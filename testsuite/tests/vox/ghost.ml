@@ -334,6 +334,11 @@ module Returns = struct
   let b () = ghost_ (if (ghost_ true) then 1 else 2)
 end
 [%%expect{|
+Line 4, characters 24-37:
+4 |   let b () = ghost_ (if (ghost_ true) then 1 else 2)
+                            ^^^^^^^^^^^^^
+Warning 225 [redundant-ghost]: This "ghost_" is redundant: the enclosing code is already ghost.
+
 module Returns :
   sig
     val ret : int -> bool @ ghost

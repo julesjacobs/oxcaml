@@ -69,7 +69,8 @@ def counts_line(stats, prefix):
 def build(args):
     source = P.Source(ROOT, args.revision, args.working_tree)
     catalogue = json.loads((HERE / 'catalogue.json').read_text())
-    only = set(args.pages.split(',')) if args.pages else None
+    # Every page links to the shared trust page, so a partial build keeps it.
+    only = set(args.pages.split(',')) | {'_trust'} if args.pages else None
     pages = P.load(only)
     demos = [d for d in catalogue['demos'] if d in pages]
     assert only or set(demos) == {p for p in pages if not p.startswith('_')}, 'catalogue.json lists every page'
@@ -90,26 +91,54 @@ def build(args):
         P.build_page(ident, meta, body, source, output, CSS, extra)
 
     by_status = {s: sum(pages[d][0]['status'] == s for d in demos) for s in P.STATUS}
-    rows = ''.join(
-        f'<li id="{d}"><h3><a href="specs/{d}.html">{P.inline(pages[d][0]["title"])}</a> '
-        f'<span class="status status-{pages[d][0]["status"]}">{P.STATUS[pages[d][0]["status"]]}</span></h3>'
-        f'<p>{P.inline(pages[d][0]["blurb"])}</p><p>{counts_line(stats[d], "")}</p></li>' for d in demos)
+    def plain(text):
+        return esc(text.replace('`', ''))
+
+    meanings = {
+        'reviewed': 'Checked by the owner after independent reviews.',
+        'owner-review': 'Two independent reviews found no false claim, and the page states every gap they found.',
+        'review-pending': 'The page is current, but a review found something to fix or has not been redone.',
+        'in-progress': 'Work on the demo is under way.',
+        'future': 'A language feature we intend to add.',
+        'question': 'A design question: whether to add this is open.'}
+
+    def short(n):
+        return f'{n / 1000:.1f}k' if n >= 1000 else str(n)
+
+    def badge(status, label):
+        return f'<span class="status status-{status}" title="{esc(meanings[status])}">{label}</span>'
+
+    cards = ''.join(
+        f'<li id="{d}" title="{plain(pages[d][0]["blurb"])}">'
+        f'<a class="card-title" href="specs/{d}.html">{P.inline(pages[d][0]["title"])}</a>'
+        f'<p class="card-claim">{P.inline(pages[d][0]["blurb"])}</p>'
+        f'<p class="card-foot">{badge(pages[d][0]["status"], P.STATUS[pages[d][0]["status"]])}'
+        f'<a class="card-counts" href="statistics/{d}.html" title="Lines: spec {stats[d]["spec"]:,}, '
+        f'impl {stats[d]["impl"]:,}, proof {stats[d]["proof"]:,}">Spec {short(stats[d]["spec"])} · '
+        f'Impl {short(stats[d]["impl"])} · Proof {short(stats[d]["proof"])}</a></p></li>' for d in demos)
     mechanisms = ''.join(
-        f'<li><h3>{esc(m["name"])}</h3><p>{P.inline(m["summary"])}</p>'
-        + (('<p class="related">Used in, for example: '
-            + ', '.join(f'<a href="specs/{d}.html">{P.inline(pages[d][0]["title"])}</a>' for d in m['demos'] if d in pages)
-            + '</p>') if any(d in pages for d in m['demos']) else '') + '</li>'
+        f'<li title="{plain(m["summary"])}"><span class="mech-name">{esc(m["name"])}</span>'
+        + (badge('future', 'Future') if m.get('future') else '')
+        + (badge('question', 'Open question') if m.get('question') else '')
+        + f'<p class="card-claim">{P.inline(m["summary"])}</p></li>'
         for m in catalogue['mechanisms'])
     summary = ' · '.join(f'{n} {P.STATUS[s].lower()}' for s, n in by_status.items() if n)
-    (output / 'index.html').write_text(shell('Vox demonstrations',
-        header() + '<h1>Vox demonstrations</h1>'
-        '<p>Vox extends OxCaml with refinement types checked by Z3 at compile time, erased ghost code and affine '
-        'ghost ownership. Each demo below is ordinary OxCaml code whose specification the compiler checks. Its page '
-        'states what is proved, what the demo trusts and what it does not claim, and quotes the code at '
-        f'{P.commit_line(source).removeprefix("Sources: ")}.</p>'
-        f'<p><strong>{len(demos)} demos</strong> · {summary}</p>' + LEGEND
-        + f'<h2>Demos</h2><ul class="demo-list">{rows}</ul>'
-        + f'<h2>Language mechanisms</h2><ul class="demo-list">{mechanisms}</ul>'))
+    (output / 'index.html').write_text(
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<title>Vox demonstrations</title><link rel="stylesheet" href="style.css?v={CSS}"></head>'
+        '<body><main class="overview"><header class="overview-head">'
+        '<h1>Vox demonstrations</h1><nav><a href="trust.html">What every demo trusts</a>'
+        '<a href="presentation.html">Presentation guide</a><a href="statistics/index.html">Line counts</a></nav></header>'
+        '<p class="overview-intro">OxCaml with refinement types checked by Z3 at compile time, erased ghost code and '
+        'affine ghost ownership. Each demo is ordinary OxCaml code whose specification the compiler checks; its page '
+        'states what is proved, what it trusts and what it does not claim. '
+        f'{P.commit_line(source).removeprefix("Sources: ")}. <strong>{len(demos)} demos</strong>: {summary}. '
+        'Hover over a status for its meaning, and over a demo for its full claim.</p>'
+        '<div class="overview-body"><section><h2>Demos</h2>'
+        f'<ul class="cards">{cards}</ul></section>'
+        f'<section><h2>Language mechanisms</h2><ul class="mechs">{mechanisms}</ul></section></div>'
+        '</main></body></html>')
 
     route = ''.join(
         f'<section class="tour-step"><p class="eyebrow">{n} · {minutes} min</p>'
@@ -131,39 +160,40 @@ def build(args):
     source.write_views(output, CSS)
     shutil.copy(HERE / 'style.css', output / 'style.css')
     shutil.copy(HERE / 'compiler-demo.js', output / 'compiler-demo.js')
-    check(output)
+    check(output, partial=only is not None)
     print(f'Built {len(demos)} demo pages from {source.short} in {output}.')
 
 
 def compiler_example(output, source, linked):
-    """Two WebAssembly modules emitted by the HM-to-Wasm compiler for the
-    design document's id/map example, run in the browser."""
+    """The WebAssembly module emitted by the HM-to-Wasm compiler for the
+    design document's id/map example, run in the browser on two inputs."""
     example = HERE / 'compiler-example'
     target = output / 'demos' / 'compiler'
     target.mkdir(parents=True)
-    cases = []
-    for n, result in ((4, '12'), (8, '0')):
-        entry = {'input': n, 'output': result, 'status': 1, 'tag': '1'}
-        for kind, name in (('wasm', f'input-{n}.wasm'), ('memory', f'input-{n}.memory.bin')):
-            raw = (example / name).read_bytes()
-            (target / name).write_bytes(raw)
-            entry[kind] = {'url': f'demos/compiler/{name}', 'sha256': hashlib.sha256(raw).hexdigest()}
-        cases.append(entry)
-    (target / 'manifest.json').write_text(json.dumps({'cases': cases}, indent=1) + '\n')
+
+    def asset(name):
+        raw = (example / name).read_bytes()
+        (target / name).write_bytes(raw)
+        return {'url': f'demos/compiler/{name}', 'sha256': hashlib.sha256(raw).hexdigest()}
+    module = asset('program.wasm')
+    cases = [{'input': n, 'output': result, 'status': 1, 'tag': '1', 'memory': asset(f'input-{n}.memory.bin')}
+             for n, result in ((4, '12'), (8, '0'))]
+    (target / 'manifest.json').write_text(json.dumps({'wasm': module, 'cases': cases}, indent=1) + '\n')
     fixture = 'verification/catalogue/compiler-example/original_run_smoke.ml'
     source.read(fixture)
     return ('<section class="tour-step compiler-example" id="compiler-example" data-state="idle">'
             '<p class="eyebrow">Compiler example · In progress</p><h2>Polymorphic id and map, compiled to WebAssembly</h2>'
             '<p>The worked example of the compiler\'s design combines polymorphic <code>id</code> and <code>map</code>, '
-            'captured closures, recursion and a final branch. The buttons run the two modules the verified compiler '
-            'emits for the inputs 4 and 8, and check the result and every byte of final memory against what the '
-            'compiler\'s WebAssembly model predicts. The modules are saved outputs of '
+            'captured closures, recursion and a final branch. The verified compiler emits one module for it; the '
+            'buttons run that module on the inputs 4 and 8, passing the input in the exported global '
+            '<code>payload</code> before calling <code>run</code>, and check the result and every byte of final '
+            'memory against what the compiler\'s WebAssembly model predicts. The module and memories are saved outputs of '
             f'<a href="{esc(source.view(fixture))}">original_run_smoke.ml</a>, which compiles the example with the '
             'compiler on this commit and gives the same bytes; this page does not compile anything.</p>'
             '<div class="demo-actions"><button type="button" data-wasm-case="0">Run input 4</button>'
             '<button type="button" data-wasm-case="1">Run input 8</button></div>'
             '<div class="demo-result" role="status" aria-live="polite"><strong data-wasm-result>Choose an input to run '
-            'its emitted program.</strong><p data-wasm-detail>Expected results: 4 → 12 and 8 → 0.</p></div>'
+            'the emitted program.</strong><p data-wasm-detail>Expected results: 4 → 12 and 8 → 0.</p></div>'
             '<p class="tour-limit">The compiler\'s theorems are conditional'
             + ('; see <a href="specs/hm-wasm-compiler.html">its page</a>' if linked else '')
             + '.</p></section>')
@@ -214,8 +244,9 @@ class Links(HTMLParser):
         self.links += [a[k] for k in ('href', 'src') if k in a]
 
 
-def check(output):
-    """Every local link and anchor resolves."""
+def check(output, partial=False):
+    """Every local link and anchor resolves. A partial build may link to
+    demo pages it did not build."""
     pages = {p: Links(p.read_text()) for p in output.rglob('*.html')}
     errors = []
     for path, page in pages.items():
@@ -225,7 +256,8 @@ def check(output):
                 continue
             target = (path.parent / unquote(u.path)).resolve() if u.path else path
             if not target.exists():
-                errors.append((str(path.relative_to(output)), link))
+                if not (partial and target.parent == output.resolve() / 'specs'):
+                    errors.append((str(path.relative_to(output)), link))
             elif u.fragment and target in pages and unquote(u.fragment) not in pages[target].ids:
                 errors.append((str(path.relative_to(output)), link))
     assert not errors, errors[:20]

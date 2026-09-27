@@ -2,26 +2,15 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa_arithmetic.ml";
- all_modules += " vox_rsa_number_theory.ml";
- all_modules += " vox_rsa_fermat.ml vox_rsa.mli vox_rsa.ml";
+ prebuilt_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa_arithmetic.ml vox_rsa_number_theory.ml vox_rsa_fermat.ml vox_rsa.mli vox_rsa.ml";
  readonly_files = "rsa_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
+   binary_modules = "prebuilt/vox_rsa_spec prebuilt/vox_rsa_arithmetic prebuilt/vox_rsa_number_theory prebuilt/vox_rsa_fermat prebuilt/vox_rsa";
    run-expect;
    check-program-output;
  }
 *)
-
-(* Load the implementation so that the accepted phrases below can be
-   evaluated. *)
-#load "vox_rsa_spec.cmo";;
-#load "vox_rsa_arithmetic.cmo";;
-#load "vox_rsa_number_theory.cmo";;
-#load "vox_rsa_fermat.cmo";;
-#load "vox_rsa.cmo";;
 
 let negative_exponent () =
   let e = -1Z in let n = 35Z in
@@ -151,7 +140,7 @@ Line 5, characters 28-29:
 5 |   Vox_rsa.roundtrip p q e d m;;
                                 ^
 Error: Refinement could not be proved (counterexample)
-File "vox_rsa.mli", line 25, characters 22-63:
+File "vox_rsa.mli", line 25, characters 22-39:
   The refinement is stated here.
 |}]
 
@@ -175,7 +164,7 @@ Line 5, characters 28-29:
 5 |   Vox_rsa.roundtrip p q e d m;;
                                 ^
 Error: Refinement could not be proved (counterexample)
-File "vox_rsa.mli", line 25, characters 22-63:
+File "vox_rsa.mli", line 25, characters 22-39:
   The refinement is stated here.
 |}]
 
@@ -199,7 +188,7 @@ Line 5, characters 28-29:
 5 |   Vox_rsa.roundtrip p q e d m;;
                                 ^
 Error: Refinement could not be proved (counterexample)
-File "vox_rsa.mli", line 25, characters 22-63:
+File "vox_rsa.mli", line 25, characters 54-63:
   The refinement is stated here.
 |}]
 
@@ -224,7 +213,7 @@ Line 6, characters 28-29:
 6 |   Vox_rsa.roundtrip p q e d m;;
                                 ^
 Error: Refinement could not be proved (counterexample)
-File "vox_rsa.mli", line 25, characters 22-63:
+File "vox_rsa.mli", line 25, characters 22-39:
   The refinement is stated here.
 |}]
 

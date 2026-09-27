@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_sequence.mli vox_sequence.ml vox_ordered_sequence.ml vox_credits.mli vox_credits.ml vox_merge_proofs.ml vox_sort_cost.ml vox_merge_sort.mli vox_merge_sort.ml merge_sort.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_ordered_sequence.ml vox_credits.mli vox_credits.ml vox_merge_proofs.ml vox_sort_cost.ml vox_merge_sort.mli vox_merge_sort.ml";
  { bytecode; }
 *)
 
@@ -65,26 +65,18 @@ let check_budget (values : int list) amount target =
   let certified : {n : int | n >= 0 &&
     Vox_sort_cost.budget (Vox_sequence.length values) <= Bigint.of_int n} =
     assume_ amount in
-  let certified = certified in
-  let certified : int = certified in
-  let initial : {n : int | n >= 0} = certified in
-  let token = C.Budget.create initial in
-  let input : {t : C.token |
-    Vox_sort_cost.budget (Vox_sequence.length values) <=
-      Bigint.of_int (C.credits t)} = token in
-  let before = ghost_ (C.credits (borrow_ input)) in
-  let result = funded_sort values target input in
+  let token = C.Budget.create certified in
+  let before = ghost_ (C.credits (borrow_ token)) in
+  let result = funded_sort values target token in
   let #{ Sort.values = sorted; state } = result in
   ghost_ (
-    let u = () in
-    let _checked = (u : {u : unit |
+    (() : {u : unit |
       0 <= C.credits state && C.credits state <= before &&
       Bigint.of_int (C.credits state) >=
         Bigint.sub (Bigint.of_int before)
-          (Vox_sort_cost.budget (Vox_sequence.length values))}) in
+          (Vox_sort_cost.budget (Vox_sequence.length values))});
     Sort.P.permutation_count values sorted target;
-    let u = () in
-    (u : {u : unit |
+    (() : {u : unit |
       Sort.P.count values target = Sort.P.count sorted target}));
   assert (sorted = List.sort Stdlib.compare values)
 
@@ -101,25 +93,19 @@ let (two @ total) : (x : int) -> (y : int) -> (z : int) ->
       r.#before = (O.le x y && O.le y z) &&
       C.credits r.#state = C.credits token - 2} @ unique =
     fun x y z token ->
-  let token = token in
-  let first : {t : C.token | C.credits t > 0} = token in
-  let a = Compare.compare x y first in
+  let a = Compare.compare x y token in
   let #{ Compare.before = ab; state } = a in
-  let second : {t : C.token | C.credits t > 0} = state in
-  let b = Compare.compare y z second in
+  let b = Compare.compare y z state in
   let #{ Compare.before = bc; state } = b in
   let result = #{ Compare.before = ab && bc; state } in
   result
 
 let () =
   let amount = 2 in
-  let initial : {n : int | n >= 0} = amount in
-  let token = C.Budget.create initial in
-  let input : {t : C.token | C.credits t >= 2} = token in
-  let result = two 3 2 1 input in
+  let token = C.Budget.create amount in
+  let result = two 3 2 1 token in
   let #{ Compare.before; state } = result in
-  ghost_ (let u = () in
-    (u : {u : unit | C.credits state = 0}));
+  ghost_ (() : {u : unit | C.credits state = 0});
   assert (not before)
 
 let () =
@@ -165,14 +151,8 @@ let check_ranked (values : Ranked.elt list) =
   let certified : {n : int | n >= 0 &&
     Vox_sort_cost.budget (Vox_sequence.length values) <= Bigint.of_int n} =
     assume_ amount in
-  let certified = certified in
-  let certified : int = certified in
-  let initial : {n : int | n >= 0} = certified in
-  let token = C.Budget.create initial in
-  let input : {t : C.token |
-    Vox_sort_cost.budget (Vox_sequence.length values) <=
-      Bigint.of_int (C.credits t)} = token in
-  let result = Rank_sort.sort values input in
+  let token = C.Budget.create certified in
+  let result = Rank_sort.sort values token in
   let #{ Rank_sort.values = sorted; state = _ } = result in
   let ranks = List.map (fun (r : Ranked.elt) -> r.rank) in
   assert (ranks sorted = List.sort Stdlib.compare (ranks values));

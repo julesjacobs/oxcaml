@@ -157,4 +157,4 @@ let[@def] rec (ran @ total) (h : node Pref.heap @ immutable) (depth : int)
         (Bind (p, env)) body after final_pool))
 
 type inference = #{value : node Pref.t option @@ aliased; state : node Pref.token;
-  pool : pool @@ aliased; execution : execution @@ ghost}
+  pool : pool @@ aliased; execution : execution @@ ghost aliased}

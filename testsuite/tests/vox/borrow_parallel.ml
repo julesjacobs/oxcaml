@@ -3,7 +3,7 @@
  multicore;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_sequence.mli vox_sequence.ml borrow.mli borrow.ml borrow_parallel.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml borrow.mli borrow.ml";
  { bytecode; }
 *)
 
@@ -50,7 +50,7 @@ let run_pair spawn a left_body right_body =
       let right = r in
       let left_end = ghost_ (Slice.final (borrow_ left)) in
       let right_end = ghost_ (Slice.final (borrow_ right)) in
-      let completed = Slice.parallel spawn left right left_post right_post
+      let _completed = Slice.parallel spawn left right left_post right_post
         (fun loan ->
           let s = loan in
           left_body ();

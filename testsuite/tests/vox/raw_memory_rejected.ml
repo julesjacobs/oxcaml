@@ -2,12 +2,10 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml raw_memory.mli raw_memory.ml";
+ prebuilt_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml raw_memory.mli raw_memory.ml";
  readonly_files = "raw_memory_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
    run-expect;
    check-program-output;
  }
@@ -33,7 +31,7 @@ Line 7, characters 24-33:
 7 |     M.read p 0 (borrow_ r.P.state);;
                             ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "raw_memory.mli", lines 74-76, characters 35-40:
+File "raw_memory.mli", lines 75-76, characters 4-40:
   The refinement is stated here.
 |}]
 
@@ -51,7 +49,7 @@ Line 9, characters 13-25:
 9 |     M.free p halves.right;;
                  ^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "raw_memory.mli", lines 93-94, characters 35-38:
+File "raw_memory.mli", line 94, characters 7-38:
   The refinement is stated here.
 |}]
 
@@ -67,7 +65,7 @@ Line 7, characters 13-23:
 7 |     M.free p parts.left;;
                  ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "raw_memory.mli", lines 93-94, characters 35-38:
+File "raw_memory.mli", line 93, characters 35-68:
   The refinement is stated here.
 |}]
 
@@ -85,7 +83,7 @@ Line 9, characters 13-18:
 9 |     M.free p token;;
                  ^^^^^
 Error: Refinement could not be proved (counterexample)
-File "raw_memory.mli", lines 93-94, characters 35-38:
+File "raw_memory.mli", line 93, characters 35-68:
   The refinement is stated here.
 |}]
 
@@ -114,7 +112,7 @@ Line 2, characters 12-24:
 2 |   M.write p (M.length p) 0 token;;
                 ^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "raw_memory.mli", line 82, characters 18-40:
+File "raw_memory.mli", line 82, characters 28-40:
   The refinement is stated here.
 |}]
 
@@ -140,7 +138,7 @@ Line 7, characters 16-19:
 7 |     M.write p 0 256 r.P.state;;
                     ^^^
 Error: Refinement could not be proved (counterexample)
-File "raw_memory.mli", line 18, characters 35-53:
+File "raw_memory.mli", line 18, characters 45-53:
   The refinement is stated here.
 |}]
 
@@ -154,7 +152,7 @@ Line 5, characters 24-25:
 5 |   | Some p -> M.write p 0 0 r.P.state;;
                             ^
 Error: Refinement could not be proved (counterexample)
-File "raw_memory.mli", line 82, characters 18-40:
+File "raw_memory.mli", line 82, characters 28-40:
   The refinement is stated here.
 |}]
 
@@ -201,7 +199,7 @@ Line 9, characters 13-25:
 9 |     M.free p (P.empty ());;
                  ^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "raw_memory.mli", lines 93-94, characters 35-38:
+File "raw_memory.mli", line 93, characters 35-68:
   The refinement is stated here.
 |}]
 

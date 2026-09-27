@@ -9,9 +9,8 @@ sources:
   - verification/library/vox_table_model.ml — Model of storage and of the SIMD masks
   - verification/library/vox_table_implementation.ml — Probing, insertion, deletion and rebuilding
   - verification/library/vox_flat_hashtbl_review.md — Review notes: reading order and trusted base
-  - verification/clients/flat_hashtbl_public.ml — Public-only client
-  - verification/clients/flat_hashtbl_rejections.py — Rejected clients
-  - verification/clients/check_flat_hashtbl_public.sh — The public check
+  - testsuite/tests/vox/flat_hashtbl_public.ml — Public-only client
+  - testsuite/tests/vox/flat_hashtbl_boundary.ml — The public check: public-only compile, rejected clients and erasure
 ---
 `Vox_verified_flat_hashtbl.Make` is a mutable open-addressing hash table whose operations are proved to act on a finite map: lookups return the map's answer, `replace` and `remove` return exactly `put` and `erase` of the previous map, and `length` is the number of bindings. The proof covers probing, replacement, deletion and rebuilding. The SIMD mask routines, the storage primitives and the checker itself are trusted.
 
@@ -21,66 +20,44 @@ Keys and values must be `immutable_data`. Every operation except `create` takes 
 
 From the public-only client, inside a functor over any `Key`, with `V = Vox_verified_flat_hashtbl.Make (Key)` and `P = Ghost_pref`. `{v : t | p}` is the type `t` refined by the predicate `p`, `===` is logical equality, and `ghost_ (...)` is proof code, checked and then erased. `c.#view` and `u.#view` are erased snapshots of the table. `c.#token` is the erased permission to use it, which `replace` consumes and returns anew and `borrow_` lends to a read.
 
-@code verification/clients/flat_hashtbl_public.ml "(* Reading a key back" "V.find_opt c.#table u.#view key"
+@code testsuite/tests/vox/flat_hashtbl_public.ml "(* Reading a key back" "V.find_opt c.#table u.#view key"
 
 ## A rejected program
 
-Claiming the wrong contents is a type error. This client stores 84 and states that `find` returns 85. The check compiles it after `module V = Flat_hashtbl_public.V`.
+Claiming the wrong contents is a type error. This client stores 84 and states that `find` returns 85. The test compiles it after `module V = Flat_hashtbl_public.V`, against the public interfaces and the client.
 
-@code verification/clients/flat_hashtbl_rejections.py "'false_lookup': ('''" "in value" after
+@code testsuite/tests/vox/flat_hashtbl_boundary.ml "(* A false claim about a lookup" "|}]"
 
-```
-File "false_lookup.ml", line 6, characters 4-60:
-6 |     V.find r.#table changed.#view 1 (borrow_ changed.#token) in value
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
-File "false_lookup.ml", line 5, characters 25-31:
-5 |   let value : {v : int | v = 85} =
-                             ^^^^^^
-  The refinement is stated here.
-```
-
-The public check compiles 13 such programs with both compilers and requires each to fail. Six are ownership or refinement errors: this one, a stale view, a reused token, a token that does not own the table, and two false key laws. Seven are abstraction checks, such as reaching hidden internals or building a `Map.t` from a list. The stale-view, reused-token and missing-ownership programs are also compiled without `-extension refinement_types` and are still rejected.
+The test requires 13 such programs to be rejected, each with its exact error. Six are ownership or refinement errors: this one, a stale view, a reused token, a token that does not own the table, and two false key laws. Seven are abstraction checks, such as reaching hidden internals or building a `Map.t` from a list. The stale-view, reused-token and missing-ownership programs are also compiled with both compilers without `-extension refinement_types` and are still rejected.
 
 ## Native code
 
-`ocamlopt -O3 -dcmm` output for the same example written at top level with integer keys (`find_after_replace_int` in the same client). Three calls remain: `create`, called directly, and `replace` and `find_opt`, through the closures of the table's functor instance. Views and tokens are passed as `[]`, the empty void argument, and the proof leaves only the trivial `catch` at the top. The check asserts that neither this nor the default build calls an ownership primitive or lemma.
+`ocamlopt -O3 -dcmm` output for the same example written at top level with integer keys (`find_after_replace_int` in the same client). The library's table modules are also compiled at `-O3`, so the table's functor instance is specialized in the client: `create` becomes the storage allocation primitive, `replace` is a direct call, and `find_opt` is inlined, down to the first SIMD group probe and a direct call to `Vox_table_search.groups` for the others. Tokens and views are gone, and the proof leaves only the trivial `catch` at the top. The beginning of the function, on x86-64:
 
 ```
 (function{flat_hashtbl_public.ml:145,27-339}
- camlFlat_hashtbl_public__find_after_replace_int_18_80_code
-     (key/8431: int value/8432: int) : val
- (catch (exit 134 (seq 1 [])) with(134)
+ camlFlat_hashtbl_public__find_after_replace_int_18_128_code
+     (key/9231: int value/9232: int) : val
+ (catch (exit 191 (seq 1 [])) with(191)
    (let
-     c_2670_unboxed0/8434
-       (app{flat_hashtbl_public.ml:147,26-47}
-         G:"camlFlat_hashtbl_public__create_15_63_code" val)
+     (allocated/9235
+        (extcall "caml_vox_table_create"{flat_hashtbl_public.ml:147,26-47;vox_verified_flat_hashtbl.ml:125,12-29;vox_table_mutation.ml:55,20-37}
+          33 int->val)
+      Pmixedfield/9236 (load val allocated/9235))
      (catch
-       (exit 135
-         (app{flat_hashtbl_public.ml:148,10-55;vox_verified_flat_hashtbl.ml:171,12-63}
-           G:"caml_applyV__V_V__R" c_2670_unboxed0/8434 [] key/8431
-           value/8432 []
-           (load val
-             (+a
-               (load val (+a G:"camlFlat_hashtbl_public__replace_20_80" 24))
-               80))
-           unit))
-     with(135)
-       (app{flat_hashtbl_public.ml:150,2-52;vox_verified_flat_hashtbl.ml:144,4-48}
-         G:"caml_applyV__V_" c_2670_unboxed0/8434 [] key/8431 []
-         (load val
-           (+a (load val (+a G:"camlFlat_hashtbl_public__replace_20_80" 24))
-             16))
-         val)))) )
+       (exit 192
+         (app{flat_hashtbl_public.ml:148,10-55;vox_verified_flat_hashtbl.ml:174,12-63}
+           G:"camlFlat_hashtbl_public__replace_9_92_code" Pmixedfield/9236
+           key/9231 value/9232 unit))
 ```
 
-Erased values that the optimizer cannot drop are passed as a placeholder constant (48059); the `-O3` assembly of this client contains none.
+The test checks that this client makes no call through a closure of the functor instance (`caml_apply`), that it calls `Vox_table_search` directly, and that neither this nor the default build calls an ownership primitive or lemma. Erased values that the optimizer cannot drop are passed as a placeholder constant (48059), for example to the function that rebuilds the table.
 
 ## Interface
 
 @code verification/library/vox_verified_flat_hashtbl.mli
 
-`Pref.Heap` is a finite map from locations to values, `P.own token` is the heap a token owns, and `Ghost_pref` provides erased tokens: `empty` makes one that owns nothing, and `split` and `join` divide and recombine ownership. `Bigint` is unbounded integers, used for sizes.
+`Pref.Heap` is a finite map from locations to values, `P.own token` is the heap a token owns, and `Ghost_pref` provides erased tokens: `empty` makes one that owns nothing, and `split` and `join` divide and recombine ownership. `current table view heap`, the token precondition of every operation but `create`, says that the heap holds `version view` at `location table`; it is a transparent definition (`[@@def transparent]`), which the checker unfolds wherever it is used. `Bigint` is unbounded integers, used for sizes.
 
 ## Trusted base
 
@@ -110,14 +87,10 @@ Against `Base.Hashtbl`, hits are 1.0–1.2× faster up to 1,024 entries and 1.8�
 
 ## Reproduce
 
-Checking happens during ordinary compilation; there is no separate verification tool. After `autoconf && ./configure --prefix=$PWD/_install`:
+Checking happens during ordinary compilation; there is no separate verification tool. After `autoconf && ./configure --prefix=$PWD/_install`, `make install` and `./dev init`:
 
 ```
-make install
-verification/library/build.sh _install
-verification/clients/check_flat_hashtbl_public.sh _install
-./dev init
-./dev test vox/table_model.ml vox/table_ownership_rejected.ml
+./dev test vox/flat_hashtbl_boundary.ml vox/table_model.ml vox/table_ownership_rejected.ml
 ```
 
-The library build checks and compiles the library's 128 modules, the table included, in about 30 seconds from scratch on an M4 Max. The SMT solver is Z3 4.16.0.
+`flat_hashtbl_boundary.ml` compiles, and so checks, the table's 32 modules with both compilers; compiles the public-only client against the `Pref`, `Ghost_pref` and `Vox_verified_flat_hashtbl` interfaces only, links and runs it; checks the rejected programs; and checks the client's Lambda and native Cmm, and the Cmm of the vacancy scan, for proof code and ownership primitives. The SMT solver is Z3 4.16.0.

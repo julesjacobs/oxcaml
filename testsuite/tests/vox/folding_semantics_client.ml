@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_machine_semantics.mli vox_machine_semantics.ml expression_folding.mli expression_folding.ml folding_semantics_client.ml";
+ prebuilt_modules = "vox_machine_semantics.mli vox_machine_semantics.ml expression_folding.mli expression_folding.ml";
  { bytecode; }
  { native; }
 *)

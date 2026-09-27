@@ -2,7 +2,8 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml vox_pref_semantics.mli vox_pref_semantics.ml pref_list.mli pref_list.ml pref_list_client.ml";
+ prebuilt_modules = "pref.mli pref.ml vox_pref_semantics.mli vox_pref_semantics.ml";
+ all_modules = "pref_list.mli pref_list.ml pref_list_client.ml";
  { bytecode; }
 *)
 
@@ -122,20 +123,14 @@ let rec reverse_into :
     let p = n.next in
     let next : {v : node option | v === root rest} =
       let b = borrow_ cell in
-      let b : {b : node option Pref.token | H.mem (Pref.own b) p} = b in
       let next = Pref.read p b in
       next in
-    let cell : {t : node option Pref.token | H.mem (Pref.own t) p} = cell in
     let cell = Pref.write p acc cell in
     let new_link = ghost_ (Pref.own (borrow_ cell)) in
     let a = Pref.join cell a in
     let extended = ghost_ (Cons (n, ys)) in
     ghost_ (reverse_rebuild xs ys n next_model acc new_link);
-    let rest_token : {t : node option Pref.token | valid rest && root rest === next
-      && Pref.own t === heap rest} = rest_token in
     let pointer = Some n in
-    let a : {a : node option Pref.token | valid extended && root extended === pointer
-      && Pref.own a === heap extended} = a in
     let r = reverse_into next pointer rest extended rest_token a in
     r
 
@@ -159,10 +154,6 @@ let reverse : (pointer : node option) @ immutable ->
   let _ = ghost_ (unfold nil) in
   let a = Pref.empty () in
   let acc : node option = None in
-  let a : {a : node option Pref.token | valid nil && root nil === acc
-    && Pref.own a === heap nil} = a in
-  let list : {t : node option Pref.token | valid xs && root xs === pointer
-    && Pref.own t === heap xs} = list in
   let r = reverse_into pointer acc xs nil list a in
   let pointer = r.pointer in
   let state = r.state in
@@ -200,13 +191,9 @@ let cons (value : int)
     let e = H.empty () in
     let _ = H.union_law before e e in
     let _ = H.put_union_law e before next pointer in
-    let u = () in
-    let _contents : {u : unit |
-      H.put before next pointer === heap model} = u in
-    let _separate : {u : unit | H.disjoint (link n pointer) before} =
-      u in
-    let proof : {u : unit | root model === Some n && valid model
-      && H.put before next pointer === heap model} = u in proof) in
+    (() : {u : unit | H.disjoint (link n pointer) before});
+    (() : {u : unit | root model === Some n && valid model
+      && H.put before next pointer === heap model})) in
   let result = {pointer = Some n; model; state} in
   result
 
@@ -235,8 +222,7 @@ let rec observe_framed : (pointer : node option) @ immutable ->
       Vox_pref_semantics.union cell rest_heap n.next;
       Vox_pref_semantics.union (heap xs) frame n.next);
     let p = n.next in
-    let readable : {b : node option Pref.token | H.mem (Pref.own b) p} = t in
-    let next : {v : node option | v === root rest} = Pref.read p readable in
+    let next : {v : node option | v === root rest} = Pref.read p t in
     n :: observe_framed next rest next_frame t
 
 let observe_read : (pointer : node option) @ immutable ->

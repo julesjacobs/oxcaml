@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_sequence.mli vox_sequence.ml vox_int_sequence.mli vox_int_sequence.ml vox_iarray.mli vox_iarray.ml sorted_array_proofs.ml sorted_array.mli sorted_array.ml sorted_array_client.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_int_sequence.mli vox_int_sequence.ml vox_iarray.mli vox_iarray.ml sorted_array_proofs.ml sorted_array.mli sorted_array.ml";
  { bytecode; }
  { native; }
 *)
@@ -141,9 +141,8 @@ let () =
 let observe_sequence : (array : t) -> (index : int) ->
     {u : unit | 0 <= index && index < length array} @ ghost ->
     {u : unit | Vox_sequence.at (contents array) (Bigint.of_int index)
-      === Some (at array index)} @ ghost = fun array index premise ->
+      === Some (at array index)} @ ghost = fun array index premise -> ghost_ (
   premise;
   let bounded : {i : int | 0 <= i && i < length array} = index in
-  ghost_ (
-    contents_at array bounded;
-    let u = () in u)
+  contents_at array bounded;
+  let u = () in u)

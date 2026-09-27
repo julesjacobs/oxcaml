@@ -1,7 +1,7 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- all_modules = "hmc_word64.ml hmc_word64_demo.ml";
+ prebuilt_modules = "hmc_word64.ml";
  { bytecode; }
 *)
 open Hmc_word64

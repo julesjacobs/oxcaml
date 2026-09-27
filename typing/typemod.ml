@@ -205,6 +205,14 @@ let rebase_modalities ~loc ~loc_md item ~md_mode ~mode modalities =
   infer_modalities pp ~loc_md item ~md_mode ~mode
 
 (** Similiar to [rebase_modalities] but lifted to signatures. *)
+(* Values bound by [include] or [open struct ... end] are bound at this point
+   of the enclosing structure or signature, like a [let] or a [val] there. *)
+let register_included_values ~level sg =
+  Ctype.register_refinement_value_scope ~level
+    (List.filter_map
+       (function Sig_value (id, _, _) -> Some id | _ -> None)
+       sg)
+
 let rebase_modalities_sg ~loc ~loc_md ~md_mode ~mode sg =
   List.map (function
     | Sig_value (id, vd, vis) ->
@@ -751,7 +759,8 @@ let params_are_constrained =
   in
   loop
 
-let rec remove_modality_and_zero_alloc_variables_sg env ~zap_modality sg =
+let rec remove_modality_and_zero_alloc_variables_sg env ~zap_modality
+    ?(zap_module_modality = zap_modality) sg =
   let sg_item = function
     | Sig_value (id, desc, vis) ->
         let val_modalities =
@@ -765,10 +774,10 @@ let rec remove_modality_and_zero_alloc_variables_sg env ~zap_modality sg =
     | Sig_module (id, pres, md, re, vis) ->
         let md_type =
           remove_modality_and_zero_alloc_variables_mty env ~zap_modality
-            md.md_type
+            ~zap_module_modality md.md_type
         in
         let md_modalities =
-          md.md_modalities |> zap_modality |> Mode.Modality.of_const
+          md.md_modalities |> zap_module_modality |> Mode.Modality.of_const
         in
         let md = {md with md_type; md_modalities} in
         Sig_module (id, pres, md, re, vis)
@@ -776,14 +785,16 @@ let rec remove_modality_and_zero_alloc_variables_sg env ~zap_modality sg =
   in
   List.map sg_item sg
 
-and remove_modality_and_zero_alloc_variables_mty env ~zap_modality mty =
+and remove_modality_and_zero_alloc_variables_mty env ~zap_modality
+    ?(zap_module_modality = zap_modality) mty =
   match mty with
   | Mty_ident _ | Mty_alias _ ->
     (* module types with names can't have inferred modalities. *)
     mty
   | Mty_signature sg ->
     Mty_signature
-      (remove_modality_and_zero_alloc_variables_sg env ~zap_modality sg)
+      (remove_modality_and_zero_alloc_variables_sg env ~zap_modality
+         ~zap_module_modality sg)
   | Mty_functor (param, mty, mm) ->
     let param : Types.functor_parameter =
       match param with
@@ -796,7 +807,8 @@ and remove_modality_and_zero_alloc_variables_mty env ~zap_modality mty =
       | Unit -> Unit
     in
     let mty =
-      remove_modality_and_zero_alloc_variables_mty env ~zap_modality mty
+      remove_modality_and_zero_alloc_variables_mty env ~zap_modality
+        ~zap_module_modality mty
     in
     Mty_functor (param, mty, mm)
   | Mty_strengthen (mty, path, alias) ->
@@ -2310,6 +2322,7 @@ and transl_signature ?(interface_toplevel = false) env
         apply_modalities_signature ~recursive env modalities.moda_modalities sg
     in
     let sg, newenv = Env.enter_signature ~scope sg ~mode:md_mode env in
+    register_included_values ~level:Ident.lowest_scope sg;
     Signature_group.iter
       (Signature_names.check_sig_item names loc)
       sg;
@@ -4191,6 +4204,7 @@ and type_open_decl_aux ?used_slot ?toplevel ~funct_body names env od =
       Env.enter_signature ~scope ~mod_shape
         (extract_sig_open env md.mod_loc md.mod_type) ~mode env
     in
+    register_included_values ~level:(Ctype.get_current_level ()) sg;
     let info, visibility =
       match toplevel with
       | Some false | None -> Some `From_open, Hidden
@@ -4257,6 +4271,7 @@ and type_structure ?(toplevel = None) ~funct_body anchor env sstr =
     let sg =
       rebase_modalities_sg ~loc:smodl.pmod_loc ~loc_md ~md_mode ~mode sg
     in
+    register_included_values ~level:(Ctype.get_current_level ()) sg;
     Signature_group.iter (Signature_names.check_sig_item names loc) sg;
     let incl =
       { incl_mod = modl;
@@ -5097,14 +5112,40 @@ let type_implementation target modulename initial_env ast =
       let simple_sg = Signature_names.simplify finalenv names sg in
       if !Clflags.print_types then begin
         remove_mode_and_jkind_variables finalenv sg;
-        let zap_modality =
+        let zap_module_modality =
           Ctype.zap_modalities_to_floor_if_modes_enabled_at Alpha
+        in
+        let zap_modality =
+          if Language_extension.(is_at_least Mode Alpha)
+             || not (Language_extension.is_enabled Refinement_types)
+          then zap_module_modality
+          else
+            (* Keep the totality and ghostliness of values, which clients
+               of the printed interface depend on. [total] implies
+               [stateless portable], so those are kept with it. *)
+            fun m ->
+              let floor = Modality.zap_to_floor m in
+              let keep ax acc =
+                Modality.Const.set ax (Modality.Const.proj ax floor) acc
+              in
+              let total =
+                not (Modality.Per_axis.is_id (Comonadic Totality)
+                       (Modality.Const.proj (Comonadic Totality) floor))
+              in
+              Modality.Const.id
+              |> keep (Comonadic Totality)
+              |> keep (Comonadic Ghostliness)
+              |> (if total then fun m ->
+                    m
+                    |> keep (Comonadic Statefulness)
+                    |> keep (Comonadic Portability)
+                  else Fun.id)
         in
         let simple_sg =
           (* Printing [.mli] from [.ml], we zap to identity modality for legacy
              compatibility. *)
           remove_modality_and_zero_alloc_variables_sg finalenv ~zap_modality
-            simple_sg
+            ~zap_module_modality simple_sg
         in
         Typecore.force_delayed_checks ();
         Verification.run_unit str;

@@ -74,6 +74,8 @@ type op =
   | Bit_or
   | Bit_xor
   | Shift_right_logical
+  | Shift_left
+  | Shift_right_arithmetic
   | Eq
   | Ne
   | Lt
@@ -96,6 +98,7 @@ type op =
   | Int_gt
   | Int_ge
   | Int_of_int63
+  | Int63_of_int  (** Wraps modulo [2^63]. *)
 
 type term =
   | Boolean of bool
@@ -139,6 +142,13 @@ val term_sort : term -> sort
     63-bit integers; [Big_integer] constants use canonical decimal text.
     Undeclared and duplicate symbols are errors. *)
 val check : ?poll:(unit -> unit) -> int_width:int -> query -> unit
+
+(** Replaces each bitwise operation by an uninterpreted function, adding facts
+    that hold for the 63-bit operation (sign and range facts, low masks, and
+    shifts by a constant). [None] when the query has no bitwise operation. The
+    result only has weaker premises, so its validity implies the query's; it
+    avoids the bitvector encoding of [to_smtlib]. *)
+val abstract_bitwise : query -> query option
 
 (** [poll] is called during traversal and may raise to cancel construction.
     Always checks sorts first. Names [v0], [v1], ... follow declaration order.

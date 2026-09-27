@@ -2,10 +2,9 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_diff_spec.mli vox_diff_spec.ml vox_diff.mli vox_diff.ml";
+ prebuilt_modules = "vox_diff_spec.mli vox_diff_spec.ml vox_diff.mli vox_diff.ml";
  readonly_files = "diff_rejected.ml";
- compile_only = "true";
- { setup-ocamlc.opt-build-env; ocamlc.opt; run-expect; check-program-output; }
+ { setup-ocamlc.opt-build-env; run-expect; check-program-output; }
 *)
 
 open Vox_diff_spec;;

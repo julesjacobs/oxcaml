@@ -1,0 +1,42 @@
+ok: snake calls exactly [snake]
+ok: snake calls 0 proof functions
+ok: snake makes no other calls
+ok: snake computes no metric or big integer
+ok: step_delete calls exactly []
+ok: step_delete calls 0 proof functions
+ok: step_delete makes no other calls
+ok: step_delete computes no metric or big integer
+ok: step_insert calls exactly []
+ok: step_insert calls 0 proof functions
+ok: step_insert makes no other calls
+ok: step_insert computes no metric or big integer
+ok: choose calls exactly [snake]
+ok: choose calls 0 proof functions
+ok: choose makes no other calls
+ok: choose computes no metric or big integer
+ok: advance calls exactly [advance choose step_delete step_insert]
+ok: advance calls 0 proof functions
+ok: advance makes no other calls
+ok: advance computes no metric or big integer
+ok: finished calls exactly [finished]
+ok: finished calls 1 proof functions
+ok: finished makes no other calls
+ok: finished computes no metric or big integer
+ok: search calls exactly [advance finished search]
+ok: search calls 0 proof functions
+ok: search makes no other calls
+ok: search computes no metric or big integer
+ok: bounded_length calls exactly [bounded_length]
+ok: bounded_length calls 0 proof functions
+ok: bounded_length makes no other calls
+ok: bounded_length computes no metric or big integer
+ok: diff calls exactly [bounded_length search snake]
+ok: diff calls 0 proof functions
+ok: diff makes no other calls
+ok: diff computes no metric or big integer
+ok: search does no arithmetic, comparison, raise or exit
+ok: search has no runtime fuel
+ok: diff does no addition
+ok: reverse_into only calls itself
+ok: verified_client makes one call, to Vox_diff.diff
+ok: accepted makes one call, to Vox_diff.diff

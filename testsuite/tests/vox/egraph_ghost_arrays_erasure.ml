@@ -2,12 +2,10 @@
  has-z3;
  flags = "-extension refinement_types -drawlambda -dcanonical-ids";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_egraph_language_spec.ml vox_egraph_rule_spec.ml vox_egraph_derivation_spec.ml";
+ prebuilt_modules = "vox_egraph_language_spec.ml vox_egraph_rule_spec.ml vox_egraph_derivation_spec.ml";
  readonly_files = "egraph_ghost_arrays_erasure.ml vox_egraph_ghost_arrays.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
    run-expect;
    check-program-output;
  }

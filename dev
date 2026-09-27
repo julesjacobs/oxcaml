@@ -16,9 +16,12 @@ usage()
   cat >&2 <<EOF
 usage: ./$program init
        ./$program test [--promote] [--compiler-host=native|bytecode] PATH...
+       ./$program test [--promote] [--compiler-host=native|bytecode]
+                       --affected BASE
 
 Each PATH is a test file or directory relative to testsuite/tests. Several
-tests run in parallel. The compiler host defaults to native.
+tests run in parallel. The compiler host defaults to native. --affected
+selects the Vox tests that the changes since the revision BASE can affect.
 EOF
   exit 2
 }
@@ -116,6 +119,7 @@ cleanup()
 {
   status=$?
   trap - 0 1 2 3 15
+  [ -z "${library_job-}" ] || stop_test_library
   if [ -n "$active_child" ]; then
     perl -e 'kill "TERM", -$ARGV[0]' "$active_child" 2>/dev/null || true
     attempts=0
@@ -555,11 +559,73 @@ plan_tests()
   return 0
 }
 
+# Starts the tests that took longest when they last ran first, so that a long
+# test does not start near the end; tests without a record go first. Tests
+# that use the prebuilt library go after the others, which run while it is
+# built.
+order_slowest_first()
+{
+  tr '\n' '\0' < "$test_files" |
+    xargs -0 grep -l -e prebuilt_modules -- > "$temp_dir/library-tests" ||
+    true
+  ls -1d "$root"/_build/vox-dev-runs/*/jobs.log 2>/dev/null |
+    LC_ALL=C sort > "$temp_dir/job-logs"
+  : > "$temp_dir/durations"
+  [ ! -s "$temp_dir/job-logs" ] || tr '\n' '\0' < "$temp_dir/job-logs" |
+    xargs -0 awk -F '\t' 'FNR > 1 {
+        test = $9
+        sub(/ 2>&1$/, "", test)
+        sub(/.* /, "", test)
+        print test "\t" $4
+      }' > "$temp_dir/durations"
+  awk -F '\t' '
+    FILENAME == ARGV[1] { library[$0] = 1; next }
+    FILENAME == ARGV[2] { seconds[$1] = $2; next }
+    {
+      printf "%d\t%s\t%s\n", ($0 in library),
+        ($0 in seconds) ? seconds[$0] : 1e9, $0
+    }' "$temp_dir/library-tests" "$temp_dir/durations" "$test_files" |
+    LC_ALL=C sort -t "$(printf '\t')" -k1,1n -k2,2gr -k3,3 | cut -f3 \
+    > "$temp_dir/ordered-tests"
+  mv -f "$temp_dir/ordered-tests" "$test_files"
+}
+
+# Each command a test runs is killed after VOX_TEST_TIMEOUT seconds (0: no
+# limit).
+set_test_timeout()
+{
+  test_timeout=${VOX_TEST_TIMEOUT:-600}
+  case "$test_timeout" in
+    ''|*[!0-9]*) die "VOX_TEST_TIMEOUT must be a number of seconds" ;;
+  esac
+}
+
+# Lists the failed tests that ocamltest killed at the time limit, so that
+# they are not mistaken for wrong results.
+report_timeouts()
+{
+  log=$1
+  awk '
+    /^Running tests from / { expired = 0 }
+    /^Timeout expired, killing all child processes/ { expired = 1 }
+    /^ \.\.\. testing .* => failed/ && expired {
+      name = $0
+      sub(/^ \.\.\. testing \047/, "", name)
+      sub(/\047.*/, "", name)
+      print "  " name
+      expired = 0
+    }' "$log" > "$temp_dir/timeouts"
+  if [ -s "$temp_dir/timeouts" ]; then
+    echo "Failed by exceeding the ${test_timeout}s limit (VOX_TEST_TIMEOUT):"
+    LC_ALL=C sort -u "$temp_dir/timeouts"
+  fi
+}
+
 run_planned_tests()
 {
   log=$1
   execution_status=0
-  planner_flags='-timeout 600'
+  planner_flags="-timeout $test_timeout"
   if [ "$promote" = true ]; then
     planner_flags="$planner_flags -promote"
   fi
@@ -567,9 +633,10 @@ run_planned_tests()
   if [ "$selection_kind" = directory ] && [ "$promote" = false ] &&
      command -v parallel >/dev/null 2>&1 &&
      echo | parallel --gnu --no-notice true >/dev/null 2>&1; then
-    # Test paths are sorted above; --keep-order makes output deterministic.
+    # --keep-order prints the results in the order the tests start.
     # Concurrent ocamltest processes need disjoint roots: its recursive
     # directory creation is not race tolerant.
+    order_slowest_first
     if run_locked parallel --gnu --no-notice --keep-order \
       --joblog "$run_dir/jobs.log" \
       "echo Running tests from \'{//}\' ...; \
@@ -584,14 +651,14 @@ run_planned_tests()
     while IFS= read -r test_file; do
       echo "Running tests from '$(dirname "$test_file")' ..." >> "$log"
       if [ "$promote" = true ]; then
-        if run_locked "$planner" -timeout 600 -promote "$test_file" \
-            >> "$log" 2>&1; then
+        if run_locked "$planner" -timeout "$test_timeout" -promote \
+            "$test_file" >> "$log" 2>&1; then
           :
         else
           execution_status=1
         fi
       else
-        if run_locked "$planner" -timeout 600 "$test_file" \
+        if run_locked "$planner" -timeout "$test_timeout" "$test_file" \
             >> "$log" 2>&1; then
           :
         else
@@ -601,15 +668,118 @@ run_planned_tests()
     done < "$test_files"
   fi
   cat "$log"
+  summary=$temp_dir/summary
   report_status=0
-  awk -f "$root/testsuite/summarize.awk" < "$log" || report_status=$?
+  awk -f "$root/testsuite/summarize.awk" < "$log" > "$summary" ||
+    report_status=$?
+  cat "$summary"
+  # ocamltest reports a promoted output as a failure, and stops the test at
+  # that action. Run the failed tests again without promotion: the command
+  # succeeds only if they now pass.
+  if [ "$promote" = true ] && [ "$report_status" -eq 4 ] &&
+     [ "$execution_status" -eq 0 ] &&
+     grep -Eq '^ +0 unexpected errors$' "$summary"; then
+    promoted_tests=$temp_dir/promoted-tests
+    awk -v only_report_failed_tests=1 -f "$root/testsuite/summarize.awk" \
+      < "$log" | LC_ALL=C sort > "$promoted_tests"
+    if [ -s "$promoted_tests" ]; then
+      echo "Checking the failed tests again without promotion:"
+      test_files=$promoted_tests
+      promote=false
+      if [ "$(wc -l < "$test_files")" -gt 1 ]; then
+        selection_kind=directory
+      else
+        selection_kind=file
+      fi
+      run_planned_tests "$run_dir/recheck.log"
+      return
+    fi
+  fi
   [ "$report_status" -eq 0 ] || return "$report_status"
   return "$execution_status"
+}
+
+# The modules that tests list in prebuilt_modules are built once per run, in
+# parallel, with the test compilers; ocamltest links each test against the
+# modules it lists. The library is kept in _build and rebuilt incrementally.
+# It is built in the background while the tests start: a test that uses it
+# waits while the marker file names a live build.
+start_test_library()
+{
+  library_seconds=0
+  library_status=0
+  library_job=
+  OCAMLTEST_VOX_TEST_LIBRARY=$root/_build/vox-test-library
+  export OCAMLTEST_VOX_TEST_LIBRARY
+  library_marker=$OCAMLTEST_VOX_TEST_LIBRARY/.building
+  mkdir -p "$OCAMLTEST_VOX_TEST_LIBRARY"
+  rm -f "$library_marker"
+  [ -n "${OCAMLTEST_OCAMLC_OPT-}" ] && [ -n "${OCAMLTEST_OCAMLOPT_OPT-}" ] ||
+    return 0
+  library_started_at=$(monotonic_seconds)
+  set --
+  while IFS= read -r test_file; do
+    set -- "$@" "$test_file"
+  done < "$test_files"
+  perl -MPOSIX=setsid -e 'setsid() >= 0 or die "setsid: $!\n"; exec @ARGV' \
+    sh -c 'status=0
+      "$@" > "$0/library.log" 2>&1 || status=$?
+      echo "$status" > "$0/library.status"
+      perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC \
+        -e "printf \"%d\n\", clock_gettime(CLOCK_MONOTONIC)" \
+        > "$0/library.finished"' \
+    "$run_dir" sh "$root/testsuite/vox-test-library.sh" \
+    "$OCAMLTEST_VOX_TEST_LIBRARY" "$planner" \
+    "$OCAMLTEST_OCAMLC_OPT" "$OCAMLTEST_OCAMLOPT_OPT" \
+    "$root/_runtest/stdlib" "$@" &
+  library_job=$!
+  echo "$library_job" > "$library_marker"
+}
+
+finish_test_library()
+{
+  [ -n "$library_job" ] || return 0
+  wait "$library_job" 2>/dev/null || true
+  library_job=
+  rm -f "$library_marker"
+  library_status=$(cat "$run_dir/library.status" 2>/dev/null || echo 1)
+  if [ -f "$run_dir/library.finished" ]; then
+    library_finished_at=$(cat "$run_dir/library.finished")
+    library_seconds=$((library_finished_at - library_started_at))
+  fi
+}
+
+stop_test_library()
+{
+  perl -e 'kill "TERM", -$ARGV[0]' "$library_job" 2>/dev/null || true
+  wait "$library_job" 2>/dev/null || true
+  library_job=
+  rm -f "$library_marker"
+}
+
+# Prints the Vox tests that the changes since $affected_base can affect and
+# that run incrementally; see testsuite/vox-affected-tests.sh for the rule.
+select_affected_tests()
+{
+  affected=$temp_dir/affected-tests
+  run_locked sh "$root/testsuite/vox-affected-tests.sh" "$root" "$planner" \
+    "$root/_install/bin/ocamldep.opt" "$affected_base" > "$affected" ||
+    die "could not select the tests affected since '$affected_base'"
+  while IFS= read -r relative; do
+    if "$planner" -plan-incremental "$root/testsuite/tests/$relative" \
+        > /dev/null 2>&1; then
+      printf '%s\n' "$relative"
+    else
+      echo "$program: skipping '$relative', which needs" \
+        "'make -s test-one TEST=$relative'" >&2
+    fi
+  done < "$affected"
 }
 
 run_test()
 {
   test_started_at=$(monotonic_seconds)
+  affected_base=
   promote=false
   compiler_host=native
   unset OCAMLTEST_EXPECT OCAMLTEST_EXPECTNAT OCAMLTEST_OCAML \
@@ -620,12 +790,22 @@ run_test()
       --promote) promote=true; shift ;;
       --compiler-host=bytecode) compiler_host=bytecode; shift ;;
       --compiler-host=native) compiler_host=native; shift ;;
+      --affected=?*) affected_base=${1#--affected=}; shift ;;
+      --affected)
+        [ "$#" -ge 2 ] || usage
+        affected_base=$2
+        shift 2
+        ;;
       --) shift; break ;;
       -*) usage ;;
       *) break ;;
     esac
   done
-  [ "$#" -ge 1 ] || usage
+  if [ -n "$affected_base" ]; then
+    [ "$#" -eq 0 ] || usage
+  else
+    [ "$#" -ge 1 ] || usage
+  fi
   reject_symlinks_below()
   {
     base=$1
@@ -648,6 +828,20 @@ run_test()
     fi
   }
   validate_state
+  set_test_timeout
+  if [ -n "$affected_base" ]; then
+    selected=$temp_dir/selected-tests
+    select_affected_tests > "$selected"
+    if [ ! -s "$selected" ]; then
+      echo "No tests are affected by the changes since $affected_base."
+      return 0
+    fi
+    echo "Tests affected by the changes since $affected_base:" \
+      "$(wc -l < "$selected" | tr -d ' ')"
+    while IFS= read -r relative; do
+      set -- "$@" "$relative"
+    done < "$selected"
+  fi
   test_files=$temp_dir/test-files
   : > "$test_files"
   selection_kind=file
@@ -782,14 +976,17 @@ run_test()
   mkdir -p "$OCAMLTESTDIR"
   log=$run_dir/test.log
   test_status=0
+  start_test_library
   execution_started_at=$(monotonic_seconds)
   run_planned_tests "$log" || test_status=$?
+  finish_test_library
   execution_seconds=$(($(monotonic_seconds) - execution_started_at))
   total_seconds=$(($(monotonic_seconds) - test_started_at))
   if [ -s "$VOX_SLOW_PROOFS" ]; then
     echo "Proofs over the solver resource warning threshold:"
     LC_ALL=C sort -u "$VOX_SLOW_PROOFS" | sed 's/^/  /'
   fi
+  report_timeouts "$log"
   if [ -f "$run_dir/jobs.log" ]; then
     echo "Slowest tests:"
     awk -F '\t' 'NR > 1 {
@@ -800,7 +997,13 @@ run_test()
         printf "%8.1fs  %s\n", $4, test
       }' "$run_dir/jobs.log" | sort -rn | head -n 10
   fi
-  echo "Time: build ${build_seconds}s, test ${execution_seconds}s, total ${total_seconds}s"
+  if [ "$library_status" -ne 0 ]; then
+    echo "The prebuilt test library failed to build ($run_dir/library.log):"
+    sed 's/^/  /' "$run_dir/library.log"
+    [ "$test_status" -ne 0 ] || test_status=1
+  fi
+  echo "Time: build ${build_seconds}s, library ${library_seconds}s" \
+    "(during the tests), test ${execution_seconds}s, total ${total_seconds}s"
   echo "Test log: $log"
   return "$test_status"
 }

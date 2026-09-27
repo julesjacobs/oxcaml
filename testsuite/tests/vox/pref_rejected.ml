@@ -2,12 +2,10 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml";
+ prebuilt_modules = "pref.mli pref.ml";
  readonly_files = "pref_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
    run-expect;
    check-program-output;
  }
@@ -89,7 +87,6 @@ Line 5, characters 4-13:
 5 |     box.state
         ^^^^^^^^^
 Error: This value is "ghost" but is expected to be "real".
-Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 module Total_read = struct
@@ -307,7 +304,6 @@ Line 5, characters 4-14:
 5 |     box.#state
         ^^^^^^^^^^
 Error: This value is "ghost" but is expected to be "real".
-Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 module Unboxed_ghost_join = struct
@@ -318,14 +314,14 @@ module Unboxed_ghost_join = struct
     let refine_ joined = Pref.join left right in ())
 end;;
 [%%expect{|
-Line 6, characters 40-45:
-6 |     let refine_ joined = Pref.join left right in ())
-                                            ^^^^^
-Error: This value is used here, but it is also being used as unique at:
 Line 6, characters 35-39:
 6 |     let refine_ joined = Pref.join left right in ())
                                        ^^^^
-
+Error: This value is "aliased"
+         because it is the field "state" of the record at line 4, characters 15-18
+         which is "aliased"
+         because it is used in an expression (at lines 3-6, characters 24-52).
+       However, the highlighted expression is expected to be "unique".
 |}]
 
 module Typed_heap_diagonal = struct

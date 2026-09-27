@@ -2,10 +2,9 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_sequence.mli vox_sequence.ml vox_table_model.ml vox_table_model_proofs.ml vox_table_bits.ml vox_table_probe.ml vox_table_wrap.ml vox_table_mask.ml vox_table_map.ml vox_table_invariant.ml vox_table_initial.ml vox_table_update_proofs.ml vox_table_insert_proofs.ml vox_table_migration_proofs.ml vox_table_read_proofs.ml vox_table_search_spec.ml vox_table_stop_proof.ml pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_table_storage.mli vox_table_storage.ml vox_table_search.ml vox_table_mutation.ml vox_table_coverage.ml vox_table_occupancy.ml vox_table_vacancy_progress.ml vox_table_vacancy.ml vox_table_insert.ml vox_table_migrate.ml vox_table_resize.ml vox_table_implementation.ml vox_table_bindings.ml vox_table_bindings_bridge.ml vox_verified_flat_hashtbl.mli vox_verified_flat_hashtbl.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_table_model.ml vox_table_model_proofs.ml vox_table_bits.ml vox_table_probe.ml vox_table_wrap.ml vox_table_mask.ml vox_table_map.ml vox_table_invariant.ml vox_table_initial.ml vox_table_update_proofs.ml vox_table_insert_proofs.ml vox_table_migration_proofs.ml vox_table_read_proofs.ml vox_table_search_spec.ml vox_table_stop_proof.ml pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_table_storage.mli vox_table_storage.ml vox_table_search.ml vox_table_mutation.ml vox_table_coverage.ml vox_table_occupancy.ml vox_table_vacancy_progress.ml vox_table_vacancy.ml vox_table_insert.ml vox_table_migrate.ml vox_table_resize.ml vox_table_implementation.ml vox_table_bindings.ml vox_table_bindings_bridge.ml vox_verified_flat_hashtbl.mli vox_verified_flat_hashtbl.ml";
  readonly_files = "table_ownership_rejected.ml";
- compile_only = "true";
- { setup-ocamlc.opt-build-env; ocamlc.opt; run-expect; check-program-output; }
+ { setup-ocamlc.opt-build-env; run-expect; check-program-output; }
 *)
 
 module Key : Vox_table_map.Key with type t = int = struct
@@ -56,7 +55,7 @@ Line 5, characters 41-55:
 5 |   V.find_opt r.#table r.#view 1 (borrow_ changed.#token);;
                                              ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_verified_flat_hashtbl.mli", line 146, characters 6-61:
+File "vox_verified_flat_hashtbl.mli", line 157, characters 37-65:
   The refinement is stated here.
 |}]
 
@@ -70,7 +69,7 @@ Line 5, characters 41-46:
 5 |   V.find_opt r.#table r.#view 1 (borrow_ empty);;
                                              ^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_verified_flat_hashtbl.mli", line 146, characters 6-61:
+File "vox_verified_flat_hashtbl.mli", line 157, characters 37-65:
   The refinement is stated here.
 |}]
 

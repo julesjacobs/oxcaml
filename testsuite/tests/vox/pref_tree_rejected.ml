@@ -2,12 +2,10 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml vox_pref_semantics.mli vox_pref_semantics.ml pref_tree.mli pref_tree.ml pref_tree_client.ml";
+ prebuilt_modules = "pref.mli pref.ml vox_pref_semantics.mli vox_pref_semantics.ml pref_tree.mli pref_tree.ml pref_tree_client.ml";
  readonly_files = "pref_tree_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
    run-expect;
    check-program-output;
  }
@@ -58,6 +56,8 @@ Line 5, characters 8-18:
 5 |     let definition = ghost_ (valid_def shared) in
             ^^^^^^^^^^
 Warning 26 [unused-var]: unused variable "definition".
+  Hint: the binding is unnecessary, because the fact in its
+  refined type holds without the name; a statement such as "lemma x;" suffices.
 
 Line 7, characters 44-45:
 7 |     let claim : {u : unit | valid shared} = u in

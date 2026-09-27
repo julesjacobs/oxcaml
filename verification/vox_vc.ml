@@ -113,9 +113,18 @@ type obligation =
     origin : Location.t;  (** where the required refinement is written *)
     goal : term;
     omitted_premises : (Location.t * Location.error) list;
+    group : int;
+        (** The conjuncts of one refinement share a group, which is proved as
+            one query; the conjuncts are proved alone only to name a failure. *)
     headline : string option;  (** printed before the solver's message *)
     context : Location.msg list  (** printed after the refinement's origin *)
   }
+
+let next_group = ref 0
+
+let fresh_group () =
+  incr next_group;
+  !next_group
 
 (* Command lists are stored in reverse execution order. Define binds a fresh
    symbol to a total SMT expression; it does not restrict reachability. Check
@@ -133,6 +142,13 @@ module Exposed = Set.Make (struct
   let compare = compare
 end)
 
+module Unfolded = Set.Make (struct
+  type t = Path.t * term
+
+  let compare (path, term) (path', term') =
+    match Path.compare path path' with 0 -> compare term term' | c -> c
+end)
+
 type state =
   { values : value option Path.Map.t;
     code : command list;
@@ -141,7 +157,9 @@ type state =
     (* Refinements already assumed on this path, by type node and value. A
        branch's additions are dropped at the join, which rebuilds the state from
        the one before the branch. *)
-    exposed : Exposed.t
+    exposed : Exposed.t;
+    (* Applications of transparent definitions already unfolded on this path. *)
+    unfolded : Unfolded.t
   }
 
 type deferred_check =
@@ -184,6 +202,11 @@ type context =
     pref_observers :
       (Function.t, (Constructor.t * Constructor.t) option) Hashtbl.t;
     mutable free : value option Path.Map.t;
+    (* Module aliases inside structures ([module B = Base]), by the local path
+       and by the paths that export it. Signatures do not keep them. *)
+    mutable module_aliases : Path.t Path.Map.t;
+    (* Whether the predicate being evaluated is a goal. *)
+    mutable in_goal : bool;
     mutable argument_values : value option Path.Map.t;
     (* Each function body's commands, with the warning settings in effect where
        it was written ([@warning] attributes apply to its proofs). *)
@@ -193,7 +216,9 @@ type context =
     prove : batch:bool -> Location.t -> query -> unit;
     verify_introductions : bool;
     mutable check_call :
-      context -> state -> expression -> value option list -> unit
+      context -> state -> expression -> value option list -> unit;
+    (* Transparent definitions being unfolded, innermost first. *)
+    mutable unfolding : Path.t list
   }
 
 let empty =
@@ -201,7 +226,8 @@ let empty =
     code = [];
     dead = false;
     omitted_premises = [];
-    exposed = Exposed.empty
+    exposed = Exposed.empty;
+    unfolded = Unfolded.empty
   }
 
 let bind s id value =
@@ -1040,22 +1066,60 @@ let symbolic_path ctx env ty path =
       value
     end
 
-let reinstantiate_nullary_constructor ctx env ty path constructor =
+(* A term built only from constructors and literals has the same shape at every
+   instance of a polymorphic value (parametricity), so it is rebuilt at the sort
+   of the use. Positions are fixed by the value's type scheme, so a constructor
+   is found by its label in the datatype at the same position. *)
+let rec rebuild_constructor_term ctx term target =
+  if term_sort term = target
+  then Some term
+  else
+    match expose_head ctx term, target with
+    | Construct (constructor, args), Datatype datatype ->
+      let label = Constructor.label constructor in
+      let target_constructor =
+        List.find_map
+          (fun (declaration : datatype_declaration) ->
+            if declaration.datatype = datatype
+            then
+              List.find_opt
+                (fun candidate -> Constructor.label candidate = label)
+                declaration.constructors
+            else None)
+          (declarations_of_sort ctx.encoding target)
+      in
+      begin match target_constructor with
+      | Some target_constructor
+        when List.compare_lengths (Constructor.fields target_constructor) args
+             = 0 ->
+        Option.map
+          (fun args -> Construct (target_constructor, args))
+          (Misc.Stdlib.List.map_option Fun.id
+             (List.map2
+                (fun arg (_, sort) -> rebuild_constructor_term ctx arg sort)
+                args
+                (Constructor.fields target_constructor)))
+      | _ -> None
+      end
+    | _ -> None
+
+let reinstantiate_constructor_term ctx env ty path term expected =
   match Subst.Lazy.force_value_description (Env.find_value path env) with
-  | source
-    when Constructor.fields constructor = []
-         && same_nominal_data_type env source.val_type ty ->
-    construct ctx env ty (Constructor.label constructor) []
+  | source when same_nominal_data_type env source.val_type ty ->
+    register_sort ctx expected;
+    Option.map
+      (fun term -> Scalar term)
+      (rebuild_constructor_term ctx term expected)
   | _ -> None
   | exception Not_found -> None
 
 let instantiate_path ctx env ty path value =
   match value, sort ctx.encoding env ty with
   | Some (Scalar term), Some expected when term_sort term <> expected ->
-    begin match term with
-    | Construct (constructor, []) ->
+    begin match expose_head ctx term with
+    | Construct _ ->
       begin match
-        reinstantiate_nullary_constructor ctx env ty path constructor
+        reinstantiate_constructor_term ctx env ty path term expected
       with
       | Some _ as value -> value
       | None -> symbolic_path ctx env ty path
@@ -1064,8 +1128,23 @@ let instantiate_path ctx env ty path value =
     end
   | _ -> value
 
-let lookup ctx s env ty path =
+let rec resolve_module_alias ctx = function
+  | Path.Pdot (prefix, name) -> (
+    match Path.Map.find_opt prefix ctx.module_aliases with
+    | Some target -> Some (Path.Pdot (target, name))
+    | None ->
+      Option.map
+        (fun prefix -> Path.Pdot (prefix, name))
+        (resolve_module_alias ctx prefix))
+  | _ -> None
+
+let rec lookup ctx s env ty path =
   let path = Env.normalize_value_path None env path in
+  match resolve_module_alias ctx path with
+  | Some path -> lookup ctx s env ty path
+  | None -> lookup_normalized ctx s env ty path
+
+and lookup_normalized ctx s env ty path =
   match sort ctx.encoding env ty with
   | Some set_sort
     when is_set_sort ctx.encoding set_sort && is_set_empty env path ->
@@ -1362,6 +1441,59 @@ let rec pref_disjoint ctx budget left right =
     in
     observe_iarray ctx call value
 
+(* Extensionality of heaps, instantiated at one location: if [left] and [right]
+   agree at [Pref.diff left right], they are equal. In the model, a heap is a
+   partial map from locations to payloads, [at] is lookup and [mem] is
+   membership in the domain, and [diff] picks a location where two different
+   heaps differ. This is Z3's array extensionality lemma. *)
+let pref_extensionality ctx env heap_type left right =
+  let heap_sort = term_sort left in
+  let payload =
+    match get_desc (Ctype.expand_head env heap_type) with
+    | Tconstr (_, [payload], _) -> Some payload
+    | _ -> None
+  in
+  let option_type = Option.map Predef.type_option payload in
+  match
+    ( Option.bind option_type (sort ctx.encoding env),
+      Option.bind option_type (data_of_type ctx env) )
+  with
+  | Some option_sort, Some data
+    when Hashtbl.mem ctx.pref_heaps heap_sort && term_sort right = heap_sort
+    -> (
+    let key_sort =
+      match Hashtbl.find_opt ctx.map_class_sorts heap_sort with
+      | Some sort -> sort
+      | None ->
+        let sort = fresh_opaque_sort ctx.encoding in
+        Hashtbl.add ctx.map_class_sorts heap_sort sort;
+        sort
+    in
+    match data_constructor data "Some", data_constructor data "None" with
+    | Some some, Some none ->
+      let diff =
+        intern_function ctx "Pref.diff" [heap_sort; heap_sort] key_sort
+      in
+      let key = Call (diff, [left; right]) in
+      let at =
+        intern_function ctx "Pref.at" [heap_sort; key_sort] option_sort
+      in
+      Hashtbl.replace ctx.pref_observers at (Some (some, none));
+      let mem = intern_function ctx "Pref.mem" [heap_sort; key_sort] Bool in
+      Hashtbl.replace ctx.pref_observers mem None;
+      let observe fn heap = pref_observe ctx 128 fn heap key in
+      let domain heap =
+        both Eq (observe mem heap) (Is (some, observe at heap))
+      in
+      Some
+        (both And
+           (both And (domain left) (domain right))
+           (both Implies
+              (both Eq (observe at left) (observe at right))
+              (both Eq left right)))
+    | _ -> None)
+  | _ -> None
+
 let operation ctx env function_type result_type name args =
   match name, args with
   | "caml_pref_heap_disjoint", [left; right] ->
@@ -1458,6 +1590,24 @@ let operation ctx env function_type result_type name args =
           scalar_value (pref_observe ctx 128 fn heap key))
     | _ -> None
     end
+  | "caml_bigint_to_int_opt", [value] -> (
+    match scalar value with
+    | Some value when term_sort value = Int -> (
+      let in_range =
+        App
+          ( And,
+            [ App (Int_le, [Big_integer "-4611686018427387904"; value]);
+              App (Int_le, [value; Big_integer "4611686018427387903"]) ] )
+      in
+      match
+        ( construct ctx env result_type "Some"
+            [scalar_value (App (Int63_of_int, [value]))],
+          construct ctx env result_type "None" [] )
+      with
+      | Some (Scalar some), Some (Scalar none) ->
+        scalar_value (App (Ite, [in_range; some; none]))
+      | _ -> None)
+    | _ -> None)
   | "caml_vox_sequence_length", [values] ->
     Option.bind (scalar values) (fun values ->
         scalar_value (vox_sequence_length ctx values))
@@ -1899,6 +2049,182 @@ let expression_constructor ctx env ty (c : Data_types.constructor_description) =
       symbolic_path ctx env ty path
     end
 
+(* A definition marked [@def transparent] is unfolded at each full application
+   of its name: the application assumes the refinement of the definition lemma
+   [f_def] at the same arguments, as if the lemma were called there. The lemma
+   must be total, so its refinement holds for all arguments that satisfy its
+   parameters' refinements; those become premises of the assumed fact. *)
+let transparent_definition env path =
+  match Env.find_value path env with
+  | description ->
+    Builtin_attributes.is_transparent_definition
+      description.Subst.Lazy.val_attributes
+  | exception Not_found -> false
+
+let refinement_free env ty =
+  let visited = Hashtbl.create 8 in
+  let rec visit ty =
+    let ty = Ctype.expand_head env ty in
+    if not (Hashtbl.mem visited (get_id ty))
+    then begin
+      Hashtbl.add visited (get_id ty) ();
+      match get_desc ty with
+      | Trefine _ -> raise Exit
+      | _ -> Btype.iter_type_expr visit ty
+    end
+  in
+  match visit ty with () -> true | exception Exit -> false
+
+exception Unusable_lemma
+
+let unfolding_equation env loc path fn_type arity =
+  let fail () = raise Unusable_lemma in
+  let lemma =
+    match path with
+    | Path.Pident id -> (
+      match
+        Env.find_value_by_name (Longident.Lident (Ident.name id ^ "_def")) env
+      with
+      | lemma, _ -> lemma
+      | exception Not_found -> fail ())
+    | Path.Pdot (parent, name) -> Path.Pdot (parent, name ^ "_def")
+    | Path.Papply _ | Path.Pextra_ty _ -> fail ()
+  in
+  let _, description, (mode, _) =
+    match Env.lookup_value_path ~use:false ~loc lemma env with
+    | found -> found
+    | exception Not_found -> fail ()
+  in
+  if not (logical_function_mode mode) then fail ();
+  let rec parameters ty n =
+    if n = 0
+    then [], ty
+    else
+      match get_desc (Ctype.expand_head env ty) with
+      | Tarrow ((Nolabel, _, _, Some binder), argument, result, _) ->
+        let rest, result = parameters result (n - 1) in
+        (binder, argument) :: rest, result
+      | _ -> fail ()
+  in
+  let rec arguments ty n =
+    if n = 0
+    then []
+    else
+      match get_desc (Ctype.expand_head env ty) with
+      | Tarrow (_, argument, result, _) -> argument :: arguments result (n - 1)
+      | _ -> fail ()
+  in
+  (* Top-level parameter refinements become premises; deeper ones cannot. *)
+  let rec refinements ty =
+    match get_desc (Ctype.expand_head env ty) with
+    | Tpoly (ty, []) -> refinements ty
+    | Trefine r ->
+      let rest, payload = refinements r.ref_payload in
+      r :: rest, payload
+    | _ -> [], ty
+  in
+  let scheme = description.val_type in
+  let generic, _ = parameters scheme arity in
+  if
+    not
+      (List.for_all
+         (fun (_, ty) -> refinement_free env (snd (refinements ty)))
+         generic)
+  then fail ();
+  (* Instantiate the lemma's type variables at the application's types. *)
+  let variables = ref [] in
+  let rec matching pattern target =
+    match get_desc pattern, get_desc target with
+    | Tvar _, _ when get_level pattern = Btype.generic_level ->
+      if not (List.exists (fun (v, _) -> eq_type v pattern) !variables)
+      then variables := (pattern, target) :: !variables
+    | Trefine { ref_payload; _ }, _ | Tpoly (ref_payload, []), _ ->
+      matching ref_payload target
+    | _, (Trefine { ref_payload; _ } | Tpoly (ref_payload, [])) ->
+      matching pattern ref_payload
+    | Tconstr (p, ps, _), Tconstr (p', ts, _)
+      when Path.same
+             (Env.normalize_type_path None env p)
+             (Env.normalize_type_path None env p')
+           && List.compare_lengths ps ts = 0 ->
+      List.iter2 matching ps ts
+    | Tconstr _, _ | _, Tconstr _ ->
+      let pattern' = Ctype.expand_head env pattern in
+      let target' = Ctype.expand_head env target in
+      if not (eq_type pattern pattern' && eq_type target target')
+      then matching pattern' target'
+    | Ttuple ps, Ttuple ts when List.compare_lengths ps ts = 0 ->
+      List.iter2 (fun (_, p) (_, t) -> matching p t) ps ts
+    | Tarrow (_, p, p', _), Tarrow (_, t, t', _) ->
+      matching p t;
+      matching p' t'
+    | _ -> ()
+  in
+  List.iter2
+    (fun (_, pattern) target -> matching pattern target)
+    generic (arguments fn_type arity);
+  let ty =
+    match List.split (List.rev !variables) with
+    | [], _ -> scheme
+    | variables, targets -> (
+      try Ctype.apply env variables scheme targets
+      with Ctype.Cannot_apply -> fail ())
+  in
+  let parameters, result = parameters ty arity in
+  let same_path p =
+    Path.same
+      (Env.normalize_value_path None env p)
+      (Env.normalize_value_path None env path)
+  in
+  let rec variable e =
+    match e.rexp_desc with
+    | Rexp_var id -> Some id
+    | Rexp_refinement (_, e) | Rexp_ghost e -> variable e
+    | _ -> None
+  in
+  match get_desc (Ctype.expand_head env result) with
+  | Trefine
+      ({ ref_pred =
+           { rexp_desc =
+               Rexp_logical_equal
+                 ( { rexp_desc =
+                       Rexp_apply ({ rexp_desc = Rexp_ident p; _ }, args);
+                     _
+                   },
+                   _ );
+             _
+           };
+         _
+       } as refinement)
+    when same_path p
+         && List.compare_lengths args parameters = 0
+         && List.for_all2
+              (fun (label, arg) (binder, _) ->
+                label = Asttypes.Nolabel
+                &&
+                match variable arg with
+                | Some id -> Ident.same id binder
+                | None -> false)
+              args parameters ->
+    ( List.map (fun (binder, ty) -> binder, fst (refinements ty)) parameters,
+      refinement )
+  | _ -> fail ()
+
+(* A local definition is not unfolded while its own lemma is checked, or when
+   its lemma is shadowed; a missing or unusable exported lemma is an error. *)
+let transparent_equation env loc path fn_type arity =
+  match unfolding_equation env loc path fn_type arity with
+  | equation -> Some equation
+  | exception Unusable_lemma -> (
+    match path with
+    | Path.Pident _ -> None
+    | _ ->
+      Location.raise_errorf ~loc
+        "The transparent definition %s cannot be unfolded: %s_def must be a \
+         total lemma stating its definition, with no refinement nested inside \
+         a parameter type"
+        (Path.name path) (Path.last path))
+
 let rec predicate ctx env s e =
   ctx.poll ();
   if impossible s
@@ -1983,6 +2309,13 @@ let rec predicate ctx env s e =
               ~total:true
           in
           let s =
+            match fn.rexp_desc with
+            | Rexp_ident path ->
+              unfold_transparent ctx env s path fn.rexp_type args result
+                e.rexp_loc
+            | _ -> s
+          in
+          let s =
             match prim with
             | Some ("caml_vox_sequence_length", 1) ->
               normal_vox_sequence_length ctx env fn.rexp_type args s
@@ -2004,9 +2337,9 @@ let rec predicate ctx env s e =
       let s, value = eval s body in
       expose_outer ctx env s source value e.rexp_loc
     | Rexp_ghost body -> eval s body
-    | Rexp_logical_equal (left, right) ->
+    | Rexp_logical_equal (left_exp, right) ->
       let s, right = eval s right in
-      let s, left = eval s left in
+      let s, left = eval s left_exp in
       if s.dead
       then s, None
       else
@@ -2014,7 +2347,17 @@ let rec predicate ctx env s e =
         let right = required e.rexp_loc right in
         if sort_has_unsupported_logical_equality ctx.encoding (term_sort left)
         then unsupported e.rexp_loc
-        else name ctx s (scalar_value (both Eq left right))
+        else
+          let s =
+            match
+              if ctx.in_goal
+              then pref_extensionality ctx env left_exp.rexp_type left right
+              else None
+            with
+            | Some lemma -> fact s "heap extensionality" lemma
+            | None -> s
+          in
+          name ctx s (scalar_value (both Eq left right))
     | Rexp_ifthenelse (c, t, Some f) ->
       let s, c = eval s c in
       choose ctx s
@@ -2076,6 +2419,73 @@ let rec predicate ctx env s e =
            predicate. Use an explicit total function witness and a pointwise \
            lemma.")
     | _ -> unsupported e.rexp_loc
+
+and unfold_transparent ctx env s path fn_type args result loc =
+  match result with
+  | Some (Scalar (Call _ as call)) when not (impossible s) -> (
+    let path = Env.normalize_value_path None env path in
+    if
+      List.exists (Path.same path) ctx.unfolding
+      || Unfolded.mem (path, call) s.unfolded
+      || not (transparent_definition env path)
+    then s
+    else
+      match transparent_equation env loc path fn_type (List.length args) with
+      | None -> s
+      | Some (parameters, refinement) ->
+        let bound = List.fold_left2 bind s (List.map fst parameters) args in
+        let premises =
+          List.concat
+            (List.map2
+               (fun (_, refinements) arg ->
+                 List.map (fun r -> r, arg) refinements)
+               parameters args)
+        in
+        let assume s =
+          match premises with
+          | [] ->
+            let s = bind s refinement.ref_binder None in
+            assume_fact ctx env s refinement.ref_pred loc
+          | _ -> (
+            (* As [if premises then f_def args]: evaluating the premises is the
+               check an explicit call makes, and the lemma's refinement, with
+               every fact found while evaluating it, holds only when they do. *)
+            try
+              let s, premises =
+                List.fold_left
+                  (fun (s, terms) (r, arg) ->
+                    let s, premise =
+                      predicate ctx env (bind s r.ref_binder arg) r.ref_pred
+                    in
+                    s, required loc premise :: terms)
+                  (s, []) premises
+              in
+              fst
+                (choose ctx s
+                   (List.fold_left (both And) (Boolean true) premises)
+                   (fun s ->
+                     ( assume_fact ctx env
+                         (bind s refinement.ref_binder None)
+                         refinement.ref_pred loc,
+                       None ))
+                   (fun s -> s, None))
+            with Location.Error error ->
+              { bound with
+                omitted_premises = (loc, error) :: bound.omitted_premises
+              })
+        in
+        let outer = ctx.unfolding in
+        ctx.unfolding <- path :: outer;
+        let unfolded =
+          Fun.protect
+            ~finally:(fun () -> ctx.unfolding <- outer)
+            (fun () -> assume bound)
+        in
+        { unfolded with
+          values = s.values;
+          unfolded = Unfolded.add (path, call) unfolded.unfolded
+        })
+  | _ -> s
 
 and expose ctx env s ty value loc =
   match get_desc (Ctype.expand_head env ty) with
@@ -2190,7 +2600,7 @@ and predicate_cases ctx env s value cases =
       guarded_case ctx (predicate ctx env) (predicate ctx env)
         case.rc_rhs.rexp_loc s matched case.rc_guard case.rc_rhs rest
 
-and expose_fact ctx env s ty value loc =
+and assume_fact ctx env s p loc =
   (* Dropping an unsupported premise is conservative; goals remain strict. *)
   let rec assume s p =
     try
@@ -2215,6 +2625,10 @@ and expose_fact ctx env s ty value loc =
     with Location.Error error ->
       { s with omitted_premises = (loc, error) :: s.omitted_premises }
   in
+  assume s p
+
+and expose_fact ctx env s ty value loc =
+  let assume s p = assume_fact ctx env s p loc in
   let ty = Ctype.expand_head env ty in
   match get_desc ty, scalar value with
   | Trefine _, Some term when Exposed.mem (get_id ty, term) s.exposed ->
@@ -2348,6 +2762,62 @@ and pattern_fallback : type k.
       s (pat_bound_idents_full p)
   in
   [s, required p.pat_loc (fresh ctx p.pat_env Predef.type_bool "pattern")]
+
+(* Asserts the predicate of refinement [r] of [value].  Each conjunct of a
+   top-level [&&] chain is an obligation of its own, proved under the
+   conjuncts before it, as [&&] evaluates; a failure then names the conjunct.
+   [required_by] explains a predicate that cannot be translated. *)
+let assert_refinement ctx env s r value ~loc ~headline ~context ~required_by =
+  let rec conjuncts p =
+    match p.rexp_desc with
+    | Rexp_apply ({ rexp_desc = Rexp_ident path; _ }, [(_, a); (_, b)])
+      when primitive env path = Some ("%sequand", 2) ->
+      conjuncts a @ conjuncts b
+    | _ -> [p]
+  in
+  let evaluate goals p =
+    let in_goal = ctx.in_goal in
+    ctx.in_goal <- true;
+    try
+      Fun.protect
+        ~finally:(fun () -> ctx.in_goal <- in_goal)
+        (fun () -> predicate ctx env goals p)
+    with Location.Error error ->
+      raise
+        (Location.Error
+           { error with
+             sub =
+               error.sub
+               @ required_by
+           })
+  in
+  let group = fresh_group () in
+  let prove goals p =
+    if goals.dead
+    then goals
+    else
+      let goals, goal = evaluate goals p in
+      let goal =
+        if goals.dead then Boolean true else required p.rexp_loc goal
+      in
+      let assertion =
+        Assert
+          { loc;
+            origin = p.rexp_loc;
+            goal;
+            omitted_premises = goals.omitted_premises;
+            group;
+            headline;
+            context
+          }
+      in
+      branch { goals with code = assertion :: goals.code } goal
+  in
+  let goals =
+    List.fold_left prove (bind s r.ref_binder value) (conjuncts r.ref_pred)
+  in
+  { s with code = Check (added_prefix ~base:s.code goals.code) :: s.code }
+
 
 (* Refinement subsumption: every value of [source] is a value of [target].
    Typing compared the two types up to refinements ([Ctype.moregen],
@@ -2529,29 +2999,10 @@ and assert_subsumed ctx env site s ty r value =
   if impossible s
   then s
   else
-    let goals, goal =
-      try predicate ctx env (bind s r.ref_binder value) r.ref_pred
-      with Location.Error error ->
-        raise (Location.Error { error with sub = error.sub @ site.sub_context })
-    in
-    let assertion =
-      Assert
-        { loc = site.sub_loc;
-          origin = r.ref_pred.rexp_loc;
-          goal =
-            (if goals.dead
-             then Boolean true
-             else required r.ref_pred.rexp_loc goal);
-          omitted_premises = goals.omitted_premises;
-          headline = site.sub_headline;
-          context = site.sub_context
-        }
-    in
     let s =
-      { s with
-        code =
-          Check (assertion :: added_prefix ~base:s.code goals.code) :: s.code
-      }
+      assert_refinement ctx env s r value ~loc:site.sub_loc
+        ~headline:site.sub_headline ~context:site.sub_context
+        ~required_by:site.sub_context
     in
     fst (expose_fact ctx env s ty value site.sub_loc)
 
@@ -2682,7 +3133,20 @@ let export_module ctx id str s =
         | Some path -> Path.Map.add path value values)
       values s.values
   in
+  ctx.module_aliases
+    <- Path.Map.fold
+         (fun path target aliases ->
+           match exported path with
+           | None -> aliases
+           | Some path -> Path.Map.add path target aliases)
+         ctx.module_aliases ctx.module_aliases;
   { s with values }
+
+let rec module_alias m =
+  match m.mod_desc with
+  | Tmod_ident (path, _) -> Some path
+  | Tmod_constraint (m, _, _, _) -> module_alias m
+  | _ -> None
 
 let forwards_result e =
   match e.exp_desc with
@@ -2775,32 +3239,11 @@ and expression_extras ?deferred ctx s e ty = function
 and introduce ctx env s ty value loc =
   match get_desc (Ctype.expand_head env ty) with
   | Trefine r when ctx.verify_introductions && not s.dead ->
-    let goals, goal =
-      try predicate ctx env (bind s r.ref_binder value) r.ref_pred
-      with Location.Error error ->
-        raise
-          (Location.Error
-             { error with
-               sub =
-                 error.sub
-                 @ [Location.msg ~loc "Required by this refinement introduction"]
-             })
+    let s =
+      assert_refinement ctx env s r value ~loc ~headline:None ~context:[]
+        ~required_by:
+          [Location.msg ~loc "Required by this refinement introduction"]
     in
-    let assertion =
-      Assert
-        { loc;
-          origin = r.ref_pred.rexp_loc;
-          goal =
-            (if goals.dead
-             then Boolean true
-             else required r.ref_pred.rexp_loc goal);
-          omitted_premises = goals.omitted_premises;
-          headline = None;
-          context = []
-        }
-    in
-    let check = assertion :: added_prefix ~base:s.code goals.code in
-    let s = { s with code = Check check :: s.code } in
     expose_outer ctx env s ty value loc
   | _ -> s, value
 
@@ -2997,6 +3440,9 @@ and expression_desc ?deferred ctx s e =
             s := checked
           | Arg _ -> ())
         args;
+      let complete =
+        Array.for_all (function _, Arg _ -> true | _, Omitted _ -> false) args
+      in
       let s, args = !s, Array.to_list values in
       if not s.dead then ctx.check_call ctx s e args;
       let prim = stored_primitive prim fn_value in
@@ -3006,6 +3452,13 @@ and expression_desc ?deferred ctx s e =
       let value =
         apply_function ctx e.exp_env fn.exp_type e.exp_type prim fn_value args
           ~total
+      in
+      let s =
+        match fn.exp_desc with
+        | Texp_ident { path; _ } when complete ->
+          unfold_transparent ctx e.exp_env s path fn.exp_type args value
+            e.exp_loc
+        | _ -> s
       in
       match prim with
       | Some ("caml_vox_sequence_length", 1) ->
@@ -3106,6 +3559,21 @@ and expression_desc ?deferred ctx s e =
     in
     s, opaque ()
   | Texp_exclave body -> result s body
+  | Texp_assert
+      ( { exp_desc = Texp_construct (_, { cstr_name = "false"; _ }, _, _, _); _ },
+        _ ) ->
+    (* Compiled to a raise, even under [-noassert]. *)
+    branch s (Boolean false), None
+  | Texp_assert (condition, _) when not !Clflags.noassert ->
+    (* The continuation runs only if the condition evaluated to true. Under
+       [-noassert] the condition is not evaluated at all. *)
+    let s, condition = eval s condition in
+    let s =
+      match scalar condition with
+      | Some condition when not s.dead -> branch s condition
+      | _ -> s
+    in
+    s, opaque ()
   | _ ->
     (* Unknown evaluation/control-flow forms lose outgoing facts, but cannot
        hide obligations in their children or delayed bodies. *)
@@ -3140,6 +3608,7 @@ and check_function ctx s e params body value =
         branch s condition)
       s params
   in
+  let s = assume_lemma_premise ctx s body in
   let arguments =
     Misc.Stdlib.List.map_option
       (fun p ->
@@ -3176,6 +3645,60 @@ and check_function ctx s e params body value =
       fn.lambda
         := logical_lambda ctx captured captured_arguments parameters body
     | _ -> ()
+
+(* An erased lemma whose conclusion is [{u : unit | if p then q else true}] is
+   proved under [p]. Its body never runs, and under [not p] its conclusion holds
+   trivially; a recursive call still has to establish the callee's own premise
+   to use its conclusion. *)
+and assume_lemma_premise ctx s body =
+  match body with
+  | Tfunction_body body
+    when (not s.dead)
+         && List.exists
+              (function Texp_ghost, _, _ -> true | _ -> false)
+              body.exp_extra -> (
+    let env = body.exp_env in
+    (* Only a body whose single refinement is this conclusion: another one (an
+       inner annotation) would be checked under [p] as well. *)
+    let conclusions =
+      List.filter_map
+        (function
+          | Texp_refinement { target; _ }, _, _ -> (
+            match get_desc (Ctype.expand_head env target) with
+            | Trefine r -> Some r
+            | _ -> None)
+          | _ -> None)
+        body.exp_extra
+    in
+    match conclusions with
+    | [ ({ ref_pred =
+             { rexp_desc =
+                 Rexp_ifthenelse
+                   ( premise,
+                     _,
+                     Some
+                       { rexp_desc =
+                           Rexp_construct
+                             (Path.Pextra_ty (_, Path.Pcstr_ty "true"), []);
+                         _
+                       } );
+               _
+             };
+           _
+         } as r) ]
+      when match get_desc (Ctype.expand_head env r.ref_payload) with
+           | Tconstr (path, [], _) -> Path.same path Predef.path_unit
+           | _ -> false -> (
+      let unit = fresh ctx env r.ref_payload "result" in
+      match predicate ctx env (bind s r.ref_binder unit) premise with
+      | assumed, premise when not assumed.dead -> (
+        match scalar premise with
+        | Some premise -> branch { assumed with values = s.values } premise
+        | None -> s)
+      | _ -> s
+      | exception Location.Error _ -> s)
+    | _ -> s)
+  | _ -> s
 
 and value_bindings ctx s rec_flag bindings =
   let s =
@@ -3288,6 +3811,13 @@ and structure ctx s str =
                 s, None)
           in
           export_module ctx id str s, None
+        | Tstr_module { mb_id = Some id; mb_expr; _ }
+          when Option.is_some (module_alias mb_expr) ->
+          (* The alias and its target are the same module at run time. *)
+          let target = Option.get (module_alias mb_expr) in
+          ctx.module_aliases
+            <- Path.Map.add (Path.Pident id) target ctx.module_aliases;
+          s, None
         | _ ->
           let state = ref s in
           let iterator = iterator ctx state in
@@ -3654,6 +4184,27 @@ let query ctx code =
           definitions
             := { label = "pref identity"; term = axiom } :: !definitions;
           Queue.add axiom pending
+        | Call (fn, [array])
+          when observation_function "Iarray.length" fn
+               && Option.is_none (iarray_origin ctx array)
+               &&
+               match expose_head ctx array with
+               | App (Ite, _) -> false
+               | _ -> true ->
+          (* Every iarray, ghost or real, is built by a literal, a partial
+             allocation that raises above [Sys.max_array_length], a total
+             operation that keeps or shrinks a length, or a view of a real array
+             or string, so its length is at most 2^57. Arrays built from others
+             get their lengths from those, and are not bounded here: their
+             construction may not have returned. *)
+          let axiom =
+            both And
+              (both Le (Integer 0L) term)
+              (both Le term (Integer 1152921504606846975L))
+          in
+          definitions
+            := { label = "iarray length bound"; term = axiom } :: !definitions;
+          Queue.add axiom pending
         | _ -> ()
         end;
         begin match term with
@@ -3775,13 +4326,42 @@ let verify_batch ctx prove code =
              sub = error.sub @ origin @ o.context @ omitted_premise_messages s
            })
   in
-  match goals with
+  (* The conjuncts of a refinement are consecutive goals of one group. A group
+     is proved as one query, which is as cheap as proving the whole refinement;
+     only if it fails is each conjunct proved alone, to name the one that
+     fails. *)
+  let rec groups = function
+    | [] -> []
+    | ((o : obligation), _) :: _ as goals ->
+      let members, rest =
+        List.partition (fun ((m : obligation), _) -> m.group = o.group) goals
+      in
+      members :: groups rest
+  in
+  let prove_group members query =
+    match members with
+    | [(o, _)] -> prove_one o (Lazy.force query)
+    | (first, _) :: _ -> (
+      try prove ~batch:false first.loc (Lazy.force query)
+      with Unproved _ ->
+        (* If every conjunct is proved alone, the refinement holds. *)
+        List.iter (fun (o, term) -> prove_one o (expand term)) members)
+    | [] -> ()
+  in
+  let conjunction members =
+    List.fold_left (fun q (_, goal) -> both And q goal) (Boolean true) members
+  in
+  match groups goals with
   | [] -> ()
-  | [(o, _)] -> prove_one o query
-  | (first, _) :: _ -> (
+  | [members] -> prove_group members (lazy query)
+  | ((first, _) :: _) :: _ as groups -> (
     try prove ~batch:true first.loc query
     with Unproved _ ->
-      List.iter (fun (o, term) -> prove_one o (expand term)) goals)
+      List.iter
+        (fun members ->
+          prove_group members (lazy (expand (conjunction members))))
+        groups)
+  | [] :: _ -> ()
 
 let context ~poll ~prove ~verify_introductions =
   { poll;
@@ -3806,13 +4386,16 @@ let context ~poll ~prove ~verify_introductions =
     pref_constructors = Hashtbl.create 8;
     pref_observers = Hashtbl.create 8;
     free = Path.Map.empty;
+    module_aliases = Path.Map.empty;
+    in_goal = false;
     argument_values = Path.Map.empty;
     batches = [];
     named_terms = Hashtbl.create 32;
     symbolic = Symbolic_keys.create 16;
     prove;
     verify_introductions;
-    check_call = (fun _ _ _ _ -> ())
+    check_call = (fun _ _ _ _ -> ());
+    unfolding = []
   }
 
 let generate ?(poll = fun () -> ()) ?interface ~prove str =
@@ -3868,69 +4451,52 @@ let check_termination ~poll ~prove ~self ~fn ~measure =
   poll ();
   let params, body = Recursive_function.parameters fn in
   let ctx = context ~poll ~prove ~verify_introductions:false in
-  let reject e =
-    Location.raise_errorf ~loc:e.exp_loc
-      "Unsupported decreases expression: expected scalar primitive operations"
+  (* The typer checked the measure as a total, stateless expression over
+     immutable parameters, so it denotes a function of their values and may call
+     total functions. Refinement introductions are not verified in this pass, so
+     the measure may not contain any: a precondition assumed but not checked
+     could make a callee's postcondition vacuous. *)
+  let scan =
+    { Tast_iterator.default_iterator with
+      expr =
+        (fun it e ->
+          (match intro_loc e with
+          | Some loc ->
+            Location.raise_errorf ~loc
+              "Unsupported decreases expression: a measure cannot contain a \
+               refinement introduction"
+          | None -> ());
+          Tast_iterator.default_iterator.expr it e)
+    }
   in
-  let rec check e =
-    if
-      Option.is_some (intro_loc e)
-      || sort ctx.encoding e.exp_env e.exp_type = None
-    then reject e;
-    match e.exp_desc with
-    | Texp_ident { desc = { val_kind = Val_reg _; _ }; _ }
-    | Texp_constant (Const_int _) ->
-      ()
-    | Texp_construct (_, c, _, [], _)
-      when Option.is_some (constructor ctx e.exp_env e.exp_type c.cstr_name) ->
-      ()
-    | Texp_apply
-        (({ exp_desc = Texp_ident { path; _ }; _ } as f), args, _, _, _, _) ->
-      let args =
-        List.map
-          (function
-            | Nolabel, Arg (e, _) ->
-              check e;
-              e
-            | _ -> reject e)
-          args
-      in
-      begin match primitive f.exp_env path with
-      | Some (name, arity) when arity = List.length args ->
-        let values =
-          List.map
-            (fun arg ->
-              match sort ctx.encoding arg.exp_env arg.exp_type with
-              | Some Bool -> scalar_value (Boolean false)
-              | Some Int63 -> scalar_value (Integer 0L)
-              | Some Int -> scalar_value (Big_integer "0")
-              | Some (Opaque _ | Datatype _) -> reject arg
-              | None -> reject arg)
-            args
-        in
-        if operation ctx e.exp_env f.exp_type e.exp_type name values = None
-        then reject e
-      | _ -> reject e
-      end
-    | Texp_let (Asttypes.Nonrecursive, bindings, body) ->
-      List.iter
-        (fun vb ->
-          begin match vb.vb_pat.pat_desc with
-          | Tpat_var _ | Tpat_any -> ()
-          | _ -> reject vb.vb_expr
-          end;
-          check vb.vb_expr)
-        bindings;
-      check body
-    | Texp_ifthenelse (c, t, Some f) -> List.iter check [c; t; f]
-    | Texp_open ({ open_expr = { mod_desc = Tmod_ident _; _ }; _ }, body) ->
-      check body
-    | Texp_sequence (a, _, b) ->
-      check a;
-      check b
-    | _ -> reject e
+  scan.expr scan measure;
+  (* A tuple is a lexicographic measure. *)
+  let components =
+    match measure.exp_desc with
+    | Texp_tuple (components, _) -> List.map snd components
+    | _ -> [measure]
   in
-  check measure;
+  List.iter
+    (fun e ->
+      match sort ctx.encoding e.exp_env e.exp_type with
+      | Some (Int63 | Int) -> ()
+      | Some (Bool | Opaque _ | Datatype _) | None ->
+        Location.raise_errorf ~loc:e.exp_loc
+          "Unsupported decreases expression: expected int or Bigint.t")
+    components;
+  let evaluate s =
+    let s, values =
+      List.fold_left
+        (fun (s, values) e ->
+          let s, value = expression ctx s e in
+          s, (e.exp_loc, value) :: values)
+        (s, []) components
+    in
+    ( s,
+      if s.dead
+      then []
+      else List.rev_map (fun (loc, value) -> required loc value) values )
+  in
   let entry =
     List.fold_left
       (fun s (id, pat) ->
@@ -3941,10 +4507,9 @@ let check_termination ~poll ~prove ~self ~fn ~measure =
         branch s condition)
       empty params
   in
-  let entry, entry_measure = expression ctx entry measure in
+  let entry, entry_measure = evaluate entry in
   if not entry.dead
   then begin
-    let entry_measure = required measure.exp_loc entry_measure in
     let check_call ctx s call args =
       match call.exp_desc with
       | Texp_apply
@@ -3958,7 +4523,27 @@ let check_termination ~poll ~prove ~self ~fn ~measure =
         let call_state =
           List.fold_left2 (fun s (id, _) value -> bind s id value) s params args
         in
-        let checked, value = expression ctx call_state measure in
+        let checked, value = evaluate call_state in
+        (* Each component is bounded below when it decreases: an int by its
+           range, a Bigint.t by zero. *)
+        let rec decreases = function
+          | [] -> Boolean false
+          | (value, entry) :: rest ->
+            let smaller =
+              match term_sort entry with
+              | Int63 -> both Lt value entry
+              | Int ->
+                both And
+                  (both Int_ge value (Big_integer "0"))
+                  (both Int_lt value entry)
+              | Bool | Opaque _ | Datatype _ -> assert false
+            in
+            if rest = []
+            then smaller
+            else
+              App
+                (Or, [smaller; both And (both Eq value entry) (decreases rest)])
+        in
         if not checked.dead
         then
           verify_batch ctx prove
@@ -3966,16 +4551,9 @@ let check_termination ~poll ~prove ~self ~fn ~measure =
                { loc = call.exp_loc;
                  (* The error already points at the decreases attribute. *)
                  origin = call.exp_loc;
-                 goal =
-                   (let value = required measure.exp_loc value in
-                    match term_sort entry_measure with
-                    | Int63 -> both Lt value entry_measure
-                    | Int ->
-                      both And
-                        (both Int_ge value (Big_integer "0"))
-                        (both Int_lt value entry_measure)
-                    | Bool | Opaque _ | Datatype _ -> reject measure);
+                 goal = decreases (List.combine value entry_measure);
                  omitted_premises = checked.omitted_premises;
+                 group = fresh_group ();
                  headline = None;
                  context = []
                }

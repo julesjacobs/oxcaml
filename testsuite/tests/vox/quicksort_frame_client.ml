@@ -3,7 +3,7 @@
  multicore;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_sequence.mli vox_sequence.ml borrow.mli borrow.ml vox_int_sequence.mli vox_int_sequence.ml quicksort_model.ml quicksort.mli quicksort.ml quicksort_frame_client.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml borrow.mli borrow.ml vox_int_sequence.mli vox_int_sequence.ml quicksort_model.ml quicksort.mli quicksort.ml";
  { bytecode; }
  { native; }
 *)
@@ -39,7 +39,7 @@ let sort_range : (parallel : bool) -> (s : int Slice.t) @ local unique ->
   let step = Slice.with_range s first past desired (fun middle ->
     let slice = middle in
     let after = ghost_ (Slice.final (borrow_ slice)) in
-    let done_ =
+    let _done =
       if parallel then Quicksort.parallel_sort ~max_domains:2 ~cutoff:2 slice
       else Quicksort.sort slice in
     let u = () in

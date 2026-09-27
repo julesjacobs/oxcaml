@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_egraph_language_spec.ml vox_egraph_rule_spec.ml vox_egraph_match_spec.ml egraph_match_spec.ml";
+ prebuilt_modules = "vox_egraph_language_spec.ml vox_egraph_rule_spec.ml vox_egraph_match_spec.ml";
  { bytecode; }
 *)
 

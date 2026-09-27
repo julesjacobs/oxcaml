@@ -45,7 +45,12 @@ let directories env =
 
 let directory_flags env =
   let f dir = ("-I " ^ dir) in
-  let l = List.map f (directories env) in
+  let prebuilt =
+    match Actions_helpers.prebuilt_modules env with
+    | [] -> []
+    | _ -> [Actions_helpers.prebuilt_view_directory env]
+  in
+  let l = List.map f (prebuilt @ directories env) in
   String.concat " " l
 
 let flags env = Environments.safe_lookup Ocaml_variables.flags env
@@ -229,15 +234,26 @@ let compile_program (compiler : Ocaml_compilers.compiler) log env =
     if has_c_file then Ocaml_flags.c_includes else "" in
   let expected_exit_status =
     Ocaml_tools.expected_exit_status env (module Compiler : Ocaml_tools.Tool) in
+  let compile_only =
+    Environments.lookup_as_bool Ocaml_variables.compile_only env = Some true
+  in
+  let prebuilt_objects =
+    if compile_only then []
+    else
+      let extension = Ocaml_backends.module_extension Compiler.target in
+      List.map
+        (fun basename ->
+          Filename.concat (Actions_helpers.prebuilt_view_directory env)
+            (Filename.make_filename basename extension))
+        (Actions_helpers.prebuilt_implementations env)
+  in
   let module_names =
+    String.concat " " prebuilt_objects ^ " " ^
     (binary_modules Compiler.target env) ^ " " ^
     (String.concat " " (List.map Ocaml_filetypes.make_filename modules)) in
   let what = Printf.sprintf "Compiling program %s from modules %s"
     program_file module_names in
   Printf.fprintf log "%s\n%!" what;
-  let compile_only =
-    Environments.lookup_as_bool Ocaml_variables.compile_only env = Some true
-  in
   let compile_flags =
     if compile_only then " -c " else ""
   in
@@ -369,7 +385,7 @@ let find_source_modules log env =
     (String.concat " " (List.map Ocaml_filetypes.make_filename source_modules))
     env
 
-let setup_tool_build_env (tool : Ocaml_tools.tool) log env =
+let setup_tool_build_env ?native (tool : Ocaml_tools.tool) log env =
   let (module Tool) = tool in
   let source_directory = Actions_helpers.test_source_directory env in
   let testfile = Actions_helpers.testfile env in
@@ -410,12 +426,13 @@ let setup_tool_build_env (tool : Ocaml_tools.tool) log env =
   Sys.force_remove tool_output_file;
   let env =
     Environments.add Builtin_variables.test_build_directory build_dir env in
-  Actions_helpers.setup_build_env false source_modules log env
+  Actions_helpers.setup_build_env ?native false source_modules log env
 
 let setup_compiler_build_env (compiler : Ocaml_compilers.compiler) log env =
   let (module Compiler) = compiler in
   let (r, env) =
-    setup_tool_build_env (module Compiler : Ocaml_tools.Tool) log env
+    setup_tool_build_env ~native:(Compiler.target = Ocaml_backends.Native)
+      (module Compiler : Ocaml_tools.Tool) log env
   in
   if Result.is_pass r then
   begin
@@ -435,7 +452,8 @@ let setup_compiler_build_env (compiler : Ocaml_compilers.compiler) log env =
 
 let setup_toplevel_build_env (toplevel : Ocaml_toplevels.toplevel) log env =
   let (module Toplevel) = toplevel in
-  setup_tool_build_env (module Toplevel : Ocaml_tools.Tool) log env
+  setup_tool_build_env ~native:(Toplevel.backend = Ocaml_backends.Native)
+    (module Toplevel : Ocaml_tools.Tool) log env
 
 let mk_compiler_env_setup name (compiler : Ocaml_compilers.compiler) =
   make_no_artifact ~name
@@ -1261,6 +1279,7 @@ let config_variables _log env =
     Ocaml_variables.arch, Ocamltest_config.arch;
     Ocaml_variables.ocamlrun, Ocaml_files.ocamlrun;
     Ocaml_variables.ocamlc_byte, Ocaml_files.ocamlc;
+    Ocaml_variables.ocamlc_opt, Ocaml_files.ocamlc_dot_opt;
     Ocaml_variables.ocamlopt_byte, Ocaml_files.ocamlopt;
     Ocaml_variables.bytecc_libs, Ocamltest_config.bytecc_libs;
     Ocaml_variables.nativecc_libs, Ocamltest_config.nativecc_libs;

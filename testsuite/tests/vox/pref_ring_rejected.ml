@@ -2,21 +2,15 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml pref_ring.mli pref_ring.ml";
+ prebuilt_modules = "pref.mli pref.ml pref_ring.mli pref_ring.ml";
  readonly_files = "pref_ring_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
+   binary_modules = "prebuilt/pref prebuilt/pref_ring";
    run-expect;
    check-program-output;
  }
 *)
-
-(* Load the implementation so that the accepted phrase below can be
-   evaluated. *)
-#load "pref.cmo";;
-#load "pref_ring.cmo";;
 
 open Pref_ring
 
@@ -40,7 +34,7 @@ Line 16, characters 34-35:
 16 |     let t = remove s left s right t in t
                                        ^
 Error: Refinement could not be proved (counterexample)
-File "pref_ring.mli", lines 167-173, characters 37-55:
+File "pref_ring.mli", line 169, characters 9-29:
   The refinement is stated here.
 |}, Principal{|
 Line 9, characters 59-60:
@@ -127,6 +121,8 @@ Line 7, characters 8-18:
 7 |     let definition = ghost_ (connected_def before left right) in
             ^^^^^^^^^^
 Warning 26 [unused-var]: unused variable "definition".
+  Hint: the binding is unnecessary, because the fact in its
+  refined type holds without the name; a statement such as "lemma x;" suffices.
 
 Line 12, characters 4-5:
 12 |     t

@@ -1,7 +1,7 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- all_modules = "wasm_u32.ml wasm_u32_demo.ml";
+ prebuilt_modules = "wasm_u32.ml";
  { bytecode; }
 *)
 open Wasm_u32

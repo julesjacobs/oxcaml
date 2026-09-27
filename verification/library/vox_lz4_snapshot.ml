@@ -123,9 +123,20 @@ let snapshot_prefix : (buffer : B.t) @ unique ->
     let post = ghost_ (fun (_ : unit @ immutable total)
         (after : char iarray @ immutable) ->
           Vox_lz4_heap_bytes.prefix_matches after heap block used) in
-    let step = A.Owned_array.with_mut owned post (fun slice ->
-      ghost_ (Vox_lz4_heap_bytes.prefix_matches_def initial heap block 0);
-      let _ = fill block used (borrow_ permission) 0 slice in
-      ()) in
+    (* The closure passed to [with_mut] may only borrow the permission: it is
+       reached through a borrowed parameter, so the permission is still
+       unique when it goes back into the result. *)
+    let fill_owned
+        (permission : {p : M.contents P.token | P.own p === heap}
+          @ local read ghost)
+        : {r : (unit, char A.Owned_array.t) A.step |
+            post r.value (A.Owned_array.contents r.state)
+            && Iarray.length (A.Owned_array.contents r.state)
+               = Iarray.length (A.Owned_array.contents owned)} @ unique =
+      A.Owned_array.with_mut owned post (fun slice ->
+        ghost_ (Vox_lz4_heap_bytes.prefix_matches_def initial heap block 0);
+        let _ = fill block used permission 0 slice in
+        ()) [@nontail] in
+    let step = fill_owned (borrow_ permission) in
     let values = A.Owned_array.into_iarray step.state in
     { values; buffer = { B.block; permission; used } }

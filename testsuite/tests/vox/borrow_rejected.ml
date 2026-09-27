@@ -2,12 +2,10 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_sequence.mli vox_sequence.ml borrow.mli borrow.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml borrow.mli borrow.ml";
  readonly_files = "borrow_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
    run-expect;
    check-program-output;
  }
@@ -101,9 +99,9 @@ Line 7, characters 6-10:
 7 |       size in
           ^^^^
 Error: Refinement could not be proved (counterexample)
-Lines 5-6, characters 27-82:
-5 | ...........................0 <= i
-6 |       && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current state)) < 0...
+Line 6, characters 9-82:
+6 |       && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current state)) < 0} =
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
 |}]
 
@@ -116,7 +114,6 @@ Line 3, characters 4-27:
 3 |     Slice.final (borrow_ s)
         ^^^^^^^^^^^^^^^^^^^^^^^
 Error: This value is "ghost" but is expected to be "real".
-Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 module Runtime_final_check = struct
@@ -130,7 +127,9 @@ Line 4, characters 30-43:
 4 |     let checked : {u : unit | Slice.final s === []} = assume_ u in
                                   ^^^^^^^^^^^^^
 Error: This value is "ghost" but is expected to be "real".
-Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
+Hint: "assume_" checks this predicate at run time,
+where ghost values are unavailable.
+State the fact as a static refinement instead.
 |}]
 
 module Stale_model = struct

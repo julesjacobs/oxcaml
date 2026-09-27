@@ -2,12 +2,10 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml pref_ring.mli pref_ring.ml pref_ring_proofs.ml pref_ring_general.mli pref_ring_general.ml pref_ring_splice_general.mli pref_ring_splice_general.ml";
+ prebuilt_modules = "pref.mli pref.ml pref_ring.mli pref_ring.ml pref_ring_proofs.ml pref_ring_general.mli pref_ring_general.ml pref_ring_splice_general.mli pref_ring_splice_general.ml";
  readonly_files = "pref_ring_general_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
    run-expect;
    check-program-output;
  }
@@ -35,7 +33,7 @@ Line 5, characters 24-25:
 5 |     reverse sentinel ns t
                             ^
 Error: Refinement could not be proved (counterexample)
-File "pref_ring_general.mli", lines 14-15, characters 39-32:
+File "pref_ring_general.mli", line 15, characters 6-32:
   The refinement is stated here.
 |}, Principal{|
 Line 3, characters 56-57:

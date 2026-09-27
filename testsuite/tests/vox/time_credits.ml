@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_credits.mli vox_credits.ml time_credits.ml";
+ prebuilt_modules = "vox_credits.mli vox_credits.ml";
  { bytecode; }
 *)
 

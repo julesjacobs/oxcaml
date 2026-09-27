@@ -2,12 +2,10 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml vox_pref_semantics.mli vox_pref_semantics.ml pref_list.mli pref_list.ml pref_list_client.ml";
+ prebuilt_modules = "pref.mli pref.ml vox_pref_semantics.mli vox_pref_semantics.ml pref_list.mli pref_list.ml pref_list_client.ml";
  readonly_files = "pref_list_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
    run-expect;
    check-program-output;
  }
@@ -31,9 +29,9 @@ Line 12, characters 4-5:
 12 |     r
          ^
 Error: Refinement could not be proved (counterexample)
-Lines 8-9, characters 20-56:
-8 | ....................r.pointer === root (rev_append xs Nil)
-9 |         && Pref.own r.state === heap (rev_append xs Nil)............
+Line 8, characters 20-58:
+8 |       {r : result | r.pointer === root (rev_append xs Nil)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
 |}, Principal{|
 Line 7, characters 20-21:

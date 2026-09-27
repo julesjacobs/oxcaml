@@ -32,10 +32,7 @@ let (sequential_runner @ portable total) : runner =
   let _ = rf right_arg in
   let u = () in u
 
-(* Every [int] is a 63-bit bitvector in the solver, so the index arithmetic of
-   the swap case is bit-blasted: about 2.4M solver resource units, over the 1M
-   slow-refinement threshold. *)
-let[@warning "-slow-refinement"] rec (partition @ total) : (pivot : int) -> (size : int) ->
+let rec (partition @ total) : (pivot : int) -> (size : int) ->
     (lower : int) -> (scan : int) ->
     (loan : {s : int Slice.t |
       0 < size && 0 <= lower && lower <= scan && scan < size

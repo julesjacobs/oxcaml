@@ -66,7 +66,7 @@ module Make (Key : Vox_table_map.Key)
         Read.I.valid_def view; Read.I.shape_def view.model;
         Count.full_count view.model.slots view.model.controls
           view.model.capacity
-          (fun index -> ghost_ (
+          (fun index -> (
             if 0 <= index && index < view.model.capacity then begin
               full_scan view hash index;
               occupied_at view.model index;

@@ -2,12 +2,10 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_big_credits.mli vox_big_credits.ml";
+ prebuilt_modules = "vox_big_credits.mli vox_big_credits.ml";
  readonly_files = "big_time_credits_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
    run-expect;
    check-program-output;
  }
@@ -37,6 +35,13 @@ module Empty = struct
     C.tick (token)
 end;;
 [%%expect{|
+Line 3, characters 6-9:
+3 |   let bad () =
+          ^^^
+Warning 223 [unerased-ghost-body]: This function's result is ghost, but its body is not wrapped in
+  "ghost_", so the body is computed when the function is called and its
+  value may be thrown away. Wrap the body in "ghost_ (...)" to erase it.
+
 Line 5, characters 11-18:
 5 |     C.tick (token)
                ^^^^^^^
@@ -57,7 +62,7 @@ Line 6, characters 19-26:
 6 |     C.split amount (token)
                        ^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_big_credits.mli", line 21, characters 26-61:
+File "vox_big_credits.mli", line 21, characters 42-61:
   The refinement is stated here.
 |}]
 
@@ -68,6 +73,13 @@ module Negative = struct
     C.Budget.create (amount)
 end;;
 [%%expect{|
+Line 3, characters 6-9:
+3 |   let bad () =
+          ^^^
+Warning 223 [unerased-ghost-body]: This function's result is ghost, but its body is not wrapped in
+  "ghost_", so the body is computed when the function is called and its
+  value may be thrown away. Wrap the body in "ghost_ (...)" to erase it.
+
 Line 5, characters 20-28:
 5 |     C.Budget.create (amount)
                         ^^^^^^^^

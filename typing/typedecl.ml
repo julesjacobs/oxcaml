@@ -4984,6 +4984,14 @@ let transl_value_decl env loc ~modal ~why valdecl =
         in
         mode, Mode.Modality.undefined, Valmi_str_primitive modes
     | Sig_value (md_mode, sig_modalities) ->
+        List.iter
+          (fun (attr : Parsetree.attribute) ->
+             if not (Builtin_attributes.is_transparent_definition [attr]) then
+               Location.raise_errorf ~loc:attr.attr_loc
+                 "In a signature, the def attribute requires the payload \
+                  transparent")
+          (Builtin_attributes.select_attributes ["def", Return]
+             valdecl.pval_attributes);
         if valdecl.pval_poly then begin
           Language_extension.assert_enabled ~loc Layout_poly
             Language_extension.Alpha;

@@ -707,7 +707,7 @@ let rec (rebuild @ total) :
   [@@decreases if passes > 0 then passes else 0]
 
 type extract_result = #{expr : L.expr @@ aliased; state : t;
-  proof : E.evidence @@ ghost}
+  proof : E.evidence @@ ghost aliased}
 
 let extract : (state : {s : t | O.valid s.owner && V.valid s.store &&
       s.owner.count = s.store.semantic.union.count &&

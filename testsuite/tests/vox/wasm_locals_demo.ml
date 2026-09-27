@@ -1,7 +1,7 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- all_modules = "wasm_u32.ml hmc_word64.ml wasm_i32.ml wasm_i64.ml wasm_instruction.ml wasm_code.ml wasm_scalar.ml wasm_word_lowering.ml wasm_locals.ml wasm_execution.ml wasm_local_lowering.ml wasm_locals_demo.ml";
+ prebuilt_modules = "wasm_u32.ml hmc_word64.ml wasm_i32.ml wasm_i64.ml wasm_instruction.ml wasm_code.ml wasm_scalar.ml wasm_word_lowering.ml wasm_locals.ml wasm_execution.ml wasm_local_lowering.ml";
  { bytecode; }
 *)
 module W = Hmc_word64

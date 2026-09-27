@@ -2,7 +2,7 @@ let[@def] clamp (lo : int) (hi : int) (x : int) = if x < lo then lo else if hi <
 
 let (bounds @ total) :
     (lo : int) -> (hi : {hi : int | lo <= hi}) -> (x : int) ->
-    {r : int | lo <= r && r <= (let h = hi in h)} =
+    {r : int | lo <= r && r <= hi} =
   fun lo hi x ->
   let result = clamp lo hi x in
   ghost_ (clamp_def lo hi x);
@@ -10,7 +10,7 @@ let (bounds @ total) :
 
 let (identity @ total) (lo : int) (hi : int) (x : int) :
     {u : unit |
-      if lo <= x && x <= hi then clamp (lo : int) (hi : int) (x : int) === x else true} =
+      if lo <= x && x <= hi then clamp lo hi x === x else true} =
   clamp_def lo hi x;
   ()
 

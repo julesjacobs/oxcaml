@@ -33,6 +33,19 @@ Use `Spec` and `Proof` modules when the size of the example makes their roles
 hard to follow. Small examples can keep their definitions together. Module
 signatures should preserve the totality needed by callers' ghost expressions.
 
+A recursive function that does not recurse on a structurally smaller argument
+states a measure with `[@@decreases e]`. The measure is a total, immutable
+expression over the parameters, of type `int` or `Bigint.t`; a `Bigint.t`
+measure must stay nonnegative when it decreases. It may call total and
+`[@def]` functions, for example `[@@decreases Bigint.add (S.length left)
+(S.length right)]`; the facts established before a recursive call, such as
+`S.length_def left`, are available when the measure is compared. A literal
+tuple `[@@decreases (level, count)]` is ordered lexicographically: each
+recursive call keeps a prefix of the components equal and decreases the next
+one. A measure cannot contain a refinement introduction, such as passing a
+literal to a refined parameter, because the termination check does not verify
+it.
+
 ## Proof blocks and fact scope
 
 For one lemma, use `ghost_ (lemma args); ...`.
@@ -113,6 +126,49 @@ and result sorts match its retained logical expression. Other applications
 retain their opaque meaning. This is explicit predicate construction; it does
 not infer a callback's postcondition.
 
+## Transparent definitions
+
+A `[@def]` definition stays opaque: a proof calls its `_def` lemma where the
+body is needed. A definition marked `[@def transparent]` is unfolded instead
+at every direct, full application, in predicates and in code. Use it to name a
+refinement that several contracts repeat:
+
+```ocaml
+let[@def transparent] within (x : int) (y : int) = 0 <= x && x < y
+
+let first : (x : int) -> (y : {y : int | within x y}) -> {r : int | r >= 0} =
+  fun x _ -> x
+```
+
+Transparency is chosen per definition and only for non-recursive
+definitions. The verifier assumes the refinement of `within_def` at each
+application, exactly as if the proof had called it there. An interface exports
+a transparent definition with the attribute and the lemma:
+
+```ocaml
+val within : int -> int -> bool @@ total [@@def transparent]
+val within_def : (x : int) -> (y : int) ->
+  {u : unit | within x y === (0 <= x && x < y)} @@ total
+```
+
+The lemma must be total. The refinements of its parameter types (a generated
+lemma keeps the definition's) are premises: the definition unfolds where the
+arguments satisfy them. Partial applications, aliases and functions passed as
+arguments keep the opaque meaning.
+
+## Inductive definitions
+
+Vox has no declaration form for inductive relations. Write one as a
+derivation datatype with one constructor per rule, whose fields are the
+rule's variables and premise derivations, together with a transparent
+conclusion function, a recursive `[@def]` validity predicate that checks
+every rule's premises, and a transparent predicate such as
+`derives d x z` (`valid d && concl d === (x, z)`). Calling `valid_def d`
+gives the premises of `d`'s last rule, both to invert a derivation and to
+build one. Rule induction is structural recursion over the derivation.
+`testsuite/tests/vox/relations.ml` proves a reflexive-transitive closure
+monotone this way and builds derivations for transitivity.
+
 ## Models, evidence, and runtime checks
 
 Use a local ghost value for a local proof. Use `Ghost.t` or a `@@ ghost` record
@@ -190,3 +246,12 @@ Machine-int constant multiplication uses exact wrapping arithmetic. Queries
 using bitvectors also encode variable multiplication exactly. Other variable
 multiplication is conservative and uninterpreted; a failed proof involving it
 reports an abstract countermodel rather than a concrete program counterexample.
+
+A query that contains a bitwise operation (`land`, `lor`, `lxor`, `lsr`) is
+first tried with those operations uninterpreted, over bounded integers, with
+facts about signs and ranges, low masks (`x land (2^k - 1)` is `x mod 2^k`)
+and shifts by a constant. This attempt is limited to the warning threshold.
+If it does not succeed, the query is retried with every machine integer as a
+63-bit bitvector, under its own limit; counterexamples and slow-proof warnings
+come from the attempt that decides the query. So a `land` fact in scope, such
+as a power-of-two capacity, costs little unless the goal depends on the bits.

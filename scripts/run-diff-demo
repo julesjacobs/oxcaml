@@ -11,7 +11,7 @@ mkdir -p "$build"
 for unit in vox_diff_spec.mli vox_diff_spec.ml vox_diff.mli vox_diff.ml; do
   cp "$root/verification/library/$unit" "$build/$unit"
 done
-cp "$root/verification/demos/diff.ml" "$build/diff_demo.ml"
+cp "$root/verification/demos/diff_demo.ml" "$build/diff_demo.ml"
 cd "$build"
 "$compiler" -extension refinement_types -o diff-demo \
   vox_diff_spec.mli vox_diff_spec.ml vox_diff.mli vox_diff.ml diff_demo.ml

@@ -89,7 +89,7 @@ let caught_exception x : zero =
 Line 3, characters 2-11:
 3 |   refine_ x;;
       ^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = -1)
 Line 4, characters 23-28:
 4 | type zero = {n : int | n = 0};;
                            ^^^^^
@@ -137,7 +137,7 @@ let not_callee_before_argument x =
 Line 2, characters 55-66:
 2 |   (let (_ : zero) = assume_ x in fun (_ : zero) -> ()) (refine_ x);;
                                                            ^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = -1)
 Line 4, characters 23-28:
 4 | type zero = {n : int | n = 0};;
                            ^^^^^
@@ -166,7 +166,7 @@ let later_assumption x =
 Line 2, characters 19-28:
 2 |   let (_ : zero) = refine_ x in
                        ^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = -1)
 Line 4, characters 23-28:
 4 | type zero = {n : int | n = 0};;
                            ^^^^^

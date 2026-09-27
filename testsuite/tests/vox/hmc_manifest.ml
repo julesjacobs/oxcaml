@@ -79,7 +79,7 @@ let rec (preserve @ total) : (larger : table) @ immutable -> (smaller : table) @
       let rec (step @ total) : (refs : references) @ immutable ->
           {u : unit | bounded (size rest) refs} ->
           {u : unit | bounded (size larger) refs && resolve larger refs === resolve rest refs} @ ghost =
-        fun refs premise -> ghost_ (
+        fun refs premise -> (
           bounded_def (size rest) refs; bounded_def (size larger) refs;
           resolve_def larger refs; resolve_def rest refs; size_def larger;
           match refs with

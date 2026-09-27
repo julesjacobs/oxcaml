@@ -13,9 +13,7 @@
    Ctype.is_equal.  After stage 2 each is rejected: by the verifier where the
    predicates are then compared semantically (each side at its own sorts,
    which cannot be related), and by the type checker where the relation stays
-   syntactic.  Each block is the output after stages 1-4.  The W8 case of
-   the design (a parameter that occurs only in a predicate is phantom) is
-   fixed and tested on another branch. *)
+   syntactic.  Each block is the output after stages 1-4. *)
 
 (* The quantifier of law_all is not printed: its variable occurs only in
    the predicate (polymorphism-definitions.md item 1).  Currently: the same. *)
@@ -170,4 +168,20 @@ module Pinned :
     sig
       val use_bool : unit -> {u : unit | Q.is_empty (Q.empty : bool Q.t)}
     end
+|}]
+
+(* W8: a type parameter that occurs only in a refinement predicate is
+   invariant (typedecl_variance.ml, fixed on trunk separately), so :> cannot
+   convert a law at int into a law at bool. *)
+module Phantom_law (Q : Q) = struct
+  type ('a : immutable_data) law =
+    Law of {u : unit | Q.is_empty (Q.empty : 'a Q.t)}
+  let cast (x : int law) = (x :> bool law)
+end;;
+[%%expect{|
+Line 4, characters 27-42:
+4 |   let cast (x : int law) = (x :> bool law)
+                               ^^^^^^^^^^^^^^^
+Error: Type "int law" is not a subtype of "bool law"
+       Type "int" is not compatible with type "bool"
 |}]

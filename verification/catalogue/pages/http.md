@@ -68,8 +68,7 @@ Nothing beyond the shared base.
 After `make install` and `./dev init`:
 
 ```
-./dev test vox/http_parser.ml vox/http_body_rejected.ml vox/http_suffix_rejected.ml vox/http_private_rejected.ml
-verification/demos/http_stream.sh
+./dev test vox/http_parser.ml vox/http_body_rejected.ml vox/http_suffix_rejected.ml vox/http_private_rejected.ml vox/http_stream_demo.ml
 ```
 
-`http_parser.ml` checks and compiles the specification, the implementation and the client proofs, then runs the client's tests as bytecode: every two-chunk split of a pipeline, byte-at-a-time input, malformed lines, framing errors and the exact message and body limits. The three rejected clients are compiled against the `.mli` files only. `http_stream.sh` builds and runs a streaming example.
+`http_parser.ml` checks and compiles the specification, the implementation and the client proofs, then runs the client's tests as bytecode: every two-chunk split of a pipeline, byte-at-a-time input, malformed lines, framing errors and the exact message and body limits. The three rejected clients are compiled against the `.mli` files only. `http_stream_demo.ml` builds and runs the streaming example and compares its output with `http_stream_demo.reference`.

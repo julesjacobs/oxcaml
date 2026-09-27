@@ -222,6 +222,13 @@ type submode_reason =
          from the context *)
   | Constructor of Longident.t
       (* Check that this constructor is allowed in this context. *)
+  | Ghost_expression
+      (* Check that the context of [ghost_ e] accepts a ghost value. *)
+  | Assume_check of submode_reason
+      (* Raised while [assume_] types its run-time check. *)
+  | Real_result of submode_reason
+      (* The expected mode was bounded by real before typing, for example by
+         an annotation. *)
   | Other (* add more cases here for better hints *)
 
 val escape : loc:Location.t -> env:Env.t -> reason:submode_reason -> (Mode.allowed * 'r) Mode.Value.t -> unit

@@ -1189,10 +1189,10 @@ open Vox_sat_spec
     empty_proof_at formula entry.proof assignment;
     ())
 
-  let[@def] rec database_valid formula entries =
+  let[@def] rec database_valid formula entries = ghost_ (
     match entries with
-    | [] -> ghost_ true
-    | entry :: rest -> ghost_ (
+    | [] -> true
+    | entry :: rest ->
       derivation_valid formula entry.proof
       && same_clause (conclusion formula entry.proof) entry.clause
       && database_valid formula rest)
@@ -1913,7 +1913,7 @@ let rec (derivation_clause_valid @ total) :
     {u : unit | if valid_formula n formula && derivation_valid formula proof
       then valid_clause n (conclusion formula proof) else true} @ ghost =
   fun n formula proof -> ghost_ (
-  ghost_ (
+  (
     derivation_valid_def formula proof;
     conclusion_def formula proof;
     match proof with
@@ -2057,7 +2057,7 @@ let rec (database_formula_valid @ total) : (n : int) -> (formula : formula) ->
     {u : unit | if valid_formula n formula && database_valid formula database
       then valid_formula n (database_clauses database) else true} @ ghost =
   fun n formula database -> ghost_ (
-  ghost_ (
+  (
     database_valid_def formula database;
     database_clauses_def database;
     valid_formula_def n (database_clauses database);

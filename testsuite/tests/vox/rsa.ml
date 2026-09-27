@@ -2,9 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa_arithmetic.ml";
- all_modules += " vox_rsa_number_theory.ml";
- all_modules += " vox_rsa_fermat.ml vox_rsa.mli vox_rsa.ml rsa.ml";
+ prebuilt_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa_arithmetic.ml vox_rsa_number_theory.ml vox_rsa_fermat.ml vox_rsa.mli vox_rsa.ml";
  { bytecode; }
 *)
 

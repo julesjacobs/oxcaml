@@ -2,12 +2,10 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml hmc_word64.ml hm_declarative.ml hm_primitive_constraints.ml";
+ prebuilt_modules = "pref.mli pref.ml copy_spec.ml hmc_word64.ml hm_declarative.ml hm_primitive_constraints.ml";
  readonly_files = "hm_primitive_constraints_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
    run-expect;
    check-program-output;
  }
@@ -28,7 +26,7 @@ Line 4, characters 74-76:
 4 |   C.construct D.Z D.Empty_context D.Truth word D.Constant D.Word_constant ());;
                                                                               ^^
 Error: Refinement could not be proved (counterexample)
-File "hm_primitive_constraints.ml", line 37, characters 16-77:
+File "hm_primitive_constraints.ml", line 37, characters 16-44:
   The refinement is stated here.
 |}]
 

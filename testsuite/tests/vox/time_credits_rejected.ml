@@ -2,12 +2,10 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_credits.mli vox_credits.ml";
+ prebuilt_modules = "vox_credits.mli vox_credits.ml";
  readonly_files = "time_credits_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
    run-expect;
    check-program-output;
  }
@@ -39,6 +37,13 @@ module Empty = struct
     C.tick (refine_ token)
 end;;
 [%%expect{|
+Line 3, characters 6-9:
+3 |   let bad () =
+          ^^^
+Warning 223 [unerased-ghost-body]: This function's result is ghost, but its body is not wrapped in
+  "ghost_", so the body is computed when the function is called and its
+  value may be thrown away. Wrap the body in "ghost_ (...)" to erase it.
+
 Line 7, characters 11-26:
 7 |     C.tick (refine_ token)
                ^^^^^^^^^^^^^^^
@@ -59,7 +64,7 @@ Line 6, characters 19-34:
 6 |     C.split amount (refine_ token)
                        ^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_credits.mli", line 21, characters 26-60:
+File "vox_credits.mli", line 21, characters 41-60:
   The refinement is stated here.
 |}]
 
@@ -94,7 +99,7 @@ Line 8, characters 38-53:
 8 |     let refine_ result = C.merge left (refine_ right) in
                                           ^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_credits.mli", lines 27-28, characters 26-35:
+File "vox_credits.mli", line 28, characters 6-35:
   The refinement is stated here.
 |}]
 
@@ -210,6 +215,13 @@ module Exhausted = struct
     C.tick (refine_ after_two)
 end;;
 [%%expect{|
+Line 3, characters 6-9:
+3 |   let bad () =
+          ^^^
+Warning 223 [unerased-ghost-body]: This function's result is ghost, but its body is not wrapped in
+  "ghost_", so the body is computed when the function is called and its
+  value may be thrown away. Wrap the body in "ghost_ (...)" to erase it.
+
 Line 11, characters 11-30:
 11 |     C.tick (refine_ after_two)
                 ^^^^^^^^^^^^^^^^^^^

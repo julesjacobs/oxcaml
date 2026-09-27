@@ -64,10 +64,42 @@ the bytecode host:
 ```
 
 Several paths can be given; more than one selected test runs in parallel,
-and the ten slowest are listed at the end. Refinement verification results
+longest first by the durations of earlier runs, and the ten slowest are
+listed at the end. Refinement verification results
 are cached in `_build/vox-verify-cache`, keyed by the compiler binary, the
 source, the imported interfaces, the flags and the solver; set
-`VOX_VERIFY_CACHE=` to disable the cache.
+`VOX_VERIFY_CACHE=` to disable the cache. Each command a test runs is killed
+after `VOX_TEST_TIMEOUT` seconds (default 600; 0 disables the limit), for
+example on a heavily loaded machine; tests failed that way are listed
+separately at the end, so they are not mistaken for wrong results.
+
+Vox tests take the verified library and shared test modules from a prebuilt
+test library instead of compiling them. A header lists them in
+`prebuilt_modules`, in link order and with the same syntax as `all_modules`,
+and the test links exactly those modules; `all_modules` then holds only the
+test's own file and anything that must be compiled with it. `./dev test`,
+`make test-one` and `make test` build the modules the selected tests list
+into `_build/vox-test-library` with `testsuite/vox-test-library.sh`: in
+parallel, with the test compilers, verifying each module. It rebuilds only
+what changed, and everything after a compiler change. Any compiler output
+while building the library fails the run. `./dev test` builds it while the
+tests that do not use it run.
+
+To test only what a change can affect, pass a base revision instead of
+paths:
+
+```bash
+./dev test --affected origin/vox
+```
+
+It selects the tests in `vox` and `typing-refinement-types` whose own file,
+reference files, header files (`all_modules`, `prebuilt_modules`, `module`,
+`modules`, `readonly_files`) or their transitive `ocamldep` dependencies
+changed since the base, including uncommitted and untracked files. A change
+outside `testsuite/tests`, `verification/library`, `verification/catalogue`
+and `research`, other than to a Markdown file, counts as a compiler change
+and selects every test. Tests that `./dev` cannot
+run incrementally are listed with their `make test-one` command.
 
 The incremental workflow does not cover changes to bootstrap-language support,
 the runtime, the standard library, the compiler-libs installation, or test

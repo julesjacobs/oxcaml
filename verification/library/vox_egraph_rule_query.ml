@@ -9,7 +9,7 @@ module L = Vox_egraph_language_spec
 type node_result = #{
   equal : bool;
   state : H.t;
-  proof : E.evidence option @@ ghost;
+  proof : E.evidence option @@ ghost aliased;
 }
 
 let nodes : (state : {s : H.t | H.O.valid s.owner && V.valid s.store &&
@@ -58,7 +58,7 @@ type status = Equal | Not_proved | Invalid_input | Node_limit
 type result = #{
   status : status;
   state : H.t;
-  proof : E.evidence option @@ ghost;
+  proof : E.evidence option @@ ghost aliased;
 }
 
 let expressions : (state : {s : H.t | H.O.valid s.owner && V.valid s.store &&

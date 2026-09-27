@@ -1464,6 +1464,13 @@ let rec lower_contravariant env var_level visited contra ty =
     | Tarrow (_, t1, t2, _) ->
         lower_rec true t1;
         lower_rec contra t2
+    | Trefine { ref_payload; ref_pred; _ } ->
+        (* Types in the predicate are invariant, as in
+           [Typedecl_variance.compute_variance]. *)
+        lower_rec contra ref_payload;
+        ignore
+          (Refinement_predicate.fold_types
+             (fun () ty -> lower_rec true ty) () ref_pred)
     | _ ->
         iter_type_expr_with_stages
           (fun env -> lower_contravariant env var_level visited contra) env ty

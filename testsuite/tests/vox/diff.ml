@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_diff_spec.mli vox_diff_spec.ml vox_diff.mli vox_diff.ml diff_public_client.ml diff.ml";
+ prebuilt_modules = "vox_diff_spec.mli vox_diff_spec.ml vox_diff.mli vox_diff.ml diff_public_client.ml";
  { bytecode; }
 *)
 

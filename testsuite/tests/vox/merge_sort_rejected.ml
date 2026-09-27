@@ -2,26 +2,15 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_sequence.mli vox_sequence.ml vox_ordered_sequence.ml vox_credits.mli vox_credits.ml vox_merge_proofs.ml vox_sort_cost.ml vox_merge_sort.mli vox_merge_sort.ml merge_sort.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_ordered_sequence.ml vox_credits.mli vox_credits.ml vox_merge_proofs.ml vox_sort_cost.ml vox_merge_sort.mli vox_merge_sort.ml merge_sort.ml";
  readonly_files = "merge_sort_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
+   binary_modules = "prebuilt/vox_sequence prebuilt/vox_ordered_sequence prebuilt/vox_credits prebuilt/vox_merge_proofs prebuilt/vox_sort_cost prebuilt/vox_merge_sort prebuilt/merge_sort";
    run-expect;
    check-program-output;
  }
 *)
-
-(* Load the implementation so that the accepted phrases below can be
-   evaluated. *)
-#load "vox_sequence.cmo";;
-#load "vox_ordered_sequence.cmo";;
-#load "vox_credits.cmo";;
-#load "vox_merge_proofs.cmo";;
-#load "vox_sort_cost.cmo";;
-#load "vox_merge_sort.cmo";;
-#load "merge_sort.cmo";;
 
 open Merge_sort;;
 [%%expect{|
@@ -29,15 +18,13 @@ open Merge_sort;;
 
 let third () =
   let amount = 2 in
-  let initial : {n : int | n >= 0} = amount in
-  let token = C.Budget.create initial in
-  let input : {t : C.token | C.credits t >= 2} = token in
-  let result = two 3 2 1 input in
+  let token = C.Budget.create amount in
+  let result = two 3 2 1 token in
   let #{ Compare.before = _; state } = result in
   Compare.compare 1 0 (state);;
 [%%expect{|
-Line 8, characters 22-29:
-8 |   Compare.compare 1 0 (state);;
+Line 6, characters 22-29:
+6 |   Compare.compare 1 0 (state);;
                           ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 File "merge_sort.ml", line 26, characters 30-45:

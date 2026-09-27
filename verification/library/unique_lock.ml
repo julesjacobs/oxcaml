@@ -80,8 +80,7 @@ let make (x : V.t @ unique) : t =
   let zero = 0 in
   ghost_ (good_def p h);
   ghost_ (Invariant.holds_def { cell = p } zero h);
-  let g : {g : Cell.contents P.token | Invariant.holds { cell = p } zero (P.own g)} = t in
-  let a = A.create (ghost_ { cell = p }) zero g in
+  let a = A.create (ghost_ { cell = p }) zero t in
   let result : t = { cell = p; atomic = a } in result
 let try_acquire (a : t) :
     {r : (bool, Cell.contents) P.step | if r.P.value then owned a (P.own r.P.state)
@@ -106,7 +105,7 @@ let release : (a : t) ->
   let ht = ghost_ (P.own (borrow_ t)) in
   ghost_ (location_def a; owned_def a ht; good_def p ht);
   let r = A.compare_and_set a.atomic 1 0
-    (ghost_ (fun success h -> release_post success h)) t
+    release_post t
     (ghost_ (fun before inside outside ->
       release_transfer p ht before inside outside)) in
   let success = r.#value in
