@@ -528,9 +528,21 @@ external equal_copy : (values : int iarray) ->
 external equal_rows : (values : int iarray iarray) ->
   {a : int iarray iarray | a === values} @ total = "%obj_dup";;
 [%%expect{|
+Lines 1-2, characters 0-54:
+1 | external equal_copy : (values : int iarray) ->
+2 |   {a : int iarray | a === values} @ total = "%obj_dup"
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+
 external equal_copy :
   (values : int iarray) -> {a : int iarray | a === values} @ total
   = "%obj_dup"
+Lines 3-4, characters 0-61:
+3 | external equal_rows : (values : int iarray iarray) ->
+4 |   {a : int iarray iarray | a === values} @ total = "%obj_dup"..
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+
 external equal_rows :
   (values : int iarray iarray) ->
   {a : int iarray iarray | a === values} @ total = "%obj_dup"
@@ -540,7 +552,19 @@ external read_int : int iarray -> int -> int @ total = "%array_safe_get"
 external read_row : int iarray iarray -> int -> int iarray @ total =
   "%array_safe_get";;
 [%%expect{|
+Line 1, characters 0-72:
+1 | external read_int : int iarray -> int -> int @ total = "%array_safe_get"
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 external read_int : int iarray -> int -> int @ total = "%array_safe_get"
+Lines 2-3, characters 0-19:
+2 | external read_row : int iarray iarray -> int -> int iarray @ total =
+3 |   "%array_safe_get"..
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 external read_row : int iarray iarray -> int -> int iarray @ total
   = "%array_safe_get"
 |}]

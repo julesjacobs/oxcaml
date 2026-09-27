@@ -72,8 +72,12 @@ val cache_zero_alloc_info : Zero_alloc_info.t -> unit
 val new_const_symbol : unit -> string
 
 val read_unit_info: string -> unit_infos * Digest.t
+
+(* The Vox record of a .cmx file (see [Vox_trust]), if it has one. *)
+val read_vox_record: string -> Cmi_format.vox_unit option
         (* Read infos and MD5 from a [.cmx] file. *)
-val write_unit_info: unit_infos -> string -> unit
+val write_unit_info:
+  ?vox:Cmi_format.vox_unit -> unit_infos -> string -> unit
         (* Save the given infos in the given file *)
 val build_unit_info:
   main_module_block_format:Lambda.main_module_block_format ->

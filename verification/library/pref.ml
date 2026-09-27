@@ -81,35 +81,35 @@ module Heap = struct
       && same_domain (put h p x) (put h p y)
       && (not (mem h p) || same_domain (put h p x) h)} @ ghost
     @@ total = "caml_pref_heap_law4"
-  external put_union_law : ('a : immutable_data).
+  let (put_union_law @ total) : ('a : immutable_data).
     (a : 'a heap) @ immutable -> (b : 'a heap) @ immutable ->
     (p : 'a t) @ immutable -> (x : 'a) @ immutable ->
-    {u : unit | put (union a b) p x === union (put a p x) b} @ ghost
-    @@ total = "caml_pref_heap_law4"
-  external commute_law : ('a : immutable_data).
+    {u : unit | put (union a b) p x === union (put a p x) b} @ ghost =
+    fun a b p x -> ghost_ (())
+  let (commute_law @ total) : ('a : immutable_data).
     (h : 'a heap) @ immutable -> (p : 'a t) @ immutable ->
     (x : 'a) @ immutable -> (q : 'a t) @ immutable -> (y : 'a) @ immutable ->
     {u : unit | mem (put (empty ()) p x) q
-      || put (put h p x) q y === put (put h q y) p x} @ ghost
-    @@ total = "caml_pref_heap_law5"
+      || put (put h p x) q y === put (put h q y) p x} @ ghost =
+    fun h p x q y -> ghost_ (())
 
   external split_law : ('a : immutable_data). (h : 'a heap) @ immutable ->
     (selection : 'a heap) @ immutable ->
     {u : unit | union (restrict h selection) (exclude h selection) === h
       && disjoint (restrict h selection) (exclude h selection)} @ ghost
     @@ total = "caml_pref_heap_law2"
-  external exclude_put_law : ('a : immutable_data).
+  let (exclude_put_law @ total) : ('a : immutable_data).
     (h : 'a heap) @ immutable -> (selection : 'a heap) @ immutable ->
     (p : 'a t) @ immutable -> (v : 'a) @ immutable ->
     {u : unit | not (mem selection p) ||
-      exclude (put h p v) selection === exclude h selection} @ ghost
-    @@ total = "caml_pref_heap_law4"
-  external exclude_union_law : ('a : immutable_data). (a : 'a heap) @ immutable
-    ->
+      exclude (put h p v) selection === exclude h selection} @ ghost =
+    fun h selection p v -> ghost_ (())
+  let (exclude_union_law @ total) : ('a : immutable_data).
+    (a : 'a heap) @ immutable ->
     (b : 'a heap) @ immutable -> (selection : 'a heap) @ immutable ->
     {u : unit | exclude (union a b) selection ===
-      union (exclude a selection) (exclude b selection)} @ ghost
-    @@ total = "caml_pref_heap_law3"
+      union (exclude a selection) (exclude b selection)} @ ghost =
+    fun a b selection -> ghost_ (())
 
 end
 

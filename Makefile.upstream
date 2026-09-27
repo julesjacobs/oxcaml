@@ -153,6 +153,7 @@ typing_SOURCES = \
   typing/typedecl_immediacy.mli typing/typedecl_immediacy.ml \
   typing/typedecl_separability.mli typing/typedecl_separability.ml \
   typing/typeopt.mli typing/typeopt.ml \
+  typing/vox_trust.mli typing/vox_trust.ml \
   typing/typedecl.mli typing/typedecl.ml \
   typing/value_rec_check.mli typing/value_rec_check.ml \
   typing/verification.mli typing/verification.ml \
@@ -195,6 +196,7 @@ comp_SOURCES = \
   driver/main_args.mli driver/main_args.ml \
   driver/compmisc.mli driver/compmisc.ml \
   driver/makedepend.mli driver/makedepend.ml \
+  driver/vox_audit.mli driver/vox_audit.ml \
   driver/compile_common.mli driver/compile_common.ml
 # All file format descriptions (including cmx{,s}) are in the
 # ocamlcommon library so that ocamlobjinfo can depend on them.

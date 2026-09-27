@@ -65,6 +65,11 @@ type unused_proof_step =
   | Unused_assume
   | Unused_argument of string  (* the parameter *)
 
+type trusted_external_reason =
+  | Trusted_refinement
+  | Trusted_totality
+  | Trusted_total_cast
+
 type t =
   | Comment_start                           (*  1 *)
   | Comment_not_end                         (*  2 *)
@@ -185,6 +190,8 @@ type t =
   | Redundant_ghost                         (* 225 *)
   | Proof_only_binding of string            (* 226 *)
   | Unused_proof_step of unused_proof_step   (* 227 *)
+  | Trusted_external of trusted_external_reason (* 228 *)
+  | Unverified_import of string            (* 229 *)
 
 (* If you remove a warning, leave a hole in the numbering.  NEVER change
    the numbers of existing warnings.
@@ -294,6 +301,8 @@ let number = function
   | Redundant_ghost -> 225
   | Proof_only_binding _ -> 226
   | Unused_proof_step _ -> 227
+  | Trusted_external _ -> 228
+  | Unverified_import _ -> 229
 ;;
 (* DO NOT REMOVE the ;; above: it is used by
    the testsuite/ests/warnings/mnemonics.mll test to determine where
@@ -764,6 +773,16 @@ let descriptions = [
     names = ["unused-proof-step"];
     description = "A lemma call, assume_ or refined argument whose facts no\n\
     \    refinement proof in its function used (checked with unsat cores).";
+    since = since 5 4 };
+  { number = 228;
+    names = ["trusted-external"];
+    description = "An external declaration outside the verified library\n\
+    \    states a refinement or totality that the verifier assumes.";
+    since = since 5 4 };
+  { number = 229;
+    names = ["unverified-import"];
+    description = "A verified unit imports an interface whose compilation\n\
+    \    skipped verification (-smt-assume-verified).";
     since = since 5 4 };
 ]
 
@@ -1708,6 +1727,17 @@ let message = function
   | Unused_proof_step (Unused_argument name) ->
       msg "No refinement proof in this function used the refinement of@ \
            argument %a."
+        Style.inline_code name
+  | Trusted_external reason ->
+      msg "The verifier assumes this external's %s;@ nothing checks it."
+        (match reason with
+         | Trusted_refinement -> "refinement"
+         | Trusted_totality -> "totality"
+         | Trusted_total_cast -> "cast of its argument to a total function")
+  | Unverified_import name ->
+      msg "The interface of %a was produced by a compilation that skipped@ \
+           verification (-smt-assume-verified), and no verified compilation@ \
+           of the same program was found; its refinements are assumed."
         Style.inline_code name
 ;;
 

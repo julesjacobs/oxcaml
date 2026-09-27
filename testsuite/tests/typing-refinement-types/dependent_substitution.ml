@@ -41,6 +41,9 @@ let () =
     (Subst.with_additional_action Prepare_for_saving Subst.identity) ty)
 ;;
 [%%expect{|
+File "_none_", line 3, characters 4-59:
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
 original: true
 copy: true
 copy of copy: true

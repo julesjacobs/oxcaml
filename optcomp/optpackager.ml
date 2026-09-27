@@ -43,7 +43,7 @@ end) : S = struct
 
   type pack_member_kind =
     | PM_intf
-    | PM_impl of unit_infos
+    | PM_impl of unit_infos * Cmi_format.vox_unit option
 
   type pack_member =
     { pm_file : string;
@@ -66,7 +66,7 @@ end) : S = struct
         then raise (Error (Wrong_for_pack (file, pack_path)));
         Backend.check_consistency linkenv file info crc;
         Compilenv.cache_unit_info info;
-        PM_impl info
+        PM_impl (info, Compilenv.read_vox_record file)
     in
     { pm_file = file; pm_name = name; pm_kind = kind }
 
@@ -78,7 +78,7 @@ end) : S = struct
       | mb :: tl ->
         (match mb.pm_kind with
         | PM_intf -> ()
-        | PM_impl infos ->
+        | PM_impl (infos, _) ->
           List.iter
             (fun import ->
               let unit = Import_info.cu import in
@@ -179,7 +179,9 @@ end) : S = struct
     let units =
       List.fold_right
         (fun m accu ->
-          match m.pm_kind with PM_intf -> accu | PM_impl info -> info :: accu)
+          match m.pm_kind with
+          | PM_intf -> accu
+          | PM_impl (info, _) -> info :: accu)
         members []
     in
     let ui =
@@ -240,7 +242,18 @@ end) : S = struct
         ui_file_sections = File_sections.Builder.build file_sections
       }
     in
-    Compilenv.write_unit_info pkg_infos cmxfile
+    let vox =
+      Vox_trust.pack_record
+        (List.filter_map
+           (fun m ->
+             let name = CU.Name.to_string m.pm_name in
+             match m.pm_kind with
+             | PM_intf ->
+               Some (name, Vox_trust.interface_file_record m.pm_file)
+             | PM_impl (_, record) -> Some (name, record))
+           members)
+    in
+    Compilenv.write_unit_info ?vox pkg_infos cmxfile
 
   let package_object_files ~ppf_dump files target targetcmx coercion =
     let pack_path = Unit_info.Artifact.modname target in

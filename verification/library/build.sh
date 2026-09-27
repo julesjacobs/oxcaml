@@ -70,7 +70,9 @@ for module in "${modules[@]}"; do
   done
 done
 cd "$output"
-flags="-nostdlib -I $prefix/lib/ocaml -I . -extension refinement_types"
+# -vox-library: the library's trusted declarations are part of the trusted
+# base (verification/catalogue/pages/_trust.md), so they are not warned about.
+flags="-nostdlib -I $prefix/lib/ocaml -I . -extension refinement_types -vox-library"
 sources=()
 for module in "${modules[@]}"; do
   sources+=("$module.ml")

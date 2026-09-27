@@ -55,7 +55,9 @@ let[@def] (decode_5 @ total) (input : bytes @ immutable) :
       | Some (n, tail) -> Some (b - 128 + 128 * n, tail)
 
 external divide : int -> {d : int | d <> 0} -> int @@ total = "%divint"
+  [@@warning "-trusted-external"]
 external remainder : int -> {d : int | d <> 0} -> int @@ total = "%modint"
+  [@@warning "-trusted-external"]
 
 let (encode_u32 @ total) (n : u32) (tail : bytes @ immutable) :
     {out : bytes | decode_5 out === Some (n, tail)} @ immutable =

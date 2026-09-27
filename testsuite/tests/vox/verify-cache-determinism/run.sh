@@ -7,7 +7,7 @@ VOX_VERIFY_CACHE="$PWD/verify-cache"; export VOX_VERIFY_CACHE
 compile() {
   "$OCAMLC" -nostdlib -I "$STDLIB" -extension refinement_types -c "$1" 2>&1
 }
-fresh() { rm -rf "$VOX_VERIFY_CACHE"; mkdir "$VOX_VERIFY_CACHE"; }
+fresh() { rm -rf "$VOX_VERIFY_CACHE"; mkdir -m 755 "$VOX_VERIFY_CACHE"; }
 # check FILE WARMUP: FILE's output with a cold cache, a warm one, and after
 # compiling WARMUP into an empty cache.
 check() {

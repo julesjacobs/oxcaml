@@ -431,6 +431,15 @@ module Shadowed_operation_unrecognized : sig end = struct
     ()
 end;;
 [%%expect{|
+Lines 20-24, characters 6-46:
+20 | ......external trust_add :
+21 |         (Real.elt -> Real.t -> Real.t) ->
+22 |         (Real.elt @ total ->
+23 |          Real.t @ total ->
+24 |          Real.t @ total) @ total = "%identity"
+Warning 228 [trusted-external]: The verifier assumes this external's cast of its argument to a total function;
+  nothing checks it.
+
 Line 31, characters 33-40:
 31 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^

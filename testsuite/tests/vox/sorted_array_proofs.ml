@@ -1,5 +1,6 @@
 module Binary = struct
   external divide : int -> {d : int | d <> 0} -> int @@ total = "%divint"
+    [@@warning "-trusted-external"]
 
   let (search_midpoint @ total) :
       (p : (int -> bool)) ->

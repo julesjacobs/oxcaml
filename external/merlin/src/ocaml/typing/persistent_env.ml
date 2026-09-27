@@ -374,7 +374,8 @@ let save_import penv crc modname impl flags filename =
     (function
         | Rectypes -> ()
         | Alerts _ -> ()
-        | Opaque -> register_import_as_opaque penv modname)
+        | Opaque -> register_import_as_opaque penv modname
+        | Vox _ -> ())
     flags;
   Consistbl.check crc_units modname impl crc filename;
   add_import penv modname
@@ -398,7 +399,8 @@ let acknowledge_import penv ~check modname pers_sig =
             if not !Clflags.recursive_types then
               error (Need_recursive_types(modname))
         | Alerts _ -> ()
-        | Opaque -> register_import_as_opaque penv modname)
+        | Opaque -> register_import_as_opaque penv modname
+        | Vox _ -> ())
     flags;
   begin match kind, Current_unit.get_cu () with
   | Normal { cmi_impl = imported_unit }, Some current_unit ->

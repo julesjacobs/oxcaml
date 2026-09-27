@@ -11,6 +11,12 @@ external same_exception : exn -> exn -> bool @@ total = "%eq";;
 external add : int -> int -> int = "%addint"
 external eq : int -> int -> bool = "%equal"
 external gt : int -> int -> bool = "%greaterthan"
+Line 4, characters 0-61:
+4 | external same_exception : exn -> exn -> bool @@ total = "%eq";;
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 external same_exception : exn -> exn -> bool = "%eq"
 |}]
 

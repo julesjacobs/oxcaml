@@ -118,6 +118,7 @@ awk -F '\t' '
       base = path; sub(/.*\//, "", base)
       flags = (path in debug) ? "-g " : ""
       flags = flags "-extension refinement_types"
+      if (path ~ /\/verification\/library\/[^\/]*$/) flags = flags " -vox-library"
       if (path in principal) flags = flags " -principal"
       print base "\t" path "\t" flags
     }

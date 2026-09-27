@@ -10,6 +10,12 @@ external deref_total : int ref -> int @@ total = "%field0";;
 [%%expect{|
 external gt : int -> int -> bool = "%greaterthan"
 external ge : int -> int -> bool = "%greaterequal"
+Line 3, characters 0-58:
+3 | external deref_total : int ref -> int @@ total = "%field0";;
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 external deref_total : int ref -> int = "%field0"
 |}]
 
@@ -80,9 +86,24 @@ external[@layout_poly] refined_array_length :
   { a : 'a array | ge (any_array_length a) 0 } -> int @@ total
   = "%array_length";;
 [%%expect{|
+Lines 1-3, characters 0-66:
+1 | external[@layout_poly] any_array_length :
+2 |   ('a : any mod separable).
+3 |   'a array @ immutable contended -> int @@ total = "%array_length"
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 external any_array_length : ('a : any separable). 'a array @ immutable -> int
   = "%array_length" [@@layout_poly]
 val runtime_array_length : ('a : value_maybe_null). 'a array -> int = <fun>
+Lines 7-10, characters 0-19:
+ 7 | external[@layout_poly] refined_array_length :
+ 8 |   ('a : any mod separable).
+ 9 |   { a : 'a array | ge (any_array_length a) 0 } -> int @@ total
+10 |   = "%array_length"..
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+
 external refined_array_length :
   ('a : any separable). {a : 'a array | ge (any_array_length a) 0} -> int
   = "%array_length" [@@layout_poly]
@@ -465,6 +486,12 @@ type resolved_record_explicit =
 let resolved_record_same : resolved_record_ambiguous list =
   ([] : resolved_record_explicit list);;
 [%%expect{|
+Line 1, characters 0-70:
+1 | external as_r1 : R1.t -> R1.t @@ total = "%identity" [@@warning "-61"]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 external as_r1 : R1.t -> R1.t = "%identity"
 type resolved_record_ambiguous =
     {n : int | gt (as_r1 { R1.field = n }).R1.field 0}
@@ -592,6 +619,12 @@ module type Result_signature =
     module Refined :
       sig val accept : {x : int | holds x} -> unit @@ total end
   end
+Line 13, characters 4-72:
+13 |     external accept : { x : int | holds x } -> unit @@ total = "%ignore"
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+
 module Make_result : functor (P : Predicate) -> Result_signature
 module Outer_modtype : sig module type R = Result_signature module N : R end
 |}]
@@ -704,6 +737,12 @@ module Second = Unstable (Empty);;
 module Empty : sig end
 val choose_positive : bool ref = {contents = true}
 module Nontrivial : Predicate
+Line 12, characters 4-72:
+12 |     external accept : { x : int | holds x } -> unit @@ total = "%ignore"
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+
 module Unstable : sig end -> Result_signature
 module First :
   sig

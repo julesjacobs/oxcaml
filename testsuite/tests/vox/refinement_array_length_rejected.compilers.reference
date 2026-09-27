@@ -1,3 +1,9 @@
+File "refinement_array_length_rejected.ml", line 11, characters 0-61:
+11 | external length : int array -> int @@ total = "%array_length"
+     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 File "refinement_array_length_rejected.ml", line 14, characters 46-52:
 14 |   {index : int | 0 <= index && index < length values} ->
                                                    ^^^^^^

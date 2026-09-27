@@ -11,6 +11,12 @@ let duplicate t = consume t; consume t;;
 [%%expect{|
 type token : void mod total contended
 external empty : unit -> token @ unique = "%unbox_unit"
+Lines 3-4, characters 0-42:
+3 | external consume : token @ unique -> unit @@ total =
+4 |   "caml_pref_own_bytecode" "caml_pref_own"..
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 external consume : token @ unique -> unit = "caml_pref_own_bytecode"
   "caml_pref_own"
 Line 5, characters 37-38:
