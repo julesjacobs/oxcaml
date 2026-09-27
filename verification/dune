@@ -6,7 +6,7 @@
 (library
  (name vox_vc)
  (wrapped false)
- (modules vox_vc vox_encoding)
+ (modules vox_vc vox_encoding vox_proof_steps)
  (libraries vox_smt ocamlfrontend))
 
 (library
@@ -38,6 +38,9 @@
   (.vox_vc.objs/byte/vox_encoding.cmi as compiler-libs/vox_encoding.cmi)
   (.vox_vc.objs/byte/vox_encoding.cmt as compiler-libs/vox_encoding.cmt)
   (.vox_vc.objs/native/vox_encoding.cmx as compiler-libs/vox_encoding.cmx)
+  (.vox_vc.objs/byte/vox_proof_steps.cmi as compiler-libs/vox_proof_steps.cmi)
+  (.vox_vc.objs/byte/vox_proof_steps.cmt as compiler-libs/vox_proof_steps.cmt)
+  (.vox_vc.objs/native/vox_proof_steps.cmx as compiler-libs/vox_proof_steps.cmx)
   (vox_smt_solver.cma as compiler-libs/vox_smt_solver.cma)
   (vox_smt_solver.cmxa as compiler-libs/vox_smt_solver.cmxa)
   (vox_smt_solver.a as compiler-libs/vox_smt_solver.a)

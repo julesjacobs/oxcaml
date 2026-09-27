@@ -166,10 +166,14 @@ val abstract_bitwise : query -> query option
     OCaml normal returns. [Int_div]/[Int_mod] use Euclidean semantics; callers
     must supply the zero-divisor behavior. [resource_limit] sets Z3's
     deterministic [rlimit] for the query; it must be positive, and omitting it
-    makes the query unlimited. *)
+    makes the query unlimited. With [assumptions], Boolean symbols of the query,
+    the query asks for an unsat core and is checked assuming them
+    ([check-sat-assuming], always with Z3's default solver); without, it is
+    unchanged. *)
 val to_smtlib :
   ?poll:(unit -> unit) ->
   ?resource_limit:int ->
+  ?assumptions:Symbol.t list ->
   int_width:int ->
   timeout_ms:int ->
   query ->

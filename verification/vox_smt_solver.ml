@@ -13,6 +13,7 @@ type result =
   { validity : validity;
     stderr : string;
     resources : int option;
+    core : Symbol.t list option;
     encoding_seconds : float;
     solving_seconds : float
   }
@@ -201,12 +202,12 @@ let dispose connection =
     [connection.input; connection.output; connection.errors]
 
 let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
-    ?(cancelled = fun () -> false) ?resource_limit ~int_width q =
+    ?(cancelled = fun () -> false) ?resource_limit ?assumptions ~int_width q =
   if config.timeout_ms <= 0 then invalid_arg "Vox_smt_solver: timeout_ms";
   let keep = ref false in
   let started = monotonic_time () in
   let deadline = started +. (float config.timeout_ms /. 1000.) in
-  let encoded = ref started and resources = ref None in
+  let encoded = ref started and resources = ref None and core = ref None in
   let stderr = Buffer.create 128 in
   let descriptors = ref [] and child = ref None and exit_status = ref None in
   let stderr_fd = ref None in
@@ -266,7 +267,7 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
     let input =
       to_smtlib
         ~poll:(fun () -> ignore (poll ()))
-        ?resource_limit ~int_width ~timeout_ms:config.timeout_ms q
+        ?resource_limit ?assumptions ~int_width ~timeout_ms:config.timeout_ms q
     in
     encoded := monotonic_time ();
     (* Each query starts from a reset solver, so its result and resource count
@@ -346,7 +347,8 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
           else begin
             let followup =
               match answer with
-              | "unsat" -> ""
+              | "unsat" ->
+                if Option.is_some assumptions then "(get-unsat-core)\n" else ""
               | "sat" ->
                 if q.symbols = []
                 then ""
@@ -449,6 +451,29 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
         | Atom "unsupported" :: rest -> List.rev rest
         | response -> List.rev response
       in
+      (* The core names the assumptions a proof used, as [to_smtlib] names
+         symbols. *)
+      let response =
+        match assumptions, answer, response with
+        | Some assumptions, "unsat", [List names] ->
+          let assumed = Hashtbl.create 16 in
+          List.iteri
+            (fun i s ->
+              if List.memq s assumptions
+              then Hashtbl.replace assumed ("v" ^ string_of_int i) s)
+            q.symbols;
+          core
+            := Some
+                 (List.map
+                    (function
+                      | Atom name when Hashtbl.mem assumed name ->
+                        Hashtbl.find assumed name
+                      | _ -> protocol "Unexpected unsat core")
+                    names);
+          []
+        | Some _, "unsat", _ -> protocol "Missing unsat core"
+        | _ -> response
+      in
       let result = interpret q.symbols answer response in
       ignore (poll ());
       (match result with
@@ -494,6 +519,7 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
   { validity;
     stderr = Buffer.contents stderr;
     resources = !resources;
+    core = (match validity with Valid -> !core | _ -> None);
     encoding_seconds = !encoded -. started;
     solving_seconds = finished -. !encoded
   }
@@ -507,7 +533,7 @@ let with_session ?config ?dump ?cancelled ~int_width f =
       Option.iter dispose session.connection;
       session.connection <- None)
     (fun () ->
-      f (fun ?resource_limit query ->
+      f (fun ?resource_limit ?assumptions query ->
           if !closed then invalid_arg "Vox_smt_solver: closed session";
           if !busy then invalid_arg "Vox_smt_solver: recursive session query";
           busy := true;
@@ -515,8 +541,9 @@ let with_session ?config ?dump ?cancelled ~int_width f =
             ~finally:(fun () -> busy := false)
             (fun () ->
               check_impl session ?config ?dump ?cancelled ?resource_limit
-                ~int_width query)))
+                ?assumptions ~int_width query)))
 
-let check ?config ?dump ?cancelled ?resource_limit ~int_width query =
+let check ?config ?dump ?cancelled ?resource_limit ?assumptions ~int_width query
+    =
   with_session ?config ?dump ?cancelled ~int_width (fun check ->
-      check ?resource_limit query)
+      check ?resource_limit ?assumptions query)
