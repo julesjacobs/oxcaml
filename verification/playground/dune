@@ -1,0 +1,2 @@
+; The playground is built by build.sh, outside Dune: see README.md.
+(dirs)
