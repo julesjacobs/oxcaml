@@ -91,29 +91,54 @@ def build(args):
         P.build_page(ident, meta, body, source, output, CSS, extra)
 
     by_status = {s: sum(pages[d][0]['status'] == s for d in demos) for s in P.STATUS}
-    rows = ''.join(
-        f'<li id="{d}"><h3><a href="specs/{d}.html">{P.inline(pages[d][0]["title"])}</a> '
-        f'<span class="status status-{pages[d][0]["status"]}">{P.STATUS[pages[d][0]["status"]]}</span></h3>'
-        f'<p>{P.inline(pages[d][0]["blurb"])}</p><p>{counts_line(stats[d], "")}</p></li>' for d in demos)
+    def plain(text):
+        return esc(text.replace('`', ''))
+
+    meanings = {
+        'reviewed': 'Checked by the owner after independent reviews.',
+        'owner-review': 'Two independent reviews found no false claim, and the page states every gap they found.',
+        'review-pending': 'The page is current, but a review found something to fix or has not been redone.',
+        'in-progress': 'Work on the demo is under way.',
+        'future': 'A language feature we intend to add.',
+        'question': 'A design question: whether to add this is open.'}
+
+    def short(n):
+        return f'{n / 1000:.1f}k' if n >= 1000 else str(n)
+
+    def badge(status, label):
+        return f'<span class="status status-{status}" title="{esc(meanings[status])}">{label}</span>'
+
+    cards = ''.join(
+        f'<li id="{d}" title="{plain(pages[d][0]["blurb"])}">'
+        f'<a class="card-title" href="specs/{d}.html">{P.inline(pages[d][0]["title"])}</a>'
+        f'<p class="card-claim">{P.inline(pages[d][0]["blurb"])}</p>'
+        f'<p class="card-foot">{badge(pages[d][0]["status"], P.STATUS[pages[d][0]["status"]])}'
+        f'<a class="card-counts" href="statistics/{d}.html" title="Lines: spec {stats[d]["spec"]:,}, '
+        f'impl {stats[d]["impl"]:,}, proof {stats[d]["proof"]:,}">Spec {short(stats[d]["spec"])} · '
+        f'Impl {short(stats[d]["impl"])} · Proof {short(stats[d]["proof"])}</a></p></li>' for d in demos)
     mechanisms = ''.join(
-        f'<li><h3>{esc(m["name"])}'
-        + (' <span class="status status-future">Future</span>' if m.get('future') else '')
-        + (' <span class="status status-question">Open question</span>' if m.get('question') else '')
-        + f'</h3><p>{P.inline(m["summary"])}</p>'
-        + (('<p class="related">Used in, for example: '
-            + ', '.join(f'<a href="specs/{d}.html">{P.inline(pages[d][0]["title"])}</a>' for d in m['demos'] if d in pages)
-            + '</p>') if any(d in pages for d in m['demos']) else '') + '</li>'
+        f'<li title="{plain(m["summary"])}"><span class="mech-name">{esc(m["name"])}</span>'
+        + (badge('future', 'Future') if m.get('future') else '')
+        + (badge('question', 'Open question') if m.get('question') else '')
+        + f'<p class="card-claim">{P.inline(m["summary"])}</p></li>'
         for m in catalogue['mechanisms'])
     summary = ' · '.join(f'{n} {P.STATUS[s].lower()}' for s, n in by_status.items() if n)
-    (output / 'index.html').write_text(shell('Vox demonstrations',
-        header() + '<h1>Vox demonstrations</h1>'
-        '<p>Vox extends OxCaml with refinement types checked by Z3 at compile time, erased ghost code and affine '
-        'ghost ownership. Each demo below is ordinary OxCaml code whose specification the compiler checks. Its page '
-        'states what is proved, what the demo trusts and what it does not claim, and quotes the code at '
-        f'{P.commit_line(source).removeprefix("Sources: ")}.</p>'
-        f'<p><strong>{len(demos)} demos</strong> · {summary}</p>' + LEGEND
-        + f'<h2>Demos</h2><ul class="demo-list">{rows}</ul>'
-        + f'<h2>Language mechanisms</h2><ul class="demo-list">{mechanisms}</ul>'))
+    (output / 'index.html').write_text(
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<title>Vox demonstrations</title><link rel="stylesheet" href="style.css?v={CSS}"></head>'
+        '<body><main class="overview"><header class="overview-head">'
+        '<h1>Vox demonstrations</h1><nav><a href="trust.html">What every demo trusts</a>'
+        '<a href="presentation.html">Presentation guide</a><a href="statistics/index.html">Line counts</a></nav></header>'
+        '<p class="overview-intro">OxCaml with refinement types checked by Z3 at compile time, erased ghost code and '
+        'affine ghost ownership. Each demo is ordinary OxCaml code whose specification the compiler checks; its page '
+        'states what is proved, what it trusts and what it does not claim. '
+        f'{P.commit_line(source).removeprefix("Sources: ")}. <strong>{len(demos)} demos</strong>: {summary}. '
+        'Hover over a status for its meaning, and over a demo for its full claim.</p>'
+        '<div class="overview-body"><section><h2>Demos</h2>'
+        f'<ul class="cards">{cards}</ul></section>'
+        f'<section><h2>Language mechanisms</h2><ul class="mechs">{mechanisms}</ul></section></div>'
+        '</main></body></html>')
 
     route = ''.join(
         f'<section class="tour-step"><p class="eyebrow">{n} · {minutes} min</p>'
