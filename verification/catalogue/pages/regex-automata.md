@@ -20,6 +20,12 @@ sources:
 
 Lowering builds one row for every subset of the list `r :: support r`, which holds `r` and the terms its partial derivatives can reach, plus two rows. A literal of `n` symbols therefore gives 2^(n+1) + 2 rows: `a` gives 6, `abcd` 34, `abcde` 66 and a 12-symbol literal 8,194. `Dfa_equivalence.reduce` accepts at most 64 rows, so lowering `abcde` and then minimizing returns `None`. Running time and memory are not proved.
 
+## An open question: sizes of in-memory data
+
+Proving that `lower` always succeeds runs into a problem that is not specific to this demo. Row numbers are OCaml `int`s, which wrap at 2^63, so "all row numbers differ" holds only for tables of fewer than 2^63 rows. No table that large can exist in memory, but the checker cannot use that fact. Tables are lists, and ghost code (which is erased and never allocates) can build lists of any length, so "every list is shorter than 2^62" would be false in Vox's logic. Immutable arrays do not have this problem, because ghost code cannot allocate them, and Vox can bound their length soundly.
+
+The options each have a cost: a size premise on every such theorem, which clients must discharge; unbounded integers for identifiers, at a run-time cost; or a new mode for values that only run-time code can produce, whose size the checker could then bound. Which of these a verified-programming language for OCaml should adopt is an open design question.
+
 ## Client example
 
 From the public client. `{u : unit | p}` is `unit` refined by the predicate `p`: returning it proves `p`. `===` is logical equality. `ghost_ (...)` is proof code, checked and then erased; the value it computes here is a `unit` whose refinement is written after the `:`. `@ total` after the function name declares it total: it terminates without raising or touching mutable state. The statement holds for every regex, limit and word, but it says nothing when either step returns `None`. `reduce` returns `None` when `limit` is not between 1 and 64 or the lowered table has more than `limit` rows, so every regex with more than 64 lowered rows is excluded.

@@ -121,7 +121,7 @@ def build(args):
     (output / 'presentation.html').write_text(shell('Presentation guide',
         header() + '<h1>Presentation guide</h1>'
         '<p>A route through four demos for a 20-minute talk, then the state of every demo.</p>' + route
-        + compiler_example(output, source)
+        + compiler_example(output, source, 'hm-wasm-compiler' in pages)
         + '<section class="tour-step"><h2>All demos</h2>' + LEGEND
         + f'<div class="table-scroll"><table class="stats-table"><thead><tr><th>Demo</th><th>Status</th><th>Claim</th>'
           f'</tr></thead><tbody>{table}</tbody></table></div></section>',
@@ -135,7 +135,7 @@ def build(args):
     print(f'Built {len(demos)} demo pages from {source.short} in {output}.')
 
 
-def compiler_example(output, source):
+def compiler_example(output, source, linked):
     """Two WebAssembly modules emitted by the HM-to-Wasm compiler for the
     design document's id/map example, run in the browser."""
     example = HERE / 'compiler-example'
@@ -164,8 +164,9 @@ def compiler_example(output, source):
             '<button type="button" data-wasm-case="1">Run input 8</button></div>'
             '<div class="demo-result" role="status" aria-live="polite"><strong data-wasm-result>Choose an input to run '
             'its emitted program.</strong><p data-wasm-detail>Expected results: 4 → 12 and 8 → 0.</p></div>'
-            '<p class="tour-limit">The compiler\'s theorems are conditional; see '
-            '<a href="specs/hm-wasm-compiler.html">its page</a>.</p></section>')
+            '<p class="tour-limit">The compiler\'s theorems are conditional'
+            + ('; see <a href="specs/hm-wasm-compiler.html">its page</a>' if linked else '')
+            + '.</p></section>')
 
 
 def statistics(output, pages, demos, stats, source):
