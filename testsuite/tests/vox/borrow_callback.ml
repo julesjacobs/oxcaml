@@ -77,6 +77,21 @@ module Model :
       contents : 'a list @@ ghost;
     }
     val contents :
+      ('a : immutable_data). 'a t @ local immutable -> 'a list @ ghost
+    val contents_def :
+      ('a : immutable_data).
+        (value : 'a t) @ local forkable unyielding immutable ->
+        {u : unit | (contents value) === value.contents}
+    val observe : ('a : immutable_data). 'a t @ unique total -> 'a t
+  end
+|}, Principal{|
+module Model :
+  sig
+    type ('a : immutable_data) t = {
+      storage : 'a array;
+      contents : 'a list @@ ghost;
+    }
+    val contents :
       ('a : immutable_data).
         'a t @ local immutable -> 'a list @ total stateful immutable ghost
     val contents_def :

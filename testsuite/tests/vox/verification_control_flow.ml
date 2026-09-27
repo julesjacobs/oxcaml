@@ -107,6 +107,8 @@ let right_to_left x =
   let consume (_ : zero) () = () in
   consume (refine_ x) (let (_ : zero) = assume_ x in ());;
 [%%expect{|
+val right_to_left : int -> unit = <fun>
+|}, Principal{|
 val right_to_left : int @ total -> unit = <fun>
 |}]
 
@@ -128,6 +130,8 @@ let callee_after_argument x =
   (let (_ : zero) = refine_ x in fun () -> ())
     (let (_ : zero) = assume_ x in ());;
 [%%expect{|
+val callee_after_argument : int -> unit = <fun>
+|}, Principal{|
 val callee_after_argument : int @ total -> unit = <fun>
 |}]
 
