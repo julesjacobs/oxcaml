@@ -157,8 +157,8 @@ arbitrary positive valid exponents, and every message below `pq`, including
 non-coprime messages. All arithmetic uses `Bigint`; proof calls
 erase. `rsa_rejected.ml` checks invalid uses and hidden proof exports.
 `rsa_public_client.ml` derives composition and CRT equivalence through the
-sealed public interface. `check_rsa_boundary.py` compiles that client with
-only the two public CMIs available, then links and runs it. See the
+sealed public interface; the test compiles it with only the two public CMIs
+available, then links and runs it with both compilers. See the
 [specification and proof boundaries](../../../verification/library/vox_rsa.md).
 
 ## Arithmetic proof boundaries
