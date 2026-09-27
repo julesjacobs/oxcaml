@@ -76,6 +76,60 @@ type crossing : (value & void) mod portable = #{ live : int; hidden : string @@ 
 type crossing = #{ live : int; hidden : string @@ ghost; }
 |}]
 
+(* A record of one ghost field is not an abbreviation of the field's type:
+   its layout is void, also when checked against a signature. *)
+module Singleton_value : sig type t : value end = struct
+  type t = #{ proof : string @@ ghost }
+end;;
+[%%expect{|
+Lines 1-3, characters 50-3:
+1 | ..................................................struct
+2 |   type t = #{ proof : string @@ ghost }
+3 | end..
+Error: Signature mismatch:
+       Modules do not match:
+         sig type t = #{ proof : string @@ ghost; } end
+       is not included in
+         sig type t end
+       Type declarations do not match:
+         type t = #{ proof : string @@ ghost; }
+       is not included in
+         type t
+       The layout of the first is void
+         because of the definition of t at line 2, characters 2-39.
+       But the layout of the first must be a value layout
+         because of the definition of t at line 1, characters 29-43.
+|}]
+
+module Singleton_void : sig type t : void end = struct
+  type t = #{ proof : string @@ ghost }
+end;;
+[%%expect{|
+module Singleton_void : sig type t : void end
+|}]
+
+module Singleton_abbreviation : sig type t : value end = struct
+  type g = #{ proof : string @@ ghost }
+  type t = g
+end;;
+[%%expect{|
+Lines 1-4, characters 57-3:
+1 | .........................................................struct
+2 |   type g = #{ proof : string @@ ghost }
+3 |   type t = g
+4 | end..
+Error: Signature mismatch:
+       Modules do not match:
+         sig type g = #{ proof : string @@ ghost; } type t = g end
+       is not included in
+         sig type t end
+       Type declarations do not match: type t = g is not included in type t
+       The layout of the first is void
+         because of the definition of g at line 2, characters 2-39.
+       But the layout of the first must be a value layout
+         because of the definition of t at line 1, characters 36-50.
+|}]
+
 type indexed = { payload : r };;
 let bad_index = (.payload.#proof);;
 [%%expect{|
