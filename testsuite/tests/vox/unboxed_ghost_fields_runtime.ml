@@ -29,3 +29,13 @@ let use_float (_ : float# @ ghost) n = n
 let read_float (r : float# poly) =
   let #{ live; hidden } = r in use_float hidden live
 let () = assert (read_float #{ live = 42; hidden = #1.0 } = 42)
+
+(* A record of one ghost field inside a boxed and an unboxed record: its
+   layout is void, not its field's. Both used to crash the compiler. *)
+type holder = { hx : singleton; hy : int }
+type uholder = #{ ux : singleton; uy : int }
+let () =
+  let h = { hx = #{ proof = ghost_ "erased" }; hy = 7 } in
+  let u = #{ ux = #{ proof = ghost_ "erased" }; uy = 8 } in
+  Gc.full_major ();
+  Printf.printf "%d %d\n" h.hy u.#uy

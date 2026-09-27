@@ -2994,6 +2994,10 @@ let unbox_once env ty =
         in
         Stepped { ty = apply ty2 ~extra_substs; modality; or_null = None }
       | None -> begin match decl.type_kind with
+        | Type_record_unboxed_product ([{ ld_ghost = true; _ }], _, _) ->
+          (* A record of one ghost field has no slot: its declared kind
+             (void) is the result. *)
+          Final_result
         | Type_record_unboxed_product ([_], _, _) ->
           (* [find_unboxed_type] would have returned [Some] *)
           Misc.fatal_error "Ctype.unbox_once"
@@ -9541,8 +9545,12 @@ let check_decl_jkind env decl jkind =
     | Type_record (
         [{ ld_type = inner_ty; ld_modalities = modality }],
         Record_unboxed, None), _
+    (* A ghost field has no slot, so a record of one ghost field is not an
+       abbreviation of the field's type: its layout is void. It uses its
+       declared kind. *)
     | Type_record_unboxed_product ([{ ld_type = inner_ty;
-                                      ld_modalities = modality }], _, None), _
+                                      ld_modalities = modality;
+                                      ld_ghost = false }], _, None), _
     | Type_variant (
         [{ cd_args =
              (Cstr_tuple [{ ca_type = inner_ty;

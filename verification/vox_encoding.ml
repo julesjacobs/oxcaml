@@ -694,7 +694,10 @@ let primitive env path =
           Subst.Lazy.force_value_description (Env.find_value path env)
         in
         match description.val_kind with
-        | Val_prim p -> Some (p.Primitive.prim_name, p.prim_arity)
+        | Val_prim p ->
+          if Vox_type.carries_builtin_meaning description.val_uid p
+          then Some (p.Primitive.prim_name, p.prim_arity)
+          else None
         | _ ->
           if same_value env description (iarray_value_path ["length"])
           then Some ("%array_length", 1)

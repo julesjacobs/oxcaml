@@ -178,6 +178,12 @@ let stateful_total_calls_are_fresh r : {n : int | n = 0} =
   let n = a - b in
   n;;
 [%%expect{|
+Line 1, characters 0-75:
+1 | external stateful_total_read : int ref -> int @@ stateful total = "%field0"
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 external stateful_total_read : int ref -> int = "%field0"
 Line 8, characters 2-3:
 8 |   n;;

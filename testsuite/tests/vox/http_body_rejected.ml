@@ -3,13 +3,13 @@
  source_directories = "${test_source_directory}/../../../verification/library";
  readonly_files = "vox_sequence.mli vox_http_spec.mli vox_http.mli";
  setup-ocamlc.opt-build-env;
- flags = "-extension refinement_types";
+ flags = "-extension refinement_types -vox-library";
  module = "vox_sequence.mli";
  ocamlc.opt;
  module = "vox_http_spec.mli";
  ocamlc.opt;
  module = "vox_http.mli";
- ocamlc.opt;
+ ocamlc.opt; flags = "-extension refinement_types";
  module = "http_body_rejected.ml";
  ocamlc_opt_exit_status = "2";
  ocamlc.opt;

@@ -7,3 +7,10 @@
 7 (rebuilt compiler, failing, query cache): accepted
 8 (no version, working): accepted
 9 (no version, failing): rejected
+10 (version 1.0, working, strict): rejected
+11 (no version, working, strict): rejected
+12 (version 4.16.0, working, strict): accepted
+13 (version 4.16.0, failing, strict, unit cache): accepted
+14 (version 4.16.0, failing, altered unit entry): rejected
+15 (version 4.16.0, failing, world-writable cache): rejected
+16 (version 4.16.0, failing, private cache): accepted

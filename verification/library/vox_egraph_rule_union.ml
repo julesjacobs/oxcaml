@@ -19,7 +19,7 @@ module M = Vox_egraph_union_spec
 type t = {
   rules : Vox_egraph_rule_spec.t @@ ghost;
   union : U.t @@ total;
-  origins : L.expr iarray @@ ghost;
+  origins : L.expr iarray @@ ghost global;
   edges : E.evidence option iarray @@ ghost;
 }
 

@@ -15,11 +15,11 @@ module Make (C : Vox_big_credits.S) = struct
   module W = Vox_union_find_worker.Make (C)
   type t = #{
     raw : W.resource;
-    paths : M.path list @@ ghost immutable total aliased;
-    capacity : Bigint.t @@ ghost aliased;
-    alpha : Bigint.t @@ ghost aliased;
-    spent : Bigint.t @@ ghost aliased;
-    events : E.event list @@ ghost aliased;
+    paths : M.path list @@ ghost global immutable total;
+    capacity : Bigint.t @@ ghost global;
+    alpha : Bigint.t @@ ghost global;
+    spent : Bigint.t @@ ghost global;
+    events : E.event list @@ ghost global;
   }
   type result = #{value : M.elem @@ aliased; state : t;
     refund : C.token @@ ghost total}

@@ -10,7 +10,7 @@ modules=(vox_sequence vox_http_spec vox_http vox_int_sequence vox_iarray vox_str
          vox_sat_spec vox_sat_proof vox_sat
          vox_cdcl_total_proof vox_cdcl_total
          vox_credits vox_ordered_sequence vox_merge_proofs vox_sort_cost
-         vox_merge_sort vox_lz4_model borrow borrow_iarray
+         vox_merge_sort vox_lz4_model vox_parallel borrow borrow_iarray
          pref vox_pref_semantics ghost_pref vox_big_credits vox_ackermann
          vox_union_find_potential vox_union_find_levels vox_union_find_path_cost
          vox_union_find_model vox_union_find_forest vox_union_find_rank
@@ -70,7 +70,9 @@ for module in "${modules[@]}"; do
   done
 done
 cd "$output"
-flags="-nostdlib -I $prefix/lib/ocaml -I . -extension refinement_types"
+# -vox-library: the library's trusted declarations are part of the trusted
+# base (verification/catalogue/pages/_trust.md), so they are not warned about.
+flags="-nostdlib -I $prefix/lib/ocaml -I . -extension refinement_types -vox-library"
 sources=()
 for module in "${modules[@]}"; do
   sources+=("$module.ml")

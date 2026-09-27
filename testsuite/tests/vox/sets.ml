@@ -121,8 +121,11 @@ module Demo : sig end = struct
   module Verify_singletons (Order : Set.TotalOrderedType) = struct
     module S = Set.MakeTotal (Order)
 
-    let (member @ total) (element @ total) =
-      let present = S.mem element (S.Refined.singleton element) in
+    (* [S.mem] is modelled only at total, stateless arguments: an element
+       holding a stateful closure could compare differently each time. *)
+    let (member @ total) (element @ total stateless) =
+      let (set @ total stateless) = S.Refined.singleton element in
+      let present = S.mem element set in
       let proof : {b : bool | b} = present in
       let _ = proof in
       ()
@@ -428,6 +431,15 @@ module Shadowed_operation_unrecognized : sig end = struct
     ()
 end;;
 [%%expect{|
+Lines 20-24, characters 6-46:
+20 | ......external trust_add :
+21 |         (Real.elt -> Real.t -> Real.t) ->
+22 |         (Real.elt @ total ->
+23 |          Real.t @ total ->
+24 |          Real.t @ total) @ total = "%identity"
+Warning 228 [trusted-external]: The verifier assumes this external's cast of its argument to a total function;
+  nothing checks it.
+
 Line 31, characters 33-40:
 31 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^

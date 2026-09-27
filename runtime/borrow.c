@@ -19,6 +19,7 @@
 CAMLextern value caml_array_get(value, value);
 CAMLextern value caml_array_set(value, value, value);
 CAMLextern value caml_array_sub(value, value, value);
+CAMLextern value caml_array_append(value, value);
 CAMLextern value caml_bigint_of_int(value);
 
 /* Every handle is heap allocated, including handles whose public type is
@@ -53,9 +54,53 @@ CAMLprim value caml_borrow_of_iarray(value array)
   CAMLreturn(borrow_handle(copy, 0, length));
 }
 
+/* An owner that covers its whole backing array is the only live handle on
+   that array (splitting and appending preserve disjointness), so freezing it
+   needs no copy. A piece of a split owner is copied out. */
 CAMLprim value caml_borrow_into_iarray(value owner)
 {
-  return Field(owner, 0);
+  value base = Field(owner, 0);
+  if (Long_val(Field(owner, 1)) == 0
+      && Long_val(Field(owner, 2)) == (intnat) caml_array_length(base))
+    return base;
+  return caml_array_sub(base, Field(owner, 1), Field(owner, 2));
+}
+
+/* Splits an owner into two owners of disjoint ranges of the same backing
+   array. Nothing is copied. */
+CAMLprim value caml_borrow_owned_split(value owner, value index)
+{
+  CAMLparam2(owner, index);
+  CAMLlocal3(left, right, result);
+  intnat k = Long_val(index);
+  intnat offset = Long_val(Field(owner, 1));
+  intnat length = Long_val(Field(owner, 2));
+  if (k < 0 || k > length)
+    caml_invalid_argument("Borrow.Owned_array.split_at: index out of bounds");
+  left = borrow_handle(Field(owner, 0), offset, k);
+  right = borrow_handle(Field(owner, 0), offset + k, length - k);
+  result = borrow_pair(left, right);
+  CAMLreturn(result);
+}
+
+/* Appends two owners. Adjacent ranges of one backing array (the pieces of a
+   split) are joined without copying; any other pair is copied into a new
+   array. */
+CAMLprim value caml_borrow_owned_append(value left, value right)
+{
+  CAMLparam2(left, right);
+  CAMLlocal3(first, second, joined);
+  intnat left_offset = Long_val(Field(left, 1));
+  intnat left_length = Long_val(Field(left, 2));
+  intnat right_length = Long_val(Field(right, 2));
+  if (Field(left, 0) == Field(right, 0)
+      && left_offset + left_length == Long_val(Field(right, 1)))
+    CAMLreturn(borrow_handle(Field(left, 0), left_offset,
+                             left_length + right_length));
+  first = caml_array_sub(Field(left, 0), Field(left, 1), Field(left, 2));
+  second = caml_array_sub(Field(right, 0), Field(right, 1), Field(right, 2));
+  joined = caml_array_append(first, second);
+  CAMLreturn(borrow_handle(joined, 0, left_length + right_length));
 }
 
 CAMLprim value caml_borrow_open(value owner)

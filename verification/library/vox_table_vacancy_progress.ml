@@ -10,17 +10,17 @@ module Make (Key : Vox_table_map.Key)
   let (full_scan @ total) : ('a : immutable_data).
       (view : 'a Read.I.view) @ immutable -> (hash : int) -> (index : int) ->
       {u : unit | not (Read.I.valid view &&
-        Read.I.empty_free view.model hash (view.model.capacity lsr 4) &&
+        Read.I.empty_free view.model hash (W.lsr4 view.model.capacity) &&
         0 <= index && index < view.model.capacity) ||
         not (M.control view.model index === Some 128)} @ ghost =
     fun view hash index -> ghost_ (
       if Read.I.valid view &&
-         Read.I.empty_free view.model hash (view.model.capacity lsr 4) &&
+         Read.I.empty_free view.model hash (W.lsr4 view.model.capacity) &&
          0 <= index && index < view.model.capacity then begin
         Read.I.valid_def view; Read.I.shape_def view.model;
         Read.I.power_of_two_def view.model.capacity;
         let rank, lane = Cover.cover view.model.capacity view.plan hash index in
-        Cover.empty_free_at view.model hash (view.model.capacity lsr 4) rank;
+        Cover.empty_free_at view.model hash (W.lsr4 view.model.capacity) rank;
         Read.group_in_shape view.model hash rank;
         Read.matching_control view.model (Read.I.group view.model.capacity
           hash rank)
@@ -57,11 +57,11 @@ module Make (Key : Vox_table_map.Key)
   let (not_exhausted @ total) : ('a : immutable_data).
       (view : 'a Read.I.view) @ immutable -> (hash : int) ->
       {u : unit | not (Read.I.valid view) ||
-        not (Read.I.empty_free view.model hash (view.model.capacity lsr 4))} @
+        not (Read.I.empty_free view.model hash (W.lsr4 view.model.capacity))} @
           ghost =
     fun view hash -> ghost_ (
       if Read.I.valid view &&
-         Read.I.empty_free view.model hash (view.model.capacity lsr 4) then
+         Read.I.empty_free view.model hash (W.lsr4 view.model.capacity) then
            begin
         Read.I.valid_def view; Read.I.shape_def view.model;
         Count.full_count view.model.slots view.model.controls

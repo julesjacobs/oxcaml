@@ -80,7 +80,7 @@ Line 8, characters 6-7:
 8 |       u) in
           ^
 Error: Refinement could not be proved (counterexample)
-File "borrow.mli", line 180, characters 18-53:
+File "borrow.mli", line 205, characters 18-53:
   The refinement is stated here.
 |}]
 
@@ -298,6 +298,12 @@ module Frame_child_extent = struct
       let _ = (u : {u : unit | false}) in ())
 end;;
 [%%expect{|
+Lines 5-6, characters 2-39:
+5 | ..external left_final : frame @ local immutable -> int Model.t @ immutable total ghost
+6 |     @@ total = "caml_borrow_frame_left"
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 Line 18, characters 15-16:
 18 |       let _ = (u : {u : unit | false}) in ())
                     ^

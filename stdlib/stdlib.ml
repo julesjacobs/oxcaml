@@ -125,12 +125,9 @@ external ( lxor ) : (int[@local_opt]) -> (int[@local_opt]) -> int
 
 let lnot x = x lxor (-1)
 
-external ( lsl ) : (int[@local_opt]) -> (int[@local_opt]) -> int
-  @@ total portable = "%lslint"
-external ( lsr ) : (int[@local_opt]) -> (int[@local_opt]) -> int
-  @@ total portable = "%lsrint"
-external ( asr ) : (int[@local_opt]) -> (int[@local_opt]) -> int
-  @@ total portable = "%asrint"
+external ( lsl ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%lslint"
+external ( lsr ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%lsrint"
+external ( asr ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%asrint"
 
 let max_int = (-1) lsr 1
 let min_int = max_int + 1

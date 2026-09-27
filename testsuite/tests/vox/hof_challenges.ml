@@ -406,6 +406,7 @@ let () =
 let[@def] nonzero (x : int @ immutable) = x <> 0
 external div_nonzero : int -> {d : int | d <> 0} -> int
   @@ total = "%divint"
+  [@@warning "-trusted-external"]
 let[@def] quotient_model (x : int) =
   if x = 0 then 0 else div_nonzero 100 (x)
 let[@def] division_relation : int @ immutable total ->

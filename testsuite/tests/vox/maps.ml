@@ -155,9 +155,12 @@ module Demo : sig end = struct
         'a @ total =
       fun map key -> M.Refined.find map key
 
+    (* [M.mem] is modelled only at total, stateless arguments: a key
+       holding a stateful closure could compare differently each time. *)
     let (singleton_member @ total)
-        (key @ total) (data @ total) =
-      let present = M.mem key (M.Refined.singleton key data) in
+        (key @ total stateless) (data @ total stateless) =
+      let (map @ total stateless) = M.Refined.singleton key data in
+      let present = M.mem key map in
       let proof : {b : bool | b} = present in
       let _ = proof in
       ()
@@ -641,6 +644,17 @@ module Shadowed_refined_operation_unrecognized : sig end = struct
     ()
 end;;
 [%%expect{|
+Lines 20-26, characters 6-49:
+20 | ......external trust_add :
+21 |         ('a : value).
+22 |         (Real.key -> 'a -> 'a Real.t -> 'a Real.t) ->
+23 |         (Real.key @ total ->
+24 |          'a @ total ->
+25 |          'a Real.t @ total ->
+26 |          'a Real.t @ total) @ total = "%identity"
+Warning 228 [trusted-external]: The verifier assumes this external's cast of its argument to a total function;
+  nothing checks it.
+
 Line 34, characters 33-40:
 34 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
@@ -693,6 +707,15 @@ module Shadowed_mem_unrecognized : sig end = struct
     ()
 end;;
 [%%expect{|
+Lines 28-32, characters 4-17:
+28 | ....external trust_mem :
+29 |       ('a : value).
+30 |       (Real.key -> 'a Real.t -> bool) ->
+31 |       (Real.key @ immutable -> 'a Real.t @ immutable -> bool) @ total =
+32 |       "%identity"
+Warning 228 [trusted-external]: The verifier assumes this external's cast of its argument to a total function;
+  nothing checks it.
+
 Line 38, characters 33-40:
 38 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^

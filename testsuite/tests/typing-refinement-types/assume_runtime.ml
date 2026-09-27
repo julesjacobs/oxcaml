@@ -1,6 +1,6 @@
 (* TEST
  modules = "assume_stubs.c";
- flags = "-extension refinement_types";
+ flags = "-extension refinement_types -w -trusted-external";
  has-z3;
  { bytecode; }
  { native; }

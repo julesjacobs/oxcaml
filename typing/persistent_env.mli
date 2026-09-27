@@ -177,7 +177,11 @@ val global_of_global_name : 'a t
    loading any .cmi files necessary to do so. *)
 val normalize_global_name : 'a t -> Global_module.Name.t -> Global_module.Name.t
 
-val make_cmi : 'a t
+(* The Vox record of an imported interface, if it has one. *)
+val vox_unit : 'a t -> Compilation_unit.Name.t -> Cmi_format.vox_unit option
+
+val make_cmi : ?vox:Cmi_format.vox_unit
+  -> 'a t
   -> Compilation_unit.Name.t
   -> Cmi_format.kind
   -> Subst.Lazy.signature * Mode.Staticity.Const.t

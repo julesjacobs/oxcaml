@@ -38,41 +38,42 @@ val abs_min :
   unit -> {u : unit | ((abs min_int) = min_int) && ((abs (-3)) = 3)} = <fun>
 |}]
 
+(* The standard shifts are partial (see int_shift_range.ml); total code
+   uses those of [Int.Refined]. *)
 let (scaled @ total) (x : {x : int | 0 <= x && x < 1024}) :
-    {y : int | y = x * 8} = x lsl 3;;
+    {y : int | y = x * 8} = Int.Refined.(x lsl 3);;
 [%%expect{|
 val scaled :
   (x : {x : int | (0 <= x) && (x < 1024)}) -> {y : int | y = (x * 8)} = <fun>
 |}]
 
-let (halved @ total) (x : {x : int | x >= 0}) : {y : int | y = x lsr 1} =
-  x asr 1;;
+let (halved @ total) (x : {x : int | x >= 0}) :
+    {y : int | y + y <= x && x <= y + y + 1} =
+  Int.Refined.(x asr 1);;
 [%%expect{|
-val halved : (x : {x : int | x >= 0}) -> {y : int | y = (x lsr 1)} = <fun>
+val halved :
+  (x : {x : int | x >= 0}) ->
+  {y : int | ((y + y) <= x) && (x <= ((y + y) + 1))} = <fun>
 |}]
 
-let negative_shift () : {u : unit | (-8) asr 2 = -2 && (-1) asr 62 = -1
-    && 1 lsl 62 = min_int} = ();;
+let (quarter @ total) () : {r : int | r = -2} = Int.Refined.((-8) asr 2)
+let (sign @ total) () : {r : int | r = -1} = Int.Refined.((-1) asr 62)
+let (top @ total) () : {r : int | r = min_int} = Int.Refined.(1 lsl 62);;
 [%%expect{|
-val negative_shift :
-  unit ->
-  {u : unit
-    | (((-8) asr 2) = (-2)) &&
-        ((((-1) asr 62) = (-1)) && ((1 lsl 62) = min_int))} =
-  <fun>
+val quarter : unit -> {r : int | r = (-2)} = <fun>
+val sign : unit -> {r : int | r = (-1)} = <fun>
+val top : unit -> {r : int | r = min_int} = <fun>
 |}]
 
-(* Outside [0, 63] the shifted value is unspecified. *)
+(* A predicate cannot use a partial shift. *)
 let unspecified (x : int) : {u : unit | 1 lsl 64 = 0} = ();;
 [%%expect{|
-Line 1, characters 56-58:
+Line 1, characters 42-45:
 1 | let unspecified (x : int) : {u : unit | 1 lsl 64 = 0} = ();;
-                                                            ^^
-Error: Refinement could not be proved (counterexample)
-Line 1, characters 40-52:
-1 | let unspecified (x : int) : {u : unit | 1 lsl 64 = 0} = ();;
-                                            ^^^^^^^^^^^^
-  The refinement is stated here.
+                                              ^^^
+Error: The value "\#lsl" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 1, characters 40-52).
 |}]
 
 let wrong_abs (x : int) : {u : unit | abs x >= 0} = ();;

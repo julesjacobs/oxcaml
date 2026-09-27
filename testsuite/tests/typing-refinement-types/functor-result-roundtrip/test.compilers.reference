@@ -1,3 +1,8 @@
+File "producer.ml", line 20, characters 2-70:
+20 |   external accept : { x : int | holds x } -> unit @@ total = "%ignore"
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
 File "inferred_consumer.ml", line 3, characters 49-50:
 3 | let distinct (x : Inferred.A.t) : Inferred.B.t = x
                                                      ^

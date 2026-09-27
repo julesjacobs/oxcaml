@@ -89,13 +89,13 @@ borrow = pick(LIB + "borrow.mli", ["@@", "Model", "step"])
 borrow += pick(LIB + "borrow.mli", ["t", "current", "final", "length", "get", "set", "swap",
     "split_at", "split3", "with_range", "finish"], parent="Slice")
 borrow += pick(LIB + "borrow.mli", ["*"], parent="Owned_array")
-parallel = pick(LIB + "borrow.mli", ["parallel"], parent="Slice")
+parallel = pick(LIB + "vox_parallel.mli", ["@@", "fork_join"])
 quick_common = common + bigint + iarray + sequence + integer_sequence + borrow
 pages = [
     {"id": "sequential-quicksort", "declarations": quick_common +
      pick(TEST + "quicksort.mli", ["@@", "Spec", "sort", "sort_array"])},
     {"id": "parallel-quicksort", "declarations": quick_common + parallel +
-     pick(TEST + "quicksort.mli", ["@@", "Spec", "parallel_sort", "parallel_sort_array"])},
+     pick(TEST + "quicksort.mli", ["@@", "Spec", "parallel_sort_array"])},
     {"id": "avl-sets", "declarations": common + bigint +
      pick(TEST + "int_set_intf.mli", ["Operations", "Extensional"]) +
      pick(TEST + "avl_sets.mli", ["*"])},

@@ -34,6 +34,18 @@ module Refined = struct
   external ( mod ) : int -> {d : int | d <> 0} -> int @@ portable total = "%modint"
   external div : int -> {d : int | d <> 0} -> int @@ portable total = "%divint"
   external rem : int -> {d : int | d <> 0} -> int @@ portable total = "%modint"
+  external ( lsl ) : int -> {n : int | 0 <= n && n <= 63} -> int
+    @@ portable total = "%lslint"
+  external ( lsr ) : int -> {n : int | 0 <= n && n <= 63} -> int
+    @@ portable total = "%lsrint"
+  external ( asr ) : int -> {n : int | 0 <= n && n <= 63} -> int
+    @@ portable total = "%asrint"
+  external shift_left : int -> {n : int | 0 <= n && n <= 63} -> int
+    @@ portable total = "%lslint"
+  external shift_right : int -> {n : int | 0 <= n && n <= 63} -> int
+    @@ portable total = "%asrint"
+  external shift_right_logical : int -> {n : int | 0 <= n && n <= 63} -> int
+    @@ portable total = "%lsrint"
 end
 external succ : (int[@local_opt]) -> int @@ portable = "%succint"
 external pred : (int[@local_opt]) -> int @@ portable = "%predint"

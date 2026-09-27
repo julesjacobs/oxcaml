@@ -161,6 +161,7 @@ let () =
     Int_key.hash_def 5;
     Inv.route_def r.view.model 5Z (Some (5, 84)) (0, 5);
     Inv.route_position_def 16 5 5Z (0, 5);
+    Vox_table_wrap.lsr4_spec 16; Vox_table_wrap.lsr7_spec 5;
     Inv.group_def 16 5 0; Inv.probe_def 16 5 0;
     Inv.wrap_def 16 0; Inv.wrap_def 16 5;
     Inv.empty_free_def r.view.model 5 0);

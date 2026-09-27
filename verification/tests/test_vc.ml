@@ -1,7 +1,13 @@
 open Vox_smt
 
+(* Built-in meanings of C primitives belong to the library units that declare
+   them, so a test that declares such a primitive itself is compiled as that
+   unit. *)
 let queries ?(retry = false) ?(poll = fun () -> ())
-    ?(before_query = fun _ _ -> ()) source =
+    ?(before_query = fun _ _ -> ()) ?(unit_name = "Test_vc") source =
+  Env.set_current_unit
+    (Unit_info.make_dummy ~input_name:"test_vc.ml"
+       (Compilation_unit.of_string unit_name));
   Language_extension.enable Refinement_types ();
   Typecore.reset_delayed_checks ();
   let parsed = Parse.implementation (Lexing.from_string source) in
@@ -184,7 +190,7 @@ let () =
                ^ "let array = append array copy in\n"))
       ^ "let value = get array index in refine_ value"
     in
-    match queries source with
+    match queries ~unit_name:"Stdlib__Iarray" source with
     | [query] -> String.length (to_smtlib ~int_width:63 ~timeout_ms:5000 query)
     | _ -> failwith "Expected one array-copy query"
   in
@@ -325,7 +331,7 @@ let () =
      external ( && ) : bool -> bool -> bool @@ total = \"%sequand\"\n"
   in
   let query source =
-    match queries (prelude ^ source) with
+    match queries ~unit_name:"Pref" (prelude ^ source) with
     | [q] -> q
     | _ -> failwith "Expected one Pref identity query"
   in
@@ -389,7 +395,7 @@ let () =
     ^ "let u = () in\n\
        let (_ : {u : unit | at h p47 === Some 999}) = refine_ u in ()"
   in
-  let qs = queries ~retry:true source in
+  let qs = queries ~retry:true ~unit_name:"Pref" source in
   assert (List.length qs = 49);
   List.iteri
     (fun index query ->

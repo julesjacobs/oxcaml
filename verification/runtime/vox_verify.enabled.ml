@@ -21,13 +21,34 @@ let timeout_ms = ref 60_000
 
 let budget_ms = ref 0
 
-let assume_verified = ref false
+(* Shared with the type checker, which records it in the compiled unit. *)
+let assume_verified = Vox_trust.assume_verified
+
+let precise_unused_steps = ref false
 
 (* Cleared when a proof is slow enough to warn, so that the warning is reported
    again rather than skipped by the cache. *)
 let cacheable = ref true
 
+(* The unused proof steps a unit reported to VOX_UNUSED_STEPS, recorded with
+   its cache entry and reported again when the entry is used. *)
+let reported_steps = Buffer.create 256
+
+let append_report file text =
+  try
+    Out_channel.with_open_gen [Open_append; Open_creat; Open_text] 0o644 file
+      (fun channel -> output_string channel text)
+  with Sys_error _ -> ()
+
 exception Budget_exceeded
+
+(* A test harness collects unused proof steps in a report, like slow proofs,
+   whether or not the warning is enabled; VOX_UNUSED_STEPS_PRECISE=1 then
+   selects the precise mode. *)
+let unused_steps_report () =
+  match Sys.getenv_opt "VOX_UNUSED_STEPS" with
+  | Some file when file <> "" -> Some file
+  | _ -> None
 
 let abstract_multiplication (query : Vox_smt.query) =
   let open Vox_smt in
@@ -61,12 +82,26 @@ let abstract_multiplication (query : Vox_smt.query) =
    covers termination checks and the unchanged parts of an edited unit, also
    across compiler rebuilds. Unit entries record only clean successes. The
    compiler is identified by a digest of its executable and the solver by the
-   version it reports, both computed once per process; when either is
-   unavailable, the caches that need it are not used. *)
+   version it reports and the platform, both computed once per process; when
+   either is unavailable, the caches that need it are not used.
+
+   Whoever can write to the cache directory can mark units and queries as
+   proved, so a directory that another user owns or that other users can
+   write to is not used. *)
+let trusted_directory directory =
+  match Unix.stat directory with
+  | { st_kind = S_DIR; st_uid; st_perm; _ } ->
+    st_uid = Unix.getuid () && st_perm land 0o022 = 0
+  | _ -> false
+  (* [record_entry] creates it. *)
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> true
+  | exception Unix.Unix_error _ -> false
+
 let cache_directory () =
   match Sys.getenv_opt "VOX_VERIFY_CACHE" with
   | None | Some "" -> None
   | Some _ when !dump_vc || !dump_smtlib || !dump_resources -> None
+  | Some directory when not (trusted_directory directory) -> None
   | directory -> directory
 
 let record_entry file contents =
@@ -79,10 +114,9 @@ let record_entry file contents =
     Sys.rename temporary file
   with Sys_error _ -> ()
 
-(* The solver's configured name and the version it reports. A solver that
-   does not answer [-version] within a few seconds is treated as having no
-   version. *)
-let solver_identity =
+(* What the solver reports for [-version]. A solver that does not answer
+   within a few seconds is treated as having no version. *)
+let solver_version =
   lazy
     (let deadline = Unix.gettimeofday () +. 5. in
      match Unix.pipe ~cloexec:true () with
@@ -142,9 +176,52 @@ let solver_identity =
          then (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
          let version = String.trim (Buffer.contents buffer) in
          (match wait finished with
-         | Some (Unix.WEXITED 0) when finished && version <> "" ->
-           Some (!executable ^ "\000" ^ version)
+         | Some (Unix.WEXITED 0) when finished && version <> "" -> Some version
          | _ | (exception Unix.Unix_error _) -> None)))
+
+(* The solver's configured name, the version it reports and the platform it
+   runs on, which both caches include in their keys. The platform is part of
+   the identity because resource counts differ between builds of one version:
+   the same query took 821,439 units with Z3 4.16.0 on macOS arm64 and 681,198
+   on Linux x86-64, so a cache shared between machines could otherwise replay a
+   proof or an exhausted limit obtained under different counts. *)
+let solver_identity =
+  lazy
+    (Option.map
+       (fun version -> String.concat "\000" [!executable; version; Config.host])
+       (Lazy.force solver_version))
+
+let any_solver_version = ref false
+
+(* A proof counts only when the solver is the version the verifier is tested
+   with, unless -smt-solver-any-version says otherwise; the compiled unit
+   then records the version used. *)
+let solver_version_error () =
+  if !any_solver_version
+  then begin
+    (match Lazy.force solver_version with
+    | Some version when Vox_smt_solver.is_expected_version version -> ()
+    | Some version -> Vox_trust.unexpected_solver := version
+    | None -> Vox_trust.unexpected_solver := "unknown");
+    None
+  end
+  else
+    match Lazy.force solver_version with
+    | Some version when Vox_smt_solver.is_expected_version version -> None
+    | Some version ->
+      Some
+        (Printf.sprintf
+           "Refinement solver %s reports %S, but proofs are checked with Z3 \
+            %s. Install that version, or pass -smt-solver-any-version to use \
+            this one."
+           !executable version Vox_smt_solver.expected_version)
+    | None ->
+      Some
+        (Printf.sprintf
+           "Cannot determine the version of refinement solver %s (%s \
+            -version); proofs are checked with Z3 %s. Pass \
+            -smt-solver-any-version to use it anyway."
+           !executable !executable Vox_smt_solver.expected_version)
 
 let compiler_digest =
   lazy
@@ -161,6 +238,14 @@ let unit_cache_file ~whole_unit =
      which are not part of this key. *)
   | Some _ when not (whole_unit && List.mem !Location.input_name arguments) ->
     None
+  (* The key has the source's digest, not that of what a preprocessor makes
+     of it, and the command line, not the arguments read from a file. *)
+  | Some _
+    when Option.is_some !Clflags.preprocessor
+         || !Clflags.all_ppx <> []
+         || List.mem "-args" arguments
+         || List.mem "-args0" arguments ->
+    None
   | Some directory -> (
     match
       ( Lazy.force compiler_digest,
@@ -169,6 +254,7 @@ let unit_cache_file ~whole_unit =
     with
     | exception Sys_error _ -> None
     | None, _, _ | _, None, _ -> None
+    | _ when Option.is_some (solver_version_error ()) -> None
     | Some compiler, Some solver, source ->
       let rec flags = function
         | ("-o" | "-I" | "-use-runtime") :: _ :: rest -> flags rest
@@ -194,11 +280,23 @@ let unit_cache_file ~whole_unit =
              compiler;
              solver;
              Digest.to_hex source;
-             Option.value (Sys.getenv_opt "OCAMLPARAM") ~default:"" ]
+             Option.value (Sys.getenv_opt "OCAMLPARAM") ~default:"";
+             (* The settings that change how the source is typed or what
+                verification may rely on, however they were set. *)
+             Vox_trust.config () ]
+          @ (if Option.is_some (unused_steps_report ())
+             then
+               [ "unused-steps"
+                 ^ Option.value ~default:""
+                     (Sys.getenv_opt "VOX_UNUSED_STEPS_PRECISE") ]
+             else [])
           @ List.sort compare imports
           @ flags (match arguments with _ :: rest -> rest | [] -> []))
       in
-      Some (Filename.concat directory (Digest.to_hex (Digest.string key))))
+      (* The entry names its key, so that only an entry this code wrote for
+         this unit counts as a verification, not any file at that path. *)
+      let digest = Digest.to_hex (Digest.string key) in
+      Some (Filename.concat directory digest, "verified unit " ^ digest))
 
 type outcome =
   | Proved of int option  (** with the resources used, when known *)
@@ -342,6 +440,9 @@ let prove poll check ~batch loc query =
   if !resource_limit < 0 || !resource_warning < 0
   then
     Location.raise_errorf ~loc "Refinement resource bounds must be nonnegative";
+  Option.iter
+    (fun message -> Location.raise_errorf ~loc "%s" message)
+    (solver_version_error ());
   let positive n = if n > 0 then Some n else None in
   (* A batch that is not proved within the warning threshold is retried one
      obligation at a time, so slow obligations are reported where they are. *)
@@ -558,10 +659,223 @@ let prove poll check ~batch loc query =
          (Location.errorf ~loc "Refinement solver returned unknown%s"
             (match reason with None -> "" | Some r -> ": " ^ r)))
 
+(* The unsat core of a query that was proved, for the unused proof steps check
+   (warning 227): the [assumptions] its proof used, or [None] when it is not
+   proved with them. A query with bitwise operations is first tried with them
+   abstracted, as in [prove]. Outcomes are cached like proofs. The precise
+   mode's proofs without a step ([deletion]) get the warning threshold as
+   their budget: a step whose removal makes a proof that much slower is worth
+   keeping. *)
+let core poll check loc (query : Vox_smt.query) ~assumptions ~deletion =
+  poll ();
+  let int_width = 63 in
+  let positive n = if n > 0 then Some n else None in
+  let attempt ~exact ~limit query =
+    let text () =
+      try
+        Vox_smt.to_smtlib ~poll ?resource_limit:limit ~assumptions ~int_width
+          ~timeout_ms:!timeout_ms query
+      with Vox_smt.Sort_error message -> "sort error: " ^ message
+    in
+    let cached =
+      match cache_directory () with
+      | None -> None
+      | Some directory ->
+        Option.map
+          (fun solver ->
+            let attempt =
+              if exact then "unsat core" else "unsat core abstract"
+            in
+            let labels = List.map Vox_smt.Symbol.label query.Vox_smt.symbols in
+            Filename.concat directory
+              ("query-5-"
+              ^ Digest.to_hex
+                  (Digest.string
+                     (String.concat "\000"
+                        (solver :: attempt :: text () :: labels)))))
+          (Lazy.force solver_identity)
+    in
+    let indexed = List.mapi (fun i symbol -> i, symbol) assumptions in
+    let recorded =
+      match cached with
+      | Some file when Sys.file_exists file -> (
+        (* An entry records the resources used, then the core's indices in
+           [assumptions]. *)
+        match
+          String.split_on_char ' '
+            (In_channel.with_open_bin file In_channel.input_all)
+        with
+        | ["unproved"; _] -> Some None
+        | "core" :: _ :: indices -> (
+          match
+            List.map
+              (fun i -> List.assoc (int_of_string i) indexed)
+              (List.filter (( <> ) "") indices)
+          with
+          | core -> Some (Some core)
+          | exception (Not_found | Failure _) -> None)
+        | _ -> None
+        | exception Sys_error _ -> None)
+      | _ -> None
+    in
+    match recorded with
+    | Some outcome -> outcome
+    | None ->
+      let result : Vox_smt_solver.result =
+        (* The check is a diagnostic: a malformed second query counts its
+           steps as used rather than failing the compilation. *)
+        try check ?resource_limit:limit ?assumptions:(Some assumptions) query
+        with Vox_smt.Sort_error message ->
+          { validity = Failure message;
+            stderr = "";
+            resources = None;
+            core = None;
+            encoding_seconds = 0.;
+            solving_seconds = 0.
+          }
+      in
+      if !dump_resources
+      then
+        Format.eprintf
+          "%a: unsat core%s %s, %s resource units, %.3f s encoding, %.3f s \
+           solving@."
+          Location.print_loc loc
+          (if exact then "" else " (bitwise operations abstracted)")
+          (match result.core with
+          | Some core ->
+            Printf.sprintf "of %d/%d facts" (List.length core)
+              (List.length assumptions)
+          | None -> validity_name result.validity)
+          (match result.resources with
+          | Some n -> string_of_int n
+          | None -> "?")
+          result.encoding_seconds result.solving_seconds;
+      let outcome =
+        match result.validity, result.core with
+        | Valid, Some core -> Some core
+        | _ -> None
+      in
+      (match result.validity with
+      | Timeout | Failure _ -> ()
+      | Valid | Invalid _ | Unknown _ ->
+        Option.iter
+          (fun file ->
+            let resources =
+              match result.resources with
+              | Some n -> string_of_int n
+              | None -> "?"
+            in
+            record_entry file
+              (match outcome with
+              | None -> "unproved " ^ resources
+              | Some core ->
+                String.concat " "
+                  ("core" :: resources
+                  :: List.filter_map
+                       (fun (i, symbol) ->
+                         if List.memq symbol core
+                         then Some (string_of_int i)
+                         else None)
+                       indexed)))
+          cached);
+      outcome
+  in
+  let limit =
+    match deletion, positive !resource_warning, positive !resource_limit with
+    | true, Some warning, Some limit -> Some (min warning limit)
+    | true, Some warning, None -> Some warning
+    | _, _, limit -> limit
+  in
+  match Vox_smt.abstract_bitwise query with
+  | None -> attempt ~exact:true ~limit query
+  | Some abstract -> (
+    let abstract_limit =
+      match positive !resource_warning, limit with
+      | Some warning, Some limit -> Some (min warning limit)
+      | Some warning, None -> Some warning
+      | None, limit -> limit
+    in
+    match attempt ~exact:false ~limit:abstract_limit abstract with
+    | Some _ as core -> core
+    | None -> attempt ~exact:true ~limit query)
+
+let unused_steps poll check =
+  let report = unused_steps_report () in
+  { Vox_proof_steps.core = core poll check;
+    precise = !precise_unused_steps;
+    precise_unreported =
+      Option.is_some report
+      && Sys.getenv_opt "VOX_UNUSED_STEPS_PRECISE" = Some "1";
+    all_steps = Option.is_some report;
+    abandoned = (function Budget_exceeded -> true | _ -> false);
+    report =
+      (fun loc warning ->
+        (* Reported again rather than skipped by the unit cache. *)
+        if Warnings.is_active warning
+        then begin
+          cacheable := false;
+          Location.prerr_warning loc warning
+        end
+        else
+          match report, warning with
+          | Some file, Unused_proof_step step ->
+            let step =
+              match step with
+              | Unused_lemma_call name -> "lemma call " ^ name
+              | Unused_assume -> "assume_"
+              | Unused_argument name -> "argument " ^ name
+            in
+            let start = loc.Location.loc_start
+            and stop = loc.Location.loc_end in
+            (* The expect tool names no file and numbers lines from each
+               phrase, but its offsets count from the start of the file it
+               parsed. *)
+            let file_name, position =
+              match start.pos_fname, !Location.input_lexbuf with
+              | "", Some lexbuf ->
+                let text = lexbuf.Lexing.lex_buffer in
+                let position (p : Lexing.position) =
+                  let line = ref 1 and bol = ref 0 in
+                  for i = 0 to min p.pos_cnum (Bytes.length text) - 1 do
+                    if Bytes.get text i = '\n'
+                    then begin
+                      incr line;
+                      bol := i + 1
+                    end
+                  done;
+                  !line, p.pos_cnum - !bol
+                in
+                ( List.fold_left
+                    (fun name argument ->
+                      let source =
+                        Option.value ~default:argument
+                          (Filename.chop_suffix_opt ~suffix:".corrected"
+                             argument)
+                      in
+                      if Filename.check_suffix source ".ml"
+                      then source
+                      else name)
+                    "" (Array.to_list Sys.argv),
+                  position )
+              | name, _ ->
+                name, fun p -> p.pos_lnum, p.pos_cnum - p.pos_bol
+            in
+            let start_line, start_column = position start
+            and stop_line, stop_column = position stop in
+            let line =
+              Printf.sprintf "%s:%d:%d-%d:%d: unused %s\n" file_name
+                start_line start_column stop_line stop_column step
+            in
+            Buffer.add_string reported_steps line;
+            append_report file line
+          | _ -> ())
+  }
+
 let install () =
   if not !installed
   then begin
     installed := true;
+    Vox_trust.add_arguments ();
     let with_prover f =
       let int_width = if Target_system.is_64_bit () then 63 else 31 in
       let dump =
@@ -588,31 +902,62 @@ let install () =
             poll ();
             false)
           ?dump ~int_width
-          (fun check -> f poll (prove poll check))
+          (fun check ->
+            f poll
+              (prove poll (fun ?resource_limit query ->
+                   check ?resource_limit query))
+              (unused_steps poll check))
       with Budget_exceeded ->
         Location.raise_errorf "Refinement verification budget exhausted"
     in
     Verification.install (fun ~whole_unit structure ->
         if not !assume_verified
         then
+          (* An entry's first line names its key (see [unit_cache_file]). *)
+          let recorded (file, entry) =
+            let first = entry ^ "\n" in
+            match In_channel.with_open_bin file In_channel.input_all with
+            | contents when String.starts_with ~prefix:first contents ->
+              Some
+                (String.sub contents (String.length first)
+                   (String.length contents - String.length first))
+            | _ | (exception Sys_error _) -> None
+          in
           match unit_cache_file ~whole_unit with
-          | Some file when Sys.file_exists file -> ()
-          | file ->
+          | Some cache when Option.is_some (recorded cache) -> (
+            (* The entry's other lines are the unused proof steps found when
+               it was recorded. *)
+            match unused_steps_report (), recorded cache with
+            | Some report, Some steps -> append_report report steps
+            | _ -> ())
+          | cache ->
             cacheable := true;
-            with_prover (fun poll prove ->
-                Vox_vc.generate ~poll ~prove structure);
+            Buffer.clear reported_steps;
+            with_prover (fun poll prove unused_steps ->
+                Vox_vc.generate ~poll ~unused_steps ~prove structure);
             if !cacheable
-            then Option.iter (fun file -> record_entry file "verified") file);
+            then
+              Option.iter
+                (fun (file, entry) ->
+                  record_entry file
+                    (entry ^ "\n" ^ Buffer.contents reported_steps))
+                cache);
     Verification.install_termination (fun ~self ~fn ~measure ->
         if not !assume_verified
         then
-          with_prover (fun poll prove ->
-              Vox_vc.check_termination ~poll ~prove ~self ~fn ~measure));
+          with_prover (fun poll prove unused_steps ->
+              Vox_vc.check_termination ~unused_steps ~poll ~prove ~self ~fn
+                ~measure ()));
     Clflags.add_arguments __LOC__
       [ ( "-smt-budget",
           Arg.Set_int budget_ms,
           "<ms> Overall budget per verification pass (0: unlimited)" );
         "-dvc", Arg.Set dump_vc, " Dump refinement verification conditions";
+        ( "-smt-unused-steps-precise",
+          Arg.Set precise_unused_steps,
+          " With warning 227 (unused-proof-step), also prove each query again \
+           without each proof step in its unsat core, to find more unused \
+           steps (slower)" );
         ( "-smt-assume-verified",
           Arg.Set assume_verified,
           " Skip refinement verification; for build scripts that verify the \
@@ -638,6 +983,11 @@ let install () =
         ( "-smt-solver",
           Arg.Set_string executable,
           "<path> Refinement solver executable (default z3)" );
+        ( "-smt-solver-any-version",
+          Arg.Set any_solver_version,
+          Printf.sprintf
+            " Accept a refinement solver other than Z3 %s"
+            Vox_smt_solver.expected_version );
         ( "-smt-timeout",
           Arg.Set_int timeout_ms,
           Printf.sprintf

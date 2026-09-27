@@ -702,20 +702,27 @@ let mode_max =
 (* Ghost fields contain total logical values but have no runtime slot.
    Construction checks totality; projection fabricates a ghost placeholder.
 
-   A ghost field is still a component of its record for ownership: reading
-   it inherits the record's mode (after the field's modalities) on every
-   axis except three.
+   A ghost field is still a component of its record: the verifier reads
+   back exactly the value that was stored, so the read must carry every
+   guarantee a real field's read would. It inherits the record's mode (after
+   the field's modalities) on every axis except two.
    - Ghostliness: the read is [ghost], since there is no run-time value.
-   - Areality (with forkable and yielding, which follow it): the
-     placeholder is fabricated, not loaded from the record, so it is
-     [global]; correspondingly construction accepts [local] values (they
-     never reach run time).
    - Totality: construction requires a [total] value, so the read is [total].
-   In particular uniqueness, linearity, visibility and contention come from
-   the record: a ghost field of an aliased record is aliased, so an
-   ownership token stored in it cannot be taken twice. *)
+   In particular areality is inherited. The placeholder is fabricated, so
+   no memory is at stake, but locality is also how [borrow_] confines a
+   borrow to its region: a ghost token read from a borrowed (local) record
+   is local, and a local value can be stored only into a local record.
+   Otherwise a borrowed token could outlive its borrow and still read after
+   the owner had written. A field of pure logical data that must be read
+   out of a borrowed record is declared [@@ ghost global]; construction
+   then requires a global value, which a borrow never is. Uniqueness,
+   linearity, visibility and contention likewise come from the record: a
+   ghost field of an aliased record is aliased, so an ownership token
+   stored in it cannot be taken twice. A field whose type crosses an axis
+   (an [int], say, crosses locality) still crosses it, through the ordinary
+   mode crossing of its type. *)
 let ghost_field_crossing =
-  Crossing.create ~regionality:true ~forkable:true ~yielding:true
+  Crossing.create ~regionality:false ~forkable:false ~yielding:false
     ~ghostliness:true
     ~linearity:false ~uniqueness:false ~portability:false ~contention:false
     ~totality:false ~statefulness:false ~visibility:false ~staticity:false
@@ -8184,6 +8191,9 @@ and type_expect_
                   { containing = Record (label.lbl_name, Modality);
                     container = (loc, Expression) }
                   ~modalities:label.lbl_modalities mode
+               in
+               let mode =
+                 if label.lbl_ghost then ghost_field_read_mode mode else mode
                in
                Overwrite_label(ty, mode))
                lbl_a_list)

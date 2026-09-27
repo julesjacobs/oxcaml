@@ -133,8 +133,8 @@ module Make (Key : Vox_table_map.Key) = struct
     I.group_def capacity hash rank;
     I.probe_def capacity hash rank;
     if rank <= 0 then begin
-      I.wrap_def capacity (hash lsr 7);
-      W.wrap_range capacity (hash lsr 7);
+      I.wrap_def capacity (W.lsr7 hash);
+      W.wrap_range capacity (W.lsr7 hash);
       ()
     end else begin
       let group, step = I.probe capacity hash (rank - 1) in
@@ -204,7 +204,7 @@ module Make (Key : Vox_table_map.Key) = struct
       {u : unit | not (I.shape model) ||
         16 <= model.capacity && model.capacity <= 1073741824 &&
         model.capacity land (model.capacity - 1) = 0 &&
-        0 < model.capacity lsr 4 && model.capacity lsr 4 <= 67108864}
+        0 < W.lsr4 model.capacity && W.lsr4 model.capacity <= 67108864}
       @ ghost = fun model -> ghost_ (I.shape_def model; I.power_of_two_def
         model.capacity; ())
 

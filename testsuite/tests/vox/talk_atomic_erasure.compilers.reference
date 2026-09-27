@@ -1,0 +1,101 @@
+(data global "camlTalk_atomic_erasure__gc_roots": int 0)
+(data
+ int 8960
+ global "camlTalk_atomic_erasure":
+ addr G:"camlTalk_atomic_erasure__good_1"
+ addr G:"camlTalk_atomic_erasure__good_def_2"
+ addr G:"camlTalk_atomic_erasure__Pmakeblock_5"
+ addr G:"camlVerified_atomic__empty_block_0"
+ addr G:"camlTalk_atomic_erasure__acquire_post_7"
+ addr G:"camlTalk_atomic_erasure__acquire_post_def_8"
+ addr G:"camlTalk_atomic_erasure__acquire_transfer_9"
+ addr G:"camlTalk_atomic_erasure__try_acquire_10")
+(data
+ int 3063
+ global "camlTalk_atomic_erasure__try_acquire_10":
+ addr G:"camlTalk_atomic_erasure__try_acquire_7_15_code"
+ int 108086391056891909)
+(data
+ int 4087
+ global "camlTalk_atomic_erasure__acquire_transfer_9":
+ addr G:"caml_curry_V___R"
+ int 324259173170675719
+ addr G:"camlTalk_atomic_erasure__acquire_transfer_6_14_code")
+(data
+ int 4087
+ global "camlTalk_atomic_erasure__acquire_post_def_8":
+ addr G:"caml_curry_V_V"
+ int 252201579132747783
+ addr G:"camlTalk_atomic_erasure__acquire_post_def_5_13_code")
+(data
+ int 4087
+ global "camlTalk_atomic_erasure__acquire_post_7":
+ addr G:"caml_curry_V_V"
+ int 252201579132747783
+ addr G:"camlTalk_atomic_erasure__acquire_post_4_12_code")
+(data
+ int 2816
+ global "camlTalk_atomic_erasure__Pmakeblock_5":
+ addr G:"camlTalk_atomic_erasure__holds_3"
+ addr G:"camlTalk_atomic_erasure__holds_def_4")
+(data
+ int 4087
+ global "camlTalk_atomic_erasure__holds_def_4":
+ addr G:"caml_curry_V_V"
+ int 252201579132747783
+ addr G:"camlTalk_atomic_erasure__holds_def_3_11_code")
+(data
+ int 4087
+ global "camlTalk_atomic_erasure__holds_3":
+ addr G:"caml_curry_V_V"
+ int 252201579132747783
+ addr G:"camlTalk_atomic_erasure__holds_2_10_code")
+(data
+ int 4087
+ global "camlTalk_atomic_erasure__good_def_2":
+ addr G:"caml_curry2"
+ int 180143985094819847
+ addr G:"camlTalk_atomic_erasure__good_def_1_9_code")
+(data
+ int 4087
+ global "camlTalk_atomic_erasure__good_1":
+ addr G:"caml_curry2"
+ int 180143985094819847
+ addr G:"camlTalk_atomic_erasure__good_0_8_code")
+(function{talk_atomic_erasure.ml:25,0-192}
+ camlTalk_atomic_erasure__good_def_1_9_code (p: val h: val) : int 1 )
+
+(function{talk_atomic_erasure.ml:25,11-192}
+ camlTalk_atomic_erasure__good_0_8_code (p: val h: val) : int 48059 )
+
+(function{talk_atomic_erasure.ml:32,2-191}
+ camlTalk_atomic_erasure__holds_def_3_11_code (flag: int h: val) : int 
+ 1 )
+
+(function{talk_atomic_erasure.ml:32,13-191}
+ camlTalk_atomic_erasure__holds_2_10_code (flag: int h: val) : int 48059 )
+
+(function{talk_atomic_erasure.ml:38,0-196}
+ camlTalk_atomic_erasure__acquire_post_def_5_13_code
+     (success: int h: val) : int
+ 1 )
+
+(function{talk_atomic_erasure.ml:38,11-196}
+ camlTalk_atomic_erasure__acquire_post_4_12_code (success: int h: val) : int
+ 48059 )
+
+(function{talk_atomic_erasure.ml:50,2-334}
+ camlTalk_atomic_erasure__acquire_transfer_6_14_code (before: int) : unit
+ [] )
+
+(function{talk_atomic_erasure.ml:58,16-238}
+ camlTalk_atomic_erasure__try_acquire_7_15_code (a: val) : val
+ (catch (exit 23 (seq 1 [])) with(23)
+   (extcall "caml_vox_atomic_cas"{talk_atomic_erasure.ml:60,2-180} a 1 3
+     48059 48059 int,int,int,int,int->val)) )
+
+(function no_cse reduce_code_size linscan camlTalk_atomic_erasure__entry
+     () : val
+ (catch (exit 22 G:"camlTalk_atomic_erasure") with(22 *ret*: val) 1) )
+
+(data)

@@ -58,6 +58,17 @@ type redundant_modifier_reason =
   | Default_bound
   | Implied_by of string
 
+(* A proof step whose facts no refinement proof used (warning 227). *)
+type unused_proof_step =
+  | Unused_lemma_call of string  (* the function called *)
+  | Unused_assume
+  | Unused_argument of string  (* the parameter *)
+
+type trusted_external_reason =
+  | Trusted_refinement
+  | Trusted_totality
+  | Trusted_total_cast
+
 type t =
   | Comment_start                           (*  1 *)
   | Comment_not_end                         (*  2 *)
@@ -182,6 +193,9 @@ type t =
   | Unerased_ghost_call                     (* 224 *)
   | Redundant_ghost                         (* 225 *)
   | Proof_only_binding of string            (* 226 *)
+  | Unused_proof_step of unused_proof_step   (* 227 *)
+  | Trusted_external of trusted_external_reason (* 228 *)
+  | Unverified_import of string            (* 229 *)
 
 type alert = {kind:string; message:string; def:loc; use:loc}
 
