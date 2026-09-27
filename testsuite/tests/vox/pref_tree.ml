@@ -427,12 +427,30 @@ let observe_read :
   ghost_ (H.union_law (heap model) frame frame);
   observe_framed pointer model frame t
 
+type observation = { shape : shape @@ aliased; state : node option Pref.token }
+
 let observe :
     (pointer : node option) @ immutable -> (model : tree) @ immutable ghost ->
     (t : {t : node option Pref.token | valid model && root model === pointer
       && Pref.own t === heap model}) @ unique ->
-    {result : shape | result === shape_of model} = fun pointer model t ->
-  observe_read pointer model (borrow_ t)
+    {r : observation | r.shape === shape_of model
+      && Pref.own r.state === heap model} @ unique = fun pointer model t ->
+  let shape = observe_read pointer model (borrow_ t) in
+  {shape; state = t}
+
+let[@def] rec (mirror_shape @ total) (s : shape @ immutable) =
+  match s with
+  | Tip -> Tip
+  | Fork (value, l, r) -> Fork (value, mirror_shape r, mirror_shape l)
+
+let rec (shape_flipped @ total) : (tree : tree) @ immutable ->
+    {u : unit | shape_of (flipped tree) === mirror_shape (shape_of tree)}
+    @ ghost =
+  fun tree -> ghost_ (
+    flipped_def tree; shape_of_def tree; shape_of_def (flipped tree);
+    mirror_shape_def (shape_of tree);
+    match tree with Empty -> () | Branch (_, l, r) ->
+      shape_flipped l; shape_flipped r; ())
 
 module Owned = struct
   type payload = parts
