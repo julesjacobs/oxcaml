@@ -20,9 +20,10 @@
       [bindings view] is its contents, [capacity view] its slot count and
       [version view] its exact storage state.
     - A token ['a state P.token] is affine ownership of a heap. Reads borrow
-      a token whose heap holds [version view] at [location table]. Mutations
-      consume the token and return a new view and a token whose heap
-      differs only at [location table]. [create] takes only a token.
+      a token whose heap holds [version view] at [location table]
+      ([current table view heap]). Mutations consume such a token and return
+      a new view and a token whose heap differs only at [location table].
+      [create] takes only a token.
 
     A view grants no access by itself: an operation accepts it only with a
     token whose heap holds its [version]. After a mutation, use the returned
@@ -117,6 +118,17 @@ module Make (Key : Key) : sig
   val capacity : ('a : immutable_data).
     'a view @ immutable -> {n : int | 16 <= n && n <= 1073741824} @ ghost @@ total
 
+  (** [heap] holds [version view] at [location table]. Transparent: the
+      verifier unfolds it by [current_def] wherever it is applied. *)
+  val current : ('a : immutable_data).
+    'a t -> 'a view @ immutable -> 'a state P.heap -> bool @ ghost @@ total
+    [@@def transparent]
+  val current_def : ('a : immutable_data).
+    (table : 'a t) -> (view : 'a view) @ immutable ->
+    (heap : 'a state P.heap) ->
+    {u : unit | current table view heap ===
+      ghost_ (H.at heap (location table) === Some (version view))} @@ total
+
   type ('a : immutable_data) created = #{
     table : 'a t @@ aliased;
     view : 'a view @@ aliased immutable;
@@ -136,27 +148,27 @@ module Make (Key : Key) : sig
 
   val length : ('a : immutable_data).
     (table : 'a t) -> (view : 'a view) @ immutable ->
-    (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (version view)}) @ local read ghost ->
+    (token : {t : 'a state P.token | current table view (P.own t)})
+      @ local read ghost ->
     {n : int | 0 <= n && Bigint.of_int n = Map.count (bindings view)}
 
   val find_opt : ('a : immutable_data).
     (table : 'a t) -> (view : 'a view) @ immutable -> (key : Key.t) ->
-    (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (version view)}) @ local read ghost ->
+    (token : {t : 'a state P.token | current table view (P.own t)})
+      @ local read ghost ->
     {value : 'a option | value === Map.lookup (bindings view) key}
 
   (** Raises [Not_found] if [key] has no binding. *)
   val find : ('a : immutable_data).
     (table : 'a t) -> (view : 'a view) @ immutable -> (key : Key.t) ->
-    (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (version view)}) @ local read ghost ->
+    (token : {t : 'a state P.token | current table view (P.own t)})
+      @ local read ghost ->
     {value : 'a | Map.lookup (bindings view) key === Some value}
 
   val mem : ('a : immutable_data).
     (table : 'a t) -> (view : 'a view) @ immutable -> (key : Key.t) ->
-    (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (version view)}) @ local read ghost ->
+    (token : {t : 'a state P.token | current table view (P.own t)})
+      @ local read ghost ->
     {present : bool | present = (match Map.lookup (bindings view) key with
       | None -> false | Some _ -> true)}
 
@@ -165,15 +177,15 @@ module Make (Key : Key) : sig
   val replace : ('a : immutable_data).
     (table : 'a t) -> (before : 'a view) @ immutable -> (key : Key.t) ->
     (value : 'a) ->
-    (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (version before)}) @ unique read_write ghost ->
+    (token : {t : 'a state P.token | current table before (P.own t)})
+      @ unique read_write ghost ->
     {r : 'a updated | bindings r.#view === Map.put (bindings before) key value &&
       P.own r.#token === H.put (P.own token) (location table) (version r.#view)} @ unique
 
   val remove : ('a : immutable_data).
     (table : 'a t) -> (before : 'a view) @ immutable -> (key : Key.t) ->
-    (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (version before)}) @ unique read_write ghost ->
+    (token : {t : 'a state P.token | current table before (P.own t)})
+      @ unique read_write ghost ->
     {r : 'a updated | bindings r.#view === Map.erase (bindings before) key &&
       P.own r.#token === H.put (P.own token) (location table) (version r.#view)} @ unique
 
@@ -181,8 +193,8 @@ module Make (Key : Key) : sig
       values. The capacity is unchanged. *)
   val clear : ('a : immutable_data).
     (table : 'a t) -> (before : 'a view) @ immutable ->
-    (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (version before)}) @ unique read_write ghost ->
+    (token : {t : 'a state P.token | current table before (P.own t)})
+      @ unique read_write ghost ->
     {r : 'a updated | bindings r.#view === Map.empty &&
       capacity r.#view = capacity before &&
       P.own r.#token === H.put (P.own token) (location table) (version r.#view)} @ unique

@@ -213,7 +213,7 @@ let[@def 1] payload x = x + 1;;
 Line 1, characters 3-11:
 1 | let[@def 1] payload x = x + 1;;
        ^^^^^^^^
-Error: The def attribute takes no payload
+Error: The def attribute takes no payload or the payload transparent
 |}]
 
 let collision_def = 0

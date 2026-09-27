@@ -140,6 +140,13 @@ module Exposed = Set.Make (struct
   let compare = compare
 end)
 
+module Unfolded = Set.Make (struct
+  type t = Path.t * term
+
+  let compare (path, term) (path', term') =
+    match Path.compare path path' with 0 -> compare term term' | c -> c
+end)
+
 type state =
   { values : value option Path.Map.t;
     code : command list;
@@ -148,7 +155,9 @@ type state =
     (* Refinements already assumed on this path, by type node and value. A
        branch's additions are dropped at the join, which rebuilds the state from
        the one before the branch. *)
-    exposed : Exposed.t
+    exposed : Exposed.t;
+    (* Applications of transparent definitions already unfolded on this path. *)
+    unfolded : Unfolded.t
   }
 
 type deferred_check =
@@ -205,7 +214,9 @@ type context =
     prove : batch:bool -> Location.t -> query -> unit;
     verify_introductions : bool;
     mutable check_call :
-      context -> state -> expression -> value option list -> unit
+      context -> state -> expression -> value option list -> unit;
+    (* Transparent definitions being unfolded, innermost first. *)
+    mutable unfolding : Path.t list
   }
 
 let empty =
@@ -213,7 +224,8 @@ let empty =
     code = [];
     dead = false;
     omitted_premises = [];
-    exposed = Exposed.empty
+    exposed = Exposed.empty;
+    unfolded = Unfolded.empty
   }
 
 let bind s id value =
@@ -2035,6 +2047,182 @@ let expression_constructor ctx env ty (c : Data_types.constructor_description) =
       symbolic_path ctx env ty path
     end
 
+(* A definition marked [@def transparent] is unfolded at each full application
+   of its name: the application assumes the refinement of the definition lemma
+   [f_def] at the same arguments, as if the lemma were called there. The lemma
+   must be total, so its refinement holds for all arguments that satisfy its
+   parameters' refinements; those become premises of the assumed fact. *)
+let transparent_definition env path =
+  match Env.find_value path env with
+  | description ->
+    Builtin_attributes.is_transparent_definition
+      description.Subst.Lazy.val_attributes
+  | exception Not_found -> false
+
+let refinement_free env ty =
+  let visited = Hashtbl.create 8 in
+  let rec visit ty =
+    let ty = Ctype.expand_head env ty in
+    if not (Hashtbl.mem visited (get_id ty))
+    then begin
+      Hashtbl.add visited (get_id ty) ();
+      match get_desc ty with
+      | Trefine _ -> raise Exit
+      | _ -> Btype.iter_type_expr visit ty
+    end
+  in
+  match visit ty with () -> true | exception Exit -> false
+
+exception Unusable_lemma
+
+let unfolding_equation env loc path fn_type arity =
+  let fail () = raise Unusable_lemma in
+  let lemma =
+    match path with
+    | Path.Pident id -> (
+      match
+        Env.find_value_by_name (Longident.Lident (Ident.name id ^ "_def")) env
+      with
+      | lemma, _ -> lemma
+      | exception Not_found -> fail ())
+    | Path.Pdot (parent, name) -> Path.Pdot (parent, name ^ "_def")
+    | Path.Papply _ | Path.Pextra_ty _ -> fail ()
+  in
+  let _, description, (mode, _) =
+    match Env.lookup_value_path ~use:false ~loc lemma env with
+    | found -> found
+    | exception Not_found -> fail ()
+  in
+  if not (logical_function_mode mode) then fail ();
+  let rec parameters ty n =
+    if n = 0
+    then [], ty
+    else
+      match get_desc (Ctype.expand_head env ty) with
+      | Tarrow ((Nolabel, _, _, Some binder), argument, result, _) ->
+        let rest, result = parameters result (n - 1) in
+        (binder, argument) :: rest, result
+      | _ -> fail ()
+  in
+  let rec arguments ty n =
+    if n = 0
+    then []
+    else
+      match get_desc (Ctype.expand_head env ty) with
+      | Tarrow (_, argument, result, _) -> argument :: arguments result (n - 1)
+      | _ -> fail ()
+  in
+  (* Top-level parameter refinements become premises; deeper ones cannot. *)
+  let rec refinements ty =
+    match get_desc (Ctype.expand_head env ty) with
+    | Tpoly (ty, []) -> refinements ty
+    | Trefine r ->
+      let rest, payload = refinements r.ref_payload in
+      r :: rest, payload
+    | _ -> [], ty
+  in
+  let scheme = description.val_type in
+  let generic, _ = parameters scheme arity in
+  if
+    not
+      (List.for_all
+         (fun (_, ty) -> refinement_free env (snd (refinements ty)))
+         generic)
+  then fail ();
+  (* Instantiate the lemma's type variables at the application's types. *)
+  let variables = ref [] in
+  let rec matching pattern target =
+    match get_desc pattern, get_desc target with
+    | Tvar _, _ when get_level pattern = Btype.generic_level ->
+      if not (List.exists (fun (v, _) -> eq_type v pattern) !variables)
+      then variables := (pattern, target) :: !variables
+    | Trefine { ref_payload; _ }, _ | Tpoly (ref_payload, []), _ ->
+      matching ref_payload target
+    | _, (Trefine { ref_payload; _ } | Tpoly (ref_payload, [])) ->
+      matching pattern ref_payload
+    | Tconstr (p, ps, _), Tconstr (p', ts, _)
+      when Path.same
+             (Env.normalize_type_path None env p)
+             (Env.normalize_type_path None env p')
+           && List.compare_lengths ps ts = 0 ->
+      List.iter2 matching ps ts
+    | Tconstr _, _ | _, Tconstr _ ->
+      let pattern' = Ctype.expand_head env pattern in
+      let target' = Ctype.expand_head env target in
+      if not (eq_type pattern pattern' && eq_type target target')
+      then matching pattern' target'
+    | Ttuple ps, Ttuple ts when List.compare_lengths ps ts = 0 ->
+      List.iter2 (fun (_, p) (_, t) -> matching p t) ps ts
+    | Tarrow (_, p, p', _), Tarrow (_, t, t', _) ->
+      matching p t;
+      matching p' t'
+    | _ -> ()
+  in
+  List.iter2
+    (fun (_, pattern) target -> matching pattern target)
+    generic (arguments fn_type arity);
+  let ty =
+    match List.split (List.rev !variables) with
+    | [], _ -> scheme
+    | variables, targets -> (
+      try Ctype.apply env variables scheme targets
+      with Ctype.Cannot_apply -> fail ())
+  in
+  let parameters, result = parameters ty arity in
+  let same_path p =
+    Path.same
+      (Env.normalize_value_path None env p)
+      (Env.normalize_value_path None env path)
+  in
+  let rec variable e =
+    match e.rexp_desc with
+    | Rexp_var id -> Some id
+    | Rexp_refinement (_, e) | Rexp_ghost e -> variable e
+    | _ -> None
+  in
+  match get_desc (Ctype.expand_head env result) with
+  | Trefine
+      ({ ref_pred =
+           { rexp_desc =
+               Rexp_logical_equal
+                 ( { rexp_desc =
+                       Rexp_apply ({ rexp_desc = Rexp_ident p; _ }, args);
+                     _
+                   },
+                   _ );
+             _
+           };
+         _
+       } as refinement)
+    when same_path p
+         && List.compare_lengths args parameters = 0
+         && List.for_all2
+              (fun (label, arg) (binder, _) ->
+                label = Asttypes.Nolabel
+                &&
+                match variable arg with
+                | Some id -> Ident.same id binder
+                | None -> false)
+              args parameters ->
+    ( List.map (fun (binder, ty) -> binder, fst (refinements ty)) parameters,
+      refinement )
+  | _ -> fail ()
+
+(* A local definition is not unfolded while its own lemma is checked, or when
+   its lemma is shadowed; a missing or unusable exported lemma is an error. *)
+let transparent_equation env loc path fn_type arity =
+  match unfolding_equation env loc path fn_type arity with
+  | equation -> Some equation
+  | exception Unusable_lemma -> (
+    match path with
+    | Path.Pident _ -> None
+    | _ ->
+      Location.raise_errorf ~loc
+        "The transparent definition %s cannot be unfolded: %s_def must be a \
+         total lemma stating its definition, with no refinement nested inside \
+         a parameter type"
+        (Path.name path) (Path.last path))
+
 let rec predicate ctx env s e =
   ctx.poll ();
   if impossible s
@@ -2117,6 +2305,13 @@ let rec predicate ctx env s e =
           let result =
             apply_function ctx env fn.rexp_type e.rexp_type prim value args
               ~total:true
+          in
+          let s =
+            match fn.rexp_desc with
+            | Rexp_ident path ->
+              unfold_transparent ctx env s path fn.rexp_type args result
+                e.rexp_loc
+            | _ -> s
           in
           let s =
             match prim with
@@ -2222,6 +2417,73 @@ let rec predicate ctx env s e =
            predicate. Use an explicit total function witness and a pointwise \
            lemma.")
     | _ -> unsupported e.rexp_loc
+
+and unfold_transparent ctx env s path fn_type args result loc =
+  match result with
+  | Some (Scalar (Call _ as call)) when not (impossible s) -> (
+    let path = Env.normalize_value_path None env path in
+    if
+      List.exists (Path.same path) ctx.unfolding
+      || Unfolded.mem (path, call) s.unfolded
+      || not (transparent_definition env path)
+    then s
+    else
+      match transparent_equation env loc path fn_type (List.length args) with
+      | None -> s
+      | Some (parameters, refinement) ->
+        let bound = List.fold_left2 bind s (List.map fst parameters) args in
+        let premises =
+          List.concat
+            (List.map2
+               (fun (_, refinements) arg ->
+                 List.map (fun r -> r, arg) refinements)
+               parameters args)
+        in
+        let assume s =
+          match premises with
+          | [] ->
+            let s = bind s refinement.ref_binder None in
+            assume_fact ctx env s refinement.ref_pred loc
+          | _ -> (
+            (* As [if premises then f_def args]: evaluating the premises is the
+               check an explicit call makes, and the lemma's refinement, with
+               every fact found while evaluating it, holds only when they do. *)
+            try
+              let s, premises =
+                List.fold_left
+                  (fun (s, terms) (r, arg) ->
+                    let s, premise =
+                      predicate ctx env (bind s r.ref_binder arg) r.ref_pred
+                    in
+                    s, required loc premise :: terms)
+                  (s, []) premises
+              in
+              fst
+                (choose ctx s
+                   (List.fold_left (both And) (Boolean true) premises)
+                   (fun s ->
+                     ( assume_fact ctx env
+                         (bind s refinement.ref_binder None)
+                         refinement.ref_pred loc,
+                       None ))
+                   (fun s -> s, None))
+            with Location.Error error ->
+              { bound with
+                omitted_premises = (loc, error) :: bound.omitted_premises
+              })
+        in
+        let outer = ctx.unfolding in
+        ctx.unfolding <- path :: outer;
+        let unfolded =
+          Fun.protect
+            ~finally:(fun () -> ctx.unfolding <- outer)
+            (fun () -> assume bound)
+        in
+        { unfolded with
+          values = s.values;
+          unfolded = Unfolded.add (path, call) unfolded.unfolded
+        })
+  | _ -> s
 
 and expose ctx env s ty value loc =
   match get_desc (Ctype.expand_head env ty) with
@@ -2336,7 +2598,7 @@ and predicate_cases ctx env s value cases =
       guarded_case ctx (predicate ctx env) (predicate ctx env)
         case.rc_rhs.rexp_loc s matched case.rc_guard case.rc_rhs rest
 
-and expose_fact ctx env s ty value loc =
+and assume_fact ctx env s p loc =
   (* Dropping an unsupported premise is conservative; goals remain strict. *)
   let rec assume s p =
     try
@@ -2361,6 +2623,10 @@ and expose_fact ctx env s ty value loc =
     with Location.Error error ->
       { s with omitted_premises = (loc, error) :: s.omitted_premises }
   in
+  assume s p
+
+and expose_fact ctx env s ty value loc =
+  let assume s p = assume_fact ctx env s p loc in
   let ty = Ctype.expand_head env ty in
   match get_desc ty, scalar value with
   | Trefine _, Some term when Exposed.mem (get_id ty, term) s.exposed ->
@@ -2895,6 +3161,9 @@ and expression_desc ?deferred ctx s e =
             s := checked
           | Arg _ -> ())
         args;
+      let complete =
+        Array.for_all (function _, Arg _ -> true | _, Omitted _ -> false) args
+      in
       let s, args = !s, Array.to_list values in
       if not s.dead then ctx.check_call ctx s e args;
       let prim = stored_primitive prim fn_value in
@@ -2904,6 +3173,13 @@ and expression_desc ?deferred ctx s e =
       let value =
         apply_function ctx e.exp_env fn.exp_type e.exp_type prim fn_value args
           ~total
+      in
+      let s =
+        match fn.exp_desc with
+        | Texp_ident { path; _ } when complete ->
+          unfold_transparent ctx e.exp_env s path fn.exp_type args value
+            e.exp_loc
+        | _ -> s
       in
       match prim with
       | Some ("caml_vox_sequence_length", 1) ->
@@ -3728,7 +4004,8 @@ let context ~poll ~prove ~verify_introductions =
     symbolic = Symbolic_keys.create 16;
     prove;
     verify_introductions;
-    check_call = (fun _ _ _ _ -> ())
+    check_call = (fun _ _ _ _ -> ());
+    unfolding = []
   }
 
 let generate ?(poll = fun () -> ()) ~prove str =

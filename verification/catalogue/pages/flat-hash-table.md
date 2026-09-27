@@ -41,12 +41,12 @@ The test requires 13 such programs to be rejected, each with its exact error. Si
  (catch (exit 191 (seq 1 [])) with(191)
    (let
      (allocated/9235
-        (extcall "caml_vox_table_create"{flat_hashtbl_public.ml:147,26-47;vox_verified_flat_hashtbl.ml:122,12-29;vox_table_mutation.ml:55,20-37}
+        (extcall "caml_vox_table_create"{flat_hashtbl_public.ml:147,26-47;vox_verified_flat_hashtbl.ml:125,12-29;vox_table_mutation.ml:55,20-37}
           33 int->val)
       Pmixedfield/9236 (load val allocated/9235))
      (catch
        (exit 192
-         (app{flat_hashtbl_public.ml:148,10-55;vox_verified_flat_hashtbl.ml:171,12-63}
+         (app{flat_hashtbl_public.ml:148,10-55;vox_verified_flat_hashtbl.ml:174,12-63}
            G:"camlFlat_hashtbl_public__replace_9_92_code" Pmixedfield/9236
            key/9231 value/9232 unit))
 ```
@@ -57,7 +57,7 @@ The test checks that this client makes no call through a closure of the functor 
 
 @code verification/library/vox_verified_flat_hashtbl.mli
 
-`Pref.Heap` is a finite map from locations to values, `P.own token` is the heap a token owns, and `Ghost_pref` provides erased tokens: `empty` makes one that owns nothing, and `split` and `join` divide and recombine ownership. `Bigint` is unbounded integers, used for sizes.
+`Pref.Heap` is a finite map from locations to values, `P.own token` is the heap a token owns, and `Ghost_pref` provides erased tokens: `empty` makes one that owns nothing, and `split` and `join` divide and recombine ownership. `current table view heap`, the token precondition of every operation but `create`, says that the heap holds `version view` at `location table`; it is a transparent definition (`[@@def transparent]`), which the checker unfolds wherever it is used. `Bigint` is unbounded integers, used for sizes.
 
 ## Trusted base
 
