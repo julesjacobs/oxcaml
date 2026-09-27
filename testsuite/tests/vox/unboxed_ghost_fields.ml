@@ -57,11 +57,23 @@ Error: The value "print_endline" is "partial"
          because it is used in an expression (at line 1, characters 34-67).
 |}]
 
+(* A ghost field has no slot, but its type still bounds the record's mode
+   crossing: a ghost-field read takes the record's mode. *)
 type opaque;;
 type crossing : (value & void) mod portable = #{ live : int; hidden : opaque @@ ghost };;
 [%%expect{|
 type opaque
-type crossing = #{ live : int; hidden : opaque @@ ghost; }
+Line 2, characters 0-87:
+2 | type crossing : (value & void) mod portable = #{ live : int; hidden : opaque @@ ghost };;
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This type definition does not satisfy its kind annotation
+         value mod portable & void mod portable,
+       because opaque is not mod portable.
+|}]
+
+type crossing : (value & void) mod portable = #{ live : int; hidden : string @@ ghost };;
+[%%expect{|
+type crossing = #{ live : int; hidden : string @@ ghost; }
 |}]
 
 type indexed = { payload : r };;

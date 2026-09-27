@@ -247,9 +247,21 @@ Error: This value is "local" to the parent region
        However, the highlighted expression is expected to be "global".
 |}]
 
+(* A ghost field has no slot, but its type still bounds the record's mode
+   crossing: a ghost-field read takes the record's mode. *)
 type opaque
 type crossing : value mod portable = { live : int; hidden : opaque @@ ghost }
 [%%expect{|
 type opaque
-type crossing = { live : int; hidden : opaque @@ ghost; }
+Line 2, characters 0-77:
+2 | type crossing : value mod portable = { live : int; hidden : opaque @@ ghost }
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This type definition does not satisfy its kind annotation
+         value mod portable,
+       because opaque is not mod portable.
+|}]
+
+type crossing : value mod portable = { live : int; hidden : string @@ ghost }
+[%%expect{|
+type crossing = { live : int; hidden : string @@ ghost; }
 |}]

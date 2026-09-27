@@ -76,11 +76,22 @@ type annotated_callback = {
 type annotated_callbacks = annotated_callback cell
 |}]
 
+(* A ghost function field has no slot, but its type still bounds the
+   record's kind: a ghost-field read takes the record's mode, so a record
+   holding a once or nonportable ghost function is not immutable data. *)
 type ghost_callback = { n : int; f : (unit -> unit) @@ ghost };;
 type ghost_callbacks = ghost_callback cell;;
 [%%expect{|
 type ghost_callback = { n : int; f : unit -> unit @@ ghost; }
-type ghost_callbacks = ghost_callback cell
+Line 2, characters 23-37:
+2 | type ghost_callbacks = ghost_callback cell;;
+                           ^^^^^^^^^^^^^^
+Error: This type "ghost_callback" should be an instance of type
+         "('a : immutable_data)"
+       The kind of ghost_callback is value non_float mod immutable
+         because of the definition of ghost_callback at line 1, characters 0-62.
+       But the kind of ghost_callback must be a subkind of immutable_data
+         because of the definition of cell at line 1, characters 0-31.
 |}]
 
 type mutable_payload = { mutable n : int };;
