@@ -1,8 +1,10 @@
 {
   "name": "vox-playground",
   "private": true,
-  "description": "Build-time dependencies of the Vox playground (Z3 compiled to WebAssembly).",
+  "description": "Files the Vox playground ships: Z3 compiled to WebAssembly, the CodeMirror 5 editor, and coi-serviceworker for hosts without COOP/COEP headers.",
   "dependencies": {
+    "codemirror": "5.65.21",
+    "coi-serviceworker": "0.1.7",
     "z3-solver": "4.16.0"
   }
 }

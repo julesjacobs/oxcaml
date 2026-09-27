@@ -11,8 +11,11 @@
    status (0: accepted, 2: rejected, 3: not checked, see below) and the
    compiler's messages exactly as ocamlc prints them on standard error. With
    [lambda] true it also returns the program after erasure, as
-   [ocamlc -dlambda] prints it. Z3 is reached through [globalThis.voxZ3Eval]
-   (see vox_smt_solver.ml).
+   [ocamlc -dlambda -dcanonical-ids] prints it. Z3 is reached through
+   [globalThis.voxZ3Eval] (see vox_smt_solver.ml).
+
+   Every check starts from the compiler's state at startup (see [reset]), so
+   its result does not depend on earlier checks.
 
    Under js_of_ocaml, OCaml's [int] and [nativeint] have 32 bits on the host.
    The verifier models the target's 63-bit integers with [Int64] throughout,
@@ -49,7 +52,10 @@ let initialize () =
       (fun name -> failwith ("unexpected argument " ^ name))
       "ocamlc";
     if not (Sys.file_exists work_directory) then Sys.mkdir work_directory 0o755;
-    Sys.chdir work_directory
+    Sys.chdir work_directory;
+    (* The first call snapshots the typer's global state (see
+       utils/local_store.mli); [check] starts every run from it. *)
+    ignore (Local_store.fresh ())
   end
 
 (* A limitation of this build, reported instead of a verdict. *)
@@ -152,7 +158,7 @@ let check_literals structure =
   in
   iterator.structure iterator structure
 
-(* The program after erasure, as [ocamlc -dlambda] prints it. *)
+(* The program after erasure, as [ocamlc -dlambda -dcanonical-ids] prints it. *)
 let lambda_of info (typed : Typedtree.implementation) =
   let loc =
     Location.in_file
@@ -167,7 +173,13 @@ let lambda_of info (typed : Typedtree.implementation) =
     Slambda.eval ~cu_static_data:(fun _ -> None) Fun.id program.Lambda.code
   in
   let lambda = Simplif.simplify_lambda_for_bytecode lambda in
-  Format.asprintf "%a@." Printlambda.lambda lambda
+  (* As [-dcanonical-ids] prints them: identifiers are numbered per name,
+     independently of the identifiers earlier checks created. *)
+  let canonical = !Clflags.canonical_ids in
+  Clflags.canonical_ids := true;
+  Fun.protect
+    ~finally:(fun () -> Clflags.canonical_ids := canonical)
+    (fun () -> Format.asprintf "%a@." Printlambda.lambda lambda)
 
 let compile ~source_file =
   let output_prefix = Filename.remove_extension source_file in
@@ -185,10 +197,11 @@ let compile ~source_file =
     ~backend:(fun info typed -> lambda := Some (lambda_of info typed));
   !lambda
 
+(* Each check starts from the state the compiler has on startup, so that it
+   behaves as a fresh ocamlc process: the typer's global state is restored
+   from the snapshot, and warnings and the location printer are reset. *)
 let reset () =
   Buffer.clear stderr_buffer;
-  (* Interfaces read from disk are kept: they do not change between checks. *)
-  Env.reset_cache ~preserve_persistent_env:true;
   Warnings.reset_fatal ();
   Location.reset ()
 
@@ -196,10 +209,16 @@ let check name source want_lambda =
   initialize ();
   reset ();
   let source_file = Filename.basename name in
+  (* Only this source is in the working directory, as when ocamlc compiles a
+     file alone in its directory. *)
+  Array.iter Sys.remove (Sys.readdir ".");
   Out_channel.with_open_bin source_file (fun channel ->
       output_string channel source);
   let status, lambda =
-    match compile ~source_file with
+    match
+      Local_store.with_store (Local_store.fresh ()) (fun () ->
+          compile ~source_file)
+    with
     | lambda -> 0, lambda
     | exception (Unsupported _ as exn) ->
       Location.report_exception Format.err_formatter exn;

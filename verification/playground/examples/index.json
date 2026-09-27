@@ -1,0 +1,18 @@
+[
+  {"file": "refinements.ml", "title": "Refinement types",
+   "summary": "Pre- and postconditions as types, proved at compile time."},
+  {"file": "counterexample.ml", "title": "A counterexample",
+   "summary": "x + 1 > x fails at max_int: ints are 63-bit machine integers."},
+  {"file": "division.ml", "title": "Division by zero",
+   "summary": "A standard-library precondition that the caller cannot establish."},
+  {"file": "lemma.ml", "title": "[@def] and a lemma",
+   "summary": "Definition equations and a proof by induction, erased at call sites."},
+  {"file": "termination.ml", "title": "Termination measures",
+   "summary": "[@@decreases] for Euclid and binary search; Collatz is rejected."},
+  {"file": "ghost_erasure.ml", "title": "Ghost code is erased",
+   "summary": "Ghost fields and proof calls disappear from the compiled program."},
+  {"file": "ghost_token.ml", "title": "An affine ghost token",
+   "summary": "A unique ghost permit cannot be used twice."},
+  {"file": "unreachable.ml", "title": "Unreachable code",
+   "summary": "unreachable_ () must be proved impossible."}
+]

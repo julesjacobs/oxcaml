@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vox playground</title>
+<!-- Z3's WebAssembly build uses threads, which need cross-origin isolation.
+     On hosts that cannot send the COOP/COEP headers, this service worker
+     adds them (it reloads the page once). -->
+<script src="coi-serviceworker.min.js"></script>
+<link rel="stylesheet" href="catalogue.css">
+<link rel="stylesheet" href="codemirror/codemirror.css">
+<link rel="stylesheet" href="playground.css">
+</head>
+<body>
+<main class="playground">
+  <header class="overview-head">
+    <h1>Vox playground</h1>
+    <nav><a id="catalogue-link" href="../catalogue/index.html">Demonstrations</a></nav>
+  </header>
+  <p class="overview-intro">Vox is OxCaml with refinement types checked by Z3 at
+    compile time, erased ghost code and affine ghost ownership. Pick an example,
+    edit it and check it. <strong>Everything runs in your browser:</strong> the
+    Vox compiler's front end and verifier are compiled to JavaScript with
+    js_of_ocaml, and Z3 is compiled to WebAssembly. Nothing is sent to a
+    server.</p>
+
+  <div class="workspace">
+    <section class="source" aria-label="Program">
+      <div class="toolbar">
+        <label for="example">Example</label>
+        <select id="example"></select>
+        <button id="check" type="button" disabled>Check</button>
+        <button id="restore" type="button" title="Discard your edits to this example">Restore</button>
+        <span class="shortcut" id="shortcut">Ctrl+Enter</span>
+      </div>
+      <p class="example-summary" id="summary"></p>
+      <div class="editor" id="editor"></div>
+    </section>
+
+    <section class="result" aria-label="Result" aria-live="polite">
+      <div class="verdict" id="verdict" data-state="loading">
+        <strong id="verdict-text">Loading the checker…</strong>
+        <p id="verdict-detail">Z3 is about 8 MB compressed; later visits use the browser's cache.</p>
+        <button id="stop" type="button" hidden>Stop</button>
+      </div>
+      <pre class="diagnostics" id="diagnostics" hidden></pre>
+      <details class="erased" id="erased" hidden>
+        <summary>Erased program</summary>
+        <p class="erased-note">The Lambda code the compiler generates, as
+          <code>ocamlc -dlambda -dcanonical-ids</code> prints it. Ghost code is
+          gone: <code>ghost_</code> expressions became placeholders
+          (<code>obj_magic 24029</code>) and ghost fields occupy no slot.</p>
+        <pre id="lambda"></pre>
+      </details>
+      <div class="about">
+        <p>A check does what <code id="command">ocamlc -extension refinement_types -c main.ml</code>
+          does up to code generation, and shows its messages exactly as the
+          compiler prints them. Locations in the messages link to the code.</p>
+        <p id="versions"></p>
+      </div>
+    </section>
+  </div>
+</main>
+<script src="codemirror/codemirror.js"></script>
+<script src="codemirror/mllike.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

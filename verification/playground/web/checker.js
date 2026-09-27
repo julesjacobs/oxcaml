@@ -12,21 +12,43 @@
 
 async function createChecker({ initZ3, loadChecker, fetchBytes, z3Options = {} }) {
   const z3 = await initZ3(z3Options);
-  const config = z3._Z3_mk_config();
-  const context = z3._Z3_mk_context_rc(config);
-  z3._Z3_del_config(config);
-  const evaluate = (ctx, text) => z3.ccall('Z3_eval_smtlib2_string', 'string', ['number', 'string'], [ctx, text]);
+  // Z3 runs timeouts (its :timeout option, and the time limits inside its
+  // default tactics) on timer threads, which it starts on first use and then
+  // reuses. Each thread is a worker. A worker started while this one runs a
+  // synchronous check could not load until the check returned, so Z3 would
+  // wait for it forever: start the workers now.
+  if (z3.PThread) {
+    for (let i = 0; i < 4; i++) z3.PThread.allocateUnusedWorker();
+    await Promise.all(z3.PThread.unusedWorkers.map((worker) => z3.PThread.loadWasmModuleToWorker(worker)));
+  }
+  const evaluate = (context, text) =>
+    z3.ccall('Z3_eval_smtlib2_string', 'string', ['number', 'string'], [context, text]);
+  const newContext = () => {
+    const config = z3._Z3_mk_config();
+    const context = z3._Z3_mk_context_rc(config);
+    z3._Z3_del_config(config);
+    return context;
+  };
+  let context = newContext();
   const version = evaluate(context, '(get-info :version)').trim();
 
   let queries = 0;
   let solverMs = 0;
   // The verifier's only way to the solver: SMT-LIB text in, Z3's output out.
+  // Each query starts with (reset). A Z3 process restarts its resource count
+  // there, but a context of the API keeps counting across resets, so every
+  // query gets a fresh context: resource counts and limits then mean what
+  // they mean natively.
   globalThis.voxZ3Eval = (text) => {
     const started = performance.now();
     try {
+      if (text.startsWith('(reset)')) {
+        z3._Z3_del_context(context);
+        context = newContext();
+        queries += 1;
+      }
       return evaluate(context, text);
     } finally {
-      queries += 1;
       solverMs += performance.now() - started;
     }
   };

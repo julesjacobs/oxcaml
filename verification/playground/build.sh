@@ -2,6 +2,7 @@
 # Builds the Vox playground as a directory of static files.
 #
 #   verification/playground/build.sh [--out DIR] [--library-prefix PREFIX]
+#                                    [--catalogue-url URL]
 #
 # Needs a configured checkout (see AGENTS.md) and the oxcaml-5.4.0+oxcaml
 # opam switch with js_of_ocaml 6.3.2, plus node and npm. Steps:
@@ -12,9 +13,11 @@
 #    interfaces come from the runtime_stdlib context, built by that front end.
 # 2. Link vox_playground.ml with those libraries into a bytecode executable
 #    and compile it to JavaScript.
-# 3. Install z3-solver 4.16.0 from npm (the Z3 version the native Vox uses).
-# 4. Copy the page, the interfaces and Z3 into DIR (default
-#    _build/playground/site).
+# 3. Install from npm (package-lock.json): z3-solver 4.16.0, the Z3 version
+#    the native Vox uses; CodeMirror 5; coi-serviceworker.
+# 4. Copy the page, the examples, the interfaces and those files into DIR
+#    (default _build/playground/site). The page links to the demonstration
+#    catalogue at URL (default ../catalogue/index.html).
 #
 # The verified library's interfaces are included when PREFIX/lib/ocaml/vox
 # exists (verification/library/build.sh PREFIX installs them there).
@@ -24,10 +27,12 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 out=$root/_build/playground/site
 library_prefix=
+catalogue_url=../catalogue/index.html
 while [[ $# -gt 0 ]]; do
   case $1 in
     --out) out=$2; shift 2 ;;
     --library-prefix) library_prefix=$2; shift 2 ;;
+    --catalogue-url) catalogue_url=$2; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -74,15 +79,24 @@ js_of_ocaml --opt=3 --no-sourcemap \
   -o "$work/vox.js" "$work/vox_playground.bc" 2>&1 \
   | grep -v "^Warning: your program contains effect handlers" || true
 
-echo "== Z3"
+echo "== Z3, CodeMirror and coi-serviceworker from npm"
 (cd "$here" && npm ci --ignore-scripts --no-audit --no-fund --silent)
 z3=$here/node_modules/z3-solver/build
 
 echo "== site in $out"
 rm -rf "$out"
 mkdir -p "$out/lib"
+modules=$here/node_modules
 cp "$work/vox.js" "$z3/z3-built.js" "$z3/z3-built.wasm" "$out/"
+cp "$modules/coi-serviceworker/coi-serviceworker.min.js" "$out/"
+mkdir -p "$out/codemirror"
+cp "$modules/codemirror/lib/codemirror.js" "$modules/codemirror/lib/codemirror.css" \
+  "$modules/codemirror/mode/mllike/mllike.js" "$out/codemirror/"
 cp "$here"/web/* "$out/"
+sed -i.orig "s|href=\"../catalogue/index.html\"|href=\"$catalogue_url\"|" "$out/index.html"
+rm "$out/index.html.orig"
+mkdir -p "$out/examples"
+cp "$here"/examples/*.ml "$here/examples/index.json" "$out/examples/"
 cp "$root/verification/catalogue/style.css" "$out/catalogue.css"
 # The interfaces, as one bundle with an index: the standard library, and the
 # verified library when it is installed.
