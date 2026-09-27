@@ -74,8 +74,10 @@ this file.
   - [x] functional-queue, merge-sort, quicksort, sparse-arrays:
         **owner-review** (merged `bf28fa14ea`; merge-sort and quicksort
         each had a false "no test rejects …" claim).
-  - [ ] In flight (27 September, evening): myers-diff · http · lz4 |
-        avl-sets · rings · lists-trees.
+  - [x] avl-sets, rings, lists-trees: **owner-review** (merged
+        `217d986873`; rings and lists had stale quoted messages; the
+        structures erasure check strengthened to an allow-list).
+  - [ ] In flight (27 September, evening): myers-diff · http · lz4.
   - [ ] Also in flight: egraphs | sat-solver | dfa-equivalence ·
         reference-locks (after deduplication and the inventory comments).
   - [ ] hm-wasm-compiler, after item 3.
