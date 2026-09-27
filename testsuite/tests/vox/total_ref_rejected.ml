@@ -2,7 +2,7 @@
  has-z3;
  setup-ocamlc.opt-build-env;
  flags = "-extension refinement_types -principal";
- module = "sat_cdcl_totality_rejected.ml";
+ module = "total_ref_rejected.ml";
  ocamlc_opt_exit_status = "2";
  ocamlc.opt;
  check-ocamlc.opt-output;
