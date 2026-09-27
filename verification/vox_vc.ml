@@ -2815,6 +2815,21 @@ and expression_desc ?deferred ctx s e =
     in
     s, opaque ()
   | Texp_exclave body -> result s body
+  | Texp_assert
+      ( { exp_desc = Texp_construct (_, { cstr_name = "false"; _ }, _, _, _); _ },
+        _ ) ->
+    (* Compiled to a raise, even under [-noassert]. *)
+    branch s (Boolean false), None
+  | Texp_assert (condition, _) when not !Clflags.noassert ->
+    (* The continuation runs only if the condition evaluated to true. Under
+       [-noassert] the condition is not evaluated at all. *)
+    let s, condition = eval s condition in
+    let s =
+      match scalar condition with
+      | Some condition when not s.dead -> branch s condition
+      | _ -> s
+    in
+    s, opaque ()
   | _ ->
     (* Unknown evaluation/control-flow forms lose outgoing facts, but cannot
        hide obligations in their children or delayed bodies. *)
