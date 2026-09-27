@@ -1,3 +1,10 @@
+(* The model that the public interface exposes. [observe nodes parents
+   count] is the trusted [Vox_egraph_match_spec.graph] whose node array is
+   the store's and whose class label at each id below [count] is its
+   union-find root ([labels]). The lemmas read the model's class labels,
+   class equality and nodes back as roots and array reads. The model is
+   ghost; [labels] is never computed at run time. *)
+
 module I = Vox_iarray
 module M = Vox_egraph_union_spec
 module Q = Vox_egraph_match_spec

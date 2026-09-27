@@ -1,3 +1,10 @@
+(* A bounded version of [Vox_egraph_match_scan.classes] with an exact cost:
+   it returns [Exhausted] exactly when [fuel] is below
+   [Vox_egraph_match_budget_spec.work], and otherwise the trusted matcher's
+   class list with [fuel - work] left. A diagnostic, exercised by
+   testsuite/tests/vox/egraph_match_observation.ml; saturation does not use
+   it. *)
+
 module Q = Vox_egraph_match_spec
 module O = Vox_egraph_match_observation
 module Scan = Vox_egraph_match_scan

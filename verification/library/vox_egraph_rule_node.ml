@@ -1,3 +1,12 @@
+(* E-nodes, with children given as ids. [key] encodes a node injectively as
+   a [Vox_egraph_key.t] ([key_exact]). [canonical] replaces the children by
+   their union-find roots and [signature] is the key of that; equal
+   signatures are how rebuilding detects congruent nodes. [origin] builds a
+   node's expression from its children's ghost origins. [well_typed] checks
+   the children against the [sorts] array and [children_below] that they
+   are smaller ids; the frame lemmas show that writing at an index above a
+   node's children changes neither its origin nor its typing. *)
+
 module K = Vox_egraph_key
 module L = Vox_egraph_language_spec
 module LP = Vox_egraph_language_proof
@@ -5,6 +14,8 @@ module S = Vox_egraph_rule_semantics
 module I = Vox_iarray
 module U = Vox_egraph_union_spec
 
+(* The model's node type, so the store's node array is the model's without
+   conversion. *)
 type t = Vox_egraph_match_spec.node =
   | Int_lit of int
   | Bool_lit of bool

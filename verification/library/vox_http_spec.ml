@@ -27,17 +27,17 @@ let[@def] token b =
   || b = 38 || b = 39 || b = 42 || b = 43 || b = 45 || b = 46
   || b = 94 || b = 95 || b = 96 || b = 124 || b = 126
 let[@def] visible b = 33 <= b && b <= 126
-let[@def] value_byte b = b = 9 || (32 <= b && b <= 126) || (128 <= b && b <=
-  255)
+let[@def] value_byte b =
+  b = 9 || (32 <= b && b <= 126) || (128 <= b && b <= 255)
 let[@def] lower b = if 65 <= b && b <= 90 then b + 32 else b
-let[@def] rec lower_all xs = match xs with [] -> [] | b :: bs -> lower b ::
-  lower_all bs
-let[@def] rec all_token xs = match xs with [] -> true | b :: bs -> token b &&
-  all_token bs
-let[@def] rec all_visible xs = match xs with [] -> true | b :: bs -> visible b
-  && all_visible bs
-let[@def] rec all_value xs = match xs with [] -> true | b :: bs -> value_byte b
-  && all_value bs
+let[@def] rec lower_all xs =
+  match xs with [] -> [] | b :: bs -> lower b :: lower_all bs
+let[@def] rec all_token xs =
+  match xs with [] -> true | b :: bs -> token b && all_token bs
+let[@def] rec all_visible xs =
+  match xs with [] -> true | b :: bs -> visible b && all_visible bs
+let[@def] rec all_value xs =
+  match xs with [] -> true | b :: bs -> value_byte b && all_value bs
 let[@def] nonempty (xs : bytes) = match xs with [] -> false | _ :: _ -> true
 let[@def] rec split (delimiter : int) (xs : bytes) =
   match xs with
@@ -63,8 +63,8 @@ let[@def] header line =
   then Some (lower_all name, trim value) else None
 let[@def] rec has_colon line =
   match line with [] -> false | b :: bs -> b = 58 || has_colon bs
-let[@def] valid_header line = has_colon line && (match header line with None ->
-  false | Some _ -> true)
+let[@def] valid_header line =
+  has_colon line && (match header line with None -> false | Some _ -> true)
 let[@def] request_parts request =
   let (meth, rest) = split 32 request.request_line in
   let (target, _) = split 32 rest in
@@ -80,8 +80,8 @@ let[@def] rec decimal value digits =
     else decimal (value * 10 + b - 48) bs
 let[@def] content_length digits =
   if nonempty digits then decimal 0 digits else Bad Invalid_content_length
-let[@def] is_cl name = equal_bytes name
-  [99;111;110;116;101;110;116;45;108;101;110;103;116;104]
+let[@def] is_cl name =
+  equal_bytes name [99;111;110;116;101;110;116;45;108;101;110;103;116;104]
 let[@def] is_host name = equal_bytes name [104;111;115;116]
 let[@def] rec has_name (which : bytes) (headers : int list list) =
   match headers with
@@ -111,35 +111,45 @@ let[@def] framing headers =
   if has_name [116;114;97;110;115;102;101;114;45;101;110;99;111;100;105;110;103]
     headers then
     if has_name [99;111;110;116;101;110;116;45;108;101;110;103;116;104] headers
-    then Bad Transfer_encoding_content_length else Bad
-      Unsupported_transfer_encoding
+    then Bad Transfer_encoding_content_length
+    else Bad Unsupported_transfer_encoding
   else frame_fields headers None 0
 let[@def] rec wire_headers headers tail =
-  match headers with [] -> 13 :: 10 :: tail
-  | line :: rest -> Vox_sequence.append line (13 :: 10 :: wire_headers rest
-    tail)
+  match headers with
+  | [] -> 13 :: 10 :: tail
+  | line :: rest ->
+    Vox_sequence.append line (13 :: 10 :: wire_headers rest tail)
+let[@def] rec header_prefix headers tail =
+  match headers with
+  | [] -> tail
+  | line :: rest ->
+    Vox_sequence.append line (13 :: 10 :: header_prefix rest tail)
 let[@def] serialize request =
-  Vox_sequence.append request.request_line (13 :: 10 :: wire_headers
-    request.headers
-    request.body)
+  Vox_sequence.append request.request_line
+    (13 :: 10 :: wire_headers request.headers request.body)
 let[@def] rec safe_line line =
-  match line with [] -> true | b :: bs -> byte b && b <> 13 && b <> 10 &&
-    safe_line bs
+  match line with
+  | [] -> true
+  | b :: bs -> byte b && b <> 13 && b <> 10 && safe_line bs
 let[@def] rec header_lines headers =
-  match headers with [] -> true
-  | line :: rest -> nonempty line && safe_line line && valid_header line &&
-    header_lines rest
+  match headers with
+  | [] -> true
+  | line :: rest ->
+    nonempty line && safe_line line && valid_header line && header_lines rest
 let[@def] rec sized n bytes =
-  match bytes with [] -> n = 0
+  match bytes with
+  | [] -> n = 0
   | b :: rest -> n > 0 && byte b && sized (n - 1) rest
 let[@def] rec fits budget bytes =
-  match bytes with [] -> budget >= 0
+  match bytes with
+  | [] -> budget >= 0
   | _ :: rest -> budget > 0 && fits (budget - 1) rest
 let[@def] well_formed request =
   valid_request_line request.request_line && safe_line request.request_line
   && header_lines request.headers
-  && (match framing request.headers with Length n -> sized n request.body | _ ->
-    false)
+  && (match framing request.headers with
+      | Length n -> sized n request.body
+      | _ -> false)
   && fits 16384 (serialize request)
 
 let[@def] has_transfer_encoding headers =

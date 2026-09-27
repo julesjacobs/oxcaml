@@ -1,6 +1,6 @@
 title: Regular expressions and automata
 blurb: A regular-expression matcher proved to accept exactly the words its membership rules derive, and a conversion to DFA tables that, when it returns a table, returns a valid one with the same language.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/regex_semantics.ml — Regular expressions and the membership rules
@@ -16,13 +16,13 @@ sources:
 ---
 `Regex_language.matches r w` decides whether the regular expression `r` matches the word `w`, where symbols are `int`s and the syntax is `Empty`, `Epsilon`, `Symbol`, `Alt`, `Seq` and `Star`. It is proved to agree with an inductive membership relation: `Membership.valid r p` says that `p` derives a word from `r` by the usual rules, and `Membership.word p` is that word. `sound` returns an erased derivation of `w` whenever `matches r w` is true, and `complete` shows that `matches r w` is true whenever such a derivation exists. The matcher uses Brzozowski derivatives.
 
-`lower r` converts `r` to a table in the format of the [DFA equivalence and minimization](dfa-equivalence.html) demo, or returns `None`. If `lower r` returns `Some m`, then `lower_matches` says that `Dfa_semantics.run m w = matches r w` for every word `w`, and `lower_valid` says that `m` is `valid` in the sense the DFA operations require, so a client can pass it to `compare` and `reduce` without checking it. Nothing in the interface says that `lower` returns `Some`, so `fun _ -> None` still satisfies the interface. The implementation proves that it builds a table for every regex and returns `None` only if that table fails the validity check. That the check passes is not proved: rows are numbered with machine `int`s, which wrap, so the numbers are distinct only for tables of fewer than 2^63 rows, and no bound on the table in terms of the regex is proved.
+`lower r` converts `r` to a table in the format of the [DFA equivalence and minimization](dfa-equivalence.html) demo, or returns `None`. If `lower r` returns `Some m`, then `lower_matches` says that `Dfa_semantics.run m w = matches r w` for every word `w`, and `lower_valid` says that `m` is `valid` in the sense the DFA operations require, so a client can pass it to `compare` and `reduce` without checking it. Nothing in the interface says that `lower` returns `Some`, so `fun _ -> None` still satisfies the interface. The implementation proves that it builds a table for every regex and returns `None` only if that table fails the validity check. That the check passes is not proved, and in Vox's logic it fails for very large regexes: rows are numbered with machine `int`s, which wrap, so the numbers are distinct only for tables of at most 2^63 rows (see the open question below).
 
 Lowering builds one row for every subset of the list `r :: support r`, which holds `r` and the terms its partial derivatives can reach, plus two rows. A literal of `n` symbols therefore gives 2^(n+1) + 2 rows: `a` gives 6, `abcd` 34, `abcde` 66 and a 12-symbol literal 8,194. `Dfa_equivalence.reduce` accepts at most 64 rows, so lowering `abcde` and then minimizing returns `None`. Running time and memory are not proved.
 
 ## An open question: sizes of in-memory data
 
-Proving that `lower` always succeeds runs into a problem that is not specific to this demo. Row numbers are OCaml `int`s, which wrap at 2^63, so "all row numbers differ" holds only for tables of fewer than 2^63 rows. No table that large can exist in memory, but the checker cannot use that fact. Tables are lists, and ghost code (which is erased and never allocates) can build lists of any length, so "every list is shorter than 2^62" would be false in Vox's logic. Immutable arrays do not have this problem, because ghost code cannot allocate them, and Vox can bound their length soundly.
+Proving that `lower` always succeeds runs into a problem that is not specific to this demo. Row numbers are OCaml `int`s, which have 2^63 values and wrap from `max_int` to `min_int`, so "all row numbers differ" holds only for tables of at most 2^63 rows. In Vox's logic, "`lower` always returns `Some`" is therefore false, not just unproved: a regex with `u` of at least 63 (a 62-symbol literal, for example) has more rows than that, its row numbers repeat, and `lower` returns `None`. No table that large can exist in memory, so at run time such a call never returns, but the checker cannot use that fact. Tables are lists, and ghost code (which is erased and never allocates) can build lists of any length, so "every list is shorter than 2^62" would be false in Vox's logic. Immutable arrays do not have this problem: an array is built by a literal of fixed length, by an allocation that ghost code cannot call because it may raise, or by a total operation that keeps or shrinks a length, so Vox can bound every array's length soundly.
 
 The options each have a cost: a size premise on every such theorem, which clients must discharge; unbounded integers for identifiers, at a run-time cost; or a new mode for values that only run-time code can produce, whose size the checker could then bound. Which of these a verified-programming language for OCaml should adopt is an open design question.
 
@@ -30,11 +30,11 @@ The options each have a cost: a size premise on every such theorem, which client
 
 From the public client. `{u : unit | p}` is `unit` refined by the predicate `p`: returning it proves `p`. `===` is logical equality. `ghost_ (...)` is proof code, checked and then erased; the value it computes here is a `unit` whose refinement is written after the `:`. `@ total` after the function name declares it total: it terminates without raising or touching mutable state. The statement holds for every regex, limit and word, but it says nothing when either step returns `None`. `reduce` returns `None` when `limit` is not between 1 and 64 or the lowered table has more than `limit` rows, so every regex with more than 64 lowered rows is excluded.
 
-@code testsuite/tests/vox/regex_public_client.ml "let (minimized_regex @ total)" "let u = () in u"
+@code testsuite/tests/vox/regex_public_client.ml "let (minimized_regex @ total)" "  ()"
 
 The next theorem needs `lower_valid`: `reduce_complete` from the DFA interface requires a `valid` source, and here that premise is gone. The others remain: every row must list at most 64 symbols, and the table must fit in `limit`.
 
-@code testsuite/tests/vox/regex_public_client.ml "let (lowered_reduction_finishes @ total)" "let u = () in u"
+@code testsuite/tests/vox/regex_public_client.ml "let (lowered_reduction_finishes @ total)" "  ()"
 
 ## A rejected program
 
@@ -73,8 +73,8 @@ Each file wraps its contents in a module (`regex_core.ml` defines `Regex`) becau
 
 - Operations: `matches` and `lower`. There is no search within a longer word, no submatch positions, no character classes and no parser; symbols are `int`s.
 - Inside `regex_core.ml`, `Regex.Dfa.correct` proves that the internal automaton accepts exactly the words `matches` accepts, for every regex. The condition on `Some` comes from the validity check on the converted table (see above).
-- Lowered tables have 2^u + 2 rows, where `u` is the length of `r :: support r`. Combined with `reduce`, only regexes with `u` at most 5 are within the DFA demo's 64-row limit.
-- Every lowered row lists each symbol that occurs in `r` as an explicit edge, so a regex with more than 64 distinct symbols lowers to a table without `labels_bounded`, and `compare_complete` and `reduce_complete` say nothing about it.
+- Lowered tables have 2^u + 2 rows, where `u` is the length of `r :: support r`. Combined with `reduce`, only regexes with `u` at most 5 are within the DFA demo's 64-row limit. `compare_complete` needs the product of the two row counts to be at most 65,536: two regexes with `u` = 7 (130 rows each) fit, two with `u` = 8 (258 rows each) do not.
+- Every lowered row lists each symbol that occurs in `r` as an explicit edge, so a regex with more than 64 distinct symbols lowers to a table without `labels_bounded`, and `compare_complete` and `reduce_complete` say nothing about it. Such a regex is in any case far past the row limits above.
 - `matches` is total; its running time is not bounded.
 - Only normal return is specified, as on the shared page.
 
@@ -86,4 +86,4 @@ After `make install` and `./dev init`, from the repository root:
 ./dev test vox/regex.ml vox/regex_dfa_bridge.ml vox/dfa_boundary.ml
 ```
 
-`regex.ml` checks the matcher and the internal automaton, compares `matches` with a separate runtime matcher on 3,244 small regexes, and requires three false claims to fail. `regex_dfa_bridge.ml` checks the conversion proof. `dfa_boundary.ml` compiles all DFA and regex modules with both compilers, the public interfaces with `-opaque`, compiles `regex_public_client.ml` against the public interfaces only, links and runs it, and checks from `-drawlambda` output that the proof functions `sound`, `complete`, `lower_matches` and `lower_valid` make no runtime calls. It also requires a public client that claims `lower` always returns `Some` to fail with its exact error.
+`regex.ml` checks the matcher and the internal automaton, compares `matches` with a separate runtime matcher on 3,244 small regexes, and requires three false claims to fail. `regex_dfa_bridge.ml` checks the conversion proof. `dfa_boundary.ml` compiles all DFA and regex modules with `-opaque` with both compilers, compiles `regex_public_client.ml` against the public interfaces only, links and runs it, and checks from `-drawlambda` output that the proof functions `sound`, `complete`, `lower_matches` and `lower_valid` make no runtime calls. It also requires a public client that claims `lower` always returns `Some` to fail with its exact error.

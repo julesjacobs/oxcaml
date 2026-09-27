@@ -1,7 +1,7 @@
 (library
  (name vox_smt)
  (wrapped false)
- (modules vox_smt))
+ (modules vox_smt vox_smt_response))
 
 (library
  (name vox_vc)
@@ -29,6 +29,9 @@
   (.vox_smt.objs/byte/vox_smt.cmi as compiler-libs/vox_smt.cmi)
   (.vox_smt.objs/byte/vox_smt.cmt as compiler-libs/vox_smt.cmt)
   (.vox_smt.objs/native/vox_smt.cmx as compiler-libs/vox_smt.cmx)
+  (.vox_smt.objs/byte/vox_smt_response.cmi as compiler-libs/vox_smt_response.cmi)
+  (.vox_smt.objs/byte/vox_smt_response.cmt as compiler-libs/vox_smt_response.cmt)
+  (.vox_smt.objs/native/vox_smt_response.cmx as compiler-libs/vox_smt_response.cmx)
   (vox_vc.cma as compiler-libs/vox_vc.cma)
   (vox_vc.cmxa as compiler-libs/vox_vc.cmxa)
   (vox_vc.a as compiler-libs/vox_vc.a)

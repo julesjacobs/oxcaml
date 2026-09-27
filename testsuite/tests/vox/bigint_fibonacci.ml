@@ -29,7 +29,7 @@ end = struct
     if i = n then a
     else
       let j = i + 1Z in
-      let k = j + 1Z in
+      let k = ghost_ (j + 1Z) in
       let c = a + b in
       ghost_ (fib_def k);
       let next : {i : t | 0Z <= i && i <= n} = j in
@@ -95,7 +95,7 @@ end = struct
       let d = a * a + b * b in
       if n mod 2Z = 0Z then (c, d)
       else
-        let next = n + 1Z in
+        let next = ghost_ (n + 1Z) in
         ghost_ (fib_def next);
         let e = c + d in
         (d, e)

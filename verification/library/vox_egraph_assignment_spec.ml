@@ -1,3 +1,12 @@
+(* The candidate assignments that saturation enumerates for one rule, as an
+   explicit list of cases. [assignments count vars] lists every list of
+   length [List.length vars] whose entries run over the ids [count - 1] down
+   to 0 and then -1 (no node); sorts are not filtered here. For n variables
+   there are (count + 1)^n cases. [closed_cases] is closure at every root
+   for each case; [Vox_egraph_assignment_proof] shows that over this
+   enumeration it equals the trusted closure
+   [Vox_egraph_saturation_spec.closed_rule]. *)
+
 module C = Vox_egraph_closure_spec
 module L = Vox_egraph_language_spec
 module Q = Vox_egraph_match_spec

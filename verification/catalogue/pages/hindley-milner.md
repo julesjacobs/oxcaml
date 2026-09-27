@@ -1,6 +1,6 @@
 title: Hindley–Milner type inference
 blurb: Type inference for a small ML with let-polymorphism, proved sound and principal against a declarative typing relation, so a rejection means the term has no type.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/hm_inference.mli — Public interface
@@ -17,7 +17,7 @@ sources:
 ---
 `Hm_inference.infer` infers the type of a closed term of a small ML: booleans, 64-bit words with addition, subtraction, equality and unsigned comparison, lists with a case form, conditionals, functions, recursive functions, application and `let`. Variables are de Bruijn indices, and `let` generalizes as in Hindley–Milner. Three theorems relate the result to a declarative typing relation, `Hm_declarative.typed`. If `infer` returns a type, the term has that type (`sound`). If the term has any type, `infer` returns a type and the given type is an instance of it (`principal`). Hence, if `infer` returns `None`, the term has no type (`rejected`).
 
-The algorithm works on a graph of mutable type nodes, with union-find links, path compression, levels for generalization and copying for instantiation. The nodes are `Pref` cells, and the proof tracks the heap they form through every mutation. Only normal return is specified. `infer` is not declared `total`, so it is not proved to terminate, and it may raise. It raises `Failure` if an internal counter (`let` nesting depth, environment size, variable index) would pass `max_int`. Six match arms in the type-copying and lowering code end in `assert false`, which the checker does not check; a contract or an enclosing match just before each rules the arm out. There is no bound on running time or memory.
+The algorithm works on a graph of mutable type nodes, with union-find links, path compression, levels for generalization and copying for instantiation. The nodes are `Pref` cells, and the proof tracks the heap they form through every mutation. Only normal return is specified, so an `infer` that always raised, or never returned, would also satisfy the interface. `infer` is not declared `total`, so it is not proved to terminate, and it may raise. It raises `Failure` if an internal counter (`let` nesting depth, environment size, variable index) would pass `max_int`. Eight match arms that cannot be reached, in type copying, lowering, unification and variable lookup, end in `unreachable_ ()`: the checker must prove that each is unreachable, and a run-time trap remains in the compiled code. There is no bound on running time or memory.
 
 ## Client example
 
@@ -25,7 +25,7 @@ From the public-only client. `ghost_ (...)` is proof code, checked and then eras
 
 @code testsuite/tests/vox/hm_inference_public_client.ml "let source = D.Lambda (D.Bound D.Z) in" "self-application accepted"
 
-The same client infers `word list` for a one-element list of words, and `word` for `let id = λx. x in let _ = id true in id w`, which needs `id` to be polymorphic.
+The same client checks at run time that `infer` returns `word list` for a one-element list of words, and `word` for `let id = λx. x in let _ = id true in id w`, which needs `id` to be polymorphic.
 
 ## A rejected program
 
@@ -74,9 +74,9 @@ Inferred types, whose variables are references to the inference's type nodes, an
 - Terms are closed: there is no initial environment or prelude. Types are `bool`, 64-bit words, lists and functions. There are no user-defined types, records, references, type annotations or pattern matching beyond the list case.
 - `Recursive` binds one recursive function whose type is monomorphic inside its body; `let` is the only place where types are generalized. The language has no effects, so there is no value restriction.
 - Indices and scheme arities are unary naturals (`Z`, `S`).
-- Only normal return: `infer` may fail to terminate and may raise `Failure` (counter overflow), `Out_of_memory` or `Stack_overflow`. The six `assert false` arms described above are ruled out but not checked.
+- Only normal return: `infer` may fail to terminate and may raise `Failure` (counter overflow), `Out_of_memory` or `Stack_overflow`.
 - `Hm_inference` reports only the type. The internal `Verified_hm.elaborate` also rebuilds a typed derivation from an inference trace; the [HM-to-WebAssembly compiler](hm-wasm-compiler.html) uses it.
-- The inference and its proofs are 237 files and about 32,000 lines in `testsuite/tests/vox`.
+- The inference and its proofs are 212 files and about 29,000 lines in `testsuite/tests/vox`. The tests also compile 25 files (about 3,000 lines) that `Hm_inference` does not use: earlier versions of the unifier, copy and lowering, and fixtures for other tests.
 
 ## Reproduce
 
@@ -86,4 +86,4 @@ After `make install` and `./dev init`:
 ./dev test vox/hm_inference_public_client.ml vox/hm_inference_rejected.ml vox/verified_hm_rejected.ml
 ```
 
-Each test compiles, and so checks, the whole inference (244 to 248 files, library files included). The public client runs on both backends; the two rejection tests are expect tests.
+The tests list the inference (244 to 247 files, library files included) as prebuilt modules, which `./dev test` compiles, and so checks, once per run with both compilers before compiling the tests against them. The public client runs on both backends; the two rejection tests are expect tests.

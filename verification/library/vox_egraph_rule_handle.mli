@@ -1,3 +1,31 @@
+(* The public interface of the e-graph. A graph [t] is created from a list
+   of valid rewrite rules and is unique: each operation consumes it and
+   returns it. [model] and [rules] are ghost observations used in the
+   contracts: [model] is a [Q.graph] (nodes and a class label per id) and
+   [rules] the rules given to [create]. Every operation keeps [rules] and,
+   through [Preserves.extends], the expression ([Snapshot.origin]) of
+   every existing id.
+
+   - [admit] adds an expression and returns an id that stands for exactly
+     it. It returns [None] only for an ill-sorted expression or when the
+     graph has 512 nodes.
+   - [query] admits both expressions and compares their classes, without
+     saturating. [Equal] comes with an erased derivation, valid for the
+     rules, from [left] to [right]; [Not_proved] says nothing.
+   - [saturate state rounds rebuild_passes fuel] applies the rules and
+     restores congruence until a fixed point or a limit. [Fixed_point]
+     means [Fixed.fixed] of the returned graph; the other statuses say only
+     which limit was reached.
+   - [same_class] says whether two ids have the same class label and, if
+     they do, gives a derivation between their origins. It does not change
+     the graph.
+   - [preserved_origin] reads one id's origin out of [Preserves.extends].
+
+   [Vox_egraph_interpret_wrapping.sound] turns a derivation into equal
+   evaluations for rules that preserve evaluation. vox_egraph_rule_handle.md
+   lists the specification files in reading order and describes the limits
+   and the search fuel. *)
+
 module Preserves = Vox_egraph_preservation_spec
 module R = Vox_egraph_rule_spec
 module Q = Vox_egraph_match_spec

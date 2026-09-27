@@ -43,7 +43,7 @@ let (correct @ total) : (writes : Wasm_mixed_write.writes) @ immutable -> (value
       Q.prefix raw.Raw.words before before raw.Raw.suffix raw.Raw.suffix extent ();
       Q.prefix after_words frame frame raw.Raw.suffix raw.Raw.suffix extent ();
       Wasm_cell.shift state.X.memory base extent stop before (); Wasm_cell.shift memory base extent stop frame ());
-    let old_values = Q.split split.Split.prefix split.Split.rest before raw.Raw.suffix () in
+    let old_values = ghost_ (Q.split split.Split.prefix split.Split.rest before raw.Raw.suffix ()) in
     let bytes = Q.split split.Split.prefix values frame raw.Raw.suffix () in
     ghost_ (Q.prefix split.Split.prefix before frame old_values bytes offset ();
       Hmc_linear_prefix_join.correct state.X.memory memory base offset (base + offset) before frame ();

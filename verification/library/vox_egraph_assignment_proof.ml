@@ -1,3 +1,10 @@
+(* Proves the trusted closure of one rule, [S.closed_rule] (stated through
+   [Vox_egraph_quantifier.closed_bindings]), equal to [closed_cases] over
+   the explicit enumeration [Vox_egraph_assignment_spec.assignments]. The
+   quantifier accumulates a prefix with [snoc] while the enumeration
+   prepends ids to suffixes, so the induction is over [closed_prefixed],
+   which puts a fixed prefix in front of every case. *)
+
 module C = Vox_egraph_closure_spec
 module S = Vox_egraph_saturation_spec
 module B = Vox_egraph_quantifier

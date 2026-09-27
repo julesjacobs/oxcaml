@@ -7,6 +7,59 @@
  { bytecode; }
 *)
 
+(* Persistent AVL sets of integers, proved correct against a sorted-list
+   model.
+
+   A set is a [Core.tree]. [Node (left, value, right, height)] stores its
+   height as a [Bigint.t], so the proof needs no overflow argument.
+   [Core.valid] is the invariant: the values in [left] are below [value]
+   and those in [right] above it, the two subtree heights differ by at most
+   one, the stored height is one more than the larger of them, and both
+   subtrees are valid. The public type is [{tree : tree | valid tree}];
+   avl_sets.mli makes it abstract ([Int_set_intf.Extensional]).
+
+   The model of a tree is [elements tree], its in-order list of values.
+   On a valid tree this list is strictly increasing ([List_set.valid]).
+   [add] is specified as [List_set.add_repr] on that list and [union] as
+   [List_set.union_repr], and the public laws follow from the matching
+   laws about lists.
+
+   The file is organised as follows.
+   - [List_set] defines the list model and [List_proofs] proves its laws.
+     The key one is [extensional_repr]: two strictly increasing lists with
+     the same members are equal.
+   - [Core] defines the tree, [valid] and [elements], and the runtime
+     code: [make_node], [balance] with its single and double rotations,
+     [add_tree] and [lookup_tree].
+   - [Validity_proofs] proves that [add_tree] keeps a tree valid and
+     changes its height by at most one.
+   - [Model_proofs] proves that trees implement the model: tree bounds and
+     sortedness carry over to [elements], [lookup_tree] agrees with list
+     membership, and [add_tree] acts on [elements] as [add_repr].
+     [Operations] attaches these facts to [add] and [union], with the
+     proof calls in [ghost_], and [Set] proves the public laws.
+
+   Functions marked [[@def]] are opaque to the solver: proofs unfold them
+   one step at a time by calling the generated [_def] equations. A lemma
+   states a precondition [P] either as a conditional conclusion
+   [if P then Q else true] or as an argument of type [{u : unit | P}], for
+   which the caller passes [()] and must prove [P].
+   Every recursion, in code and in proofs, is on a structurally smaller
+   argument, so no [[@@decreases]] measure is needed; in a recursive lemma
+   the recursive calls are the induction hypotheses.
+
+   Nothing runs at the end of this file. The TEST block above links it with
+   avl_set_client.ml, which checks at run time that inserted values are
+   members and that [size] counts distinct values, and shows that [equal]
+   differs from structural equality; and with avl_stdlib_set.ml, which
+   compares membership with the standard library's [Set]. Their output
+   must match avl_sets.reference. *)
+
+(* The model: a set is a list, strictly increasing when [valid]. [append]
+   builds the in-order list of a tree. [union_repr] adds the elements of
+   its first argument to the second one at a time, as [union_tree] does.
+   [same_repr] is structural comparison as a total boolean function; the
+   public [equal] runs it on the two element lists. *)
 module List_set = struct
     type repr = Nil | Cons of int * repr [@@inductive]
 
@@ -66,6 +119,8 @@ module List_set = struct
           left_head = right_head && same_repr left_tail right_tail
 end
 
+(* Laws of the list model. Each is proved by induction on one list,
+   unfolding the definitions involved at the current node. *)
 module List_proofs = struct
     open List_set
 
@@ -142,6 +197,9 @@ module List_proofs = struct
         lookup_append element tail right;
         ()
 
+    (* An element at or above a strict upper bound of a list (at or below a
+       strict lower bound) is not in it. These discard the part of the
+       in-order list that a search does not visit. *)
     let rec (lookup_above @ total) :
         (element : int) ->
         (upper : int) ->
@@ -180,6 +238,11 @@ module List_proofs = struct
           ())
       else ()
 
+    (* [add_left], [add_right] and [add_at_pivot] describe [add_repr] on
+       [append left (Cons (pivot, right))], the in-order list of a node: an
+       element below the pivot goes into [left], one above it into [right],
+       and the pivot itself leaves the list unchanged. They are the list side
+       of the three cases of [Core.add_tree]. *)
     let rec (add_left @ total) :
         (element : int) ->
         (left : repr) ->
@@ -332,6 +395,8 @@ module List_proofs = struct
         lookup_add_repr element added tail;
         ()
 
+    (* By induction on [left] with [right] generalised: [union_repr] moves
+       the head of [left] into [right] before recursing. *)
     let rec (lookup_union_repr @ total) :
         (element : int) ->
         (left : repr) ->
@@ -406,6 +471,12 @@ module List_proofs = struct
         size_nonnegative tail;
         ()
 
+    (* Two strictly increasing lists with the same members are equal. The
+       premise is a total function giving, for every element, a proof that
+       both lists agree on it. If the heads differ, the smaller head is a
+       member of one list but, by [lookup_below], not of the other. If they
+       are equal, [tail_premise] derives the premise for the tails: the
+       common head is in neither tail, again by [lookup_below]. *)
     let rec (extensional_repr @ total) :
         (left : repr) ->
         (right : repr) ->
@@ -469,6 +540,10 @@ module List_proofs = struct
       else ()
 end
 
+(* The runtime tree and its specification functions. The last field of
+   [Node] is the stored height, which [height] returns without recomputing.
+   [valid] is the AVL invariant described at the top of the file, and
+   [elements] the in-order list that serves as the model. *)
 module Core = struct
 type tree = Empty | Node of tree * int * tree * Bigint.t [@@inductive]
 
@@ -530,6 +605,14 @@ type tree = Empty | Node of tree * int * tree * Bigint.t [@@inductive]
       in
       Node (left, value, right, cached_height)
 
+    (* Rebuilds a node whose children may differ in height by two, as after
+       one insertion into a child. When the left child is two taller, a
+       single right rotation applies if its left subtree is at least as tall
+       as its right one, and a left-right double rotation otherwise; the
+       right side is symmetric. The [Empty] branches are unreachable for
+       valid children, since the taller child and its taller subtree have
+       positive height, but returning [make_node] there keeps [balance]
+       total without a precondition. *)
     let[@def] (balance @ total) left value right =
       let left_height = height left in
       let right_height = height right in
@@ -584,6 +667,11 @@ end
 
 open Core
 
+(* [add_tree] keeps a tree valid, and the result is as tall as the input or
+   one taller. The height bound is part of the induction hypothesis:
+   [balance] restores the invariant only when the children's heights differ
+   by at most two, which holds because the changed child grew by at most
+   one. The signature exports only the final theorem. *)
 module Validity_proofs : sig
       val add_valid_height :
         (element : int) ->
@@ -595,6 +683,12 @@ module Validity_proofs : sig
               || height (add_tree element tree)
                  = Bigint.add (height tree) 1Z)}
     end = struct
+      (* Height arithmetic for the four rotations, stated over the
+         subtrees' heights as plain [Bigint.t] values so that each is proved
+         by unfolding [maximum] alone. Given the heights inside a node
+         whose left (or right) child is two taller than its sibling, the
+         rebuilt nodes are balanced and the new root is as tall as that
+         child or one taller. *)
       let (left_rotation_heights @ total) :
           (left_left : Bigint.t) ->
           (left_right : Bigint.t) ->
@@ -777,6 +871,8 @@ module Validity_proofs : sig
           ())
         else ()
 
+      (* Weakening of bounds, then the bounds, height and validity of a
+         single [make_node]. *)
       let rec (all_less_weaken @ total) :
           (lower : int) ->
           (upper : int) ->
@@ -871,6 +967,10 @@ module Validity_proofs : sig
       height_def result;
       ()
 
+      (* Heights are unbounded integers, so nonnegativity is not given by
+         the type; it follows from [valid] by induction. The balance proofs
+         use it, for instance to show that the [Empty] branches of
+         [balance] are unreachable. *)
       let rec (height_nonnegative @ total) :
           (tree : tree) ->
           {u : unit |
@@ -924,6 +1024,9 @@ module Validity_proofs : sig
         ())
       else ()
 
+      (* A valid node built to become the left (right) child of a node
+         holding [upper] ([lower]): it is bounded by that value and has the
+         height [make_node] computes. *)
       let (make_left_child @ total) :
           (upper : int) ->
           (left : tree) ->
@@ -1007,6 +1110,12 @@ module Validity_proofs : sig
         ())
       else ()
 
+    (* Each rotation gives a valid tree when the children are valid and
+       ordered around [value] and one child is exactly two taller than the
+       other. The single rotations assume that child's outer subtree is at
+       least as tall as its inner one, the double rotations that the inner
+       one is taller; these are the conditions under which [balance]
+       chooses them. *)
     let (rotate_right_valid @ total) :
         (left_left : tree) ->
         (left_value : int) ->
@@ -1329,6 +1438,10 @@ module Validity_proofs : sig
       else
         make_node_valid left value right
 
+    (* The height half of the insertion step. The left child had height
+       [old_left_height], balanced against [right], and has grown by at most
+       one; the rebalanced node is then as tall as the original node or one
+       taller. [balance_right_height] is the mirror image. *)
     let (balance_left_height @ total) :
         (old_left_height : Bigint.t) ->
         (left : tree) ->
@@ -1707,6 +1820,10 @@ module Validity_proofs : sig
             ())
       else ()
 
+    (* The induction on the tree. For an insertion into [left], the
+       recursive call gives a valid [new_left] at most one taller than
+       [left], [add_all_less] keeps it below [value], and [balance_valid]
+       and [balance_left_height] conclude; the right case is symmetric. *)
     let rec (add_valid_height @ total) :
         (element : int) ->
         (tree : tree) ->
@@ -1752,9 +1869,14 @@ module Validity_proofs : sig
           ()
     end
 
+    (* Correctness against the list model. Only [Set] leaves this module,
+       with [t] abstract; the file ends by including it. *)
     module Model_proofs : sig
       module Set : Int_set_intf.Extensional
     end = struct
+    (* From trees to element lists: bounds on a tree are bounds on its list,
+       a valid tree has a strictly increasing list, and [lookup_tree]
+       agrees with [List_set.lookup_repr] on the list. *)
     module Element_proofs : sig
       val elements_all_less :
         (upper : int) ->
@@ -1855,6 +1977,11 @@ module Validity_proofs : sig
             ()
         else ()
 
+      (* The list of a node is
+         [append (elements left) (Cons (value, elements right))]. When the
+         search goes left, [element] is below [value] and every member of
+         [elements right], so that suffix cannot contain it; symmetrically
+         when it goes right. *)
       let rec (lookup_tree_elements @ total) :
           (element : int) ->
           (tree : tree) ->
@@ -1936,6 +2063,10 @@ module Validity_proofs : sig
 
     end
 
+    (* [add_tree] acts on the element list as [List_set.add_repr]. A
+       rotation does not change the in-order list, which comes down to
+       associativity of [append]. Each case of the induction is a separate
+       step lemma, and [add_tree_elements] combines them. *)
     module Insertion_model_proofs : sig
       val add_tree_elements :
         (element : int) ->
@@ -1961,6 +2092,10 @@ module Validity_proofs : sig
       elements_def result;
       ()
 
+    (* [balance] takes apart nodes with arbitrary stored heights and rebuilds
+       them with [make_node]. [elements] ignores the stored height, so the
+       rotation lemmas, stated on [make_node] trees, also describe the
+       nodes [balance] started from. *)
     let (cached_height_irrelevant @ total) :
         (left : tree) ->
         (value : int) ->
@@ -2217,6 +2352,9 @@ module Validity_proofs : sig
         ())
       else ()
 
+    (* The recursive cases take the induction hypothesis for the changed
+       child as the premise [correctness]; [add_tree_elements] passes the
+       result of its recursive call. *)
     let (add_left_step @ total) :
         (element : int) ->
         (left : tree) ->
@@ -2322,6 +2460,10 @@ module Validity_proofs : sig
 
     end
 
+    (* [add] and [union] on bare trees, returning the runtime result refined
+       by its specification, and [count_tree] for [size]. The proof calls
+       in [add] and [union] are in [ghost_], so they are checked and then
+       erased from the compiled code. *)
     module Operations = struct
     let (add @ total) :
         (element : int) ->
@@ -2338,6 +2480,12 @@ module Validity_proofs : sig
       ghost_ (Insertion_model_proofs.add_tree_elements element tree);
       result
 
+    (* Union is proved in two steps through [add_elements xs tree], which
+       inserts the members of the list [xs] into [tree] in order.
+       [union_tree_correct] shows that [union_tree source destination]
+       equals [add_elements (elements source) destination], and
+       [add_elements_spec] that for a valid [tree] the result is valid with
+       element list [List_set.union_repr xs (elements tree)]. *)
     let[@def] rec (add_elements @ total) xs tree =
       match xs with
       | List_set.Nil -> tree
@@ -2408,6 +2556,8 @@ module Validity_proofs : sig
         add_elements_def suffix after_left;
         ()
 
+    (* [count_tree_correct]: the node count is the length of the element
+       list. [Set.size_zero] needs it. *)
     let[@def] rec (count_tree @ total) tree =
       match tree with
       | Empty -> 0Z
@@ -2441,6 +2591,8 @@ module Validity_proofs : sig
         List_set.size_repr_def suffix;
         ()
 
+    (* Only [right] must be valid: the values of [left] are inserted into
+       [right] one at a time, and [add_tree] keeps a valid tree valid. *)
     let (union @ total) :
         (left : tree) ->
         (right : tree) ->
@@ -2459,6 +2611,13 @@ module Validity_proofs : sig
 
     end
 
+    (* The public module. [t] is a tree refined by [valid]: a function
+       returning a [t] must prove validity, and code holding one may assume
+       it, which discharges the [()] premises below. [equal] compares the
+       element lists, so trees of different shapes can be equal. The
+       membership laws rewrite [lookup] into list membership with
+       [lookup_tree_elements] and then apply the matching law from
+       [List_proofs]. *)
     module Set = struct
       type t = {tree : tree | valid tree}
 
@@ -2505,6 +2664,10 @@ module Validity_proofs : sig
         lookup_tree_def element tree;
         ()
 
+      (* The call to [Operations.add] is made for its postcondition:
+         [add_def] unfolds [add] to the same call, so that postcondition
+         gives the element list of [result]. [lookup_union] does the same
+         with [Operations.union]. *)
       let (lookup_add @ total) :
           (element : int) ->
           (added_element : int) ->
@@ -2587,6 +2750,10 @@ module Validity_proofs : sig
           ()
         else ()
 
+      (* Both element lists are strictly increasing ([elements_valid]), and
+         [model_premise] turns the premise about [lookup] into one about
+         list membership, so [extensional_repr] makes the lists equal.
+         [same_repr_reflexive] then shows that [equal] returns true. *)
       let (extensional @ total) :
           (left : t) ->
           (right : t) ->
@@ -2621,6 +2788,9 @@ module Validity_proofs : sig
         equal_def left right;
         ()
 
+      (* [size] is the length of the element list ([count_tree_correct]).
+         [equal set empty] unfolds to [same_repr] of that list and [Nil],
+         and [size_zero_repr] says the length is zero exactly then. *)
       let (size_zero @ total) (set : t) :
           {u : unit | (size set === 0Z) === equal set empty} =
         let empty_set = empty in

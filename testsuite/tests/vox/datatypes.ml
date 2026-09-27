@@ -88,6 +88,18 @@ module Nullary :
     val polymorphic_empty : 'a maybe
     type 'a maybe_alias = 'a maybe = Empty | Other
     [@@inductive]
+    val instantiate_empty_int : unit -> {r : int maybe_alias | r === Empty}
+    val instantiate_empty_bool : unit -> {r : bool maybe_alias | r === Empty}
+    val instantiate_empty_alias : unit -> {r : int maybe_alias | r === Empty}
+  end
+|}, Principal{|
+module Nullary :
+  sig
+    type 'a maybe = Empty | Other
+    [@@inductive]
+    val polymorphic_empty : 'a maybe
+    type 'a maybe_alias = 'a maybe = Empty | Other
+    [@@inductive]
     val instantiate_empty_int : unit -> {r : int maybe | r === Empty}
     val instantiate_empty_bool : unit -> {r : bool maybe | r === Empty}
     val instantiate_empty_alias : unit -> {r : int maybe_alias | r === Empty}

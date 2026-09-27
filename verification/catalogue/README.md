@@ -21,6 +21,9 @@ broken link or anchor. Links to GitHub point at that commit, so build from a
 pushed commit when the site is shared. For a draft, `--working-tree` reads
 the checkout instead, and `--pages flat-hash-table,_trust` builds only those
 pages.
+`--home-url URL` adds a "Vox" link to URL at the start of every page's
+navigation, for a catalogue that is part of a larger site (the public site
+uses `/vox/`); without it there is no such link.
 
 ## Files
 

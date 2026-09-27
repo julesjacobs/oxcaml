@@ -47,11 +47,9 @@ let (set_commutes @ total) (source : Avl_sets.t) (a : int) (b : int) :
     Avl_sets.lookup_add query a b_first;
     Avl_sets.lookup_add query b a_first;
     Avl_sets.lookup_add query a source;
-    Avl_sets.lookup_add query b source;
-    let u = () in u
+    Avl_sets.lookup_add query b source
   in
-  Avl_sets.extensional left right members;
-  let u = () in u
+  Avl_sets.extensional left right members
 
 let () =
   let input = [: 3; 1; 3; min_int; max_int; 3 :] in

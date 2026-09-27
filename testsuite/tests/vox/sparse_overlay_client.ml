@@ -38,7 +38,7 @@ module Client (Element : sig type t : immutable_data end) = struct
     L.set_base source index first;
     L.length_equation source;
     L.length_equation once;
-    let u = () in u
+    ()
 
   let (independent_updates @ total) : (source : Element.t S.t) ->
       (left : int) -> (right : {i : int | i <> left}) ->
@@ -59,13 +59,13 @@ module Client (Element : sig type t : immutable_data end) = struct
     L.length_equation source;
     L.length_equation left_first;
     L.length_equation right_first;
-    let u = () in u
+    ()
 
   let (clear_restores_base @ total) (source : Element.t S.t) (index : int) :
       {u : unit | S.lookup index (S.clear index source) ===
         Vox_iarray.at (S.base source) index} =
     L.clear_lookup source index index;
-    let u = () in u
+    ()
 end
 
 module Int_client = Client (struct type t = int end)

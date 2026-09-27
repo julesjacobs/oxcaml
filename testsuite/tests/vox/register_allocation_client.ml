@@ -41,15 +41,11 @@ let (verified_run @ total) :
         || observable_equal
              (advance program.code fuel (source_initial program args)) target} =
   fun program physical args fuel ->
-  let allocation = allocate program physical in
   ghost_ (preserves program physical args fuel);
-  match allocation with
-  | None -> let result = None in result
+  match allocate program physical with
+  | None -> None
   | Some allocation ->
-    let target = advance allocation.code fuel
-      (initial_of_allocation allocation args) in
-    let result = Some target in
-    result
+    Some (advance allocation.code fuel (initial_of_allocation allocation args))
 
 let example =
   { registers = 7; inputs = [0]; code = [

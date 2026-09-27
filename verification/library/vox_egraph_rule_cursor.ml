@@ -1,3 +1,9 @@
+(* A cursor into the rule list for [Vox_egraph_rules_scan]: [drop rules i]
+   is the list without its first [i] rules. [lookup] says the head of that
+   suffix is [R.lookup_rule rules i], and [advance] that its tail is
+   [drop rules (i + 1)]; the bound on [index] keeps [index + 1] from
+   overflowing. *)
+
 module R = Vox_egraph_rule_spec
 
 let[@def] rec (drop @ total) (rules : R.t @ immutable) (index : int) =

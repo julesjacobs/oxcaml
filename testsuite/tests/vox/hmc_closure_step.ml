@@ -72,7 +72,7 @@ let (return_value @ total) : (p : P.program) @ immutable ->
       && H.source p.P.table out === Q.step definitions (H.source p.P.table (Running (Return v, k)))
       && H.target out === R.step p.P.table p.P.globals (H.target (Running (Return v, k)))} @ immutable =
   fun p definitions v k premise ->
-  let table = p.P.table in let interface = C.manifest definitions in
+  let table = p.P.table in let interface = ghost_ (C.manifest definitions) in
   let state = Running (Return v, k) in
   ghost_ (P.valid_def p; H.source_def table state; H.target_def state; H.valid_def table state);
   ghost_ (let control = Return v in

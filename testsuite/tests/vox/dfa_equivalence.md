@@ -51,7 +51,7 @@ public implementation from exporting auxiliary helpers. The implementation
 modules rely on those interfaces instead of repeating their entire signatures.
 
 `dfa_equivalence_proof.ml` contains the sealed `Dfa_proof` implementation and
-its auxiliary interface for diagnostic tests and bridge proofs. `regex_core.ml`
+its auxiliary interface for tests and bridge proofs. `regex_core.ml`
 and `regex_dfa_bridge_core.ml` contain the regex/DFA implementations and their
 proofs. Their raw helper interfaces and certificate lemmas are not part of the
 ordinary public API. `dfa_equivalence_core.ml` and `regex_language.ml` prove the
@@ -78,8 +78,8 @@ and `state_size source <= limit` with `0 < limit <= 64`.
 `reduce_complete` proves success within these bounds. The label bound is per
 state; the global alphabet may exceed 64 letters.
 
-`Dfa_proof.diagnose_comparison` and `Dfa_proof.diagnose_reduction` are optional diagnostic APIs
-that construct runtime witnesses and certificates. Ordinary APIs erase them.
+Each search is written once. Witness words, relations and reduction
+certificates exist only in ghost code; there is no runtime certificate API.
 The ordinary search queues and visited sets remain runtime algorithm state.
 Resource bounds establish checked termination. No allocation-success or
 stack-space guarantee is claimed.
@@ -98,7 +98,8 @@ sequentially:
 ```
 
 The DFA test runs its phrases once in the expect toplevel and covers
-ordinary and diagnostic results, exact and insufficient
+comparison and minimization results, runtime checks of hand-written reduction
+certificates, exact and insufficient
 budgets, unreachable states, default transitions, and 66 global labels spread
 across two states.
 
@@ -130,24 +131,19 @@ runtime calls. Expected ordinary paths:
 - `reduce` calls `minimize_proved`, the `reachable_states_*` search,
   `refine_to_stable`, and quotient construction. Partition refinement retains
   its current partition, with the prior partition and decreasing measure erased.
-- Neither path calls `candidate`, `search_product`, `append_word`,
-  `quotient_relation`, `quotient_access`, `cover_rows`, `copy_access`,
-  `copy_separations`, `same_class_pairs`, `copy_word`, `copy_relation`,
-  `copy_table`, or `copy_machine`.
+- Neither path calls `append_word`, `quotient_relation`, `quotient_access`,
+  `cover_row`, `cover_rows`, `same_class_pairs`, `compare_states`,
+  `distinguish_classes` or `minimization_certificate`.
 - `comparison_witness` and regex `sound` have empty product results.
   `compare_complete`, `compare_equal`, `reduce_complete`, `reduce_preserves`,
   `reduce_minimum`, regex `complete`, `lower_matches` and `lower_valid` contain
   no runtime function calls. Ghost record fields have empty product layout;
   ghost histories and fuel are constant placeholders.
 
-The diagnostic APIs intentionally retain their certificate-producing paths.
-
 The alphabet/class accumulators require total lists, and alphabet, partition,
 class and quotient producers return total values directly. This removes four
 identity traversals from ordinary minimization and the partition traversal
 from each refinement round. Producer equations and public claims are unchanged.
-Diagnostic access/separation witness copies retain their existing conversion
-to total data; they are absent from ordinary execution.
 
 `state_size` counts table rows directly. Private `state_ids_length` and
 `state_size_via_ids` prove equality with the former ID-list count for every raw
@@ -164,11 +160,13 @@ public refinement interface.
 
 ### Minimization proof placement
 
-`minimize_proved` calls the private `minimization_certificate` helper once,
-inside `ghost_`. The helper contains the relation-respect proof, distinguishing
-word construction, and separation cases. Its input refinements state the
-source validity, access and closure facts, refinement result identity, and
-budget and quotient facts required to produce the complete
+`minimize_proved` calls the ghost function `minimization_certificate` once,
+inside `ghost_`. It contains the relation-respect proof, distinguishing word
+construction, and separation cases. Distinguishing words come from the ghost
+`compare_states` and `distinguish_classes`, which read the erased decision of
+the same comparison search that `compare` runs. The function's input
+refinements state the source validity, access and closure facts, refinement
+result identity, and budget and quotient facts required to produce the complete
 `check_reduction` certificate. The ordinary pipeline retains its small local
 facts and contains no certificate construction block.
 

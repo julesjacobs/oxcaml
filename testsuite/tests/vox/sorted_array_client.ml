@@ -24,7 +24,7 @@ let (empty_observations @ total) (value : int) :
   edited_equation array array zero value inserting;
   edit_suffix_equation array array zero value inserting zero;
   at_outside array negative;
-  let u = () in u
+  ()
 
 let round_trip : (source : t) -> (value : int) -> (index : int) ->
     {u : unit | 0 <= index && index < length source} @ ghost ->
@@ -32,44 +32,39 @@ let round_trip : (source : t) -> (value : int) -> (index : int) ->
       && at result index = at source index} =
   fun source value index premise ->
   premise;
-  let u = () in
   let pair = insert source value in
   let (position : int), (inserted : t) = pair in
   ghost_ (length_bounds source);
-  let result = remove_at inserted position (u) in
+  let result = remove_at inserted position () in
   ghost_ (
     let zero = 0 in
     let insertion = true in
     let removal = false in
     let original = if index < position then index else index + 1 in
     edited_at inserted result position zero
-      removal index (u);
+      removal index ();
     edited_at source inserted position value
-      insertion original (u);
-    (u : {u : unit | at result index = at source index}));
+      insertion original ();
+    (() : {u : unit | at result index = at source index}));
   result
 
 let () =
   let initial = empty in
-  let u = () in
   let value = 7 in
   let pair = insert initial value in
   let (position : int), (one : t) = pair in
   let found = mem one value in
-  let proof : {u : unit | found && length one = 1} = u in
-  let _proof = proof in
+  (() : {u : unit | found && length one = 1});
   let smaller = 3 in
   let pair = insert one smaller in
   let _, two = pair in
   let left = 0 in
   let right = 1 in
-  ghost_ (ordered two left right (u));
-  let proof : {u : unit | at two left <= at two right} = u in
-  let _proof = proof in
-  let result = round_trip one value position (u) in
-  let removed = remove_at result position (u) in
-  let proof : {u : unit | length removed = 0} = u in
-  proof;
+  ghost_ (ordered two left right ());
+  (() : {u : unit | at two left <= at two right});
+  let result = round_trip one value position () in
+  let removed = remove_at result position () in
+  (() : {u : unit | length removed = 0});
   Format.printf "abstract sorted array: found=%b; restored length=%d@."
     found (length removed)
 
@@ -124,8 +119,7 @@ let check values =
     [-1; 0; 1; 2; 3];
   List.iteri (fun index _ ->
     if 0 <= index && index < length array then (
-      let u = () in
-      let result = remove_at array index (u) in
+      let result = remove_at array index () in
       let remaining = List.filteri (fun i _ -> i <> index) expected in
       assert (List.init (length result) (at result) = remaining))
     else assert false) expected
@@ -145,4 +139,4 @@ let observe_sequence : (array : t) -> (index : int) ->
   premise;
   let bounded : {i : int | 0 <= i && i < length array} = index in
   contents_at array bounded;
-  let u = () in u)
+  ())

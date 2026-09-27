@@ -4,7 +4,7 @@
 open Emitted_code
 
 let lemmas = [ "put_get"; "erase_get"; "count_put"; "count_erase";
-               "lookup_empty" ]
+               "lookup_empty"; "lookup_equal"; "current_def" ]
 
 let () =
   let native = Sys.argv.(1) = "native" and dir = Sys.argv.(2) in

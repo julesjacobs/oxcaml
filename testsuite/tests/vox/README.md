@@ -207,6 +207,10 @@ explicit definition lemmas.
 
 `expressions.ml` now proves constant folding preserves evaluation for every
 expression and input. Both evaluations use machine-integer wrapping semantics.
+`expression_folding.mli` is the same folder behind an interface:
+`folding_semantics_client.ml` uses it, and `expression_folding_rejected.ml`
+rejects a wrong folding rule and a `total` evaluator that does not descend,
+both against that interface.
 
 `array_search.ml` proves first-match correctness within the requested interval
 and absence throughout that interval on `None`. Its total `at` observer returns

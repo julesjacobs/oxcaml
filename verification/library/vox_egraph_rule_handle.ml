@@ -1,3 +1,12 @@
+(* Implementation of vox_egraph_rule_handle.mli. The handle [t] is the
+   engine ([Vox_egraph_rule_hashcons.t]), the rules and a ghost [model],
+   refined by the engine invariant, [R.valid rules], [rules] being the
+   store's rules and [model] the store's view; so [model] and [rules] are
+   field reads. Each operation
+   unpacks the handle, calls the engine and rebuilds the model, proving
+   [Preserves.extends] with [Vox_egraph_preservation_proof.extends] and
+   exact origins with [Vox_egraph_snapshot_proof.origin]. *)
+
 module Preserves = Vox_egraph_preservation_spec
 module Preserve = Vox_egraph_preservation_proof
 module H = Vox_egraph_rule_hashcons

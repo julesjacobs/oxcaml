@@ -13,7 +13,7 @@ bytecode and native modes. Checking uses `-principal` except for
 prevents those modules from compiling in principal mode. All modules undergo
 refinement and termination checking. The build installs `Vox_sequence`,
 `Vox_int_sequence`, `Vox_iarray`, `Vox_http_spec`, `Vox_http`, `Vox_sat_spec`,
-`Vox_sat`, `Vox_cdcl`, `Vox_cdcl_total`, `Borrow`,
+`Vox_sat`, `Vox_cdcl_total`, `Borrow`,
 `Borrow_iarray`, the permission, raw-memory, atomic and verified-table
 modules, and the `vox_borrow` archive
 under the configured prefix's `lib/ocaml/vox`. The archive name is historical;
@@ -24,18 +24,14 @@ accepted-input soundness, roundtrip, chunking, accounting, and request-separatio
 proofs. Its semantic module and sealed API define the human review surface.
 `./dev test vox/http_stream_demo.ml` runs its streaming demo.
 
-[`Vox_sat`](vox_sat.md) is a bounded DPLL solver for in-memory CNFs. Its SAT
-and UNSAT guarantees are checked in Vox.
-
-[`Vox_cdcl`](vox_cdcl.md) adds first-UIP clause learning and backjumping. Its
-learned clauses carry ghost derivations; UNSAT needs no runtime trace check.
-[`Vox_cdcl_total`](vox_cdcl_total.md) provides the same sound answers with
-Vox-checked termination and a recursion budget that returns `Unknown` when
-exhausted or when an internal CDCL check fails. Its separate
-`solve_with_fallback` entry point guarantees a decision on every accepted input
-when the fallback depth budget is at least `n + 1`.
+[`Vox_cdcl_total`](vox_cdcl_total.md) is a CDCL solver for in-memory CNFs,
+with first-UIP clause learning and backjumping. Its learned clauses carry
+ghost derivations; UNSAT needs no runtime trace check. `solve_complete` is
+total and decides every accepted input; `solve` runs the same search with a
+budget and may return `Unknown`. `Vox_sat.unsat_at` extends an UNSAT answer to
+Boolean assignments of any length.
 The [SAT review boundary](vox_sat_boundary.md) lists its complete semantic
-surface. The three SAT `*_proof` interfaces are private and are not installed.
+surface. The two SAT `*_proof` interfaces are private and are not installed.
 
 With the worktree-local prefix from the agent guide, compile a client with:
 

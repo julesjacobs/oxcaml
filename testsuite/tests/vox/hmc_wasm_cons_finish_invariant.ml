@@ -59,9 +59,9 @@ let (correct @ total) : (signature : G.signature) @ immutable -> (next_signature
         | Some (remaining, _) ->
           ghost_ (Codec.decode_temporaries_def (G.Environment (context, schema)) saved_start);
           let saved = Hmc_frame_slices.saved context schema saved_start (Frame.Environment (saved_env, remaining)) old_padding () in
-          let env_count = Hmc_wasm_schema_counts.encode (Codec.locals_size signature.G.locals) capacity () in
-          let saved_count = Hmc_wasm_schema_counts.encode (Codec.locals_size context) capacity () in
-          let old_count = Hmc_wasm_schema_counts.encode (Codec.temporaries_size schema) capacity () in
+          let env_count = ghost_ (Hmc_wasm_schema_counts.encode (Codec.locals_size signature.G.locals) capacity ()) in
+          let saved_count = ghost_ (Hmc_wasm_schema_counts.encode (Codec.locals_size context) capacity ()) in
+          let old_count = ghost_ (Hmc_wasm_schema_counts.encode (Codec.temporaries_size schema) capacity ()) in
           let values = Seg.append saved.Hmc_frame_slices.saved saved.Hmc_frame_slices.older in
           let target = D.S (D.S (Heap.length values)) in
           ghost_ (Hmc_frame_relayout_patch.replacement_def (G.Restore next) saved.Hmc_frame_slices.saved activation.Frame.accumulator saved.Hmc_frame_slices.older;

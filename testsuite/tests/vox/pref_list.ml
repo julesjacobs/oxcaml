@@ -265,6 +265,40 @@ let rec of_list : (values : int list) ->
     ghost_ (let view = borrow_ b in contents_def view.model);
     b
 
+let[@def] rec (node_values @ total) (ns : node list @ immutable) =
+  match ns with [] -> [] | n :: rest -> n.value :: node_values rest
+
+let[@def] rec (rev_onto @ total) (xs : ('a : immutable_data) list @ immutable total)
+    (ys : 'a list @ immutable total) : 'a list @ immutable total =
+  match xs with [] -> ys | x :: rest -> rev_onto rest (x :: ys)
+
+let rec (contents_nodes @ total) : (xs : model) @ immutable ->
+    {u : unit | contents xs === node_values (nodes xs)} @ ghost =
+  fun xs -> ghost_ (
+    contents_def xs; nodes_def xs; node_values_def (nodes xs);
+    match xs with Nil -> () | Cons (_, rest) -> contents_nodes rest; ())
+
+let rec (nodes_rev_append @ total) : (xs : model) @ immutable ->
+    (ys : model) @ immutable ->
+    {u : unit | nodes (rev_append xs ys) === rev_onto (nodes xs) (nodes ys)}
+    @ ghost =
+  fun xs ys -> ghost_ (
+    rev_append_def xs ys; nodes_def xs; rev_onto_def (nodes xs) (nodes ys);
+    match xs with Nil -> () | Cons (n, rest) ->
+      nodes_def (Cons (n, ys));
+      nodes_rev_append rest (Cons (n, ys)); ())
+
+let rec (contents_rev_append @ total) : (xs : model) @ immutable ->
+    (ys : model) @ immutable ->
+    {u : unit | contents (rev_append xs ys) ===
+      rev_onto (contents xs) (contents ys)} @ ghost =
+  fun xs ys -> ghost_ (
+    rev_append_def xs ys; contents_def xs;
+    rev_onto_def (contents xs) (contents ys);
+    match xs with Nil -> () | Cons (n, rest) ->
+      contents_def (Cons (n, ys));
+      contents_rev_append rest (Cons (n, ys)); ())
+
 module Owned = struct
   type payload = #{pointer : node option @@ global;
     model : model @@ global ghost; state : node option Pref.token}

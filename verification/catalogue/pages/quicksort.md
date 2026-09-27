@@ -1,6 +1,6 @@
 title: Quicksort
 blurb: An in-place quicksort on mutable `int` arrays, sequential and parallel, proved to leave the array sorted and a permutation of its input.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/quicksort.mli — Public interface
@@ -14,15 +14,15 @@ sources:
   - testsuite/tests/vox/quicksort_frame_client.ml — Client: sorts a subrange and leaves the rest unchanged
   - testsuite/tests/vox/quicksort_rejected.ml — Rejected programs
 ---
-`Quicksort` sorts a mutable array of `int` in place. Each of its four operations is proved to leave the array sorted by `<=` and a permutation of its contents at the call, where `permutation` means that every integer occurs the same number of times. `sort` and `sort_array` run on one domain and are declared `total`, so the checker also proves that they terminate. `parallel_sort` and `parallel_sort_array` sort the two sides of a partition in separate OCaml domains; their contract holds on normal return only. Partitioning is Lomuto's scheme with the middle element as pivot; an element equal to the pivot goes left or right depending on the parity of its position.
+`Quicksort` sorts a mutable array of `int` in place. Each of its four operations is proved to leave the array sorted by `<=` and a permutation of its contents at the call, where `permutation` means that every integer occurs the same number of times. `sort` and `sort_array` run on one domain and are declared `total`, so the checker also proves that they terminate without raising. They do write to the array. `total` does not exclude that: `Slice.set` is declared `total`, a slice is uniquely borrowed, and the checker tracks its contents as values (`Slice.current`, `Slice.final`). `parallel_sort` and `parallel_sort_array` sort the two sides of a partition in separate OCaml domains; their contract holds on normal return only. Partitioning is Lomuto's scheme with the middle element as pivot; an element equal to the pivot goes left or right depending on the parity of its position.
 
 The array is reached through `Borrow`, a library of exclusively borrowed array slices. Its storage primitives and the equations the checker uses for them are assumed, not proved. Nothing is proved about running time or recursion depth. The parallel operations may raise (for example if a domain cannot be started), and then the array is lost to the caller.
 
 ## Client example
 
-From the client test. `{v : t | p}` is the type `t` refined by the predicate `p`. `let refine_ x = e in` binds `x` to the value of `e` and keeps the refinement of `e`'s type as a known fact; `refine_ result` at the end checks that `result` has the refined result type. `Owned_array.t` is a uniquely owned mutable array: `of_iarray` copies an immutable array into one, and `into_iarray` freezes it again. `Model.of_iarray` is the list of an array's elements, used only in specifications.
+From the client test. `{v : t | p}` is the type `t` refined by the predicate `p`. The checker proves the refined result type from the contracts of the three calls. `Owned_array.t` is a uniquely owned mutable array: `of_iarray` copies an immutable array into one, and `into_iarray` freezes it again. `Model.of_iarray` is the list of an array's elements; here it is used only in the specification.
 
-@code testsuite/tests/vox/quicksort_client.ml "let verified_sort" "  refine_ result"
+@code testsuite/tests/vox/quicksort_client.ml "let verified_sort" "  Owned_array.into_iarray sorted"
 
 The rest of the test runs this on fixed and random inputs of up to 8,192 elements and compares the results with `List.sort` at run time.
 
@@ -32,9 +32,9 @@ The parallel operations are not declared `total`, so a function declared `total`
 
 @code testsuite/tests/vox/quicksort_rejected.ml "let (blocking_sort @ total)" "();;"
 
-@text testsuite/tests/vox/quicksort_rejected.ml "Line 2, characters 23-52:" "which is expected to be"
+@text testsuite/tests/vox/quicksort_rejected.ml "Line 2, characters 16-45:" "which is expected to be"
 
-The same test rejects a non-terminating callback passed to `Owned_array.with_mut` inside a `total` function, and a write to a slice inside `ghost_ (...)`, which is erased code. `quicksort_rejected.ml` contains no false sortedness or permutation claim.
+The same test rejects a non-terminating callback passed to `Owned_array.with_mut` inside a `total` function, and a write to a slice inside `ghost_ (...)`, which is erased code (inside `ghost_` the slice is not unique, so the uniqueness check rejects the write). It also rejects two false contracts: a function that leaves its slice unchanged and claims that the result is sorted (it can prove the permutation half), and one that overwrites the first element before calling `sort` and claims that the result is a permutation of the original contents (it can prove the sorted half).
 
 ## Interface
 
@@ -54,7 +54,7 @@ The same test rejects a non-terminating callback passed to `Owned_array.with_mut
 
 ## Trusted base
 
-- Beyond the `borrow.mli` operations on the shared page, the slice library relies on internal primitives declared `external` in the `Raw` module of `verification/library/borrow.ml` (`open_`, `restore`, `split`, `recombine`, `transfer`, `finish`, `length`), implemented in `runtime/borrow.c`. The checker gives them fixed equations in `verification/vox_vc.ml` (`normal_borrow_transition`): for example, splitting a slice of length `n` at `k` gives slices of lengths `k` and `n - k`, recombining them gives back the parent with the children's final contents as its current contents, and finishing a slice makes its final contents equal its current contents.
+- Beyond the `borrow.mli` operations on the shared page, the slice library relies on internal primitives declared `external` in the `Raw` module of `verification/library/borrow.ml` (`open_`, `restore`, `split`, `recombine`, `transfer`, `finish`, `length`), implemented in `runtime/borrow.c`. Their meaning comes partly from refinements on the `external` declarations (splitting at `k` gives slices whose contents are the first `k` and the remaining elements of the parent; recombining gives a slice whose current contents are the children's final contents, concatenated) and partly from fixed equations in `verification/vox_vc.ml` (`normal_borrow_transition`): splitting a slice of length `n` at `k` gives slices of lengths `k` and `n - k`, final contents are carried across opening, splitting, recombining and restoring, and finishing a slice makes its final contents equal its current contents.
 - `quicksort.ml` redeclares integer division as `external divide : int -> {d : int | d <> 0} -> int @@ total = "%divint"`. The nonzero-divisor refinement on the primitive is written by hand.
 - `parallel_sort` runs through `Borrow.Slice.parallel`, which starts a domain with `Domain.Safe.spawn` under `[@alert "-do_not_spawn_domains"]` and hands the left slice to it with `Raw.transfer`, which turns a `local` slice into a global one by returning the same handle. This is safe only because slice handles are heap-allocated and `Slice.parallel` joins the domain before it returns or raises. The right half runs on the calling domain; the left half's result comes back through `Domain.join`.
 
@@ -75,4 +75,4 @@ After `./configure --prefix=$PWD/_install`, `make install` and `./dev init`:
 ./dev test vox/quicksort_client.ml vox/quicksort_frame_client.ml vox/quicksort_rejected.ml
 ```
 
-The two client tests check `Vox_sequence`, `Borrow`, `Vox_int_sequence`, `Quicksort_model` and `Quicksort` while compiling them, then run the clients as bytecode and native code. The frame client needs a runtime with multiple domains.
+The two client tests check `Vox_sequence`, `Borrow`, `Vox_int_sequence`, `Quicksort_model` and `Quicksort` while compiling them, then run the clients as bytecode and native code. With this configuration the runtime has a single domain: `Domain.recommended_domain_count ()` is 1, so `parallel_sort` never starts a domain and runs sequentially, and `quicksort_frame_client.ml` is skipped. To run the parallel path and the frame client, configure with `--enable-poll-insertion --enable-multidomain` as well; the frame client also needs `Domain.recommended_domain_count ()` to be at least 2.

@@ -1,3 +1,22 @@
+(* The model of an e-graph that the public interface exposes, and pattern
+   matching in it; part of the trusted specification. A [graph] has a node
+   [count], a node per id ([nodes], whose children are ids) and a class
+   label per id ([classes]); in the implementation the label is the id's
+   union-find root ([Vox_egraph_match_observation.observe]). [node] and
+   [class_id] read an id below [count] and give [None] otherwise; [same]
+   says that two ids have equal labels.
+
+   Matching is relative to [bindings], one id per rule variable.
+   [classes graph pat bindings] lists the labels of the classes in which
+   [pat] matches. For [Var i] it is the class of the id bound to [i], or
+   nothing if that id is negative or not below [count]. For a constructor
+   pattern it is the class of every id below [count] whose node has that
+   constructor (and literal) and whose children are in classes matched by
+   the sub-patterns ([layer] checks one node, [collect] goes over the ids).
+   The list can repeat labels. [matches graph pat bindings root] says that
+   [root]'s class is in it. A variable matches only the class of its bound
+   id, so all occurrences of a repeated variable match the same class. *)
+
 module L = Vox_egraph_language_spec
 module R = Vox_egraph_rule_spec
 

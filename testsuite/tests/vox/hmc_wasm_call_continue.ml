@@ -206,7 +206,7 @@ let (correct @ total) : (frames : Q.frames) @ immutable ->
             state = {X.memory = out.call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.frame.Frame.memory; machine = {E.locals = out.call.callee.Call_Loaded.entry.Dispatch.locals; stack = S.Empty}}}} @ immutable =
   fun frames stack_base width stack_capacity stack_limit limit_local depth outer tail blocks block stored_capacity table heap runtime table_base table_count frame_count frame_stop signature activation cells old_padding context ty schema next env_count count old_pc fragment capacity padding padding_count padding_length state source base limit bytes suffix source_local base_local program entry function_ id closure captures capture capture_count plans code_local call_capacity address_local slots callee_stop object_local globals premise ->
     let labels = Continue.labels tail outer in
-    let body = Call.emit fragment padding source_local base_local width limit_local depth env_count capture plans table_base code_local address_local slots object_local in
+    let body = ghost_ (Call.emit fragment padding source_local base_local width limit_local depth env_count capture plans table_base code_local address_local slots object_local) in
     let start = {T.code = emit fragment padding source_local base_local width limit_local depth env_count capture plans table_base code_local address_local slots object_local tail; labels = outer; state} in
     ghost_ (emit_def fragment padding source_local base_local width limit_local depth env_count capture plans table_base code_local address_local slots object_local tail;
       Continue.labels_def tail outer; T.step_def start; T.enter_def body tail None start; T.stack_def state S.Empty);

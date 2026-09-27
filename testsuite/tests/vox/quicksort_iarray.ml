@@ -53,7 +53,7 @@ let rec (partition @ total) : (pivot : int) -> (size : int) ->
     fun pivot size lower scan loan -> exclave_ (
   let s = loan in
   let before = ghost_ (Slice.current (borrow_ s)) in
-  let last = (size - 1) in
+  let last = ghost_ (size - 1) in
   let zero = 0 in
   let low_side = true in
   let high_side = false in
@@ -105,7 +105,7 @@ let rec (partition @ total) : (pivot : int) -> (size : int) ->
       scan in
     let state = Slice.swap s first second in
     let after = ghost_ (Slice.current (borrow_ state)) in
-    let next_lower = lower + 1 in
+    let next_lower = ghost_ (lower + 1) in
     ghost_ (Quicksort_iarray_model.swap_partition before pivot lower scan);
     ghost_ (Spec.range_shrink after pivot low_side zero next_lower zero lower);
     ghost_ (Spec.element_swap before lower scan lower);

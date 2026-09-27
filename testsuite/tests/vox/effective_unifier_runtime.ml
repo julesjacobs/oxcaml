@@ -60,7 +60,7 @@ let rec raw_work : (goal : goal) @ immutable -> (h : node Pref.heap Ghost.t) @ i
       ghost_ (U.unified_def h.Ghost.ghost r s ok h.Ghost.ghost old; unified_def h.Ghost.ghost r s ok h.Ghost.ghost d);
       finish (#{ok; state; derivation = d})
     | Link _, _ | _, Link _ ->
-      ghost_ (terminal_def h.Ghost.ghost r; terminal_def h.Ghost.ghost s; let _ : {u : unit | false} = () in ()); assert false
+      ghost_ (terminal_def h.Ghost.ghost r; terminal_def h.Ghost.ghost s); unreachable_ ()
     | List a, List b ->
       ghost_ (scope.Ghost.ghost r; scope.Ghost.ghost s;
         E.effective_scope_def h.Ghost.ghost heads.Ghost.ghost r;

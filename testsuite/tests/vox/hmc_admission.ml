@@ -1,3 +1,16 @@
+(* Admission: the fragment the rest of the compiler accepts, checked on the
+   grounded derivation.
+
+   [outer term d] holds when [term] is a sequence of top-level [let]s whose
+   right-hand sides are functions ([callable]) and that ends in a function,
+   and every [let] inside them is monomorphic in [d] ([local]: its scheme
+   has no parameters). [admit] decides it, or returns an error.
+
+   An error is found on the derivation, but the interface states it about
+   the term alone: [meaning] is the fact about the term that each error
+   implies. [Invalid_annotation] means that the derivation does not have
+   the shape of the term; [typed_matches] shows that a typing derivation
+   always has it, so that error cannot occur. *)
 module D = Hm_declarative
 module G = Hmc_grounding
 

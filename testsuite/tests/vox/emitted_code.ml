@@ -150,8 +150,26 @@ let cmm_callees text =
       else "<closure>")
     (find_all "(app" text)
 
-(* Functions called directly by name in a Lambda expression. *)
-let direct_calls body = captures "(apply%s%w/%d" body
+(* The kinds of application Lambda prints: [apply], then [nontail] or
+   [tail], then [[L]] (the result may be on the stack), then [[yielding]]
+   (see [Printlambda.lam]). *)
+let application_kinds =
+  List.concat_map
+    (fun position ->
+      List.concat_map
+        (fun mode ->
+          List.map
+            (fun yielding -> "(apply" ^ position ^ mode ^ yielding)
+            [ ""; "[yielding]" ])
+        [ ""; "[L]" ])
+    [ ""; "nontail"; "tail" ]
+
+(* Functions called directly by name in a Lambda expression, by any kind
+   of application. *)
+let direct_calls body =
+  List.concat_map (fun kind -> all_captures (kind ^ "%s%w/%d") body)
+    application_kinds
+  |> List.sort_uniq String.compare
 
 let applications body = count "(apply" body
 

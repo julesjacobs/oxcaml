@@ -76,7 +76,7 @@ let (fetch @ total) : (p : C.program) @ immutable ->
   fun p id ->
     ghost_ (C.ready_def p);
     let defs : {d : C.definitions | C.origins d} = refine_ p.C.definitions in
-    let table = C.manifest defs in
+    let table = ghost_ (C.manifest defs) in
     ghost_ (M.lookup_present table id ());
     match C.lookup defs id with None -> unreachable_ () | Some d ->
       ghost_ (

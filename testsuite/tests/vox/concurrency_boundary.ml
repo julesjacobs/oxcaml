@@ -13,6 +13,7 @@
  readonly_files += " unique_cell.mli unique_cell.ml";
  readonly_files += " one_shot.mli one_shot.ml";
  readonly_files += " channel_buffer.mli channel_buffer.ml";
+ readonly_files += " spin_lock.mli spin_lock.ml";
  readonly_files += " unique_lock.mli unique_lock.ml";
  readonly_files += " reference_lock.mli reference_lock.ml";
  {
@@ -33,6 +34,10 @@
    flags = "${library_flags} -dlambda";
    all_modules = "channel_buffer.mli channel_buffer.ml";
    ocamlc.opt;
+   compiler_output2 = "${lib}/spin_lock.dump";
+   flags = "${library_flags} -dlambda";
+   all_modules = "spin_lock.mli spin_lock.ml";
+   ocamlc.opt;
    compiler_output2 = "${lib}/unique_lock.dump";
    flags = "${library_flags} -dlambda";
    all_modules = "unique_lock.mli unique_lock.ml";
@@ -46,7 +51,8 @@
    src = "${lib}/pref.cmi ${lib}/ghost_pref.cmi";
    src += " ${lib}/raw_memory.cmi ${lib}/verified_atomic.cmi";
    src += " ${lib}/unique_cell.cmi ${lib}/one_shot.cmi";
-   src += " ${lib}/channel_buffer.cmi ${lib}/unique_lock.cmi";
+   src += " ${lib}/channel_buffer.cmi ${lib}/spin_lock.cmi";
+   src += " ${lib}/unique_lock.cmi";
    src += " ${lib}/reference_lock.cmi";
    dst = "${test_build_directory_prefix}/ocamlc.opt.public/";
    compiler_directory_suffix = ".public";
@@ -67,7 +73,8 @@
    binary_modules = "${lib}/pref ${lib}/ghost_pref ${lib}/raw_memory";
    binary_modules += " ${lib}/verified_atomic ${lib}/unique_cell";
    binary_modules += " ${lib}/one_shot ${lib}/channel_buffer";
-   binary_modules += " ${lib}/unique_lock ${lib}/reference_lock";
+   binary_modules += " ${lib}/spin_lock ${lib}/unique_lock";
+   binary_modules += " ${lib}/reference_lock";
    all_modules = "one_shot_demo.ml";
    program = "${lib}.public/one_shot_demo.exe";
    ocamlc.opt;
@@ -131,7 +138,8 @@
    binary_modules = "${lib}/pref ${lib}/ghost_pref ${lib}/raw_memory";
    binary_modules += " ${lib}/verified_atomic ${lib}/unique_cell";
    binary_modules += " ${lib}/one_shot ${lib}/channel_buffer";
-   binary_modules += " ${lib}/unique_lock ${lib}/reference_lock";
+   binary_modules += " ${lib}/spin_lock ${lib}/unique_lock";
+   binary_modules += " ${lib}/reference_lock";
    binary_modules += " unique_lock_demo unique_lock_buffer_client";
    run-expect;
    check-program-output;
@@ -140,7 +148,8 @@
    binary_modules = "${lib}/pref ${lib}/ghost_pref ${lib}/raw_memory";
    binary_modules += " ${lib}/verified_atomic ${lib}/unique_cell";
    binary_modules += " ${lib}/one_shot ${lib}/channel_buffer";
-   binary_modules += " ${lib}/unique_lock ${lib}/reference_lock";
+   binary_modules += " ${lib}/spin_lock ${lib}/unique_lock";
+   binary_modules += " ${lib}/reference_lock";
    all_modules = "channel_buffer_demo.ml";
    program = "${lib}.public/channel_buffer_demo.exe";
    ocamlc.opt;
@@ -171,6 +180,10 @@
    flags = "${library_flags} -dlambda -dcmm";
    all_modules = "channel_buffer.mli channel_buffer.ml";
    ocamlopt.opt;
+   compiler_output2 = "${lib}/spin_lock.dump";
+   flags = "${library_flags} -dlambda -dcmm";
+   all_modules = "spin_lock.mli spin_lock.ml";
+   ocamlopt.opt;
    compiler_output2 = "${lib}/unique_lock.dump";
    flags = "${library_flags} -dlambda -dcmm";
    all_modules = "unique_lock.mli unique_lock.ml";
@@ -184,12 +197,14 @@
    src = "${lib}/pref.cmi ${lib}/ghost_pref.cmi";
    src += " ${lib}/raw_memory.cmi ${lib}/verified_atomic.cmi";
    src += " ${lib}/unique_cell.cmi ${lib}/one_shot.cmi";
-   src += " ${lib}/channel_buffer.cmi ${lib}/unique_lock.cmi";
+   src += " ${lib}/channel_buffer.cmi ${lib}/spin_lock.cmi";
+   src += " ${lib}/unique_lock.cmi";
    src += " ${lib}/reference_lock.cmi ${lib}/pref.cmx";
    src += " ${lib}/ghost_pref.cmx ${lib}/raw_memory.cmx";
    src += " ${lib}/verified_atomic.cmx ${lib}/unique_cell.cmx";
    src += " ${lib}/one_shot.cmx ${lib}/channel_buffer.cmx";
-   src += " ${lib}/unique_lock.cmx ${lib}/reference_lock.cmx";
+   src += " ${lib}/spin_lock.cmx ${lib}/unique_lock.cmx";
+   src += " ${lib}/reference_lock.cmx";
    dst = "${test_build_directory_prefix}/ocamlopt.opt.public/";
    compiler_directory_suffix = ".public";
    unset module;
@@ -209,7 +224,8 @@
    binary_modules = "${lib}/pref ${lib}/ghost_pref ${lib}/raw_memory";
    binary_modules += " ${lib}/verified_atomic ${lib}/unique_cell";
    binary_modules += " ${lib}/one_shot ${lib}/channel_buffer";
-   binary_modules += " ${lib}/unique_lock ${lib}/reference_lock";
+   binary_modules += " ${lib}/spin_lock ${lib}/unique_lock";
+   binary_modules += " ${lib}/reference_lock";
    all_modules = "one_shot_demo.ml";
    program = "${lib}.public/one_shot_demo.exe";
    ocamlopt.opt;
@@ -274,7 +290,8 @@
    binary_modules = "${lib}/pref ${lib}/ghost_pref ${lib}/raw_memory";
    binary_modules += " ${lib}/verified_atomic ${lib}/unique_cell";
    binary_modules += " ${lib}/one_shot ${lib}/channel_buffer";
-   binary_modules += " ${lib}/unique_lock ${lib}/reference_lock";
+   binary_modules += " ${lib}/spin_lock ${lib}/unique_lock";
+   binary_modules += " ${lib}/reference_lock";
    all_modules = "channel_buffer_demo.ml";
    program = "${lib}.public/channel_buffer_demo.exe";
    ocamlopt.opt;
@@ -290,7 +307,7 @@
 *)
 
 (* The boundary of the one-shot channels and the reference locks. With
-   each compiler, the nine library units are compiled with -principal, and
+   each compiler, the ten library units are compiled with -principal, and
    concurrency_boundary_check.ml checks that the Lambda (and, natively, the
    Cmm) of the channel and lock libraries has no ghost primitive: heap
    operations, token split and join, an atomic's invariant key or a cell's
@@ -491,12 +508,12 @@ Line 3, characters 39-44:
 |}]
 
 (* hidden *)
-module A = Reference_lock.A;;
+module A = Reference_lock.L.A;;
 [%%expect{|
 Line 1, characters 11-27:
-1 | module A = Reference_lock.A;;
+1 | module A = Reference_lock.L.A;;
                ^^^^^^^^^^^^^^^^
-Error: Unbound module "Reference_lock.A"
+Error: Unbound module "Reference_lock.L"
 |}]
 
 (* payload-reuse *)
@@ -536,12 +553,12 @@ Line 4, characters 37-44:
 |}]
 
 (* unique-hidden *)
-module A = L.A;;
+module A = L.L.A;;
 [%%expect{|
 Line 1, characters 11-14:
-1 | module A = L.A;;
+1 | module A = L.L.A;;
                ^^^
-Error: Unbound module "L.A"
+Error: Unbound module "L.L"
 |}]
 
 (* unique-release-empty *)

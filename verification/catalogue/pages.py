@@ -25,6 +25,14 @@ import csv, html, json, os, re, shlex, statistics, subprocess
 from highlight_code import highlight
 
 esc = html.escape
+
+# The home page of the site the catalogue is part of (build.py --home-url).
+# When set, every page's navigation starts with a link to it.
+HOME = None
+
+
+def home_link(separator=' · '):
+    return f'<a href="{esc(HOME)}">Vox</a>{separator}' if HOME else ''
 STATUS = {'reviewed': 'Reviewed', 'owner-review': 'Ready for owner review',
           'review-pending': 'Review pending', 'in-progress': 'In progress'}
 HERE = Path(__file__).resolve().parent
@@ -92,7 +100,7 @@ class Source:
                 '<!doctype html><html lang="en"><head><meta charset="utf-8">'
                 '<meta name="viewport" content="width=device-width,initial-scale=1">'
                 f'<title>{esc(Path(path).name)}</title><link rel="stylesheet" href="{rel("style.css")}?v={css}"></head>'
-                f'<body><main class="source-page"><p><a href="{rel("index.html")}">Catalogue</a> · '
+                f'<body><main class="source-page"><p>{home_link()}<a href="{rel("index.html")}">Catalogue</a> · '
                 f'<a href="{esc(raw.name)}">Raw</a> · <a href="{esc(self.github(path))}">GitHub</a></p>'
                 f'<h1>{esc(path)}</h1><p>Commit {self.short}</p>'
                 f'<div class="numbered"><pre class="gutter">{gutter}</pre><pre><code>{code}</code></pre></div>'
@@ -280,14 +288,14 @@ def build_page(ident, meta, body, source, output, css, stats_html=''):
     <name>.html at the top level."""
     used = set()
     if ident.startswith('_'):
-        content = ('<p><a href="index.html">← Catalogue</a></p><h1>' + inline(meta['title']) + '</h1>'
+        content = (f'<p>{home_link()}<a href="index.html">← Catalogue</a></p><h1>' + inline(meta['title']) + '</h1>'
                    f'<p class="page-meta">{esc(meta["date"])} · {commit_line(source)}</p>'
                    + render_body(body, source, '', ident, used))
         (output / (ident[1:] + '.html')).write_text(page_shell(meta['title'], css, '', content))
         return used
     body = body.replace('\n## Trusted base\n',
                         '\n## Trusted base\n\nBeyond [what every demo trusts](../trust.html):\n\n', 1)
-    content = (f'<p><a href="../index.html#{ident}">← Catalogue</a></p>'
+    content = (f'<p>{home_link()}<a href="../index.html#{ident}">← Catalogue</a></p>'
                f'<h1>{inline(meta["title"])}</h1>'
                f'<p class="page-meta"><span class="status status-{meta["status"]}">{STATUS[meta["status"]]}</span>'
                f' · {esc(meta["date"])} · {commit_line(source)}</p>'

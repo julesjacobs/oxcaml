@@ -1,3 +1,16 @@
+(* The expression language of the e-graph; the first file of the trusted
+   specification (vox_egraph_rule_handle.md gives the reading order). Two
+   sorts, integers and booleans. [expr] has literals, one integer and one
+   boolean input ([Int_input] and [Bool_input], read from [env]), addition,
+   integer equality and a conditional at each sort. [sort] is an
+   expression's sort, or [None] if it is ill-sorted. [eval] is total on all
+   expressions: [as_int] and [as_bool] turn a value of the wrong sort into
+   0 and [false], so most lemmas about [eval] assume that a subexpression
+   has a value of the right sort. [+] is OCaml's 63-bit addition and wraps.
+   The e-graph's equality is derivability from the caller's rules
+   (Vox_egraph_derivation_spec), not equality under [eval]; [eval] enters
+   only through [Vox_egraph_interpret_wrapping.sound]. *)
+
 type sort = Integer | Boolean
 type value = Int_value of int | Bool_value of bool
 type expr =

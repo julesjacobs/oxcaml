@@ -449,6 +449,10 @@ let resolved_field_alias_same : resolved_field_explicit list =
   ([] : resolved_field_alias list);;
 [%%expect{|
 module R1_alias = R1
+type resolved_field_alias = {r : R1_alias.t | gt r.R1_alias.field 0}
+val resolved_field_alias_same : resolved_field_explicit list = []
+|}, Principal{|
+module R1_alias = R1
 type resolved_field_alias = {r : R1.t | gt r.R1_alias.field 0}
 val resolved_field_alias_same : resolved_field_explicit list = []
 |}]

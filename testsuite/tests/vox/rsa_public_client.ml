@@ -74,8 +74,8 @@ let (crt_equivalence @ total) c (exponent : {d : t | d >= 0Z}) p
       r = Spec.power c d mod (p * q)} =
   let d = exponent in let q = other_prime in
   ghost_ (Spec.prime_def p); ghost_ (Spec.prime_def q);
-  let n = p * q in
-  let ordinary = Vox_rsa.decrypt c d n in
+  let n = ghost_ (p * q) in
+  let ordinary = ghost_ (Vox_rsa.decrypt c d n) in
   let crt = Vox_rsa.decrypt_crt c d p q in
   ghost_ ((() : {u : unit | ordinary = crt}));
   crt

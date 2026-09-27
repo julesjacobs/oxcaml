@@ -1,3 +1,15 @@
+(* Closure under one rule for every assignment of its variables; part of the
+   trusted specification. [closed_bindings graph rule vars prefix count]
+   says that [C.closed_roots] holds at every root for every assignment that
+   extends [prefix] with one id per sort in [vars]: the first variable takes
+   the ids [count - 1] down to 0 and then -1 (no node), and each later one
+   the ids [graph.count - 1] down to 0 and then -1. Sorts are not filtered
+   here; [C.closed_roots] checks them with [C.binding_valid]. Only the
+   defining equation [closed_bindings_def] is visible:
+   vox_egraph_quantifier.ml defines the function by recursion on the
+   lexicographic measure (length of [vars], [count]) and proves the
+   equation, which keeps the measure out of the specification. *)
+
 module C = Vox_egraph_closure_spec
 
 val closed_bindings : C.Q.graph @ immutable -> C.R.rule @ immutable ->

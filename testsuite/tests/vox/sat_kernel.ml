@@ -8,8 +8,6 @@
 
 open Vox_sat_spec
 
-open Vox_sat_spec
-
 let () =
   let open Vox_sat_proof in
   let units = [[Positive 0]; [Negative 0]] in
@@ -38,24 +36,10 @@ let () =
      let learned = resolve_result units 0 positive negative in
      (match learned.clause with
       | [] ->
-        let database = database_empty units in
-        let database = database_cons units learned database in
-        (match database_at units database 0 with
-         | Some empty ->
-           (match empty.clause with
-            | [] -> ghost_ (empty_result_at units empty [false])
-            | _ :: _ -> assert false)
-         | None -> assert false)
+        let database = database_cons units learned (database_empty units) in
+        (match database_clauses database with
+         | [[]] -> ghost_ (empty_result_at units learned [false])
+         | _ -> assert false)
       | _ :: _ -> assert false)
    | _ -> assert false);
-  let plan =
-    [{pivot = 0; source = Original_clause 1; current_positive = true}]
-  in
-  (match execute_resolution units (database_empty units)
-    (Original_clause 0) plan with
-   | Some result ->
-     (match result.clause with
-      | [] -> ghost_ (empty_result_at units result [true])
-      | _ :: _ -> assert false)
-   | None -> assert false);
   ()

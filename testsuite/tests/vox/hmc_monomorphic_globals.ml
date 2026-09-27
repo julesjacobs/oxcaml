@@ -18,7 +18,7 @@ let (fetch @ total) : (program : C.program) @ immutable ->
         (G.mono d.C.body.B.origin.I.ty) d.C.body.B.derivation} @ immutable = fun program id ->
   ghost_ (C.ready_def program);
   let definitions : {d : C.definitions | C.origins d} = refine_ program.C.definitions in
-  let table = C.manifest definitions in
+  let table = ghost_ (C.manifest definitions) in
   ghost_ (M.lookup_present table id ());
   match C.lookup definitions id with
   | None -> unreachable_ ()

@@ -1,3 +1,10 @@
+(* [present graph pat bindings]: every variable of [pat] is bound to an id
+   that has a class label. [matched] shows that a match of [pat] implies
+   [present]; [transfer] carries [present] from a rule's left-hand side to
+   its right-hand side, using the rule validity condition that every
+   right-hand variable occurs on the left. Together they show that the
+   right-hand side of a matched rule can be admitted. *)
+
 module Q = Vox_egraph_match_spec
 module R = Vox_egraph_rule_spec
 module P = Vox_egraph_match_evidence

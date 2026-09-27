@@ -37,6 +37,16 @@ module Proof :
     val value : int -> int @@ total
     val lemma : (x : int) -> {u : unit | (value x) >= 0} @@ total
   end
+val erased : int -> {y : int | y >= 0} = <fun>
+val retained : int -> {y : int | y >= 0} = <fun>
+val nested : {p : {u : unit | true} | true} = ()
+val discard_nested : unit -> unit = <fun>
+|}, Principal{|
+module Proof :
+  sig
+    val value : int -> int @@ total
+    val lemma : (x : int) -> {u : unit | (value x) >= 0} @@ total
+  end
 val erased : int @ total -> {y : int | y >= 0} = <fun>
 val retained : int -> {y : int | y >= 0} = <fun>
 val nested : {p : {u : unit | true} | true} = ()
@@ -89,5 +99,7 @@ let (use_nested @ total) x : {y : int | y >= 0} =
     (refine_ p : {p : {u : unit | Proof.value x >= 0} | true}));
   refine_ y;;
 [%%expect{|
+val use_nested : int -> {y : int | y >= 0} = <fun>
+|}, Principal{|
 val use_nested : int @ total -> {y : int | y >= 0} = <fun>
 |}]

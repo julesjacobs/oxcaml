@@ -64,7 +64,7 @@ let rec walk_loop : (goal : walk_goal) @ immutable -> (h : (node Pref.heap) Ghos
 
       )
       | Var | Bool | Word | List _ | Arrow _ ->
-        ghost_ (let _ : {u : unit | false} = () in ()); assert false)
+        unreachable_ ())
 
 let walk : (h : (node Pref.heap) Ghost.t) @ immutable  ->(scope : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h.Ghost.ghost x) || source_ok h.Ghost.ghost x})) Ghost.t) @ total  ->
     (p : node Pref.t) @ immutable  -> (root : node Pref.t) @ immutable  ->(path : (resolution) Ghost.t) @ immutable  ->

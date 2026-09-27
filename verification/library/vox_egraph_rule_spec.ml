@@ -1,3 +1,18 @@
+(* Rewrite rules, part of the trusted specification. A [pat] is an
+   expression with variables: [Var i] is the rule's variable [i], whose sort
+   is entry [i] of the rule's [vars] ([lookup_sort]). A [rule] rewrites
+   [lhs] to [rhs], and [t] is a list of rules numbered from 0
+   ([lookup_rule]). [rule_valid] asks that both sides have the same, defined
+   sort ([pat_sort]) and that every variable of the right side occurs in the
+   left ([vars_in]), so a match of the left side fixes the right side;
+   [valid] asks it of every rule and is the precondition of
+   [Vox_egraph_rule_handle.create]. Nothing asks the two sides to evaluate
+   alike. A [subst] has one expression per variable; [subst_valid vars
+   subst] asks for exactly one expression of each variable's sort, and
+   [instantiate] replaces each variable by its expression. The lookups
+   return [None] or [Int_lit 0] out of range, which a valid rule with a
+   valid substitution never reaches. *)
+
 module L = Vox_egraph_language_spec
 
 type pat =

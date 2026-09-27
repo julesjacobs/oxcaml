@@ -1,3 +1,14 @@
+(* Invariants linking the abstract slot list of the hash-cons table (the
+   model of [Vox_table_map]) to the arena of [Vox_egraph_owner], as a functor
+   over that model. [valid slots arena count]: every entry [(key, id)] has
+   [id < count] and arena cell [id] holding [key], so a hit names a node with
+   that key. [indexed slots arena count]: every filled cell below [count] is
+   found by [lookup], so a miss means the key is new. The lemmas keep both
+   across [put] ([append_valid], [append_indexed]) and across any slot list
+   with the same bindings ([valid_agrees], [indexed_same]), which is what
+   the table's [replace] guarantees. [empty16] is the initial table of 16
+   empty slots, unrolled. *)
+
 module I = Vox_iarray
 module K = Vox_egraph_key
 module Template = Vox_table_map.Make (K)

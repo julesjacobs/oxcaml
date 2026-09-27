@@ -55,7 +55,7 @@ def shell(title, body, prefix='', script=''):
 
 
 def header(prefix=''):
-    return (f'<p class="site-nav"><a href="{prefix}index.html">Vox demonstrations</a> · '
+    return (f'<p class="site-nav">{P.home_link()}<a href="{prefix}index.html">Vox demonstrations</a> · '
             f'<a href="{prefix}trust.html">What every demo trusts</a> · '
             f'<a href="{prefix}presentation.html">Presentation guide</a> · '
             f'<a href="{prefix}statistics/index.html">Line counts</a></p>')
@@ -67,6 +67,7 @@ def counts_line(stats, prefix):
 
 
 def build(args):
+    P.HOME = args.home_url
     source = P.Source(ROOT, args.revision, args.working_tree)
     catalogue = json.loads((HERE / 'catalogue.json').read_text())
     # Every page links to the shared trust page, so a partial build keeps it.
@@ -128,7 +129,7 @@ def build(args):
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<title>Vox demonstrations</title><link rel="stylesheet" href="style.css?v={CSS}"></head>'
         '<body><main class="overview"><header class="overview-head">'
-        '<h1>Vox demonstrations</h1><nav><a href="trust.html">What every demo trusts</a>'
+        '<h1>Vox demonstrations</h1><nav>' + P.home_link('') + '<a href="trust.html">What every demo trusts</a>'
         '<a href="presentation.html">Presentation guide</a><a href="statistics/index.html">Line counts</a></nav></header>'
         '<p class="overview-intro">OxCaml with refinement types checked by Z3 at compile time, erased ghost code and '
         'affine ghost ownership. Each demo is ordinary OxCaml code whose specification the compiler checks; its page '
@@ -252,7 +253,7 @@ def check(output, partial=False):
     for path, page in pages.items():
         for link in page.links:
             u = urlsplit(link)
-            if u.scheme or u.netloc:
+            if u.scheme or u.netloc or link == P.HOME:
                 continue
             target = (path.parent / unquote(u.path)).resolve() if u.path else path
             if not target.exists():
@@ -270,4 +271,6 @@ if __name__ == '__main__':
     arguments.add_argument('--prefix', default=str(ROOT / '_install'))
     arguments.add_argument('--output', default=str(ROOT / '_build' / 'catalogue'))
     arguments.add_argument('--pages')
+    arguments.add_argument('--home-url', help='the home page of the site the catalogue is part of, '
+                           'linked from every page as "Vox" (default: no link)')
     build(arguments.parse_args())

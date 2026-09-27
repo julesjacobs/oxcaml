@@ -74,7 +74,7 @@ let (correct @ total) : (lowered : Lower.program) @ immutable -> (locals : Emit.
     let read = Read.emit (Root.reads tag_local payload_local) frame_local in
     let done_code = Emit.status local (finished ()) T.Empty in
     let root = Lift.embed read done_code in
-    let caller = Lift.embed (Hmc_wasm_return_frame.emit lowered.Lower.restore (Restore.width lowered.Lower.capacity) frame_local top_local) T.Empty in
+    let caller = ghost_ (Lift.embed (Hmc_wasm_return_frame.emit lowered.Lower.restore (Restore.width lowered.Lower.capacity) frame_local top_local) T.Empty) in
     let select = Caller.emit lowered.Lower.restore lowered.Lower.capacity frame_local top_local stack_base root T.Empty in
     let prepared = Status.write local (Status.zero ()) select labels state () in
     ghost_ (L.other_local state.X.machine.E.locals local (S.I32 (Status.zero ())) prepared.X.machine.E.locals frame_local ();

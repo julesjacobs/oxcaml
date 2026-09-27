@@ -6,8 +6,8 @@ open Emitted_code
 let () =
   let dir = Sys.argv.(1) in
   let proofs =
-    [ "empty_unsatisfiable"; "semantic_unsat_at"; "exhaustive_result";
-      "rejects_extensions"; "derivation_valid"; "classify_input" ]
+    [ "empty_unsatisfiable"; "semantic_unsat_at"; "rejects_extensions";
+      "derivation_valid"; "classify_input" ]
   in
   List.iter
     (fun (unit, calls) ->
@@ -17,7 +17,7 @@ let () =
         (unit ^ " names no proof function");
       check (applications lambda = calls)
         (Printf.sprintf "%s makes %d calls" unit calls))
-    [ "vox_sat", 1; "vox_cdcl", 1; "vox_cdcl_total", 6 ];
+    [ "vox_sat", 0; "vox_cdcl_total", 4 ];
   if Array.length Sys.argv > 2 then begin
     let obj = read Sys.argv.(2) in
     let measures =

@@ -1,3 +1,10 @@
+(* Runs of the dispatcher loop after the prologue ([Entry.configuration]),
+   for a program initialized for [input]. [run] and [preservation]
+   initialize and then run; the fixture tests execute them. [safe] and
+   [reflection] are the facts Hmc_wasm_program_binary uses. [safe] holds
+   at any step count because Hmc_wasm_program_observe takes enough block
+   steps to cover it, and every block step continues, returns or reports
+   exhaustion. *)
 module D = Hm_declarative
 module I = Hmc_tail_ir
 module M = Hmc_monomorphic

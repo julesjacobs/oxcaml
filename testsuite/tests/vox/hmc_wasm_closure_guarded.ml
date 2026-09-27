@@ -94,7 +94,7 @@ let (correct @ total) : (program : Program.program) @ immutable -> (globals : Ma
           && L.get out.state.X.machine.E.locals frame_local === Some (S.I32 frame_base)
           && out.state.X.machine.E.stack === S.Empty)} @ immutable =
   fun program globals stack_limit table heap signature next_signature activation frames id type_ typing next cells padding old_pc pc capacity max_code fragment state frame_base frame_stop heap_base limit frame_local heap_local limit_local before_frame tail premise ->
-    let body = Success.emit fragment pc frame_local heap_local in
+    let body = ghost_ (Success.emit fragment pc frame_local heap_local) in
     let start = {T.code = emit fragment pc frame_local heap_local limit_local; labels = T.No_labels; state} in
     ghost_ (Select.correct fragment.Write.bytes heap_local limit_local heap_base limit state T.No_labels (Lift.embed body T.Empty) T.Empty T.Empty ();
       emit_def fragment pc frame_local heap_local limit_local;
@@ -110,8 +110,8 @@ let (correct @ total) : (program : Program.program) @ immutable -> (globals : Ma
         state = success.Success.state; success = Some success})
     else (
       ghost_ (Write.matches_def signature.G.locals id capacity max_code fragment);
-      let view = Hmc_frame_slices.decode signature activation cells padding () in
-      let count = Hmc_wasm_schema_counts.encode (Codec.locals_size signature.G.locals) capacity () in
+      let view = ghost_ (Hmc_frame_slices.decode signature activation cells padding ()) in
+      let count = ghost_ (Hmc_wasm_schema_counts.encode (Codec.locals_size signature.G.locals) capacity ()) in
       ghost_ (Allocate.exhausted heap id view.Hmc_frame_slices.env count heap_base limit ();
         Hmc_heap_closure_transition.exhausted program globals heap limit stack_limit activation frames id type_ typing next ();
         X.run_def C.Empty state; Lift.embed_def C.Empty T.Empty;

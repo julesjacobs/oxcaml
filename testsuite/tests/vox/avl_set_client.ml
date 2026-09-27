@@ -24,9 +24,7 @@ let () =
         (element : int) ->
         {u : unit |
           lookup element ascending === lookup element ascending} =
-      fun _element ->
-      let u = () in
-      u
+      fun _element -> ()
     in
     extensional ascending ascending same_lookup;
     ())

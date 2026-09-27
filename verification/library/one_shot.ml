@@ -91,6 +91,9 @@ let send (type a : value mod portable contended)
   let h = ghost_ (P.own (borrow_ permission)) in
   ghost_ (P.Heap.put_law (P.Heap.empty ()) (Slot.location cell) false true);
   ghost_ (Invariant.full_def k h);
+  (* The transition shows that the flag is 0 at this step (the caller owns
+     the full slot, so the invariant cannot), and [publication_post] requires
+     success: the result is always [true]. *)
   let _ = A.compare_and_set atomic 0 1
     publication_post permission
     (ghost_ (fun before inside outside ->

@@ -1,6 +1,6 @@
 title: Functional queue
 blurb: A persistent two-list queue proved to act on the list of its elements: `enqueue` appends, and `dequeue` of a nonempty queue returns the first element and the rest.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/functional_queue.mli — Public interface
@@ -16,13 +16,13 @@ Not proved: running time. When each version of a queue is used at most once, `en
 
 ## Client example
 
-From the client, which uses only the public interface. It enqueues two values into an empty queue, dequeues twice, and proves that the values come out in order and the queue is empty again. `('a : immutable_data)` restricts the element type. `{r : t | p}` is the type `t` refined by the predicate `p`. `let refine_ x = e` binds `x` and keeps the refinement of `e`'s result as a fact about `x`, and `refine_ e` checks `e` against the refinement expected at that point. `ghost_ (...)` is proof code, checked and then erased. The checker does not evaluate recursive functions by itself: `append_def` unfolds `append` once, so that `append [] [first]` is known to be `[first]`.
+From the client, which uses only the public interface. It enqueues two values into an empty queue, dequeues twice, and proves that the values come out in order and the queue is empty again. `('a : immutable_data)` restricts the element type. `{r : t | p}` is the type `t` refined by the predicate `p`. The refinements of `enqueue`'s results are facts about `q1` and `q2`, and the checker uses them to prove the precondition of each `dequeue` and the refined result. `ghost_ (...)` is proof code, checked and then erased. The checker does not evaluate recursive functions by itself: `append_def` unfolds `append` once, so that `append [] [first]` is known to be `[first]`.
 
-@code testsuite/tests/vox/queue_client.ml "let (fifo @ total) :" "refine_ result"
+@code testsuite/tests/vox/queue_client.ml "let (fifo @ total) :" "  a, b, q4"
 
 ## A rejected program
 
-Dequeuing from the empty queue is a type error. This client claims that `empty` is nonempty in order to pass it to `dequeue`.
+Dequeuing from the empty queue is a type error. This client passes `empty` to `dequeue`, and the checker cannot prove the precondition stated in the interface.
 
 @code testsuite/tests/vox/queue_rejected.ml "let () =" "  ()"
 

@@ -112,6 +112,42 @@ let (reject_transfer_encoding @ total) (line : bytes)
   ghost_ (header_outcome line headers; framing_rejection headers);
   result
 
+let (reject_request_line @ total) (line : bytes) (suffix : bytes) :
+    {result : result |
+      if safe_line line && not (valid_request_line line)
+        && fits 16384 (S.append line [13; 10]) then
+      status result.state === Malformed Invalid_request_line
+      && result.rest === suffix
+      else true} =
+  let result = parse (S.append line (13 :: 10 :: suffix)) in
+  ghost_ (request_line_rejection line suffix);
+  result
+
+let (reject_header @ total) (line : bytes) (headers : int list list)
+    (bad : bytes) (suffix : bytes) :
+    {result : result |
+      if valid_request_line line && safe_line line && header_lines headers
+        && nonempty bad && safe_line bad && not (valid_header bad)
+        && fits 16384 (S.append line
+          (13 :: 10 :: header_prefix headers (S.append bad [13; 10]))) then
+      status result.state === Malformed Invalid_header
+      && result.rest === suffix
+      else true} =
+  let result = parse (S.append line
+    (13 :: 10 :: header_prefix headers (S.append bad (13 :: 10 :: suffix)))) in
+  ghost_ (header_rejection line headers bad suffix);
+  result
+
+let (reject_byte @ total) (state : state) (b : int) (rest : bytes) :
+    {result : result |
+      if status state === Incomplete && total_consumed state < 16384
+        && not (byte b) then
+      status result.state === Malformed Invalid_byte && result.rest === rest
+      else true} =
+  let result = feed state (b :: rest) in
+  ghost_ (invalid_byte_rejection state b rest);
+  result
+
 let bytes text = List.init (String.length text) (fun i -> Char.code text.[i])
 let text bs = String.of_seq (List.to_seq (List.map Char.chr bs))
 let run text =
@@ -169,6 +205,20 @@ let () =
     assert (result.rest = []);
     assert (consumed (initial ()) result.state = cut)
   done;
+  let rejected expected result rest =
+    assert ((status result.state) = Malformed expected && result.rest = bytes rest)
+  in
+  let next = "GET / HTTP/1.1\r\nHost: a\r\n\r\n" in
+  rejected Invalid_request_line
+    (reject_request_line (bytes "GET / HTTP/1.0") (bytes next)) next;
+  rejected Invalid_request_line (reject_request_line [] []) "";
+  rejected Invalid_header
+    (reject_header (bytes "GET / HTTP/1.1") (List.map bytes ["Host: a"; "X: 1"])
+      (bytes "Broken") (bytes next)) next;
+  rejected Invalid_header
+    (reject_header (bytes "GET / HTTP/1.1") [] (bytes " folded") []) "";
+  let partial = (feed (initial ()) (bytes "GET / HTTP/1.1\r\nHo")).state in
+  rejected Invalid_byte (reject_byte partial 256 (bytes next)) next;
   malformed Invalid_request_line "GET / HTTP/1.0\r\n";
   malformed Invalid_request_line "GET  / HTTP/1.1\r\n";
   malformed Invalid_crlf "GET / HTTP/1.1\n";
@@ -280,4 +330,13 @@ let () =
     ^ "\r\n\r\n" in
   check_splits wire [0; 1; String.length prefix; 16380; 16381; 16382; 16383; 16384];
   let over = prefix ^ String.make 16384 'x' in
-  check_splits over [0; String.length prefix; 16383; 16384; 16385]
+  check_splits over [0; String.length prefix; 16383; 16384; 16385];
+  (* The budget also runs out in the body: a header block of 16,334 bytes
+     announces 100 body bytes, of which 50 fit. *)
+  let prefix = "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 100\r\nX: " in
+  let head = prefix ^ String.make (16334 - String.length prefix - 4) 'x'
+    ^ "\r\n\r\n" in
+  let result = run (head ^ String.make 100 'b') in
+  assert (status result.state = Limit Message_bytes);
+  assert (consumed (initial ()) result.state = 16384);
+  assert (List.length result.rest = 50)

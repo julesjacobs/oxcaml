@@ -1,3 +1,9 @@
+(* The runtime union-find: a 512-entry parent array and a node count. There
+   is no path compression and no ranks: [union] points the larger root at
+   the smaller one, which keeps [S.ordered] (every parent is at most its
+   child), the invariant that makes [S.root] terminate. [union_semantics]
+   gives the root of every id after a union. *)
+
 module I = Vox_iarray
 module S = Vox_egraph_union_spec
 

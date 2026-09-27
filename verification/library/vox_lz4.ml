@@ -28,11 +28,20 @@ let decompress_verified : (wire : string) ->
     {decoded : D.decoded | Vox_lz4_spec.matches_model wire capacity decoded} =
   fun wire capacity -> D.decode_string wire capacity
 
-let decompress ?(capacity = max_block_size) wire =
-  if capacity < 0 || capacity > max_block_size then Error Invalid_capacity
-  else
-    let decoded = decompress_verified wire capacity in
-    decoded
+let decompress : ?capacity:(c : int) -> (wire : string) ->
+    {result : (string, decode_error) result |
+      match c with
+      | None -> Vox_lz4_spec.matches_model wire 4194304 result
+      | Some n ->
+          if 0 <= n && n <= 4194304
+          then Vox_lz4_spec.matches_model wire n result
+          else result === Error Invalid_capacity} =
+  fun ?capacity wire ->
+    match capacity with
+    | None -> decompress_verified wire max_block_size
+    | Some capacity ->
+        if capacity < 0 || capacity > max_block_size then Error Invalid_capacity
+        else decompress_verified wire capacity
 
 let compress_decompress : (source : string) ->
     {output : string | V.contents output === V.contents source} =
@@ -45,6 +54,6 @@ let compress_decompress : (source : string) ->
       ghost_ (R.roundtrip source wire capacity decoded);
       match decoded with
       | Ok output -> output
-      | Error _ -> assert false
+      | Error _ -> unreachable_ ()
 
 let (roundtrip @ total) = R.roundtrip

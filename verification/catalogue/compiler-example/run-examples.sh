@@ -21,7 +21,11 @@ compiler=$root/_install/bin/ocamlopt.opt
 [ -f "$test" ] || { echo "run from the repository root" >&2; exit 2; }
 [ -x "$compiler" ] || { echo "no $compiler: run make install" >&2; exit 2; }
 
-modules=$(sed -n 's/^ *all_modules = "\([^"]*\)";$/\1/p' "$test")
+# The modules, in dependency order, as listed in the test's header, then the
+# test itself.
+prebuilt=$(sed -n 's/^ *prebuilt_modules = "\([^"]*\)";$/\1/p' "$test")
+[ -n "$prebuilt" ] || { echo "no prebuilt_modules in $test" >&2; exit 2; }
+modules="$prebuilt $(basename "$test")"
 if [ "$dir" = "$default" ]; then
   rm -rf "$dir"
 elif [ -e "$dir" ]; then

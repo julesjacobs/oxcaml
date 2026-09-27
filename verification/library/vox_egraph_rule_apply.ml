@@ -1,3 +1,8 @@
+(* Applies one rule instance given an explicit substitution: admits both
+   instantiated sides as expressions and merges them with an erased [Rule]
+   derivation. Saturation does not use this module (it matches in the graph
+   through [Vox_egraph_rule_rewrite]); the rule tests exercise it. *)
+
 module H = Vox_egraph_rule_hashcons
 module V = Vox_egraph_rule_store
 module S = Vox_egraph_rule_semantics

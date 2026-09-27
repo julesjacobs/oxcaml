@@ -1,6 +1,7 @@
-(** Public edit semantics. Every observation has a complete checked equation.
-    Counts use mathematical Bigint integers, not wrapping machine arithmetic.
-    These structurally decreasing equations uniquely determine their values. *)
+(** Edit scripts and their meaning. Each function is specified by an
+    equation, checked against its implementation in vox_diff_spec.ml. Every
+    recursive equation recurses on shorter lists, so it determines its
+    function uniquely. Counts are unbounded Bigint integers. *)
 
 type operation : immutable_data mod total =
   | Keep of int | Delete of int | Insert of int

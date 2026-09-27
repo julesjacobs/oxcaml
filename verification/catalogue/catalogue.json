@@ -170,7 +170,7 @@
   {
    "id": "stateful-termination",
    "name": "Termination of stateful code",
-   "summary": "`total` means terminating and free of effects, so code that reads or writes arrays is never `total`. A separate guarantee that stateful code terminates would be a new mode; no demo needs it yet.",
+   "summary": "`total` means terminating without raising. It covers pure code and writes through uniquely owned storage (`Quicksort.sort` writes a unique slice), but not code built on the typed heap, such as the hash table, the rings or Hindley–Milner inference: their state is uniquely owned, but `Pref.read` and `write` are declared partial. A termination guarantee for such code would be a separate mode.",
    "question": true,
    "demos": []
   },
@@ -224,6 +224,7 @@
     "verified_atomic",
     "one_shot",
     "channel_buffer",
+    "spin_lock",
     "reference_lock",
     "unique_lock",
     "hmc_word64"
@@ -354,6 +355,7 @@
     "unique_lock"
    ],
    "owned": [
+    "spin_lock",
     "reference_lock",
     "unique_lock"
    ]
@@ -361,7 +363,6 @@
   "sat-solver": {
    "roots": [
     "vox_sat",
-    "vox_cdcl",
     "vox_cdcl_total"
    ],
    "owned": [

@@ -2855,8 +2855,7 @@ let rec (find_latest @ total) :
       match variables with
       | [] -> ()
       | first :: _ -> trail_has_def (Bigint.of_int first) []);
-    let _ : {u : unit | false} = () in
-    0
+    unreachable_ ()
   | literal :: rest ->
     let v = variable literal in
     if has_int v variables then (
@@ -3217,8 +3216,7 @@ let (resolve_latest @ total) :
     (match fetch_reason formula (ghost_ database) (ghost_ state.learned)
         binding.reason with
      | None ->
-       let _ : {u : unit | false} = () in
-       current
+       unreachable_ ()
      | Some reason ->
        if binding.value then (
          let resolved = resolve_result formula v reason current in
@@ -3233,8 +3231,7 @@ let (resolve_latest @ total) :
            current.clause variables false v reason.clause resolved.clause);
          resolved))
   | Some None | None ->
-    let _ : {u : unit | false} = () in
-    current
+    unreachable_ ()
 
 let rec (analyze @ total) :
     (n : {n : int | 0 <= n}) @ ghost ->
@@ -3366,8 +3363,7 @@ let rec (asserting_clause @ total) :
     (match asserting with
      | Some literal -> literal, target
      | None ->
-       let _ : {u : unit | false} = () in
-       Positive 0, target)
+       unreachable_ ())
   | literal :: rest ->
     ghost_ (scan_conflict_head (binding_values bindings) literal rest);
     let v = variable literal in
@@ -3395,8 +3391,7 @@ let rec (asserting_clause @ total) :
         asserting_clause (ghost_ n) bindings level (ghost_ variables)
           rest asserting target
     | Some None | None ->
-      let _ : {u : unit | false} = () in
-      Positive 0, target
+      unreachable_ ()
   in
   ghost_ (let literal, next = result in
     at_level_def bindings level literal;
@@ -3417,8 +3412,7 @@ let rec (find_level_literal @ total) : (bindings : binding option list) ->
   ghost_ (level_occurs_def bindings pivot level clause);
   match clause with
   | [] ->
-    let _ : {u : unit | false} = () in
-    Positive 0
+    unreachable_ ()
   | literal :: rest ->
     let found = match at bindings (variable literal) with
       | Some (Some binding) ->
@@ -3650,8 +3644,7 @@ let rec (propagate @ total) : (n : int) @ ghost ->
     (match original_result formula index with
      | Some entry -> Conflict (entry, state)
      | None ->
-       let _ : {u : unit | false} = () in
-       Stable (state, partial))
+       unreachable_ ())
   | Scan_unit (index, literal) ->
     ghost_ (scan_unit_binding 4096 state.bindings formula);
     ghost_ (
@@ -3663,8 +3656,7 @@ let rec (propagate @ total) : (n : int) @ ghost ->
     (match enqueue (ghost_ formula) (ghost_ database) state literal
         (Original index) with
      | None ->
-       let _ : {u : unit | false} = () in
-       Stable (state, partial)
+       unreachable_ ()
      | Some state ->
        ghost_ (unassigned_bounds state.bindings);
        propagate (ghost_ n) formula database state
@@ -3687,8 +3679,7 @@ let rec (propagate @ total) : (n : int) @ ghost ->
       (match enqueue (ghost_ formula) (ghost_ database) state literal reason
         with
        | None ->
-         let _ : {u : unit | false} = () in
-         Stable (state, partial)
+         unreachable_ ()
        | Some state ->
          ghost_ (unassigned_bounds state.bindings);
          propagate (ghost_ n) formula database state
@@ -4366,8 +4357,7 @@ let rec (search @ total) :
        | None ->
          (match choose_variable state.bindings scores with
           | None ->
-            let _ : {u : unit | false} = () in
-            {answer = Unknown; statistics = statistics state}
+            unreachable_ ()
           | Some (v, _) ->
             ghost_ (decision_level_bound n state.bindings state.trail
               state.level);
@@ -4390,8 +4380,7 @@ let rec (search @ total) :
             (match enqueue (ghost_ formula) (ghost_ database) state (Positive
               v) Decision with
              | None ->
-               let _ : {u : unit | false} = () in
-               {answer = Unknown; statistics = statistics state}
+               unreachable_ ()
              | Some state ->
                ghost_ (progress_decision n database initial_bindings
                  state.bindings;
@@ -4447,8 +4436,7 @@ let rec (search @ total) :
         (match enqueue (ghost_ formula) (ghost_ database) state
           literal reason with
          | None ->
-           let _ : {u : unit | false} = () in
-           {answer = Unknown; statistics = statistics state}
+           unreachable_ ()
          | Some state ->
            ghost_ (progress_learning n previous_database learned
              initial_bindings state.bindings;
@@ -4568,52 +4556,6 @@ let (solve_complete @ total) : (n : int) -> (formula : formula) ->
   else if not (valid_formula n formula) then Error (Invalid_input
     Invalid_formula)
   else Ok (start_search None n formula)
-
-let (solve_with_fallback @ total) :
-    (fuel : int) -> (depth_fuel : int) -> (n : int) -> (formula : formula) ->
-    {r : (report, input_error) result |
-      match r with
-      | Error Invalid_fuel -> fuel < 0 || depth_fuel < 0
-      | Error (Invalid_input Unsupported_variable_count) ->
-        0 <= fuel && 0 <= depth_fuel && (n < 0 || n > 256)
-      | Error (Invalid_input Too_many_clauses) ->
-        0 <= fuel && 0 <= depth_fuel && 0 <= n && n <= 256
-        && not (clauses_fit 4096 formula)
-      | Error (Invalid_input Too_many_literals) ->
-        0 <= fuel && 0 <= depth_fuel && 0 <= n && n <= 256
-        && clauses_fit 4096 formula
-        && not (literals_fit 65536 formula)
-      | Error (Invalid_input Invalid_formula) ->
-        0 <= fuel && 0 <= depth_fuel && 0 <= n && n <= 256
-        && clauses_fit 4096 formula
-        && literals_fit 65536 formula && not (valid_formula n formula)
-      | Ok report ->
-        0 <= fuel && 0 <= depth_fuel && 0 <= n && n <= 256
-        && clauses_fit 4096 formula
-        && literals_fit 65536 formula && valid_formula n formula
-        && match report.answer with
-        | Sat assignment -> check n formula assignment
-        | Unsat entry ->
-          derivation_valid formula entry.proof
-          && same_clause (conclusion formula entry.proof) entry.clause
-          && entry.clause === []
-        | Unknown -> depth_fuel <= n && report.statistics.steps = fuel} =
-  fun fuel depth_fuel n formula ->
-  if depth_fuel < 0 then Error Invalid_fuel
-  else match solve fuel n formula with
-  | Error error -> Error error
-  | Ok report ->
-    match report.answer with
-    | Sat _ | Unsat _ -> Ok report
-    | Unknown ->
-      match Vox_sat_proof.decide_depth depth_fuel n formula with
-      | Vox_sat_proof.Sat assignment ->
-        ghost_ (check_def n formula assignment);
-        Ok {report with answer = Sat assignment}
-      | Vox_sat_proof.Unsat ->
-        let proof = exhaustive_result n formula in
-        Ok {report with answer = Unsat proof}
-      | Vox_sat_proof.Unknown -> Ok report
 
 let (unsat_at @ total) :
     (formula : formula) ->

@@ -1,113 +1,83 @@
-# SAT specification/proof boundary
+# The SAT solver: what to read and what is checked
 
-## Exact transitive human-review surface
+## What to read
 
-Read these files in order, all under `verification/library/`:
+The public contract is in three interfaces, all under `verification/library/`:
 
-1. `vox_sat_spec.mli`: literal/CNF types and complete checked equations for
-   assignment lookup, literal/clause/formula satisfaction, assignment length,
-   valid variable indices, input limits, assignment concatenation, and UNSAT.
-   The transparent `classify_input` equation fixes the accepted domain and
-   input-error precedence once for all total public entrypoints.
-   `vox_sat_spec.ml` implements exactly these equations and can be read instead
-   for their compact recursive definitions; interface checking connects them.
-2. `vox_sat.mli`: bounded DPLL's actual executable contract and the theorem
-   specializing semantic UNSAT to any Boolean assignment.
-3. `vox_cdcl.mli`: mutable CDCL's actual executable contract, sound on return.
-4. `vox_cdcl_total.mli`: complete CDCL, bounded CDCL, and the separate combined
-   solver, including exact permitted errors and the fallback depth guarantee.
-5. This file: termination/resource conventions and the shared trust boundary.
+1. `vox_sat_spec.mli`: literals and CNF formulas, and equations for
+   evaluation, assignment length, valid variable indices, the size limits,
+   `check` (an assignment of length `n` that satisfies the formula),
+   `unsatisfiable` (every assignment of length `n` falsifies the formula) and
+   `classify_input` (the accepted inputs, and which error each rejected input
+   gets). `vox_sat_spec.ml` gives the same definitions as recursive
+   functions; the compiler checks that they satisfy the equations.
+2. `vox_sat.mli`: `unsat_at`, which extends `unsatisfiable` to Boolean lists
+   of any length. A missing variable evaluates to `false`, and values past
+   position `n` do not affect a formula over `n` variables.
+3. `vox_cdcl_total.mli`: `solve_complete` and the bounded `solve`, with the
+   exact errors each may return.
 
-The semantic dependency closure uses only Boolean and machine-integer
-operations, algebraic datatypes, lists, options, results, and structural
-logical equality (`===`). There are no SAT-specific axioms, external
-primitives, abstract semantic predicates, or proof-module names in these
-interfaces. Statistics are operational counters; no exact cost relation is
-claimed. `Vox_sequence` and its mathematical integers are private proof
-implementation dependencies, not premises of the public SAT contracts.
+These interfaces use only booleans, machine integers, lists, options,
+results, algebraic datatypes and logical equality (`===`). They contain no
+axiom, `external`, abstract predicate or name from the proof modules.
+`Vox_sequence` and `Bigint` appear only in the proofs.
 
-`rejects_extensions prefix remaining formula` universally enumerates all
-Boolean extensions of the prefix, appending one bit per positive remaining
-step. Its leaf is failure of ordinary CNF evaluation. `unsatisfiable n formula`
-requires nonnegative `n`, valid indices below `n`, and rejection of all
-length-`n` assignments. The public checked theorem extends rejection to every
-Boolean list: missing values evaluate false and unused trailing values cannot
-affect a valid formula. An empty CNF evaluates true; an empty clause false.
+The accepted inputs have `0 <= n <= 256`, at most 4,096 clauses, at most
+65,536 literal occurrences and every variable index in `[0, n)`. Duplicate
+literals and tautological clauses are accepted. `solve` returns
+`Invalid_fuel` for a negative budget.
 
-The accepted solver domain is `0 <= n <= 256`, at most 4,096 clauses and
-65,536 literal occurrences, with valid indices. DPLL requires nonnegative
-fuel as a caller premise; budgeted CDCL entrypoints return `Invalid_fuel` for
-a negative budget. Complete CDCL has no fuel argument. Mutable CDCL's error contract is deliberately unrestricted. The total
-solver signatures specify each permitted input error and its ordering.
+`solve_complete` returns `Sat` or `Unsat` on every accepted input. `solve`
+may also return `Unknown`, which implies `statistics.steps = fuel` and nothing
+more; no fuel is promised to suffice, and more fuel is not promised to help.
+The other statistics are unconstrained. Totality is proved in Vox's logical
+model: memory, stack and running time are not bounded.
 
-Bounded DPLL and bounded CDCL permit `Unknown` without a semantic claim.
-Combined `solve_with_fallback fuel depth_fuel n formula` additionally proves
-`Unknown -> depth_fuel <= n`; accepted inputs and `depth_fuel >= n + 1`
-therefore force a decision. Independently, `solve_complete n formula` proves
-a CDCL decision for every accepted input, with no budget premise or fallback.
-The bounded CDCL contract permits `Unknown` and proves `statistics.steps = fuel`
-on that result. Fuel monotonicity is not part of the contract.
-The fallback can visit exponentially many nodes. Totality uses Vox's logical
-execution model, without a bound on available memory, stack, or elapsed time.
-Mutable CDCL is only proved sound when it returns.
+## The proof modules
 
-## Private implementation
+`vox_sat_proof` and `vox_cdcl_total_proof` are internal and are not
+installed. `vox_sat_proof` defines derivations (input clauses and resolution),
+proves them sound, and proves that a derivation of the empty clause makes the
+formula `unsatisfiable`. It also scans clauses under a partial assignment and
+holds the learned-clause database, in which each clause carries its
+derivation in a ghost field. `vox_cdcl_total_proof` is the search: the trail,
+propagation, conflict analysis, learning, backjumping and the termination
+measure. `vox_cdcl_total.md` explains the search and its termination
+argument. The public wrappers in `vox_cdcl_total.ml` turn the internal
+`Unsat` answer, which carries the derivation, into the nullary `Unsat` by a
+ghost call to `Vox_sat_proof.empty_unsatisfiable`.
 
-`vox_sat_proof`, `vox_cdcl_proof`, and `vox_cdcl_total_proof` contain derivation
-representations, validity, learned-clause databases, state invariants, and
-auxiliary induction lemmas. Public wrappers translate private outcomes into
-ordinary `Sat assignment`, nullary `Unsat`, or `Unknown`. Their ghost calls
-establish the semantic contracts. Clients neither inspect a derivation nor
-supply a solver invariant. Private interfaces are excluded from installation.
+Derivations, invariants and the termination measure are erased. The solver
+does not enumerate assignments, record a proof trace or check its answer at
+the end. Learned clauses are ordinary runtime data.
 
-Persistent CDCL preserves strict reason order: every nonpivot variable in a
-stored reason occurs older than its assignment on the unique trail. This
-invariant survives enqueue, backtracking, and learned-clause insertion, and
-applies to the reason selected during conflict analysis. Latest-pivot selection
-and strict reason order prove a whole-clause rank decrease at every resolution.
-Analysis terminates and returns a clause without fuel; its termination
-measure is that rank.
-A preserved ghost prefix invariant ensures that nonroot analysis retains a
-current-level variable; asserting construction and learned enqueue succeed.
-A stronger prefix invariant proves learned-clause freshness. Resolution
-produces unique literals, bounding learned-clause length by `2 * n`. A finite
-clause universe supplies an erased absent-clause count. Search decreases that
-count times `n + 1`, plus the number of unassigned variables. Direct learned
-references remove machine ordinals; a trail-length proof bounds decision levels
-independently of fuel. Thus complete CDCL terminates throughout the domain.
+## What the tests check
 
-Learned clauses remain executable solver data. Their derivations erase.
-Semantic enumeration is used only in proofs of returned answers; solvers do
-not run it, accumulate a proof trace, or perform a final formula check.
-DPLL and persistent CDCL also have no final assignment-length check. Mutable
-CDCL retains its length check.
+`testsuite/tests/vox/sat_boundary.ml` compiles the library with `ocamlc` and
+`ocamlopt`, using `-principal` where `build.sh` does. It copies the `.cmi`
+files of the three public modules (and, for native code, the `.cmx` files
+needed to link) into an empty directory, compiles
+`testsuite/tests/vox/sat_public.ml` there, and links and runs it. That client
+proves from the public interfaces alone that `solve_complete` decides every
+accepted input, that `Sat` carries a satisfying assignment, and that `Unsat`
+rules out any given assignment. `sat_boundary_check.ml` then checks that the
+`-dlambda` output of `Vox_sat` and `Vox_cdcl_total` names no proof function
+and makes the expected number of calls, and that the native object of
+`Vox_cdcl_total_proof` has no symbol for a list of named proof helpers
+(trail ranks, prefix invariants, the clause universe, the measure and the
+level bound). The list is a targeted check, not a proof that every proof
+function is erased.
 
-## Evidence
+`testsuite/tests/vox/sat_cdcl_total.ml` runs both solvers on every formula of
+three clauses drawn from nine small clauses over two variables and compares
+the answers with a truth table. It also checks the size limits and the error
+order, 256 variables, duplicate-literal propagation, the statistics of the
+bounded solver, and learning and backjumping on a random 3-SAT instance.
+`sat_kernel.ml` exercises the derivation operations of `Vox_sat_proof`
+directly. `sat_solver_rejected.ml` checks that `unsat_at` cannot be applied
+to a satisfiable formula, and `sat_cdcl_progress_rejected.ml` that a client
+cannot prove that fuel `n + 1` suffices for `solve`.
 
-`testsuite/tests/vox/sat_boundary.ml` compiles the library as
-`verification/library/build.sh` does, copies only the four public `.cmi` files
-to an isolated directory, separately compiles
-`testsuite/tests/vox/sat_public.ml`, and links/runs bytecode and native clients.
-Its arbitrary-input theorems derive complete-CDCL and sufficient-fallback-depth
-decisions, SAT satisfaction, and rejection of any proposed assignment on UNSAT.
-The client cannot import a private interface.
-
-The same test checks bytecode/native Lambda for surviving public proof bridges or semantic enumeration calls.
-The public `unsat_at` body erases to unit. Native symbol inspection also finds
-no unassigned-count, reason-source, reason-order, trail-rank, trail-coverage,
-level-bound, finite-universe, or global-progress helpers in
-`vox_cdcl_total_proof.o`; propagation remains executable.
-
-`testsuite/tests/vox/sat_solver.ml`, `sat_cdcl.ml`, and `sat_cdcl_total.ml`
-exercise the public APIs. `sat_kernel.ml` separately checks private resolution
-operations. Rejection tests retain forged-UNSAT, mutable-totality, loop-totality,
-and mutable-array-bound checks. Public-interface rejection tests also prevent
-claiming CDCL completeness at fuel `n + 1` or combined completeness at fallback
-depth `n`; positive clients prove complete CDCL without fuel and the fallback
-guarantee at depth `n + 1`.
-The build and native benchmark use the
-installed compiler produced by `make install`.
-
-Trust includes Vox's type/refinement and termination checking, VC generation,
-Z3's reported UNSAT answers, ghost erasure, and the compiler/runtime execution
-stack. These are shared language assumptions, not extra SAT premises.
+What the SAT proofs trust is the shared base of every demo: the type and
+refinement checker, the totality check, verification-condition generation,
+Z3, ghost erasure and the compiler and runtime.

@@ -83,31 +83,6 @@ let (solve @ total) :
   | Ok report ->
     Ok (convert_report (ghost_ n) (ghost_ formula) report)
 
-let (solve_with_fallback @ total) :
-  (fuel : int) -> (depth_fuel : int) -> (n : int) ->
-  (formula : Vox_sat_spec.formula) ->
-  {r : (report, input_error) result |
-    match r with
-    | Error Invalid_fuel -> fuel < 0 || depth_fuel < 0
-    | Error (Invalid_input error) ->
-      0 <= fuel && 0 <= depth_fuel
-      && Vox_sat_spec.classify_input n formula === Some error
-    | Ok report ->
-      0 <= fuel && 0 <= depth_fuel
-      && Vox_sat_spec.classify_input n formula === None
-      && match report.answer with
-      | Sat assignment -> Vox_sat_spec.check n formula assignment
-      | Unsat -> Vox_sat_spec.unsatisfiable n formula
-      | Unknown -> depth_fuel <= n && report.statistics.steps = fuel} =
-  fun fuel depth_fuel n formula ->
-  ghost_ (Vox_sat_spec.classify_input_def n formula);
-  match Vox_cdcl_total_proof.solve_with_fallback fuel depth_fuel n formula with
-  | Error Vox_cdcl_total_proof.Invalid_fuel -> Error Invalid_fuel
-  | Error (Vox_cdcl_total_proof.Invalid_input error) -> Error (Invalid_input
-    error)
-  | Ok report ->
-    Ok (convert_report (ghost_ n) (ghost_ formula) report)
-
 let (solve_complete @ total) : (n : int) -> (formula : Vox_sat_spec.formula) ->
   {r : (report, input_error) result | match r with
     | Error Invalid_fuel -> false
