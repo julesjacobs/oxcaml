@@ -10964,8 +10964,15 @@ and type_function
                       Some (opening, close_dependent_type [opening] body_type)
                   else
                     unify_exp_types loc ext_env body_type ty_ret
-              | Some _, Some _, Some _ ->
-                  unify_exp_types loc ext_env body_type ty_ret
+              | Some opening, Some _, Some _ ->
+                  (* A result constraint gives [body_type] in terms of the
+                     binders, while [ty_ret] and inner function types are
+                     opened by the enclosing parameters: compare them
+                     closed. *)
+                  let close =
+                    close_dependent_type (opening :: dependent_openings)
+                  in
+                  unify_exp_types loc ext_env (close body_type) (close ty_ret)
               | None, _, _ | Some _, Some _, None -> ()
               end;
               let contains_gadt =
