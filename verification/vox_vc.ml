@@ -3333,6 +3333,27 @@ let query ctx code =
           definitions
             := { label = "pref identity"; term = axiom } :: !definitions;
           Queue.add axiom pending
+        | Call (fn, [array])
+          when observation_function "Iarray.length" fn
+               && Option.is_none (iarray_origin ctx array)
+               &&
+               match expose_head ctx array with
+               | App (Ite, _) -> false
+               | _ -> true ->
+          (* Every iarray, ghost or real, is built by a literal, a partial
+             allocation that raises above [Sys.max_array_length], a total
+             operation that keeps or shrinks a length, or a view of a real array
+             or string, so its length is at most 2^57. Arrays built from others
+             get their lengths from those, and are not bounded here: their
+             construction may not have returned. *)
+          let axiom =
+            both And
+              (both Le (Integer 0L) term)
+              (both Le term (Integer 1152921504606846975L))
+          in
+          definitions
+            := { label = "iarray length bound"; term = axiom } :: !definitions;
+          Queue.add axiom pending
         | _ -> ()
         end;
         begin match term with
