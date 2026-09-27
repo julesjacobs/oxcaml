@@ -71,8 +71,8 @@ this file.
         tail calls reuse frames; no garbage collector; layout rejections
         depend on inference, which is not proved deterministic).
   - [x] Input as a run-time value through the exported `payload` global;
-        theorems for every input (merged in `01b1df3709`); the example suite is
-        being adapted (branch `jujacobs/vox/examples-input-20260927`). Open,
+        theorems for every input (merged in `01b1df3709`); the example suite
+        runs one module per program on several inputs (`1111bd1927`). Open,
         stated on the page: a module whose heap starts full could make
         `sufficient` false and always report exhaustion.
   - [x] WebAssembly model tested against Node: 100,000 random modules, no
