@@ -16,9 +16,12 @@ usage()
   cat >&2 <<EOF
 usage: ./$program init
        ./$program test [--promote] [--compiler-host=native|bytecode] PATH...
+       ./$program test [--promote] [--compiler-host=native|bytecode]
+                       --affected BASE
 
 Each PATH is a test file or directory relative to testsuite/tests. Several
-tests run in parallel. The compiler host defaults to native.
+tests run in parallel. The compiler host defaults to native. --affected
+selects the Vox tests that the changes since the revision BASE can affect.
 EOF
   exit 2
 }
@@ -656,9 +659,29 @@ build_test_library()
   library_seconds=$(($(monotonic_seconds) - library_started_at))
 }
 
+# Prints the Vox tests that the changes since $affected_base can affect and
+# that run incrementally; see testsuite/vox-affected-tests.sh for the rule.
+select_affected_tests()
+{
+  affected=$temp_dir/affected-tests
+  run_locked sh "$root/testsuite/vox-affected-tests.sh" "$root" "$planner" \
+    "$root/_install/bin/ocamldep.opt" "$affected_base" > "$affected" ||
+    die "could not select the tests affected since '$affected_base'"
+  while IFS= read -r relative; do
+    if "$planner" -plan-incremental "$root/testsuite/tests/$relative" \
+        > /dev/null 2>&1; then
+      printf '%s\n' "$relative"
+    else
+      echo "$program: skipping '$relative', which needs" \
+        "'make -s test-one TEST=$relative'" >&2
+    fi
+  done < "$affected"
+}
+
 run_test()
 {
   test_started_at=$(monotonic_seconds)
+  affected_base=
   promote=false
   compiler_host=native
   unset OCAMLTEST_EXPECT OCAMLTEST_EXPECTNAT OCAMLTEST_OCAML \
@@ -669,12 +692,22 @@ run_test()
       --promote) promote=true; shift ;;
       --compiler-host=bytecode) compiler_host=bytecode; shift ;;
       --compiler-host=native) compiler_host=native; shift ;;
+      --affected=?*) affected_base=${1#--affected=}; shift ;;
+      --affected)
+        [ "$#" -ge 2 ] || usage
+        affected_base=$2
+        shift 2
+        ;;
       --) shift; break ;;
       -*) usage ;;
       *) break ;;
     esac
   done
-  [ "$#" -ge 1 ] || usage
+  if [ -n "$affected_base" ]; then
+    [ "$#" -eq 0 ] || usage
+  else
+    [ "$#" -ge 1 ] || usage
+  fi
   reject_symlinks_below()
   {
     base=$1
@@ -697,6 +730,19 @@ run_test()
     fi
   }
   validate_state
+  if [ -n "$affected_base" ]; then
+    selected=$temp_dir/selected-tests
+    select_affected_tests > "$selected"
+    if [ ! -s "$selected" ]; then
+      echo "No tests are affected by the changes since $affected_base."
+      return 0
+    fi
+    echo "Tests affected by the changes since $affected_base:" \
+      "$(wc -l < "$selected" | tr -d ' ')"
+    while IFS= read -r relative; do
+      set -- "$@" "$relative"
+    done < "$selected"
+  fi
   test_files=$temp_dir/test-files
   : > "$test_files"
   selection_kind=file

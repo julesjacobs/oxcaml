@@ -81,6 +81,22 @@ in parallel, with the test compilers, verifying each module with `ocamlc`.
 It rebuilds only what changed, and everything after a compiler change. Any
 compiler output while building the library fails the run.
 
+To test only what a change can affect, pass a base revision instead of
+paths:
+
+```bash
+./dev test --affected origin/vox
+```
+
+It selects the tests in `vox` and `typing-refinement-types` whose own file,
+reference files, header files (`all_modules`, `prebuilt_modules`, `module`,
+`modules`, `readonly_files`) or their transitive `ocamldep` dependencies
+changed since the base, including uncommitted and untracked files. A change
+outside `testsuite/tests`, `verification/library`, `verification/catalogue`
+and `research`, other than to a Markdown file, counts as a compiler change
+and selects every test. Tests that `./dev` cannot
+run incrementally are listed with their `make test-one` command.
+
 The incremental workflow does not cover changes to bootstrap-language support,
 the runtime, the standard library, the compiler-libs installation, or test
 infrastructure. In those cases, or if `./dev` rejects a test action, run the
