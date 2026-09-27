@@ -37,8 +37,7 @@ let bind_searched :
     let refine_ old = Pref.read p (borrow_ t) in ghost_ (active_def h.Ghost.ghost p; at_level_def h.Ghost.ghost p);
     match old.level with
     | Generic ->
-      let _ = ghost_ ((() : {u : unit | false})) in
-      assert false
+      unreachable_ ()
     | Finite bound ->
       ghost_ (witness.Ghost.ghost q; E.terminal_level h.Ghost.ghost heads.Ghost.ghost q ();
         E.effective_active_def h.Ghost.ghost heads.Ghost.ghost q; active_def h.Ghost.ghost q);

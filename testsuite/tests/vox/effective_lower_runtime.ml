@@ -101,7 +101,7 @@ let rec run_lower : (goal : lower_goal) @ immutable -> (h : node Pref.heap Ghost
       ghost_ (lowering_at h.Ghost.ghost heads.Ghost.ghost bound edits p ();
         lower_frame_def h.Ghost.ghost after p; bound_root_def tree; effective_bounded_def after heads.Ghost.ghost bound tree);
       let r = #{state = r.#state; edits; tree} in use (refine_ r)
-    | Link _ -> assert false
+    | Link _ -> unreachable_ ()
     | List q ->
       let t : {t : node Pref.token | Pref.own t === h.Ghost.ghost && bound >= 0 && E.effective_active h.Ghost.ghost heads.Ghost.ghost q} = refine_ t in
       let lower_heap_witness : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
