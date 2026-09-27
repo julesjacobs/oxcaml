@@ -39,7 +39,9 @@ let () =
       let calls = direct_calls body in
       check (calls = allowed)
         (Printf.sprintf "%s calls exactly [%s]" name (words allowed));
-      let proof_calls = captures "(apply%s(field_imm%s%w%sProof/%d)" body in
+      let proof_calls =
+        all_captures "(apply%s(field_imm%s%w%sProof/%d)" body
+      in
       let wanted = if name = "finished" then [ reverse_into ] else [] in
       check (proof_calls = wanted)
         (Printf.sprintf "%s calls %d proof functions" name
@@ -68,7 +70,7 @@ let () =
   check (not (occurs "(%%int_add " diff || occurs "(+ " diff))
     "diff does no addition";
   let reverse = function_body library "reverse_into" in
-  check (direct_calls reverse = [ "reverse_into" ]
+  check (all_captures "(apply%s%w/%d" reverse = [ "reverse_into" ]
          && not (occurs "global" reverse
                 || occurs "bigint" (String.lowercase_ascii reverse)))
     "reverse_into only calls itself";

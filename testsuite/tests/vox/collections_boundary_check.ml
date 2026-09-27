@@ -27,9 +27,11 @@ let is_def name =
 let () =
   let dir = Sys.argv.(1) in
   let dump unit = read (Filename.concat dir (unit ^ ".lambda")) in
-  let audit ?(both = false) unit names ~forbidden ~called ~to_line_end =
+  (* Only the sparse overlay is left out, under -principal. *)
+  let audit ?(both = false) ?(optional = false) unit names ~forbidden ~called
+      ~to_line_end =
     match dump unit with
-    | exception Sys_error _ -> ()
+    | exception Sys_error _ when optional -> ()
     | text ->
       List.iter
         (fun name ->
@@ -38,7 +40,8 @@ let () =
             match bodies with
             | [] -> []
             | first :: _ when not both -> [ first ]
-            | first :: rest -> [ first; List.nth (first :: rest) (List.length rest) ]
+            | first :: rest ->
+              [ first; List.nth (first :: rest) (List.length rest) ]
           in
           check
             (bodies <> []
@@ -61,7 +64,8 @@ let () =
   audit "functional_queue" [ "enqueue"; "dequeue" ] ~forbidden:[]
     ~called:[ "contents"; "reverse"; "reverse_append_correct" ]
     ~to_line_end:true;
-  audit "sparse_overlay" [ "empty"; "set"; "clear"; "lookup"; "get" ]
+  audit ~optional:true "sparse_overlay"
+    [ "empty"; "set"; "clear"; "lookup"; "get" ]
     ~forbidden:[ "find_remove"; "Vox_iarray" ] ~called:[] ~to_line_end:true;
   audit ~both:true "avl_sets"
     [ "add"; "union"; "lookup"; "add_tree"; "lookup_tree"; "make_node";

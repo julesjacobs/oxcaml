@@ -76,9 +76,12 @@ let count_word pattern text =
        (fun (start, _, _) -> start = 0 || not (is_word text.[start - 1]))
        (find_all pattern text))
 
-let captures pattern text =
+(* The captured words of every match, in order. *)
+let all_captures pattern text =
   List.concat_map (fun (_, _, captures) -> captures) (find_all pattern text)
-  |> List.sort_uniq String.compare
+
+let captures pattern text =
+  all_captures pattern text |> List.sort_uniq String.compare
 
 (* The balanced parenthesised expression starting at [start], ignoring
    parentheses in string literals. *)

@@ -52,7 +52,7 @@ The same test rejects a false claim about the patched result, a conclusion drawn
 
 ## Trusted base
 
-- `scripts/check-diff-erasure` is the only check that `diff` runs no proof code. It compiles the library with `-drawlambda` and requires, for each function `diff` runs (named in the script), a fixed set of callees and no reference to `minimum_cost` or `Bigint`. `./dev test` does not run it. `optimal_at`, `invert_correct` and `inverse_patch` are ordinary functions that run their proofs if called outside `ghost_`; the client calls them inside it.
+- `diff_boundary.ml` is the only check that `diff` runs no proof code. It compiles the library with `-drawlambda` and requires, for each function `diff` runs (named in `diff_boundary_check.ml`), a fixed set of callees and no reference to `minimum_cost` or `Bigint`. `optimal_at`, `invert_correct` and `inverse_patch` are ordinary functions that run their proofs if called outside `ghost_`; the client calls them inside it.
 
 ## Scope
 
