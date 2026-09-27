@@ -45,11 +45,13 @@ this file.
   - [x] Ghost-field ownership fix, merged in `3f313103a3` (checker fix
         `ec365027eb`). No demo took a token twice; the demos that broke relied
         on the construction-side hole (repairs in `3b2a3047e5`, `13f99dd368`).
-  - [ ] W8: a type parameter used only in a refinement predicate was treated
-        as phantom, so `int law :> bool law` was accepted (branch
-        `jujacobs/vox/fix-soundness-20260927`).
-  - [ ] W9: the verification cache must identify the solver version and the
-        compiler binary (same branch).
+  - [x] W8: type parameters used only in refinement predicates are now
+        invariant (merged in `4e24de3229`). Still open through type
+        abbreviations and re-exported signatures; closes with subsumption
+        stage 2 (predicates compared with their types).
+  - [x] W9: the caches are keyed by the compiler digest and solver version
+        (`4e24de3229`); follow-up: query cache keyed by solver only, and a
+        timeout on the version probe.
   - [ ] Compare refinement predicates with their types (subsumption
         stage 2; design in `research/subsumption-design-20260927`).
 - [ ] **2. Second review round** (brief:
