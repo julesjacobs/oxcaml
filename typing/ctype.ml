@@ -2831,150 +2831,6 @@ let rec is_inductive env ty =
       (try (Env.find_type path env).type_inductive with Not_found -> false)
   | _ -> false
 
-let declaration_can_pattern_match_total env root root_args decl =
-  let visited_direct_types = ref TypeSet.empty in
-  let visited_indirect_types = ref TypeSet.empty in
-  let active_declarations = ref Path.Map.empty in
-  let completed_declarations = ref Path.Map.empty in
-  let exception Not_definitely_nonrecursive in
-  let allow_direct_recursion = decl.type_inductive in
-  let strictly_contains outer inner =
-    if eq_type outer inner then false
-    else
-      let seen = ref TypeSet.empty in
-      let found = ref false in
-      let rec visit ty =
-        if not (TypeSet.mem ty !seen) then begin
-          seen := TypeSet.add ty !seen;
-          if eq_type ty inner then found := true
-          else Btype.iter_type_expr visit ty
-        end
-      in
-      Btype.iter_type_expr visit outer;
-      !found
-  in
-  let arguments_decrease args previous =
-    List.length args = List.length previous
-    && List.for_all2
-         (fun arg previous ->
-           eq_type arg previous || strictly_contains previous arg)
-         args previous
-  in
-  let rec visit_type direct ty =
-    let visited =
-      if direct then visited_direct_types else visited_indirect_types
-    in
-    if not (TypeSet.mem ty !visited) then begin
-      visited := TypeSet.add ty !visited;
-      match get_desc ty with
-      | Tconstr (path, args, _) ->
-        if Path.same path root then begin
-          if not (allow_direct_recursion
-                  && direct
-                  && List.equal eq_type args root_args)
-          then raise_notrace Not_definitely_nonrecursive
-        end else begin
-          let expanded = expand_head env ty in
-          if eq_type expanded ty then visit_declaration path args
-          else visit_type direct expanded
-        end
-      | Ttuple fields ->
-        List.iter (fun (_, ty) -> visit_type direct ty) fields
-      | Tvar _ | Tunivar _ -> ()
-      | _ -> Btype.iter_type_expr (visit_type false) ty
-    end
-  and visit_declaration path args =
-    let completed =
-      Option.value
-        (Path.Map.find_opt path !completed_declarations)
-        ~default:[]
-    in
-    let active =
-      Option.value (Path.Map.find_opt path !active_declarations) ~default:[]
-    in
-    if List.exists (List.equal eq_type args) (completed @ active) then ()
-    else match active with
-    | previous :: _ when not (arguments_decrease args previous) ->
-      (* Permit finite nesting, but do not expand growing instantiations. *)
-      raise_notrace Not_definitely_nonrecursive
-    | _ ->
-      active_declarations := Path.Map.add path (args :: active)
-        !active_declarations;
-      Fun.protect
-        ~finally:(fun () ->
-          active_declarations :=
-            if active = [] then Path.Map.remove path !active_declarations
-            else Path.Map.add path active !active_declarations)
-        (fun () ->
-          match Env.find_type path env with
-          | decl ->
-              begin match decl.type_kind with
-              | Type_abstract _ | Type_open
-                when not decl.type_phantom_parameters ->
-                  List.iter (visit_type false) args
-              | Type_variant (constructors, _, _)
-                when List.exists (fun constructor ->
-                  Option.is_some constructor.cd_res) constructors ->
-                  List.iter (visit_type false) args
-              | _ -> ()
-              end;
-              visit_representation false decl args
-          | exception Not_found -> List.iter (visit_type false) args);
-      completed_declarations :=
-        Path.Map.add path (args :: completed) !completed_declarations
-  and visit_representation direct decl args =
-    let visit ty =
-      let ty =
-        if decl.type_params = [] then ty
-        else apply env decl.type_params ty args
-      in
-      visit_type direct ty
-    in
-    Option.iter visit decl.type_manifest;
-    match decl.type_kind with
-    | Type_variant (constructors, _, _) ->
-      List.iter
-        (fun constructor ->
-          Btype.iter_type_expr_cstr_args visit constructor.cd_args)
-        constructors
-    | Type_record (labels, _, _)
-    | Type_record_unboxed_product (labels, _, _) ->
-      List.iter (fun label -> visit label.ld_type) labels
-    | Type_abstract _ -> ()
-    | Type_open -> ()
-  in
-  try
-    visit_representation true decl root_args;
-    true
-  with
-  | Not_definitely_nonrecursive
-  | Cannot_apply -> false
-
-let can_pattern_match_total env ty =
-  let rec check seen ty =
-    match get_desc ty with
-    | Tconstr (path, _, _) ->
-        if Path.Set.mem path seen then false
-        else begin
-          match Env.find_type path env with
-          | decl ->
-              let expanded = expand_head env ty in
-              if not (eq_type expanded ty) then
-                check (Path.Set.add path seen) expanded
-              else begin match decl.type_kind with
-              | Type_variant _ | Type_record _
-              | Type_record_unboxed_product _ ->
-                declaration_can_pattern_match_total env path
-                  decl.type_params decl
-              | Type_abstract _ | Type_open -> false
-              end
-          | exception Not_found -> false
-        end
-    | Tpoly (ty, _) -> check seen ty
-    | _ -> false
-  in
-  check Path.Set.empty ty
-
 let _ = forward_try_expand_safe := try_expand_safe
 
 
@@ -3981,6 +3837,351 @@ let is_always_gc_ignorable env ty =
   check_type_externality env ty
     (Jkind_axis.Externality.upper_bound_if_is_always_gc_ignorable ())
   || type_is_gc_ignorable_scannable env ty
+
+(* Totality of pattern matching.
+
+   Total code may eliminate a value of a nominal type (match a constructor,
+   project a field) only if the type is definitely nonrecursive, or
+   [@@inductive] and recursive only directly. Otherwise the elimination ties
+   a knot without syntactic recursion: [type t = Roll of (t -> int)] gives
+   [delta (Roll delta)].
+
+   A type that the walk cannot see into may be, or contain, the matched type.
+   These hidden types are a GADT constructor's existential variables, an
+   abstract type without a manifest (other than a predefined one) and an open
+   type; unpacking a first-class module creates more of them
+   ([can_unpack_total]). Examples: [Pack : 'a * ('a, t -> int) eq -> t]
+   recovers [t -> int] after the match, and a signature that exports
+   [type u] and [type t = Roll of (u -> int)] can hide [type u = t].
+
+   The knot needs the hidden type to appear where a function consumes it, i.e.
+   in a NEGATIVE position (under an odd number of arrow-arguments). A hidden
+   type in positive position -- a functional map or bignum stored in a field --
+   cannot be called and so cannot loop. The walk therefore tracks polarity and
+   rejects a hidden abstract or open type only when it is reached negatively,
+   which keeps the existing acceptance of positive occurrences. Polarity comes
+   from the arrows actually traversed, so no variance annotation is trusted.
+
+   An existential variable is different: a GADT witness in the same value can
+   retype it to [root -> _] after the match, moving [root] into negative
+   position invisibly (as in [Witness_same_group] below). So a directly matched
+   constructor's existentials are rejected whatever position they appear in.
+
+   Both hidden kinds need the same jkind guard: they are harmless only if
+   their values can never be a heap pointer. The matched type is a boxed
+   nominal type and a closure is a heap block, so a jkind that rules out
+   pointers -- a non-scannable layout, a non-pointer separability, or an
+   immediate ([external]) value -- excludes both being the matched type and
+   being a function. [immutable_data] is NOT enough on either count: a record
+   whose field modality caps a [total] arrow across every axis (e.g.
+   [f : t -> unit @@ many portable forkable unyielding stateless total]) is
+   [immutable_data], so an [immutable_data] type can be the matched type and
+   can hold a callable function. Before this guard rejected [immutable_data],
+   both an abstract [immutable_data] type in negative position and an
+   [immutable_data] existential recovered to such a record were accepted false
+   proofs. *)
+let jkind_cannot_be_pointer env jkind =
+  (* A closure, and any boxed nominal type, is a heap pointer. We read the
+     layout off the jkind's own description, which keeps a declared layout
+     (e.g. [void mod total]) even for an abstract type, where
+     [Jkind.get_layout] would expand it to [None]. *)
+  let non_pointer_axes ({ separability; _ } : Jkind_types.Scannable_axes.t) =
+    match separability with
+    | Non_pointer | Non_pointer64 -> true
+    | Non_float | Separable | Maybe_separable -> false
+  in
+  let rec layout_has_no_pointer : Jkind.Sort.Flat.t Jkind.Layout.t -> bool =
+    function
+    | Sort (Base Scannable, axes) | Any axes -> non_pointer_axes axes
+    | Sort (Base (Void | Untagged_immediate | Float64 | Float32 | Word | Bits8
+                 | Bits16 | Bits32 | Bits64 | Vec128 | Vec256 | Vec512 | Mask),
+            _) -> true
+    | Sort ((Var _ | Genvar _ | Univar _), _) -> false
+    | Product layouts -> List.for_all layout_has_no_pointer layouts
+  in
+  (match (Jkind.get jkind).base with
+   | Layout layout -> layout_has_no_pointer layout
+   | Kconstr _ -> false)
+  ||
+  let context = mk_jkind_context_always_principal env in
+  match Jkind.get_externality_upper_bound ~context env jkind with
+  | External | External64 -> true
+  | Internal -> false
+
+(* A hidden type -- a negatively reached abstract/open type, or an
+   existential -- is dangerous unless its jkind rules out pointers. *)
+let type_may_be_matched_type env ty =
+  let jkind =
+    match get_desc ty with
+    | Tvar { jkind; _ } -> Jkind.disallow_right jkind
+    | _ -> type_jkind_purely env ty
+  in
+  not (jkind_cannot_be_pointer env jkind)
+
+let is_predef_path = function
+  | Path.Pident id -> Ident.is_predef id
+  | Path.Pdot _ | Path.Papply _ | Path.Pextra_ty _ -> false
+
+(* Whether the walk cannot see [decl]'s representation, so a value of it could
+   be, or contain, any type: an abstract type with no manifest (a predefined
+   one such as [string] excepted; it cannot be a user type), or an open type
+   (a later extension constructor could carry anything). *)
+let declaration_is_hidden path decl =
+  match decl.type_kind with
+  | Type_abstract _ ->
+    Option.is_none decl.type_manifest && not (is_predef_path path)
+  | Type_open -> true
+  | Type_variant _ | Type_record _ | Type_record_unboxed_product _ -> false
+
+let declaration_can_pattern_match_total env root root_args decl =
+  (* Visited sets are keyed by [direct] (drives the inductive allowance) and by
+     [negative] (drives the hidden-type check), so a type seen in one polarity
+     is still walked in the other. *)
+  let visited_dp = ref TypeSet.empty and visited_dn = ref TypeSet.empty in
+  let visited_ip = ref TypeSet.empty and visited_in = ref TypeSet.empty in
+  let visited_set direct negative =
+    match direct, negative with
+    | true, false -> visited_dp
+    | true, true -> visited_dn
+    | false, false -> visited_ip
+    | false, true -> visited_in
+  in
+  (* The declaration caches are also keyed by polarity: a declaration walked
+     in one polarity must still be walked in the other, or a negative
+     occurrence hidden behind a positively-visited declaration is missed. *)
+  let active_declarations_p = ref Path.Map.empty
+  and active_declarations_n = ref Path.Map.empty in
+  let completed_declarations_p = ref Path.Map.empty
+  and completed_declarations_n = ref Path.Map.empty in
+  let active_declarations negative =
+    if negative then active_declarations_n else active_declarations_p in
+  let completed_declarations negative =
+    if negative then completed_declarations_n else completed_declarations_p in
+  let exception Not_definitely_nonrecursive in
+  let allow_direct_recursion = decl.type_inductive in
+  let strictly_contains outer inner =
+    if eq_type outer inner then false
+    else
+      let seen = ref TypeSet.empty in
+      let found = ref false in
+      let rec visit ty =
+        if not (TypeSet.mem ty !seen) then begin
+          seen := TypeSet.add ty !seen;
+          if eq_type ty inner then found := true
+          else Btype.iter_type_expr visit ty
+        end
+      in
+      Btype.iter_type_expr visit outer;
+      !found
+  in
+  let arguments_decrease args previous =
+    List.length args = List.length previous
+    && List.for_all2
+         (fun arg previous ->
+           eq_type arg previous || strictly_contains previous arg)
+         args previous
+  in
+  (* A hidden type reached negatively could be the matched type appearing as a
+     function argument -- the knot. Reject it unless its jkind rules out being
+     a pointer. If the walk cannot see into a type at all ([Not_found]), reject
+     regardless of polarity. Positive hidden types cannot be called, so they
+     stay allowed as before. *)
+  let check_not_hidden ~negative path ty =
+    match Env.find_type path env with
+    | decl ->
+      if negative
+         && declaration_is_hidden path decl
+         && type_may_be_matched_type env ty
+      then raise_notrace Not_definitely_nonrecursive
+    | exception Not_found -> raise_notrace Not_definitely_nonrecursive
+  in
+  (* A directly matched constructor's existential variables are hidden: a GADT
+     witness can retype one to [root -> _] after the match, so any of them that
+     can be a pointer is a possible knot, whatever position it occupies. *)
+  let check_existentials (constructor : constructor_declaration) =
+    let _, existentials =
+      Datarepr.constructor_existentials constructor.cd_args constructor.cd_res
+    in
+    if List.exists (type_may_be_matched_type env) existentials then
+      raise_notrace Not_definitely_nonrecursive
+  in
+  let rec visit_type ~direct ~negative ty =
+    let visited = visited_set direct negative in
+    if not (TypeSet.mem ty !visited) then begin
+      visited := TypeSet.add ty !visited;
+      match get_desc ty with
+      | Tconstr (path, args, _) ->
+        if Path.same path root then begin
+          if not (allow_direct_recursion
+                  && direct
+                  && List.equal eq_type args root_args)
+          then raise_notrace Not_definitely_nonrecursive
+        end else begin
+          let expanded = expand_head env ty in
+          if eq_type expanded ty then begin
+            check_not_hidden ~negative path ty;
+            visit_declaration ~negative path args
+          end
+          else visit_type ~direct ~negative expanded
+        end
+      | Ttuple fields ->
+        List.iter (fun (_, ty) -> visit_type ~direct ~negative ty) fields
+      | Tarrow (_, arg, res, _) ->
+        (* The argument flips polarity; the result keeps it. *)
+        visit_type ~direct:false ~negative:(not negative) arg;
+        visit_type ~direct:false ~negative res
+      | Tvar _ | Tunivar _ -> ()
+      | _ ->
+        Btype.iter_type_expr (visit_type ~direct:false ~negative) ty
+    end
+  and visit_declaration ~negative path args =
+    let active_declarations = active_declarations negative in
+    let completed_declarations = completed_declarations negative in
+    let completed =
+      Option.value
+        (Path.Map.find_opt path !completed_declarations)
+        ~default:[]
+    in
+    let active =
+      Option.value (Path.Map.find_opt path !active_declarations) ~default:[]
+    in
+    if List.exists (List.equal eq_type args) (completed @ active) then ()
+    else match active with
+    | previous :: _ when not (arguments_decrease args previous) ->
+      (* Permit finite nesting, but do not expand growing instantiations. *)
+      raise_notrace Not_definitely_nonrecursive
+    | _ ->
+      active_declarations := Path.Map.add path (args :: active)
+        !active_declarations;
+      Fun.protect
+        ~finally:(fun () ->
+          active_declarations :=
+            if active = [] then Path.Map.remove path !active_declarations
+            else Path.Map.add path active !active_declarations)
+        (fun () ->
+          match Env.find_type path env with
+          | decl ->
+              begin match decl.type_kind with
+              | Type_abstract _ | Type_open
+                when not decl.type_phantom_parameters ->
+                  List.iter (visit_type ~direct:false ~negative) args
+              | Type_variant (constructors, _, _)
+                when List.exists (fun constructor ->
+                  Option.is_some constructor.cd_res) constructors ->
+                  List.iter (visit_type ~direct:false ~negative) args
+              | _ -> ()
+              end;
+              visit_representation ~direct:false ~negative decl args
+          | exception Not_found ->
+              List.iter (visit_type ~direct:false ~negative) args);
+      completed_declarations :=
+        Path.Map.add path (args :: completed) !completed_declarations
+  and visit_representation ~direct ~negative decl args =
+    let visit ty =
+      let ty =
+        if decl.type_params = [] then ty
+        else apply env decl.type_params ty args
+      in
+      visit_type ~direct ~negative ty
+    in
+    Option.iter visit decl.type_manifest;
+    match decl.type_kind with
+    | Type_variant (constructors, _, _) ->
+      List.iter
+        (fun constructor ->
+          (* Only the directly matched constructor exposes its existentials;
+             a nested type's constructors are matched (and checked) on their
+             own. *)
+          if direct then check_existentials constructor;
+          Btype.iter_type_expr_cstr_args visit constructor.cd_args)
+        constructors
+    | Type_record (labels, _, _)
+    | Type_record_unboxed_product (labels, _, _) ->
+      List.iter (fun label -> visit label.ld_type) labels
+    | Type_abstract _ -> ()
+    | Type_open -> ()
+  in
+  try
+    visit_representation ~direct:true ~negative:false decl root_args;
+    true
+  with
+  | Not_definitely_nonrecursive
+  | Cannot_apply -> false
+
+let can_pattern_match_total env ty =
+  let rec check seen ty =
+    match get_desc ty with
+    | Tconstr (path, _, _) ->
+        if Path.Set.mem path seen then false
+        else begin
+          match Env.find_type path env with
+          | decl ->
+              let expanded = expand_head env ty in
+              if not (eq_type expanded ty) then
+                check (Path.Set.add path seen) expanded
+              else begin match decl.type_kind with
+              | Type_variant _ | Type_record _
+              | Type_record_unboxed_product _ ->
+                declaration_can_pattern_match_total env path
+                  decl.type_params decl
+              | Type_abstract _ | Type_open -> false
+              end
+          | exception Not_found -> false
+        end
+    | Tpoly (ty, _) -> check seen ty
+    | _ -> false
+  in
+  check Path.Set.empty ty
+
+(* Unpacking a first-class module is like matching a constructor with
+   existentials: the abstract types of its signature are fresh hidden types,
+   and a value in the module can consume one of them, so the module can hide a
+   knot the way [type u  type t = Roll of (u -> unit)] with [u = t] does. Total
+   code may therefore unpack a module only if none of its abstract types can be
+   a pointer (a bare arrow, or the boxed type a negative use would feed itself).
+   The check is position-agnostic -- it does not track where each abstract type
+   is used -- so it rejects a boxed abstract type even when it happens to be
+   used only positively. Types fixed by the package's constraints
+   ([with type ...]) are not hidden; nested modules and functor results are
+   included; abstract module types are hidden. *)
+let can_unpack_total env ty =
+  let rec module_type_hides env ~constrained ~prefix = function
+    | Mty_ident path ->
+      begin match Env.find_modtype_expansion path env with
+      | mty -> module_type_hides env ~constrained ~prefix mty
+      | exception Not_found -> true
+      end
+    | Mty_signature sg ->
+      let env = Env.add_signature sg env in
+      List.exists (signature_item_hides env ~constrained ~prefix) sg
+    | Mty_functor (_, result, _) ->
+      module_type_hides env ~constrained:[] ~prefix result
+    | Mty_alias _ | Mty_strengthen _ ->
+      (* The types are those of an existing module. *)
+      false
+  and signature_item_hides env ~constrained ~prefix = function
+    | Sig_type (id, decl, _, _) ->
+      declaration_is_hidden (Path.Pident id) decl
+      && not (List.mem (prefix @ [Ident.name id]) constrained)
+      && not (jkind_cannot_be_pointer env decl.type_jkind)
+    | Sig_module (id, _, md, _, _) ->
+      module_type_hides env ~constrained
+        ~prefix:(prefix @ [Ident.name id]) md.md_type
+    | Sig_value _ | Sig_typext _ | Sig_modtype _ | Sig_class _
+    | Sig_class_type _ | Sig_jkind _ -> false
+  in
+  match get_desc (expand_head env ty) with
+  | Tpackage { pack_path; pack_cstrs } ->
+    let constrained = List.map fst pack_cstrs in
+    begin match Env.find_modtype_expansion pack_path env with
+    | mty -> not (module_type_hides env ~constrained ~prefix:[] mty)
+    | exception Not_found -> false
+    end
+  (* [let (module M) = e in ...] leaves the package type an unresolved variable
+     at this point (unlike a [match] scrutinee or a [(module M : S)] parameter,
+     whose type is known), so it cannot be shown safe and is conservatively
+     rejected. *)
+  | _ -> false
 
 let check_type_jkind_exn env texn ty jkind =
   match check_type_jkind env ty jkind with
