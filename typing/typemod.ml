@@ -205,6 +205,14 @@ let rebase_modalities ~loc ~loc_md item ~md_mode ~mode modalities =
   infer_modalities pp ~loc_md item ~md_mode ~mode
 
 (** Similiar to [rebase_modalities] but lifted to signatures. *)
+(* Values bound by [include] or [open struct ... end] are bound at this point
+   of the enclosing structure or signature, like a [let] or a [val] there. *)
+let register_included_values ~level sg =
+  Ctype.register_refinement_value_scope ~level
+    (List.filter_map
+       (function Sig_value (id, _, _) -> Some id | _ -> None)
+       sg)
+
 let rebase_modalities_sg ~loc ~loc_md ~md_mode ~mode sg =
   List.map (function
     | Sig_value (id, vd, vis) ->
@@ -2310,6 +2318,7 @@ and transl_signature ?(interface_toplevel = false) env
         apply_modalities_signature ~recursive env modalities.moda_modalities sg
     in
     let sg, newenv = Env.enter_signature ~scope sg ~mode:md_mode env in
+    register_included_values ~level:Ident.lowest_scope sg;
     Signature_group.iter
       (Signature_names.check_sig_item names loc)
       sg;
@@ -4168,6 +4177,7 @@ and type_open_decl_aux ?used_slot ?toplevel ~funct_body names env od =
       Env.enter_signature ~scope ~mod_shape
         (extract_sig_open env md.mod_loc md.mod_type) ~mode env
     in
+    register_included_values ~level:(Ctype.get_current_level ()) sg;
     let info, visibility =
       match toplevel with
       | Some false | None -> Some `From_open, Hidden
@@ -4234,6 +4244,7 @@ and type_structure ?(toplevel = None) ~funct_body anchor env sstr =
     let sg =
       rebase_modalities_sg ~loc:smodl.pmod_loc ~loc_md ~md_mode ~mode sg
     in
+    register_included_values ~level:(Ctype.get_current_level ()) sg;
     Signature_group.iter (Signature_names.check_sig_item names loc) sg;
     let incl =
       { incl_mod = modl;

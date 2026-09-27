@@ -13069,8 +13069,21 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
           in
           let (pat_list, _new_env, _force, _checks, pvs, _mvs as res) =
             with_local_level_generalize_if is_recursive (fun () ->
-              type_pattern_list Value existential_context env mutable_flag spatl
-                nvs sorts allow_modules
+              try
+                type_pattern_list Value existential_context env mutable_flag
+                  spatl nvs sorts allow_modules
+              with Ctype.Refinement_scope_escape id
+                when existential_context = At_toplevel ->
+                (* Inside an expression, [type_expect] reports this. *)
+                let loc = (List.hd spat_sexp_list).pvb_pat.ppat_loc in
+                raise (Error_forward
+                  (Location.errorf ~loc
+                     ~sub:[Location.msg
+                             "@[Hint: bind %a outside this definition.@]"
+                             Style.inline_code (Ident.name id)]
+                     "the refinement type of this pattern escapes the \
+                      scope of binding %a"
+                     Style.inline_code (Ident.name id)))
             ) ~before_generalize:(fun (_, _, _, _, pvs, _) ->
                                     iter_pattern_variables_type generalize pvs)
           in
