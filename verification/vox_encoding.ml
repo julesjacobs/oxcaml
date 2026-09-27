@@ -618,6 +618,10 @@ let same_nominal_data_type env left right =
   match type_key env left, type_key env right with
   | Some (Constructor (source, _)), Some (Constructor (expected, _)) ->
     Path.same source expected
+  | Some (Tuple source), Some (Tuple expected) ->
+    List.equal
+      (fun (left, _) (right, _) -> Option.equal String.equal left right)
+      source expected
   | _ -> false
 
 let declarations_of_sort ctx = function
