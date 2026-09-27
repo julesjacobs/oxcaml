@@ -11490,9 +11490,21 @@ and type_label_access
   = fun record_form env srecord usage lid ->
   let mode = Value.newvar () in
   (* Reading or writing a field is a runtime access of the record, so it
-     must be real. (Inside a ghost context [submode] does not check
-     the ghostliness axis.) *)
-  Value.submode_exn mode value_max_real;
+     must be real. (Inside a ghost context [submode] does not check the
+     ghostliness axis.) Projecting a ghost field does not read the record:
+     the result is a placeholder, so the record may be ghost. Whether the
+     label is ghost is known only after the record is typed. *)
+  let deferred_real_check =
+    usage = Env.Projection
+    && not (Env.in_ghost_context env)
+    && (match
+          Env.lookup_all_labels ~use:false ~record_form ~loc:lid.loc usage
+            lid.txt env
+        with
+        | Ok labels -> List.exists (fun (label, _) -> label.lbl_ghost) labels
+        | Error _ -> false)
+  in
+  if not deferred_real_check then Value.submode_exn mode value_max_real;
   let record_jkind, record_sort =
     Jkind.of_new_sort_var ~why:Record_projection
       ~level:(Ctype.get_current_level ())
@@ -11522,6 +11534,8 @@ and type_label_access
   let label, ambiguity =
     wrap_disambiguate "This expression has" (mk_expected ty_exp)
       (label_disambiguate record_form usage lid env expected_type) labels in
+  if deferred_real_check && not label.lbl_ghost then
+    submode ~loc:record.exp_loc ~env mode (mode_default value_max_real);
   (record, record_sort, Mode.Value.disallow_right mode,
    label, expected_type, ambiguity)
 
