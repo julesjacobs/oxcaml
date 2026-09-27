@@ -35,9 +35,9 @@ need Jane Street's paid runners and never run. The full suite is our own run
 on the AMD box (`~/vox-check-run.sh` on the `incoming` branch there).
 
 Multidomain runs: our other builds are configured without
-`--enable-multidomain`, so the seven tests marked `multicore` (one-shot
-parallel, channel buffer, raw memory, borrow, quicksort frame, the two lock
-tests) are skipped and `parallel_sort` runs sequentially. The AMD clone
+`--enable-multidomain`, so the six tests marked `multicore` (one-shot
+parallel, channel buffer, raw memory, borrow, the two lock tests) are skipped
+and `parallel_sort_array` runs sequentially. The AMD clone
 `~/git/vox-multidomain` is configured with `--enable-multidomain
 --enable-poll-insertion` (configure refuses the first without the second).
 Run the suite there with each batched full run, and before merging changes to

@@ -39,6 +39,8 @@ These C and compiler files implement the primitives above. They are ordinary unv
 
 The channel and lock demos also trust `verification/library/verified_atomic.mli`, whose atomic load and compare-and-set are `external` with contracts that open an invariant at the atomic step, and `verification/library/unique_cell.mli`, whose operations (`location`, `create`, `take`, `put`, `replace` and the `Slot` functions) are C primitives; only `location` is declared `external` in the interface, the others are `external`s in `unique_cell.ml`. `verification/library/concurrency-boundary.md` gives the reading order. Their theorems are about ownership transfer and refinements on normal return, not linearizability or progress.
 
+The parallel quicksort trusts `verification/library/vox_parallel.ml`: `fork_join` starts a domain with `Domain.Safe.spawn` and joins it before returning or raising, and applies `Obj.magic_unique` to the joined result (the domain handle is private and joined once, and `Domain.join` returns its result `aliased`). Its interface is plain polymorphism with no refinements.
+
 ## How the library is built
 
 `verification/library/build.sh` checks every library module when compiling it to bytecode. The native compile of the same source then passes `-smt-assume-verified` and does not check it again. Both builds use a verification cache keyed by the compiler executable, the source, the interfaces it imports, the flags and the solver; a changed input misses the cache. Set `VOX_VERIFY_CACHE=` to disable it.

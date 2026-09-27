@@ -64,15 +64,16 @@ are total in the model. `quicksort_frame_client.ml` derives exact framing for
 sorting a selected subrange using these public operations.
 
 **Parallel quicksort**: the same ordered files, additionally reading
-`Borrow.Slice.parallel` and `Quicksort.parallel_sort/parallel_sort_array`.
-Callbacks consume disjoint unique loans, are portable/once, and establish their
-own postconditions on normal return. Parallel quicksort supplies those
-callbacks internally; callers supply no callback correctness assumptions.
-The primitive combines their postconditions on normal return. Optional domain
-and cutoff integers affect scheduling, not the semantic domain. No parallel
-termination, liveness, speedup, or exceptional-result claim is exported.
-`Borrow.await_both` joins the worker before propagating a right-side exception;
-`borrow_parallel.ml` tests spawning, sequential fallback, and that behavior.
+`Vox_parallel.fork_join` and `Quicksort.parallel_sort_array`. (Until
+27 September 2026 parallel quicksort used `Borrow.Slice.parallel` and also
+exported `parallel_sort` on slices; this paragraph describes the replacement.)
+The two thunks consume disjoint unique owned pieces, are portable/once, and
+return refined owners; `fork_join`'s type is plain polymorphism, and the
+refinements travel through its type variables. Callers supply no callback
+correctness assumptions. Optional domain and cutoff integers affect
+scheduling, not the semantic domain. No parallel termination, liveness,
+speedup, or exceptional-result claim is exported. `fork_join` joins the worker
+before propagating a right-side exception.
 This operational test is not a proved exception-recovery theorem.
 
 **AVL integer sets**:

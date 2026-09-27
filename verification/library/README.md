@@ -45,6 +45,8 @@ _install/bin/ocamlopt -extension refinement_types \
 The library needs this compiler's storage primitives. Configure the compiler
 with `--enable-poll-insertion --enable-multidomain` for actual parallel domains.
 `Slice.parallel false` is also available with the single-domain runtime.
+`Vox_parallel.fork_join` is a two-way fork/join with an ordinary polymorphic
+type, for thunks over global data such as owned arrays.
 
 [The design](../../design-docs/borrows-and-slices.md) explains ownership,
 current/final models, callback postconditions, the storage boundary, and the
