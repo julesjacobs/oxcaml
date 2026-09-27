@@ -23,7 +23,7 @@ sources:
 
 From the public client. `(x : t) -> ...` names an argument so that later types can mention it, and `{u : unit | p}` is `unit` refined by the predicate `p`: returning it proves `p`. `agreement` is a proof passed as a function: for each word it returns a `unit` refined by the fact that `source` and `other` agree on that word. `ghost_ (...)` is proof code, checked and then erased, and `@ total` marks a total function, one that terminates without raising or touching mutable state.
 
-@code testsuite/tests/vox/dfa_public_client.ml "let (minimum @ total)" "let u = () in u"
+@code testsuite/tests/vox/dfa_public_client.ml "let (minimum @ total)" "  ()"
 
 ## A rejected program
 
