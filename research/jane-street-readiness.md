@@ -92,6 +92,16 @@ this file.
         "verified to be 1: 2"). Agent on
         `jujacobs/vox/totality-knot-20260927`: map every route, principled
         fix, Codex review.
+  - [ ] **Effectful callbacks break call congruence (found 27 September):**
+        a call to a total, stateless function is encoded as a function of its
+        arguments even when a callback argument is partial and stateful
+        (`apply tick 0 = apply tick 0` proved, false at run time). Agent on
+        `jujacobs/vox/call-congruence-20260927`.
+  - [ ] **Hidden types in the totality check:** the knot above, plus an
+        abstract type in a signature hiding negative recursion. One rule for
+        existentials, abstract/open types and unpacked modules (possibly
+        recursive unless the jkind excludes functions or a recorded guarantee
+        holds). Agent on `jujacobs/vox/totality-existentials-20260927`.
   - [ ] **Out-of-range shift counts (found 27 September):** one
         uninterpreted function per shift operator equates results that
         differ between constant-folded and run-time code; a verified program
