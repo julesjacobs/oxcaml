@@ -83,7 +83,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
     let premise : ({u : unit | F.valid_forest runtime_env && index.T.number >= 0}) Ghost.t = {Ghost.ghost = ghost_ (refine_ ())} in
     let refine_ found = F.lookup runtime_env index.T.number premise in
     let p : {p : node Pref.t | lookup env i === Some p && H.mem h.Ghost.ghost p} = match found with
-      | Some p -> refine_ p | None -> ghost_ (let _ : {u : unit | false} = refine_ () in ()); assert false in
+      | Some p -> refine_ p | None -> unreachable_ () in
     let c = {Effective_copy_spec.saved = ghost_ h.Ghost.ghost; epoch = ghost_ p;
       depth = ghost_ depth; base = ghost_ physical} in
     let scope : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem c.Effective_copy_spec.saved x) || source_ok c.Effective_copy_spec.saved x})) Ghost.t =

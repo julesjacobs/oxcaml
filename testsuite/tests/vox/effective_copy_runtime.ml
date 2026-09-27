@@ -27,7 +27,7 @@ let finish : (c : context) @ immutable -> (heads : E.heads Ghost.t) @ total -> (
     ghost_ (history_at c.saved heads.Ghost.ghost c.epoch c.depth d.Ghost.ghost p ());
     let old = Pref.read p (borrow_ state) in ghost_ (clean.Ghost.ghost p; clean_memo_lookup c.saved heads.Ghost.ghost c.epoch c.depth d.Ghost.ghost p old ());
     match old.memo with
-    | Memo _ -> assert false
+    | Memo _ -> unreachable_ ()
     | Forward value ->
       ghost_ (let h = Pref.own (borrow_ state) in result_def c heads.Ghost.ghost d.Ghost.ghost p value h d.Ghost.ghost pool trail;
         effective_target_for_def c.saved heads.Ghost.ghost d.Ghost.ghost p value;
@@ -93,7 +93,7 @@ let rec copy_work : (c : context) @ immutable -> (heads : E.heads Ghost.t) @ tot
     let old = Pref.read p (borrow_ state) in ghost_ (clean_memo_lookup c.saved heads.Ghost.ghost c.epoch c.depth d.Ghost.ghost p old ();
       source_ok_def c.saved p; U.observe_def c.saved p);
     match old.memo with
-    | Memo _ -> assert false
+    | Memo _ -> unreachable_ ()
     | Forward value ->
       ghost_ (mapped_generic c.saved heads.Ghost.ghost c.epoch c.depth d.Ghost.ghost p value ();
         effective_target_for_def c.saved heads.Ghost.ghost d.Ghost.ghost p value;
@@ -139,7 +139,7 @@ let rec copy_work : (c : context) @ immutable -> (heads : E.heads Ghost.t) @ tot
             ghost_ (effective_ready_def c.saved heads.Ghost.ghost d.Ghost.ghost old.desc old.desc);
             let dest = Allocate old.desc in
             let out = finish c heads depth d pool trail p dest clean (state) in let out = #{value = out.#value; state = out.#state; pool = out.#pool; trail = out.#trail; history = out.#history} in use (out)
-          | Link _ -> assert false
+          | Link _ -> unreachable_ ()
           | List child ->
             let resume : (r : {r : copied | result c heads.Ghost.ghost d.Ghost.ghost child r.#value
                 (Pref.own r.#state) r.#history r.#pool r.#trail}) @ unique ->
