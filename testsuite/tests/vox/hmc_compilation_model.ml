@@ -83,9 +83,9 @@ let[@def] (sufficient @ total) (layout : layout @ immutable) (bytes : B.bytes @ 
   | _ -> false
 
 type exhaustion = {prefix : C.count; before : Wasm_calls.configuration; remaining : C.count}
-let[@def] (honest_exhaustion @ total) (bytes : B.bytes @ immutable) (capacity : C.count @ immutable)
+let[@def] (honest_exhaustion @ total) (bytes : B.bytes @ immutable) (input : W.t @ immutable) (capacity : C.count @ immutable)
     (after : GE.state @ immutable) (witness : exhaustion @ immutable) = ghost_ (
-  Wasm_binary_execution.run witness.prefix bytes capacity === Wasm_binary_execution.Result (Wasm_calls.Running witness.before)
+  Wasm_binary_execution.run witness.prefix bytes input capacity === Wasm_binary_execution.Result (Wasm_calls.Running witness.before)
   && (match after.GE.execution.X.machine.E.stack with
     | S.Push (S.I32 2, S.Empty) -> Hmc_failed_guard_model.failed Hmc_failed_guard_model.Heap witness.before.Wasm_calls.current.Wasm_instance_control.body
     | S.Push (S.I32 3, S.Empty) -> Hmc_failed_guard_model.failed Hmc_failed_guard_model.Stack witness.before.Wasm_calls.current.Wasm_instance_control.body
