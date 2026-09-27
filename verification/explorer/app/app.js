@@ -4,7 +4,9 @@
 // src/<path>.txt, written by build.py.
 'use strict';
 (() => {
-  const version = document.currentScript.dataset.version;
+  const script = document.currentScript;
+  const version = script.dataset.version, revision = script.dataset.revision;
+  const dataFiles = JSON.parse(script.dataset.files);
   const $ = (id) => document.getElementById(id);
   const escText = (s) => String(s).replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'));
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -18,19 +20,20 @@
   const S = {
     tree: null, content: null, demos: [], demoById: new Map(), byPath: new Map(), root: null, all: [],
     focus: null, layout: null, selected: null, hover: null,
-    scope: 'compiler', filter: 'all', demo: null, size: 'lines', outline: false,
+    scope: 'proper', filter: 'all', demo: null, size: 'lines', outline: false,
     file: null, range: null, tour: null, stop: 0, panel: 'node', anim: 0, W: 0, H: 0,
   };
 
   // ---------------------------------------------------------------- data
 
   function load() {
-    const get = (name) => fetch(`data/${name}.json?v=${version}`, { cache: 'no-cache' }).then((r) => {
-      if (!r.ok) throw new Error(`data/${name}.json: ${r.status}`);
+    const get = (name) => fetch(dataFiles[name]).then((r) => {
+      if (!r.ok) throw new Error(`${dataFiles[name]}: ${r.status}`);
       return r.json();
     });
     return Promise.all([get('tree'), get('content'), get('demos')]).then(([tree, content, demos]) => {
       S.tree = tree;
+      S.scope = tree.default_scope || tree.scopes[0].id;
       S.content = content;
       S.demos = demos.demos;
       for (const d of S.demos) S.demoById.set(d.id, d);
@@ -139,7 +142,22 @@
 
   // -------------------------------------------------------------- layout
 
-  const HEAD = 15, HEAD_W = 44, HEAD_H = 30;
+  const HEAD = 15, HEAD_BIG = 19, HEAD_W = 44, HEAD_H = 30;
+
+  // A directory whose only visible child is a directory is drawn as one
+  // frame with the joined name, e.g. testsuite/tests/vox/.
+  const onlyDir = (n) => {
+    if (!n.dir) return null;
+    let only = null;
+    for (const c of n.children) {
+      if (c.v <= 0) continue;
+      if (only || !c.dir) return null;
+      only = c;
+    }
+    return only;
+  };
+  const descend = (n) => { for (let c = onlyDir(n); c; c = onlyDir(n)) n = c; return n; };
+  const ascend = (n) => { let p = n.parent; while (p && p.parent && onlyDir(p)) p = p.parent; return p; };
 
   function squarify(nodes, x0, y0, x1, y1, place) {
     const ratio = (1 + Math.sqrt(5)) / 2;
@@ -190,18 +208,31 @@
 
   function inner(r, isFocus) {
     if (isFocus) return { x: r.x, y: r.y, w: r.w, h: r.h, head: 0 };
-    const head = r.w >= HEAD_W && r.h >= HEAD_H ? HEAD : 0;
+    const head = r.w >= 160 && r.h >= 90 ? HEAD_BIG : r.w >= HEAD_W && r.h >= HEAD_H ? HEAD : 0;
     const pad = r.w > 12 && r.h > 12 ? 2 : r.w > 4 && r.h > 4 ? 1 : 0;
     return { x: r.x + pad, y: r.y + (head || pad), w: r.w - 2 * pad, h: r.h - (head || pad) - pad, head };
   }
 
   function layout(focus, W, H) {
     const L = new Map();
+    L.merged = new Set();
+    L.label = new Map();
     (function place(n, x, y, w, h, isFocus) {
       const r = { x, y, w, h };
       L.set(n, r);
       if (!n.dir || w < 1 || h < 1) return;
-      const kids = n.children.filter((c) => c.v > 0);
+      let body = n;
+      if (!isFocus) {
+        let name = n.name + '/';
+        for (let c = onlyDir(body); c; c = onlyDir(body)) {
+          L.set(c, { x, y, w, h });
+          L.merged.add(c);
+          name += c.name + '/';
+          body = c;
+        }
+        if (body !== n) L.label.set(n, name);
+      }
+      const kids = body.children.filter((c) => c.v > 0);
       if (!kids.length) return;
       const i = inner(r, isFocus);
       if (i.w <= 0 || i.h <= 0) return;
@@ -212,7 +243,7 @@
 
   // -------------------------------------------------------------- colour
 
-  const GREY = { ocaml: [188, 195, 201], c: [170, 179, 187], other: [214, 218, 222], binary: [226, 229, 231] };
+  const GREY = { ocaml: [172, 182, 191], c: [148, 158, 166], other: [212, 216, 220], binary: [228, 230, 232] };
   const NEW = [61, 111, 148], MOD_LO = [244, 230, 198], MOD_HI = [192, 127, 16];
   const mix = (a, b, t) => [0, 1, 2].map((i) => Math.round(a[i] + (b[i] - a[i]) * t));
   const rgb = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
@@ -235,8 +266,8 @@
 
   const canvas = $('map-canvas'), overlay = $('map-overlay');
   const ctx = canvas.getContext('2d'), octx = overlay.getContext('2d');
-  const FONT = '11px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
-  const BOLD = '600 11px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+  const SANS = '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+  const FONT = `11px ${SANS}`, FONT_BIG = `13px ${SANS}`, BOLD = `600 11px ${SANS}`, BOLD_BIG = `600 12.5px ${SANS}`;
 
   function resize() {
     const box = $('map').getBoundingClientRect();
@@ -304,15 +335,18 @@
         else ctx.fillRect(r.x, r.y, r.w, r.h);
         if (r.w > 40 && r.h > 13) {
           const dark = n.status === 'n' || (n.status === 'm' && n.added / Math.max(1, n.lines) > 0.3);
-          label(n.name, r.x, r.y + Math.min(r.h / 2, 9), r.w, FONT, dark ? '#fff' : '#2b343b');
-          if (r.h > 28 && r.w > 50) label(kfmt(n.lines), r.x, r.y + 21, r.w, FONT, dark ? '#e3edf4' : '#5d6870');
+          const big = r.w > 110 && r.h > 38;
+          label(n.name, r.x + (big ? 2 : 0), r.y + (big ? 12 : Math.min(r.h / 2, 9)), r.w - (big ? 2 : 0), big ? FONT_BIG : FONT, dark ? '#fff' : '#1f282e');
+          if (r.h > 28 && r.w > 50) label(kfmt(n.lines), r.x + (big ? 2 : 0), r.y + (big ? 28 : 21), r.w, FONT, dark ? '#dde8f1' : '#3f4a52');
         }
         const o = outlined(n);
         if (o) outlines.push([r, o]);
         return;
       }
-      if (!isFocus) {
-        ctx.fillStyle = n.depth % 2 ? '#e4e8eb' : '#edf0f2';
+      const merged = !isFocus && S.layout && S.layout.merged && S.layout.merged.has(n);
+      let frame = false;
+      if (!isFocus && !merged) {
+        ctx.fillStyle = '#f2f4f5';
         ctx.fillRect(r.x, r.y, r.w, r.h);
         if (r.w < 7 || r.h < 7) {
           ctx.fillStyle = rgb(colour(n));
@@ -321,19 +355,29 @@
         }
         const i = inner(r, false);
         if (i.head) {
+          const big = i.head === HEAD_BIG;
+          ctx.fillStyle = '#dce2e6';
+          ctx.fillRect(r.x, r.y, r.w, i.head);
           const size = kfmt(n.v);
           const sw = r.w > 90 ? measure(size, FONT) + 8 : 0;
-          label(n.name + '/', r.x, r.y + 8, r.w - sw, BOLD, '#27323a');
+          const name = (S.layout && S.layout.label && S.layout.label.get(n)) || n.name + '/';
+          label(name, r.x + 1, r.y + i.head / 2, r.w - sw, big ? BOLD_BIG : BOLD, '#1d272e');
           if (sw) {
             ctx.font = FONT;
-            ctx.fillStyle = '#66727b';
-            ctx.fillText(size, r.x + r.w - sw + 4, r.y + 8);
+            ctx.fillStyle = '#56616a';
+            ctx.fillText(size, r.x + r.w - sw + 4, r.y + i.head / 2);
           }
         }
+        frame = true;
       }
       for (const c of n.children) {
         if (c.v <= 0 && !S.anim) continue;
         draw(c, false);
+      }
+      if (frame && r.w > 3 && r.h > 3) {
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = n.parent === root ? '#7d8a94' : '#a3aeb6';
+        ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
       }
     })(root, true);
     for (const [r, o] of outlines) {
@@ -364,7 +408,10 @@
       octx.strokeRect(x + width / 2, y + width / 2, w - width, h - width);
     };
     if (S.selected && S.selected !== S.focus) mark(S.selected, '#b3413a', 2.5);
-    if (S.hover && S.hover !== S.selected && S.hover !== S.focus) mark(S.hover, '#16232c', 2);
+    if (S.hover && S.hover !== S.selected && S.hover !== S.focus) {
+      if (S.hover === S.cursor) mark(S.hover, '#1f5f8b', 3.5);
+      else mark(S.hover, '#16232c', 2);
+    }
   }
 
   function render() {
@@ -626,7 +673,7 @@
 
   function fetchSource(n) {
     if (cache.has(n.path)) return Promise.resolve(cache.get(n.path));
-    return fetch(`src/${encodePath(n.path)}.txt?v=${version}`).then((r) => {
+    return fetch(`src/${encodePath(n.path)}.txt?v=${revision.slice(0, 10)}`).then((r) => {
       if (!r.ok) throw new Error(`${r.status}`);
       return r.text();
     }).then((text) => {
@@ -663,6 +710,7 @@
   async function openFile(n, range) {
     const left = $('left');
     $('file').hidden = false;
+    $('divider').hidden = false;
     left.classList.add('file-open');
     document.body.classList.add('file-open');
     const same = S.file === n;
@@ -784,6 +832,7 @@
     S.entry = null;
     S.range = null;
     $('file').hidden = true;
+    $('divider').hidden = true;
     $('left').classList.remove('file-open', 'file-max');
     document.body.classList.remove('file-open');
     code.innerHTML = '';
@@ -866,9 +915,9 @@
       }
       if (n.voxLines) {
         const files = [];
-        (function walk(x) { if (x.dir) x.children.forEach(walk); else if (x.voxLines) files.push(x); })(n);
+        (function walk(x) { if (x.dir) x.children.forEach(walk); else if (x.voxLines && x.v > 0) files.push(x); })(n);
         files.sort((a, b) => b.voxLines - a.voxLines);
-        html += `<h3>Vox's largest changes here</h3><ul class="rows">` + files.slice(0, 12).map((f) => `<li><a href="#p/${encodePath(f.path)}" title="${esc(f.path)}">${esc(f.path.slice(n.path === '/' ? 0 : n.path.length))}</a>`
+        if (files.length) html += `<h3>Vox's largest changes here${S.scope !== 'all' || S.filter !== 'all' ? ' (in view)' : ''}</h3><ul class="rows">` + files.slice(0, 12).map((f) => `<li><a href="#p/${encodePath(f.path)}" title="${esc(f.path)}">${esc(f.path.slice(n.path === '/' ? 0 : n.path.length))}</a>`
           + (f.status === 'n' ? `<span class="n plus">new, ${fmt(f.lines)}</span>` : `<span class="n"><span class="plus">+${fmt(f.added)}</span> <span class="minus">−${fmt(f.removed)}</span></span>`) + '</li>').join('')
           + (files.length > 12 ? `<li><span class="name n">${fmt(files.length - 12)} more files changed</span></li>` : '') + '</ul>';
       }
@@ -994,6 +1043,8 @@
   async function route() {
     const r = parseHash();
     $('search-results').hidden = true;
+    $('tip').hidden = true;
+    S.hover = S.cursor = null;
     if (r.kind === 'tours') { panelTours(); return; }
     if (r.kind === 'demo') {
       if (!S.demoById.has(r.id)) return;
@@ -1031,8 +1082,9 @@
       crumbsAfter(view(focus || n.parent));
       return;
     }
-    const n = S.byPath.get(r.path) || S.byPath.get(r.path + '/') || S.root;
+    let n = S.byPath.get(r.path) || S.byPath.get(r.path + '/') || S.root;
     ensureVisible(n);
+    if (n.dir) n = descend(n);
     if (n.dir) {
       S.selected = null;
       if (S.file) closeFile();
@@ -1057,8 +1109,9 @@
   function ensureVisible(n) {
     if (n.v > 0 || n === S.root) return;
     if (!inScope(n.path)) {
-      S.scope = 'all';
-      $('scope').value = 'all';
+      const fits = S.tree.scopes.find((s) => !s.prefixes || s.prefixes.some((p) => n.path.startsWith(p)));
+      S.scope = fits ? fits.id : 'all';
+      $('scope').value = S.scope;
     }
     computeValues();
     if (n.v > 0) { S.layout = layout(S.focus, S.W, S.H); return; }
@@ -1162,12 +1215,15 @@
       $('tip').hidden = true;
       if (target === S.focus) return;
       const r = S.layout.get(target);
-      if (target.dir && r && inner(r, false).head && y < r.y + HEAD) return go(`#p/${encodePath(target.path)}`);
+      if (target.dir && r && inner(r, false).head && y < r.y + inner(r, false).head) return go(`#p/${encodePath(target.path)}`);
       if (!target.dir && r && r.w > 40 && r.h > 13) return go(`#p/${encodePath(target.path)}`);
       let child = target;
       while (child.parent !== S.focus) child = child.parent;
       go(`#p/${encodePath(child.path)}`);
     });
+    canvas.addEventListener('focus', () => { if (!S.anim) mapKey({ key: 'Home' }); });
+    canvas.addEventListener('blur', () => { S.cursor = null; S.hover = null; drawOverlay(); $('tip').hidden = true; });
+    bindDivider();
     canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); zoomOut(); });
     $('tree-list').addEventListener('click', (e) => {
       const li = e.target.closest('li[data-path]');
@@ -1234,6 +1290,7 @@
     document.addEventListener('keydown', (e) => {
       if (e.target.closest && e.target.closest('input,select,textarea')) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (document.activeElement === canvas && mapKey(e)) { e.preventDefault(); return; }
       if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && S.tour && (S.panel === 'tour' || S.panel === 'tour-intro')) {
         e.preventDefault();
         step(e.key === 'ArrowRight' ? 1 : -1);
@@ -1250,12 +1307,89 @@
       if (phone.matches) return;
       resize();
       if (S.focus) { S.layout = layout(S.focus, S.W, S.H); render(); }
+      renderChunks();
     }).observe($('map'));
     phone.addEventListener('change', () => {
       $('tree-list').hidden = !phone.matches;
       resize();
       S.layout = layout(S.focus, S.W, S.H);
       render();
+    });
+  }
+
+  // Keyboard navigation of the map: arrows move a cursor between the
+  // visible parts of the current directory, Enter opens the one under it.
+  function mapKey(e) {
+    if (phone.matches || S.anim || !S.layout) return false;
+    const kids = S.focus.children.filter((c) => c.v > 0 && S.layout.get(c));
+    if (!kids.length) return false;
+    let cur = S.cursor && S.cursor.parent === S.focus && S.layout.get(S.cursor) ? S.cursor : null;
+    if (e.key === 'Enter' || e.key === ' ') {
+      if (!cur) return false;
+      S.cursor = S.hover = null;
+      $('tip').hidden = true;
+      go(`#p/${encodePath(cur.path)}`);
+      return true;
+    }
+    const step = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowDown: [0, 1], ArrowUp: [0, -1] }[e.key];
+    if (!step && e.key !== 'Home') return false;
+    const centre = (n) => { const q = S.layout.get(n); return [q.x + q.w / 2, q.y + q.h / 2]; };
+    if (!cur || !step) cur = kids[0];
+    else {
+      const [x0, y0] = centre(cur);
+      let best = null, score = Infinity;
+      for (const c of kids) {
+        if (c === cur) continue;
+        const [x, y] = centre(c);
+        const along = (x - x0) * step[0] + (y - y0) * step[1];
+        if (along <= 1) continue;
+        const across = Math.abs((x - x0) * step[1] + (y - y0) * step[0]);
+        if (along + 2 * across < score) { score = along + 2 * across; best = c; }
+      }
+      if (best) cur = best;
+    }
+    S.cursor = cur;
+    S.hover = cur;
+    drawOverlay();
+    const q = S.layout.get(cur);
+    showTip(cur, Math.min(q.x + q.w / 2, S.W - 20), Math.min(q.y + q.h / 2, S.H - 20));
+    return true;
+  }
+
+  // The divider between the map and an open file sets the map's height.
+  function bindDivider() {
+    const divider = $('divider'), left = $('left');
+    const set = (h) => {
+      const max = left.getBoundingClientRect().height - 200;
+      h = Math.round(Math.max(80, Math.min(max, h)));
+      left.style.setProperty('--map-h', `${h}px`);
+      try { localStorage.setItem('vox-explorer-map-height', String(h)); } catch (e) { /* not stored */ }
+    };
+    try {
+      const saved = +localStorage.getItem('vox-explorer-map-height');
+      if (saved) left.style.setProperty('--map-h', `${saved}px`);
+    } catch (e) { /* default height */ }
+    divider.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      divider.setPointerCapture(e.pointerId);
+      divider.classList.add('dragging');
+      const top = $('map').getBoundingClientRect().top;
+      const legend = $('legend').getBoundingClientRect().height;
+      const move = (m) => set(m.clientY - top - legend - 4);
+      const up = () => {
+        divider.classList.remove('dragging');
+        divider.removeEventListener('pointermove', move);
+        divider.removeEventListener('pointerup', up);
+        renderChunks();
+      };
+      divider.addEventListener('pointermove', move);
+      divider.addEventListener('pointerup', up);
+    });
+    divider.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      e.preventDefault();
+      e.stopPropagation();
+      set($('map').getBoundingClientRect().height + (e.key === 'ArrowDown' ? 30 : -30));
     });
   }
 
@@ -1277,7 +1411,8 @@
   }
 
   function zoomOut() {
-    if (S.focus.parent) go(`#p/${encodePath(S.focus.parent.path)}`);
+    const up = ascend(S.focus);
+    if (up) go(`#p/${encodePath(up.path)}`);
   }
 
   // ----------------------------------------------------------------- main
@@ -1291,7 +1426,7 @@
     S.layout = layout(S.root, S.W, S.H);
     render();
     route().then(() => {
-      window.__explorer = { ready: true, readyAt: performance.now(), layoutMs: performance.now() - started, S, render, layout };
+      window.__explorer = { version, ready: true, readyAt: performance.now(), layoutMs: performance.now() - started, S, render, layout };
     });
   }).catch((e) => {
     panel.innerHTML = `<h2>Could not load the explorer</h2><p>${esc(e.message)}</p>`;

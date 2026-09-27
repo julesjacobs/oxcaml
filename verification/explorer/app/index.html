@@ -5,7 +5,22 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Vox source explorer</title>
 <meta name="description" content="The OxCaml compiler with Vox, as a treemap: what each part is, what Vox changed there, where the demos live, and guided tours.">
-<link rel="stylesheet" href="style.css?v={{version}}">
+<link rel="stylesheet" href="{{style}}">
+<script>
+// A cached copy of this page may be older than the deployed build (every
+// other file is named by its content hash): if so, fetch the page afresh.
+(function (version) {
+  try {
+    fetch('version.txt', { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : version; }).then(function (t) {
+      t = t.trim();
+      var key = 'vox-explorer-reload-' + t;
+      if (!t || t === version || sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, '1');
+      fetch(location.pathname, { cache: 'reload' }).then(function () { location.reload(); });
+    }).catch(function () {});
+  } catch (e) {}
+})('{{version}}');
+</script>
 </head>
 <body>
 <header class="topbar">
@@ -38,7 +53,7 @@
   <section class="left" id="left">
     <nav class="crumbs" id="crumbs" aria-label="Location"></nav>
     <div class="map" id="map">
-      <canvas id="map-canvas" aria-label="Treemap of the source tree"></canvas>
+      <canvas id="map-canvas" tabindex="0" aria-label="Treemap of the source tree. Arrow keys move between the parts of the current directory, Enter opens one, Escape goes up."></canvas>
       <canvas id="map-overlay" aria-hidden="true"></canvas>
       <div class="tip" id="tip" hidden></div>
       <ul class="tree-list" id="tree-list" hidden></ul>
@@ -49,8 +64,9 @@
       <span><i class="sw sw-n"></i>Vox-new</span>
       <span><i class="sw sw-d"></i>Demo file</span>
       <label class="outline-toggle"><input type="checkbox" id="outline"> Outline demo files</label>
-      <span class="hint">Click to zoom in · Esc or right-click to zoom out</span>
+      <span class="hint">Click or Enter zooms in · Esc zooms out</span>
     </div>
+    <div class="divider" id="divider" role="separator" aria-orientation="horizontal" aria-label="Resize the map" tabindex="0" title="Drag to resize the map" hidden></div>
     <section class="file" id="file" hidden>
       <div class="file-head">
         <div class="file-title"><strong id="file-path"></strong> <span id="file-meta" class="file-meta"></span></div>
@@ -64,6 +80,6 @@
   <aside class="panel" id="panel" aria-live="polite"></aside>
 </div>
 <noscript><p class="noscript">The explorer needs JavaScript. The sources are on <a href="https://github.com/julesjacobs/oxcaml/tree/vox">GitHub</a>.</p></noscript>
-<script src="app.js?v={{version}}" data-version="{{version}}"></script>
+<script src="{{app}}" data-version="{{version}}" data-revision="{{revision}}" data-files="{{data}}"></script>
 </body>
 </html>

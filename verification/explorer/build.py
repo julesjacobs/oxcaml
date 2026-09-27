@@ -29,7 +29,7 @@ relative to the explorer (default ../catalogue/).
 Serve with `python3 -m http.server -d _build/explorer`.
 """
 from pathlib import Path
-import argparse, gzip, hashlib, json, re, shlex, shutil, subprocess, sys, time
+import argparse, gzip, hashlib, html, json, re, shlex, shutil, subprocess, sys, time
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -262,7 +262,7 @@ def build(args):
 
     repo = C.Repo(ROOT, commit)
     problems = C.Problems()
-    content = C.load(repo, [d['id'] for d in demo_list], problems)
+    content = C.load(repo, [d['id'] for d in demo_list], problems, args.content)
     for w in problems.warnings:
         print('warning:', w)
     if problems.errors:
@@ -270,31 +270,40 @@ def build(args):
 
     tree = {'revision': commit, 'base': base, 'repository': config['repository'],
             'catalogue': args.catalogue_url, 'scopes': config['scopes'],
+            'default_scope': config.get('default_scope', config['scopes'][0]['id']),
             'excluded': config['exclude'], 'built': time.strftime('%Y-%m-%d'),
             'columns': ['path', 'lines', 'language', 'status', 'added', 'removed', 'ranges', 'catalogue'],
             'files': files}
     data = {
-        'tree.json': tree,
-        'demos.json': {'demos': demo_list},
-        'content.json': content,
+        'tree': tree,
+        'demos': {'demos': demo_list},
+        'content': content,
     }
-    stamp = hashlib.sha256()
+    # Every asset's name carries a hash of its content, so an index.html
+    # only ever loads the files it was built with; version.txt lets a
+    # cached index.html notice that a newer build is deployed.
+    def hashed(folder, stem, suffix, raw):
+        name = f'{stem}.{hashlib.sha256(raw).hexdigest()[:10]}{suffix}'
+        (output / folder / name).write_bytes(raw)
+        return f'{folder}/{name}' if folder != '.' else name
+
+    names = {}
     for name, value in data.items():
-        text = json.dumps(value, separators=(',', ':'), ensure_ascii=False)
-        (output / 'data' / name).write_text(text)
-        stamp.update(text.encode())
+        raw = json.dumps(value, separators=(',', ':'), ensure_ascii=False).encode()
+        names[name] = hashed('data', name, '.json', raw)
+    names['app'] = hashed('.', 'app', '.js', (HERE / 'app' / 'app.js').read_bytes())
+    names['style'] = hashed('.', 'style', '.css', (HERE / 'app' / 'style.css').read_bytes())
+    version = hashlib.sha256(json.dumps(names, sort_keys=True).encode()).hexdigest()[:10]
+    page = (HERE / 'app' / 'index.html').read_text()
+    for key, value in {'version': version, 'app': names['app'], 'style': names['style'],
+                       'data': json.dumps({k: names[k] for k in data}), 'revision': commit}.items():
+        page = page.replace('{{' + key + '}}', html.escape(value))
+    assert '{{' not in page, 'every placeholder of index.html is filled'
+    (output / 'index.html').write_text(page)
+    (output / 'version.txt').write_text(version + '\n')
     for item in (HERE / 'app').iterdir():
-        if item.is_file():
-            stamp.update(item.read_bytes())
-    version = stamp.hexdigest()[:10]
-    for item in (HERE / 'app').iterdir():
-        target = output / item.name
-        if item.is_dir():
-            shutil.copytree(item, target)
-        elif item.name == 'index.html':
-            target.write_text(item.read_text().replace('{{version}}', version))
-        else:
-            shutil.copy(item, target)
+        if item.name not in ('index.html', 'app.js', 'style.css'):
+            (shutil.copytree if item.is_dir() else shutil.copy)(item, output / item.name)
 
     total = sum(f.stat().st_size for f in output.rglob('*') if f.is_file())
     data_bytes = sum(f.stat().st_size for f in (output / 'data').iterdir())
@@ -317,5 +326,7 @@ if __name__ == '__main__':
                            help='an installed compiler whose compiler-libs parse the demos (default _install)')
     arguments.add_argument('--catalogue', help='a built catalogue, whose rendered sources the file view links to')
     arguments.add_argument('--catalogue-url', default='../catalogue/')
+    arguments.add_argument('--content', default=str(HERE / 'content'),
+                           help='the directory of descriptions and tours (default: content/ in the checkout)')
     arguments.add_argument('--measure', action='store_true', help='also report the gzipped size of the sources')
     build(arguments.parse_args())

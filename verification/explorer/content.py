@@ -267,11 +267,11 @@ def short_text(value, where, problems):
     return value
 
 
-def load(repo, demos, problems, catalogue_url='{catalogue}'):
+def load(repo, demos, problems, content=CONTENT):
     """The compiled content: {'descriptions': {path: ...}, 'tours': [...]}.
     Markdown is rendered to HTML; `{catalogue}` in links is left for the
     caller to replace."""
-    tour_files = sorted((CONTENT / 'tours').glob('*.json'))
+    tour_files = sorted((Path(content) / 'tours').glob('*.json'))
     tour_ids = {p.stem for p in tour_files}
     md = Markdown(repo, demos, tour_ids)
 
@@ -289,7 +289,7 @@ def load(repo, demos, problems, catalogue_url='{catalogue}'):
         return out
 
     descriptions, origin = {}, {}
-    for file in sorted((CONTENT / 'descriptions').glob('*.json')):
+    for file in sorted((Path(content) / 'descriptions').glob('*.json')):
         name = f'descriptions/{file.name}'
         try:
             data = json.loads(file.read_text())

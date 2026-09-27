@@ -9,29 +9,64 @@
   "verification/review/": "review notes, not published",
   "problems.md": "working notes",
   "setissues.md": "working notes",
-  "slowness.md": "working notes"
+  "slowness.md": "working notes",
+  "verification/explorer/": "the explorer itself: its app, build and content"
  },
  "languages": {
-  "ocaml": [".ml", ".mli", ".mll", ".mly"],
-  "c": [".c", ".h"]
+  "ocaml": [
+   ".ml",
+   ".mli",
+   ".mll",
+   ".mly"
+  ],
+  "c": [
+   ".c",
+   ".h"
+  ]
  },
  "scopes": [
   {
-   "id": "compiler",
-   "label": "Compiler and Vox tests",
-   "prefixes": ["middle_end/", "typing/", "backend/", "stdlib/", "runtime/", "verification/", "lambda/",
-                "otherlibs/", "parsing/", "utils/", "driver/", "chamelon/", "testsuite/tests/vox/"]
-  },
-  {
    "id": "proper",
    "label": "Compiler proper",
-   "prefixes": ["middle_end/", "typing/", "backend/", "stdlib/", "runtime/", "verification/", "lambda/",
-                "otherlibs/", "parsing/", "utils/", "driver/", "chamelon/"]
+   "prefixes": [
+    "middle_end/",
+    "typing/",
+    "backend/",
+    "stdlib/",
+    "runtime/",
+    "verification/",
+    "lambda/",
+    "otherlibs/",
+    "parsing/",
+    "utils/",
+    "driver/",
+    "chamelon/"
+   ]
+  },
+  {
+   "id": "compiler",
+   "label": "Compiler and Vox tests",
+   "prefixes": [
+    "middle_end/",
+    "typing/",
+    "backend/",
+    "stdlib/",
+    "runtime/",
+    "verification/",
+    "lambda/",
+    "otherlibs/",
+    "parsing/",
+    "utils/",
+    "driver/",
+    "chamelon/",
+    "testsuite/tests/vox/"
+   ]
   },
   {
    "id": "all",
    "label": "Whole repository",
    "prefixes": null
   }
- ]
+ ],
+ "default_scope": "proper"
 }
