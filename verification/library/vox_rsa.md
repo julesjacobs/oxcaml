@@ -105,7 +105,6 @@ From a configured worktree:
 ./dev test vox/rsa.ml
 ./dev test vox/rsa_rejected.ml
 ./dev test vox/rsa_public_client.ml
-python3 testsuite/tests/vox/check_rsa_boundary.py
 ```
 
 The fixture includes a statically proved non-coprime example, differential
@@ -122,6 +121,6 @@ they are not part of the implementation or its correctness proof.
 
 `rsa_public_client.ml` derives the general encryption/decryption composition
 and CRT equivalence using only `Vox_rsa` and `Vox_rsa.Spec`.
-`check_rsa_boundary.py` separately compiles it with only `vox_rsa.cmi` and
-`vox_rsa_spec.cmi` as library interfaces, then links and runs it. No proof-module
+The test compiles it with only `vox_rsa.cmi` and `vox_rsa_spec.cmi` as library
+interfaces, then links and runs it with both compilers. No proof-module
 interface is available while compiling the client.

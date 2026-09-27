@@ -36,7 +36,7 @@ Line 4, characters 36-38:
 4 |   W.local M.Nil W.Empty V.Empty D.Z ());;
                                         ^^
 Error: Refinement could not be proved (counterexample)
-File "hmc_monomorphic_values.ml", line 41, characters 16-85:
+File "hmc_monomorphic_values.ml", line 41, characters 54-85:
   The refinement is stated here.
 |}]
 

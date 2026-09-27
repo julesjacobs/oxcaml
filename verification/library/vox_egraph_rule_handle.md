@@ -17,11 +17,14 @@ Read these files in `verification/library`, in order:
 4. `vox_egraph_match_spec.ml`: graph observation and class-based pattern matching.
 5. `vox_egraph_snapshot_spec.ml`: input-origin reconstruction.
 6. `vox_egraph_preservation_spec.ml`: preservation of previously admitted origins.
-7. `vox_egraph_saturation_spec.ml`: finite typed instances and rule closure.
-8. `vox_egraph_congruence_spec.ml`: independent enode congruence closure.
-9. `vox_egraph_fixedpoint_spec.ml`: conjunction of rule and congruence closure.
-10. `vox_egraph_interpret_wrapping.mli`: interpretation consequence and premise.
-11. `vox_egraph_rule_handle.mli`: actual executable entrypoints and guarantees.
+7. `vox_egraph_closure_spec.ml`: typed bindings and closure at every root.
+8. `vox_egraph_quantifier.mli`: closure over every typed assignment of
+   allocated IDs, characterized by `closed_bindings_def`.
+9. `vox_egraph_saturation_spec.ml`: rule closure.
+10. `vox_egraph_congruence_spec.ml`: independent enode congruence closure.
+11. `vox_egraph_fixedpoint_spec.ml`: conjunction of rule and congruence closure.
+12. `vox_egraph_interpret_wrapping.mli`: interpretation consequence and premise.
+13. `vox_egraph_rule_handle.mli`: actual executable entrypoints and guarantees.
 
 The accompanying declaration inventory selects the exact public declarations
 and every definition needed to interpret them, excluding auxiliary proof bodies.
@@ -90,15 +93,17 @@ The saturation regression includes productive cyclic classes and every limit
 status. Semantic rejection tests cover foreign-rule provenance and incompatible
 transitivity endpoints. The matcher regression includes exact cost/exhaustion.
 
-For a fresh dependency compile, a public-only CMI client, three additional
-interface rejection fixtures, and emitted-Lambda inspection, run:
+For a public-only CMI client, three additional interface rejection fixtures,
+emitted-Lambda inspection and the declaration inventory, run:
 
 ```
-python3 verification/tests/check_egraph_boundary.py \
-  --compiler _build/main/main.bc --stdlib _runtest/stdlib
+./dev test vox/egraph_boundary.ml
 ```
 
-The script writes its artifacts to a temporary directory and prints its path.
+The test regenerates the inventory from the thirteen files above and the
+trusted primitives and compares it with
+`vox_egraph_rule_handle.spec.json`; after a reviewed change to one of those
+files, `./dev test --promote vox/egraph_boundary.ml` rewrites it.
 The emitted-code check excludes calls to proof modules; the handle retains a
 static export of the ghost `preserved_origin` function, while `same_class`
 executes the two union-root lookups in `model_evidence.query`.

@@ -46,6 +46,46 @@ Expect files show types, results, and nearby rejected programs. Definitions
 whose modes matter live inside modules to avoid the interactive toplevel's
 legacy-mode defaults.
 
+A rejection test against library units compiles them as real units, then
+runs the expect file against them:
+
+```
+ all_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa.mli vox_rsa.ml";
+ compile_only = "true";
+ {
+   setup-ocamlc.opt-build-env;
+   ocamlc.opt;
+   binary_modules = "vox_rsa_spec vox_rsa";
+   run-expect;
+   check-program-output;
+ }
+```
+
+`compile_only` compiles `all_modules` but loads nothing into the toplevel:
+the type checker sees the units, but an accepted phrase that calls them
+fails at run time. `binary_modules`, set after the compilation step (the
+compiler would otherwise receive the objects too) and listed in dependency
+order, loads their `.cmo` files before the script, as `#load` would. Keep an
+accepted phrase in each rejection test as a positive control.
+
+The boundary tests (`*_boundary.ml`, `rsa_public_client.ml`,
+`structures_erasure.ml`, `library_build.ml`) check a demo's public surface
+with ordinary ocamltest actions, which `./dev test` runs: the library is
+compiled in one build directory, `copy` puts only the public `.cmi` files
+(and, for native code, the `.cmx` files) into a second one made by another
+`setup-*-build-env` with a `compiler_directory_suffix`, and the client is
+compiled there and linked with the library's objects through
+`binary_modules`. Rejections are expect phrases run in that directory, so
+each pins its whole error. Emitted code is dumped by setting
+`compiler_output2` before a compile with `-dlambda` or `-dcmm`; a small
+checker program built on `emitted_code.ml` reads the dumps, prints one line
+per check and exits with status 1 after a failed check, so a failure cannot
+be promoted away. Name its reference so that it does not collide with a
+compiler's default reference (`<test>.byte.reference`,
+`<test>.native.reference`), and set `stdout` and `stderr` with `output`
+for every `run` after the first. A test stops at its first failing action,
+so a test with several new outputs may need several `--promote` runs.
+
 | Stage | Files | What is established |
 | --- | --- | --- |
 | Dev loop | `smoke.ml` | The expect-test workflow runs. |
@@ -135,8 +175,8 @@ arbitrary positive valid exponents, and every message below `pq`, including
 non-coprime messages. All arithmetic uses `Bigint`; proof calls
 erase. `rsa_rejected.ml` checks invalid uses and hidden proof exports.
 `rsa_public_client.ml` derives composition and CRT equivalence through the
-sealed public interface. `check_rsa_boundary.py` compiles that client with
-only the two public CMIs available, then links and runs it. See the
+sealed public interface; the test compiles it with only the two public CMIs
+available, then links and runs it with both compilers. See the
 [specification and proof boundaries](../../../verification/library/vox_rsa.md).
 
 ## Arithmetic proof boundaries

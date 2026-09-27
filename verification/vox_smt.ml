@@ -146,6 +146,8 @@ type op =
   | Bit_or
   | Bit_xor
   | Shift_right_logical
+  | Shift_left
+  | Shift_right_arithmetic
   | Eq
   | Ne
   | Lt
@@ -168,6 +170,7 @@ type op =
   | Int_gt
   | Int_ge
   | Int_of_int63
+  | Int63_of_int
 
 type term =
   | Boolean of bool
@@ -208,6 +211,8 @@ let operator = function
   | Bit_or -> "int63_or"
   | Bit_xor -> "int63_xor"
   | Shift_right_logical -> "int63_lsr"
+  | Shift_left -> "int63_lsl"
+  | Shift_right_arithmetic -> "int63_asr"
   | Eq -> "="
   | Ne -> "distinct"
   | Lt -> "<"
@@ -229,6 +234,7 @@ let operator = function
   | Int_gt -> ">"
   | Int_ge -> ">="
   | Int_of_int63 -> "int_of_int63"
+  | Int63_of_int -> "int63_of_int"
 
 let sort_name = function
   | Bool -> "Bool"
@@ -255,7 +261,8 @@ type operator_signature =
 
 let operator_signature = function
   | Add | Sub | Mul | Div | Rem -> Fixed ([Int63; Int63], Int63)
-  | Bit_and | Bit_or | Bit_xor | Shift_right_logical ->
+  | Bit_and | Bit_or | Bit_xor | Shift_right_logical | Shift_left
+  | Shift_right_arithmetic ->
     Fixed ([Int63; Int63], Int63)
   | Neg -> Fixed ([Int63], Int63)
   | Lt | Le | Gt | Ge -> Fixed ([Int63; Int63], Bool)
@@ -267,6 +274,7 @@ let operator_signature = function
   | Int_neg -> Fixed ([Int], Int)
   | Int_lt | Int_le | Int_gt | Int_ge -> Fixed ([Int; Int], Bool)
   | Int_of_int63 -> Fixed ([Int63], Int)
+  | Int63_of_int -> Fixed ([Int], Int63)
 
 let rec term_sort = function
   | Boolean _ -> Bool
@@ -442,6 +450,167 @@ let check ?(poll = fun () -> ()) ~int_width q =
   List.iter fact q.facts;
   fact q.goal
 
+(* Each distinct bitwise application becomes a call to an uninterpreted
+   function, constrained by facts that hold for the 63-bit operation. *)
+let abstract_bitwise q =
+  let functions = ref [] in
+  let function_for op =
+    match List.assq_opt op !functions with
+    | Some f -> f
+    | None ->
+      let f =
+        Function.create ~label:(operator op) ~arguments:[Int63; Int63]
+          ~result:Int63
+      in
+      functions := (op, f) :: !functions;
+      f
+  in
+  let applications = ref [] and seen = Hashtbl.create 16 in
+  let rec rewrite term =
+    match term with
+    | Boolean _ | Integer _ | Big_integer _ | Var _ -> term
+    | App (((Bit_and | Bit_or | Bit_xor | Shift_right_logical) as op), [a; b])
+      ->
+      let a = rewrite a and b = rewrite b in
+      let call = Call (function_for op, [a; b]) in
+      if not (Hashtbl.mem seen call)
+      then begin
+        Hashtbl.add seen call ();
+        applications := (op, a, b, call) :: !applications
+      end;
+      call
+    | App (op, args) -> App (op, List.map rewrite args)
+    | Call (f, args) -> Call (f, List.map rewrite args)
+    | Construct (c, args) -> Construct (c, List.map rewrite args)
+    | Is (c, value) -> Is (c, rewrite value)
+    | Select (c, index, value) -> Select (c, index, rewrite value)
+  in
+  let goal = { q.goal with term = rewrite q.goal.term } in
+  let facts = List.map (fun f -> { f with term = rewrite f.term }) q.facts in
+  if !functions = []
+  then None
+  else begin
+    let nonnegative = function
+      | Integer n -> Boolean (n >= 0L)
+      | x -> App (Ge, [x; Integer 0L])
+    in
+    let negative = function
+      | Integer n -> Boolean (n < 0L)
+      | x -> App (Lt, [x; Integer 0L])
+    in
+    let both op a b =
+      match op, a, b with
+      | And, Boolean true, x | And, x, Boolean true -> x
+      | Or, Boolean false, x | Or, x, Boolean false -> x
+      | And, Boolean false, _ | And, _, Boolean false -> Boolean false
+      | Or, Boolean true, _ | Or, _, Boolean true -> Boolean true
+      | _ -> App (op, [a; b])
+    in
+    let implies guard fact =
+      match guard with
+      | Boolean true -> [fact]
+      | Boolean false -> []
+      | guard -> [App (Implies, [guard; fact])]
+    in
+    let eq a b = App (Eq, [a; b]) and le a b = App (Le, [a; b]) in
+    (* 2^k - 1 for 1 <= k <= 61 gives Some 2^k. *)
+    let low_mask = function
+      | Integer m when m > 0L && m < 0x2000_0000_0000_0000L ->
+        let p = Int64.succ m in
+        if Int64.logand p m = 0L then Some p else None
+      | _ -> None
+    in
+    let euclidean_mod a p =
+      let r = App (Rem, [a; Integer p]) in
+      App (Ite, [App (Lt, [r; Integer 0L]); App (Add, [r; Integer p]); r])
+    in
+    let facts_for (op, a, b, r) =
+      match op with
+      | Bit_and ->
+        let mask =
+          match low_mask b, low_mask a with
+          | Some p, _ -> [eq r (euclidean_mod a p)]
+          | None, Some p -> [eq r (euclidean_mod b p)]
+          | None, None -> (
+            match a, b with
+            | _, Integer -1L -> [eq r a]
+            | Integer -1L, _ -> [eq r b]
+            | _ -> [])
+        in
+        implies (both Or (nonnegative a) (nonnegative b)) (nonnegative r)
+        @ implies (both And (negative a) (negative b)) (negative r)
+        @ implies (nonnegative a) (le r a)
+        @ implies (nonnegative b) (le r b)
+        @ mask
+      | Bit_or -> (
+        let sign = both Or (negative a) (negative b) in
+        (match sign with
+          | Boolean true -> [negative r]
+          | Boolean false -> [nonnegative r]
+          | sign -> [eq (negative r) sign])
+        @ implies (both Or (nonnegative b) (negative a)) (le a r)
+        @ implies (both Or (nonnegative a) (negative b)) (le b r)
+        @
+        match a, b with
+        | _, Integer 0L -> [eq r a]
+        | Integer 0L, _ -> [eq r b]
+        | _ -> [])
+      | Bit_xor -> (
+        [eq (negative r) (App (Ne, [negative a; negative b]))]
+        @
+        match a, b with
+        | _, Integer 0L -> [eq r a]
+        | Integer 0L, _ -> [eq r b]
+        | _ -> [])
+      | Shift_right_logical -> (
+        match b with
+        | Integer 0L -> [eq r a]
+        | Integer k when k >= 1L && k <= 61L ->
+          let p = Int64.shift_left 1L (Int64.to_int k) in
+          [ eq r
+              (App
+                 ( Ite,
+                   [ nonnegative a;
+                     App (Div, [a; Integer p]);
+                     App
+                       ( Add,
+                         [ App
+                             ( Div,
+                               [ App
+                                   (Sub, [a; Integer (-0x4000_0000_0000_0000L)]);
+                                 Integer p ] );
+                           Integer (Int64.shift_left 1L (62 - Int64.to_int k))
+                         ] ) ] )) ]
+        | Integer 62L ->
+          [eq r (App (Ite, [nonnegative a; Integer 0L; Integer 1L]))]
+        | Integer 63L -> [eq r (Integer 0L)]
+        | Integer _ -> []
+        | count ->
+          let in_range low =
+            both And (le (Integer low) count) (le count (Integer 63L))
+          in
+          implies
+            (both And (in_range 0L) (nonnegative a))
+            (both And (nonnegative r) (le r a))
+          @ implies (in_range 1L) (nonnegative r))
+      | _ -> []
+    in
+    let bitwise_facts =
+      List.concat_map
+        (fun application ->
+          List.map
+            (fun term -> { label = "bitwise abstraction"; term })
+            (facts_for application))
+        (List.rev !applications)
+    in
+    Some
+      { q with
+        functions = q.functions @ List.rev_map snd !functions;
+        facts = facts @ bitwise_facts;
+        goal
+      }
+  end
+
 let to_smtlib ?(poll = fun () -> ()) ?resource_limit ~int_width ~timeout_ms q =
   check ~poll ~int_width q;
   if timeout_ms <= 0 then invalid_arg "Vox_smt.to_smtlib: timeout_ms";
@@ -579,7 +748,13 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ~int_width ~timeout_ms q =
     (fun index id -> Hashtbl.add opaque_names id ("s" ^ string_of_int index))
     opaque_ids;
   let has_bitwise =
-    List.exists uses [Bit_and; Bit_or; Bit_xor; Shift_right_logical]
+    List.exists uses
+      [ Bit_and;
+        Bit_or;
+        Bit_xor;
+        Shift_right_logical;
+        Shift_left;
+        Shift_right_arithmetic ]
   in
   let smt_sort = function
     | Bool -> "Bool"
@@ -606,6 +781,21 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ~int_width ~timeout_ms q =
       if has_bitwise then add "(int63_of_bits ";
       term argument;
       if has_bitwise then add ")"
+    | App (Int63_of_int, [argument]) ->
+      (* Wraps modulo 2^63, like [int2bv]. *)
+      if has_bitwise
+      then begin
+        add "((_ int2bv 63) ";
+        term argument;
+        add ")"
+      end
+      else begin
+        add "(- (mod (+ ";
+        term argument;
+        add " 4611686018427387904) ";
+        add modulus;
+        add ") 4611686018427387904)"
+      end
     | App (Div, [dividend; Integer divisor])
       when divisor <> 0L && not has_bitwise ->
       add "(let ((x ";
@@ -670,16 +860,28 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ~int_width ~timeout_ms q =
       add " ";
       term value;
       add ")"
-    | App (Shift_right_logical, [value; count]) ->
+    | App
+        ( ((Shift_right_logical | Shift_left | Shift_right_arithmetic) as op),
+          [value; count] ) ->
+      let shift, unspecified =
+        match op with
+        | Shift_left -> "bvshl", "int63_lsl_unspecified"
+        | Shift_right_arithmetic -> "bvashr", "int63_asr_unspecified"
+        | _ -> "bvlshr", "int63_lsr_unspecified"
+      in
       add "(ite (and (bvsge ";
       term count;
       add " (_ bv0 63)) (bvsle ";
       term count;
-      add " (_ bv63 63))) (bvlshr ";
+      add " (_ bv63 63))) (";
+      add shift;
+      add " ";
       term value;
       add " ";
       term count;
-      add ") (int63_lsr_unspecified ";
+      add ") (";
+      add unspecified;
+      add " ";
       term value;
       add " ";
       term count;
@@ -750,11 +952,17 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ~int_width ~timeout_ms q =
       \  (ite (= ((_ extract 62 62) x) #b0) (bv2int x)\n\
       \    (- (bv2int x) 9223372036854775808)))\n"
   end;
-  if uses Shift_right_logical
-  then
-    add
-      "(declare-fun int63_lsr_unspecified ((_ BitVec 63) (_ BitVec 63)) (_ \
-       BitVec 63))\n";
+  List.iter
+    (fun (op, name) ->
+      if uses op
+      then
+        add
+          (Printf.sprintf
+             "(declare-fun %s ((_ BitVec 63) (_ BitVec 63)) (_ BitVec 63))\n"
+             name))
+    [ Shift_right_logical, "int63_lsr_unspecified";
+      Shift_left, "int63_lsl_unspecified";
+      Shift_right_arithmetic, "int63_asr_unspecified" ];
   if uses Add && not has_bitwise
   then
     add
@@ -989,7 +1197,10 @@ let explain_invalid query model =
         | Bit_or -> "lor"
         | Bit_xor -> "lxor"
         | Shift_right_logical -> "lsr"
+        | Shift_left -> "lsl"
+        | Shift_right_arithmetic -> "asr"
         | Int_of_int63 -> "Bigint.of_int"
+        | Int63_of_int -> "int_of_bigint"
       in
       match args with
       | [left; right] ->

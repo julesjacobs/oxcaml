@@ -110,9 +110,9 @@ Line 7, characters 5-10:
 7 |     (state : {s : U.t | U.valid s && U.member x s})
          ^^^^^
 Error: Refinement could not be proved (counterexample)
-Line 7, characters 24-49:
+Line 7, characters 37-49:
 7 |     (state : {s : U.t | U.valid s && U.member x s})
-                            ^^^^^^^^^^^^^^^^^^^^^^^^^
+                                         ^^^^^^^^^^^^
   The refinement is stated here.
 |}]
 
@@ -129,6 +129,6 @@ Line 7, characters 54-59:
 7 |       U.result @ unique = fun state fee -> U.make_set state fee
                                                           ^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_union_find_online.mli", line 133, characters 24-65:
+File "vox_union_find_online.mli", line 133, characters 35-65:
   The refinement is stated here.
 |}]

@@ -9,8 +9,6 @@ let (regionality_adjunction @ total) :
   regional_to_global_def b;
   le_def (regional_to_local a) b;
   le_def a (regional_to_global b);
-  (match a with Global | Regional | Local -> ());
-  (match b with Global | Regional | Local -> ());
   rank_def a;
   rank_def b;
   rank_def (regional_to_local a);

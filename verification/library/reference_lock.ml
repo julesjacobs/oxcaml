@@ -76,8 +76,7 @@ let make (x : {n : int | 0 <= n}) : t =
   let zero = 0 in
   ghost_ (good_def p h);
   ghost_ (Invariant.holds_def { location = p } zero h);
-  let g : {g : int P.token | Invariant.holds { location = p } zero (P.own g)} = t in
-  let a = A.create (ghost_ { location = p }) zero g in
+  let a = A.create (ghost_ { location = p }) zero t in
   let result : t = { location = p; atomic = a } in result
 let try_acquire (a : t) :
     {r : (bool, int) P.step | if r.P.value then owned a (P.own r.P.state)
@@ -102,7 +101,7 @@ let release : (a : t) ->
   let ht = ghost_ (P.own (borrow_ t)) in
   ghost_ (location_def a; owned_def a ht; good_def p ht);
   let r = A.compare_and_set a.atomic 1 0
-    (ghost_ (fun success h -> release_post success h)) t
+    release_post t
     (ghost_ (fun before inside outside ->
       release_transfer p ht before inside outside)) in
   let success = r.#value in
@@ -120,18 +119,15 @@ let try_increment (a : t) =
     ghost_ (location_def a; owned_def a h; good_def p h);
     let x : {v : int | 0 <= v && h === P.Heap.put (P.Heap.empty ()) p v} =
       let b = borrow_ t in
-      let b : {b : int P.token | P.Heap.mem (P.own b) p} = b in
       let v = P.read p b in
       v in
     let next = x + 1 in
     let y = if next < 0 then x else next in
-    let t : {t : int P.token | P.Heap.mem (P.own t) p} = t in
     let t = P.write p y t in
     let h = ghost_ (P.own (borrow_ t)) in
     let empty = ghost_ (P.Heap.empty ()) in
     ghost_ (P.Heap.put_law empty p x y);
     ghost_ (location_def a; owned_def a h; good_def p h);
-    let t : {t : int P.token | owned a (P.own t)} = t in
     let _ = release a t in
     true
   end else false
@@ -143,5 +139,4 @@ let read_owned : (a : t) ->
     let p = a.location in
     let h = ghost_ (P.own t) in
     ghost_ (location_def a; owned_def a h; good_def p h);
-    let t : {t : int P.token | P.Heap.mem (P.own t) p} = t in
     let v = P.read p t in v

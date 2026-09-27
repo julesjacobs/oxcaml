@@ -1,0 +1,2 @@
+ok: the client's code refers to no specification module
+ok: the client makes two calls to Vox_lz4

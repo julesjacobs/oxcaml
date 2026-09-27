@@ -33,7 +33,7 @@ Line 5, characters 24-25:
 5 |     reverse sentinel ns t
                             ^
 Error: Refinement could not be proved (counterexample)
-File "pref_ring_general.mli", lines 14-15, characters 39-32:
+File "pref_ring_general.mli", line 15, characters 6-32:
   The refinement is stated here.
 |}, Principal{|
 Line 3, characters 56-57:

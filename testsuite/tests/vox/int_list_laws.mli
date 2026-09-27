@@ -15,14 +15,14 @@ module Laws : sig
   val append_nil_left : (ys : t) ->
     {u : unit | append Nil ys === ys} @@ total
   val append_nil_right : (xs : t) ->
-    {u : unit | append xs Nil === xs} @ immutable contended @@ total
+    {u : unit | append xs Nil === xs} @@ total
   val append_associative : (xs : t) -> (ys : t) -> (zs : t) ->
     {u : unit | append (append xs ys) zs === append xs (append ys zs)}
-    @ immutable contended @@ total
+    @@ total
   val length_append : (xs : t) -> (ys : t) ->
     {u : unit | length (append xs ys) === length xs + length ys}
-    @ immutable contended @@ total
+    @@ total
   val sum_append : (xs : t) -> (ys : t) ->
     {u : unit | sum (append xs ys) === sum xs + sum ys}
-    @ immutable contended @@ total
+    @@ total
 end

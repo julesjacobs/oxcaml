@@ -34,10 +34,7 @@ let (reduce_product @ total) (a : t) (b : t) (n : t) :
     ()
   end)
 
-(* The squaring steps combine products with [mod] (nonlinear integer
-   arithmetic): about 1.9M solver resource units, over the 1M slow-refinement
-   threshold. *)
-let[@warning "-slow-refinement"] rec (modexp @ total) : (a : t) ->
+let rec (modexp @ total) : (a : t) ->
     (exponent : {e : t | e >= 0Z}) ->
     (modulus : {n : t | n > 0Z}) ->
     {r : t | let e = exponent in let n = modulus in

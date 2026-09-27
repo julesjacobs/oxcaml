@@ -65,7 +65,8 @@ stored reason occurs older than its assignment on the unique trail. This
 invariant survives enqueue, backtracking, and learned-clause insertion, and
 applies to the reason selected during conflict analysis. Latest-pivot selection
 and strict reason order prove a whole-clause rank decrease at every resolution.
-Analysis terminates and returns a clause without fuel; its rank is erased.
+Analysis terminates and returns a clause without fuel; its termination
+measure is that rank.
 A preserved ghost prefix invariant ensures that nonroot analysis retains a
 current-level variable; asserting construction and learned enqueue succeed.
 A stronger prefix invariant proves learned-clause freshness. Resolution
@@ -83,15 +84,15 @@ CDCL retains its length check.
 
 ## Evidence
 
-`verification/clients/check_sat_public.sh _install` copies only the four
-public `.cmi` files to an isolated directory, separately compiles
-`verification/clients/sat_public.ml`, and links/runs bytecode and native clients.
+`testsuite/tests/vox/sat_boundary.ml` compiles the library as
+`verification/library/build.sh` does, copies only the four public `.cmi` files
+to an isolated directory, separately compiles
+`testsuite/tests/vox/sat_public.ml`, and links/runs bytecode and native clients.
 Its arbitrary-input theorems derive complete-CDCL and sufficient-fallback-depth
 decisions, SAT satisfaction, and rejection of any proposed assignment on UNSAT.
 The client cannot import a private interface.
 
-`verification/clients/check_sat_erasure.sh _install` checks bytecode/native
-Lambda for surviving public proof bridges or semantic enumeration calls.
+The same test checks bytecode/native Lambda for surviving public proof bridges or semantic enumeration calls.
 The public `unsat_at` body erases to unit. Native symbol inspection also finds
 no unassigned-count, reason-source, reason-order, trail-rank, trail-coverage,
 level-bound, finite-universe, or global-progress helpers in

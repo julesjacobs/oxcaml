@@ -34,7 +34,7 @@ The same file also rejects an `eval` that recurses on its own argument instead o
 
 @code testsuite/tests/vox/expression_folding.mli
 
-`[@@inductive]` declares a variant whose values are finite trees, so `total` functions may recurse on their subterms. `@@ total` on a value declaration states that the function is total. `@ immutable contended` on `fold_correct` and `@ total` on `fold`'s argument and result are mode annotations; they do not change the statements, and the module still checks with the one on `fold_correct` removed.
+`[@@inductive]` declares a variant whose values are finite trees, so `total` functions may recurse on their subterms. `@@ total` on a value declaration states that the function is total. The implementation carries no mode annotations: the checker infers that its functions are total and checks that against the interface.
 
 ## Trusted base
 

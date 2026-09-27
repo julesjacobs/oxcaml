@@ -26,9 +26,9 @@ Line 4, characters 4-13:
 4 |     refine_ e
         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-Line 2, characters 24-58:
+Line 2, characters 24-39:
 2 |   let bad : {e : term | scoped_term Z e && term_let_free e} =
-                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                            ^^^^^^^^^^^^^^^
   The refinement is stated here.
 |}]
 

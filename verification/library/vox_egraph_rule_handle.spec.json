@@ -401,8 +401,8 @@
       ]
     },
     {
-      "path": "verification/library/vox_egraph_saturation_spec.ml",
-      "sha256": "af4d33429dd5743bc8873def76bf1f4312e9e7762602231d207215ebf5c8a62c",
+      "path": "verification/library/vox_egraph_closure_spec.ml",
+      "sha256": "67ecf65ccb1a63a5b4d6834735ad542d26560d0674f5537391bc06e118c6048c",
       "role": "semantic_definitions",
       "declarations": [
         {
@@ -442,72 +442,86 @@
         },
         {
           "kind": "let",
-          "name": "closed_instance",
-          "start_line": 24,
-          "end_line": 28,
-          "code": "let[@def] (closed_instance @ total) (graph : Q.graph @ immutable)\n    (rule : R.rule @ immutable) (bindings : int list @ immutable) (root : int) =\n  not (binding_valid graph rule.vars bindings) ||\n  not (Q.matches graph rule.lhs bindings root) ||\n  Q.matches graph rule.rhs bindings root"
-        },
-        {
-          "kind": "let",
           "name": "closed_roots",
-          "start_line": 30,
-          "end_line": 35,
-          "code": "let[@def] rec (closed_roots @ total) (graph : Q.graph @ immutable)\n    (rule : R.rule @ immutable) (bindings : int list @ immutable) (count : int) =\n  if count <= 0 then true\n  else closed_instance graph rule bindings (count - 1) &&\n    closed_roots graph rule bindings (count - 1)\n  [@@decreases if count > 0 then count else 0]"
-        },
-        {
-          "kind": "type",
-          "name": "cases",
-          "start_line": 37,
-          "end_line": 37,
-          "code": "type cases = End | Case of int list * cases [@@inductive]"
+          "start_line": 24,
+          "end_line": 31,
+          "code": "let[@def] rec (closed_roots @ total) (graph : Q.graph @ immutable)\n    (rule : R.rule @ immutable) (bindings : int list @ immutable) (count : int) =\n  if count <= 0 then true\n  else (not (binding_valid graph rule.vars bindings) ||\n    not (Q.matches graph rule.lhs bindings (count - 1)) ||\n    Q.matches graph rule.rhs bindings (count - 1)) &&\n    closed_roots graph rule bindings (count - 1)\n  [@@decreases if count > 0 then count else 0]"
         },
         {
           "kind": "let",
-          "name": "append",
-          "start_line": 39,
-          "end_line": 40,
-          "code": "let[@def] rec (append @ total) (first : cases @ immutable) (second : cases @ immutable) =\n  match first with End -> second | Case (ids, rest) -> Case (ids, append rest second)"
+          "name": "snoc",
+          "start_line": 33,
+          "end_line": 34,
+          "code": "let[@def] rec (snoc @ total) (prefix : int list @ immutable) (id : int) =\n  match prefix with [] -> [id] | head :: rest -> head :: snoc rest id"
+        }
+      ]
+    },
+    {
+      "path": "verification/library/vox_egraph_quantifier.mli",
+      "sha256": "42c4033a51df127121409981df66feccadd38e4661a1dc108333278915eb507a",
+      "role": "semantic_definitions",
+      "declarations": [
+        {
+          "kind": "module",
+          "name": "C",
+          "start_line": 1,
+          "end_line": 1,
+          "code": "module C = Vox_egraph_closure_spec"
         },
         {
-          "kind": "let",
-          "name": "prepend",
-          "start_line": 42,
-          "end_line": 45,
-          "code": "let[@def] rec (prepend @ total) (id : int) (suffixes : cases @ immutable) =\n  match suffixes with\n  | End -> End\n  | Case (ids, rest) -> Case (id :: ids, prepend id rest)"
+          "kind": "val",
+          "name": "closed_bindings",
+          "start_line": 3,
+          "end_line": 4,
+          "code": "val closed_bindings : C.Q.graph @ immutable -> C.R.rule @ immutable ->\n    C.L.sort list @ immutable -> int list @ immutable -> int -> bool @@ total"
         },
         {
-          "kind": "let",
-          "name": "choices",
-          "start_line": 47,
-          "end_line": 50,
-          "code": "let[@def] rec (choices @ total) (count : int) (suffixes : cases @ immutable) =\n  if count <= 0 then prepend (-1) suffixes\n  else append (prepend (count - 1) suffixes) (choices (count - 1) suffixes)\n  [@@decreases if count > 0 then count else 0]"
+          "kind": "val",
+          "name": "closed_bindings_def",
+          "start_line": 6,
+          "end_line": 14,
+          "code": "val closed_bindings_def : (graph : C.Q.graph) @ immutable -> (rule : C.R.rule) @ immutable ->\n    (vars : C.L.sort list) @ immutable -> (prefix : int list) @ immutable -> (count : int) ->\n    {u : unit | closed_bindings graph rule vars prefix count =\n      (match vars with\n       | [] -> C.closed_roots graph rule prefix graph.count\n       | _ :: rest ->\n         if count <= 0 then closed_bindings graph rule rest (C.snoc prefix (-1)) graph.count\n         else closed_bindings graph rule rest (C.snoc prefix (count - 1)) graph.count &&\n           closed_bindings graph rule vars prefix (count - 1))} @ ghost @@ total"
+        }
+      ]
+    },
+    {
+      "path": "verification/library/vox_egraph_saturation_spec.ml",
+      "sha256": "48ccd6a047e76bfdf63df4d85400edb952477d33dd47aa2acc54598d7ec3e547",
+      "role": "semantic_definitions",
+      "declarations": [
+        {
+          "kind": "module",
+          "name": "R",
+          "start_line": 1,
+          "end_line": 1,
+          "code": "module R = Vox_egraph_rule_spec"
         },
         {
-          "kind": "let",
-          "name": "assignments",
-          "start_line": 52,
-          "end_line": 55,
-          "code": "let[@def] rec (assignments @ total) (count : int) (vars : L.sort list @ immutable) =\n  match vars with\n  | [] -> Case ([], End)\n  | _ :: vars -> choices count (assignments count vars)"
+          "kind": "module",
+          "name": "Q",
+          "start_line": 2,
+          "end_line": 2,
+          "code": "module Q = Vox_egraph_match_spec"
         },
         {
-          "kind": "let",
-          "name": "closed_cases",
-          "start_line": 57,
-          "end_line": 61,
-          "code": "let[@def] rec (closed_cases @ total) (graph : Q.graph @ immutable)\n    (rule : R.rule @ immutable) (cases : cases @ immutable) =\n  match cases with\n  | End -> true\n  | Case (ids, rest) -> closed_roots graph rule ids graph.count && closed_cases graph rule rest"
+          "kind": "module",
+          "name": "B",
+          "start_line": 3,
+          "end_line": 3,
+          "code": "module B = Vox_egraph_quantifier"
         },
         {
           "kind": "let",
           "name": "closed_rule",
-          "start_line": 63,
-          "end_line": 64,
-          "code": "let[@def] (closed_rule @ total) (graph : Q.graph @ immutable) (rule : R.rule @ immutable) =\n  closed_cases graph rule (assignments graph.count rule.vars)"
+          "start_line": 5,
+          "end_line": 6,
+          "code": "let[@def] (closed_rule @ total) (graph : Q.graph @ immutable) (rule : R.rule @ immutable) =\n  B.closed_bindings graph rule rule.vars [] graph.count"
         },
         {
           "kind": "let",
           "name": "closed_rules",
-          "start_line": 66,
-          "end_line": 69,
+          "start_line": 8,
+          "end_line": 11,
           "code": "let[@def] rec (closed_rules @ total) (graph : Q.graph @ immutable) (rules : R.t @ immutable) =\n  match rules with\n  | R.No_rules -> true\n  | R.Rule_cons (rule, rest) -> closed_rule graph rule && closed_rules graph rest"
         }
       ]

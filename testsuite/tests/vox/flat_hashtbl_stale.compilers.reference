@@ -1,0 +1,6 @@
+File "flat_hashtbl_stale.ml", line 7, characters 41-55:
+7 |   V.find_opt r.#table r.#view 1 (borrow_ changed.#token)
+                                             ^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+File "vox_verified_flat_hashtbl.mli", line 146, characters 6-61:
+  The refinement is stated here.

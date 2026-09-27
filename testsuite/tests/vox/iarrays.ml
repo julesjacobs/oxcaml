@@ -69,10 +69,10 @@ let caught_read (values : int iarray) index :
 Line 4, characters 2-7:
 4 |   index
       ^^^^^
-Error: Refinement could not be proved (counterexample)
-Line 2, characters 15-49:
+Error: Refinement could not be proved (counterexample: index = -1)
+Line 2, characters 15-21:
 2 |     {i : int | 0 <= i && i < Iarray.length values} =
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                   ^^^^^^
   The refinement is stated here.
 |}]
 
@@ -150,9 +150,9 @@ Line 5, characters 4-9:
 5 |     index
         ^^^^^
 Error: Refinement could not be proved (counterexample)
-Line 4, characters 27-61:
+Line 4, characters 37-61:
 4 |   let bounded : {i : int | 0 <= i && i < Iarray.length values} =
-                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
 |}]
 
@@ -344,7 +344,7 @@ let caught_slice (source : int iarray) (position : int) (size : int) :
 Line 5, characters 2-10:
 5 |   position
       ^^^^^^^^
-Error: Refinement could not be proved (counterexample: position = -1)
+Error: Refinement could not be proved (counterexample)
 Line 2, characters 20-31:
 2 |     {result : int | 0 <= result} =
                         ^^^^^^^^^^^
@@ -502,9 +502,9 @@ Line 11, characters 6-11:
 11 |       index in
            ^^^^^
 Error: Refinement could not be proved (counterexample)
-Line 10, characters 29-61:
+Line 10, characters 39-61:
 10 |     let bounded : {i : int | 0 <= i && i < Iarray.length data} =
-                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                            ^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
 |}]
 

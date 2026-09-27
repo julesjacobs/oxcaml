@@ -92,7 +92,7 @@ let send (type a : value mod portable contended)
   ghost_ (P.Heap.put_law (P.Heap.empty ()) (Slot.location cell) false true);
   ghost_ (Invariant.full_def k h);
   let _ = A.compare_and_set atomic 0 1
-    (ghost_ (fun success h -> publication_post success h)) permission
+    publication_post permission
     (ghost_ (fun before inside outside ->
       publication_transfer k h before inside outside)) in
   ()

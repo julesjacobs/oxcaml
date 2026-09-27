@@ -149,10 +149,10 @@ module User_measure = struct
   [@@decreases identity n]
 end;;
 [%%expect{|
-Line 4, characters 15-25:
-4 |   [@@decreases identity n]
-                   ^^^^^^^^^^
-Error: Unsupported decreases expression: expected scalar primitive operations
+Line 3, characters 33-45:
+3 |   let rec loop n = if n > 0 then loop (n - 1) else 0
+                                     ^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample: n = 1)
 Line 4, characters 15-25:
 4 |   [@@decreases identity n]
                    ^^^^^^^^^^
@@ -219,12 +219,7 @@ Error: The value "print_int" is "partial"
 let rec user_measure n = if n > 0 then user_measure (n - 1) else 0
 [@@decreases abs n];;
 [%%expect{|
-Line 2, characters 13-16:
-2 | [@@decreases abs n];;
-                 ^^^
-Error: The value "abs" is "partial"
-       but is expected to be "total"
-         because it is used in an expression (at line 2, characters 13-18).
+val user_measure : int -> int = <fun>
 |}]
 
 let rec self_measure n = if n > 0 then self_measure (n - 1) else 0

@@ -94,7 +94,7 @@ byte-identical in both engines with and without `-principal`.
 
 `_build/hashtable-simplification/final-provenance.json` identifies the exact dirty
 snapshot, compiler hashes, semantic review spans, implementation/proof sources
-and evidence. `flat_hashtbl_vacancy_erasure.py` checks emitted native scan code.
+and evidence. `testsuite/tests/vox/flat_hashtbl_boundary.ml` checks emitted native scan code.
 No new axiom, opaque semantic predicate, runtime certificate or final checker
 was added. Allocation success, general termination, exception-safe reclamation,
 concurrency and complexity remain unproved. Independent semantic/trust review

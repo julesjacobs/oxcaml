@@ -24,11 +24,11 @@ Installed SHA256:
 - ocamlc: `2d96a631b25d477a0cf3c265fdbd020eb30742756d9aa1115a38f85256a0df9d`
 - ocamlopt: `f8953e9990f0c62c3b7bdab99e7e8f6051c2e9c3ac7eefba980801a2a06d2bb0`
 
-Run `python3 verification/review/check_implicit_library.py COMPILER_PREFIX`.
-This compiles every library interface/implementation in the existing library
-build order on both backends, including unchanged downstream table/ownership
-modules, with isolated output in `_build/refine-library`. It never installs or
-modifies the supplied compiler. The complete run passed. Borrow demo, ranges,
+Run `./dev test vox/library_build.ml`, which replaced the former
+`check_implicit_library.py`. It compiles every library interface/implementation
+in the library build order of `verification/library/build.sh` on both
+backends, including unchanged downstream table/ownership modules, and checks
+that its module list is build.sh's. The complete run passed. Borrow demo, ranges,
 parallel, and Pref ownership execution regressions also passed using ocamltest
 with installed compiler overrides. Cost and structure clients/rejections and
 erasure are covered by their existing boundary scripts in the follow-up.

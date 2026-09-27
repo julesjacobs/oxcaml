@@ -28,9 +28,9 @@ Line 6, characters 62-71:
 6 |     finite_def after t; tree_root_def t; observe_def after p; refine_ t)
                                                                   ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-Line 3, characters 18-77:
+Line 3, characters 18-56:
 3 |       {t : tree | finite (H.put h p (cell (Link p) 0)) t && tree_root t === p} @ immutable ghost = fun h p -> ghost_ (
-                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
 |}]
 

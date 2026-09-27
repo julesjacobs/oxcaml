@@ -6,15 +6,11 @@
  readonly_files = "pref_ring_rejected.ml";
  {
    setup-ocamlc.opt-build-env;
+   binary_modules = "prebuilt/pref prebuilt/pref_ring";
    run-expect;
    check-program-output;
  }
 *)
-
-(* Load the implementation so that the accepted phrase below can be
-   evaluated. *)
-#load "pref.cmo";;
-#load "pref_ring.cmo";;
 
 open Pref_ring
 
@@ -38,7 +34,7 @@ Line 16, characters 34-35:
 16 |     let t = remove s left s right t in t
                                        ^
 Error: Refinement could not be proved (counterexample)
-File "pref_ring.mli", lines 167-173, characters 37-55:
+File "pref_ring.mli", line 169, characters 9-29:
   The refinement is stated here.
 |}, Principal{|
 Line 9, characters 59-60:

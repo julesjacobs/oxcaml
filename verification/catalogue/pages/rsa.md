@@ -13,7 +13,6 @@ sources:
   - verification/library/vox_rsa.md — Reading order and proof outline
   - testsuite/tests/vox/rsa_public_client.ml — Public-only client
   - testsuite/tests/vox/rsa_rejected.ml — Rejected clients
-  - testsuite/tests/vox/check_rsa_boundary.py — Compiles the client with only the public interfaces
 ---
 `Vox_rsa` computes modular powers of unbounded integers (`Bigint.t`) by repeated squaring. `modexp a e n` is proved to return `power a e mod n` for every integer `a`, every `e >= 0` and every `n > 0`, where `power` is repeated multiplication; `encrypt` and `decrypt` are the same function. `decrypt_crt c d p q` computes the residues modulo two distinct primes and recombines them, and is proved to return `power c d mod (p * q)` for every `d >= 0`. The theorem `roundtrip_correct` states that decrypting the encryption of `m` gives back `m` for any distinct primes `p` and `q`, any `e, d > 0` with `(e * d - 1) mod lcm (p - 1) (q - 1) = 0`, and any `0 <= m < p * q`, including messages divisible by `p` or `q`. Primality is defined by trial division. Fermat's little theorem, Bézout's identity and the uniqueness part of the Chinese remainder theorem are proved in the library; it adds no axioms.
 
@@ -59,7 +58,6 @@ After `./configure --prefix=$PWD/_install`, `make install` and `./dev init`:
 
 ```
 ./dev test vox/rsa.ml vox/rsa_rejected.ml vox/rsa_public_client.ml
-python3 testsuite/tests/vox/check_rsa_boundary.py
 ```
 
-`rsa.ml` checks the library and runs differential tests of `modexp`, round trips of every message for each pair of distinct primes from 2, 3, 5, 7, 11 and 13 and every valid `e` and `d` up to 24, every message modulo `53 * 61`, and exponents of more than 100 decimal digits, as bytecode. These tests establish each call's precondition with `(assume_ x : {v : t | p})`, which checks `p` at run time. `rsa_public_client.ml` is compiled as bytecode and native code. `check_rsa_boundary.py` compiles the client with only `vox_rsa.cmi` and `vox_rsa_spec.cmi` available, then links and runs it with both compilers. The client only defines functions, so these two check compilation and linking, not the client's results.
+`rsa.ml` checks the library and runs differential tests of `modexp`, round trips of every message for each pair of distinct primes from 2, 3, 5, 7, 11 and 13 and every valid `e` and `d` up to 24, every message modulo `53 * 61`, and exponents of more than 100 decimal digits, as bytecode. These tests establish each call's precondition with `(assume_ x : {v : t | p})`, which checks `p` at run time. `rsa_public_client.ml` compiles the client with only `vox_rsa.cmi` and `vox_rsa_spec.cmi` available (and, for native code, the library's `.cmx` files), then links and runs it with both compilers. The client only defines functions, so this checks compilation and linking, not the client's results.

@@ -7507,42 +7507,6 @@ end = struct
            ghost_ (all_separated_def source classes remaining extended);
            let result = Some extended in result)
 
-  let rec (copy_word @ total) :
-      (word : int list) -> {result : int list | result === word}
-        @ total immutable contended =
-    fun word ->
-    match word with
-    | [] -> let result = [] in result
-    | letter :: rest ->
-      let tail = copy_word rest in
-      let result = letter :: tail in result
-
-  let rec (copy_access @ total) :
-      (access : (int * int list) list) ->
-      {result : (int * int list) list | result === access}
-        @ total immutable contended =
-    fun access ->
-    match access with
-    | [] -> let result = [] in result
-    | (state, word) :: rest ->
-      let copied_word = copy_word word in
-      let copied_rest = copy_access rest in
-      let result = (state, copied_word) :: copied_rest in
-      result
-
-  let rec (copy_separations @ total) :
-      (separate : (int * int * int list) list) ->
-      {result : (int * int * int list) list | result === separate}
-        @ total immutable contended =
-    fun separate ->
-    match separate with
-    | [] -> let result = [] in result
-    | (p, q, word) :: rest ->
-      let copied_word = copy_word word in
-      let copied_rest = copy_separations rest in
-      let result = (p, q, copied_word) :: copied_rest in
-      result
-
   let (quotient_of_raw_preserves @ total) (source : machine)
       (entries : (int * int list) list)
       (previous : (int * int) list) (stable : (int * int) list)
@@ -7737,8 +7701,7 @@ end = struct
       match search_result with
       | None -> let result = None in result
       | Some entries ->
-        let original_reachable = states_of_entries entries in
-        let reachable = copy_word original_reachable in
+        let reachable = states_of_entries entries in
         let alphabet = collect_alphabet source reachable in
         let initial_classes = initial_partition source reachable in
         let refinement_measure = ghost_ (same_class_pairs initial_classes reachable) in
@@ -7769,8 +7732,7 @@ end = struct
           partition reduced);
         ghost_ (of_raw_valid candidate_raw);
         ghost_ (valid_def reduced);
-        let original_access = quotient_access partition entries in
-        let access = copy_access original_access in
+        let access = quotient_access partition entries in
         let empty = [] in
         ghost_ (all_separated_def source class_ids empty empty);
         let (respect @ total) (relation : relation) :
@@ -7812,8 +7774,6 @@ end = struct
         (match separation with
          | None -> let result = None in result
          | Some separation ->
-           let separation =
-             copy_separations separation in
            ghost_ (quotient_all_separated_reduced source entries previous
              partition reduced separation);
            let certificate = equivalent, access, separation in
@@ -7868,8 +7828,7 @@ end = struct
       partition reduced);
     ghost_ (of_raw_valid candidate_raw);
     ghost_ (valid_def reduced);
-    let original_access = quotient_access partition entries in
-    let access = copy_access original_access in
+    let access = quotient_access partition entries in
     let empty = [] in
     ghost_ (all_separated_def source class_ids empty empty);
     let (respect @ total) (relation : relation) :
@@ -7914,8 +7873,6 @@ end = struct
        (certificate : {certificate : reduction_certificate |
          check_reduction source reduced certificate})
      | Some separation ->
-       let separation =
-         copy_separations separation in
        ghost_ (quotient_all_separated_reduced source entries previous
          partition reduced separation);
        let certificate = equivalent, access, separation in

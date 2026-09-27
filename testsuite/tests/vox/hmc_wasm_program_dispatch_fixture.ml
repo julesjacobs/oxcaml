@@ -101,7 +101,11 @@ let fixture : (program : Program.program) @ immutable -> (globals : Machine.glob
               Dispatch.enter module_ wasm_globals memory (C.Succ C.Zero));
             (match Calls.start module_ count memory wasm_globals (C.Succ C.Zero) with
             | Calls.Running start ->
-              (match Calls.run (C.Succ fuel) module_ start with
+              if start <> Dispatch.point (Runtime.dispatcher ()).Func.code T.No_labels wasm_globals memory S.Empty (C.Succ C.Zero)
+                then failwith "dispatcher start";
+              (* Skip the prologue, which would store global 7 as the input. *)
+              (match Calls.run (C.Succ fuel) module_
+                  (Dispatch.point (Runtime.loop_code ()) T.No_labels wasm_globals memory S.Empty (C.Succ C.Zero)) with
               | Calls.Finished actual -> if actual.GE.execution <> {X.memory; machine = {E.locals = S.Empty; stack = S.Push (S.I32 1, S.Empty)}} then failwith "dispatcher entry result"
               | _ -> failwith "dispatcher entry execution")
             | _ -> failwith "dispatcher start");

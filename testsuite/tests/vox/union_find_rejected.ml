@@ -38,9 +38,9 @@ Line 7, characters 5-10:
 7 |     (state : {s : U.t | U.valid s && U.member x s})
          ^^^^^
 Error: Refinement could not be proved (counterexample)
-Line 7, characters 24-49:
+Line 7, characters 37-49:
 7 |     (state : {s : U.t | U.valid s && U.member x s})
-                            ^^^^^^^^^^^^^^^^^^^^^^^^^
+                                         ^^^^^^^^^^^^
   The refinement is stated here.
 |}]
 
@@ -102,6 +102,6 @@ Line 8, characters 13-23:
 8 |     U.create (capacity) (fee)
                  ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_union_find.mli", line 97, characters 43-80:
+File "vox_union_find.mli", line 97, characters 43-50:
   The refinement is stated here.
 |}]

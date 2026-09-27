@@ -32,9 +32,9 @@ Line 10, characters 39-48:
 10 |     built_def h env g h; source_def g; refine_ g)
                                             ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-Line 5, characters 19-86:
+Line 5, characters 19-58:
 5 |       {g : graph | built h (Bind (p, Bind (q, Empty))) g h && source g === Bound (S Z)}
-                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
 |}]
 

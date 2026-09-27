@@ -125,14 +125,14 @@ guarantee. No exception-safety theorem is claimed.
   implementations and the sealed public interface once, in the bytecode
   compilation; the native compilation of the same sources passes
   `-smt-assume-verified`.
-- `python3 verification/benchmarks/lz4_boundary_check.py` copies only the public
+- `./dev test vox/lz4_boundary.ml` copies only the public
   CMIs into an isolated directory, separately compiles `vox_lz4_public_client.ml`,
   derives byte identity from the two actual calls and exported total theorem,
   and links/runs it in bytecode and native modes. It checks Lambda output for
   erased semantic dependencies and rejects access to hidden implementation
   modules, runtime use of ghost contents, a false compression identity and
   a false decoder-status claim. The isolated client has no heap-model, raw-memory or ownership CMIs.
-- `python3 verification/benchmarks/lz4_finalizers.py` checks live-buffer GC
+- The same test runs `lz4_finalizers.ml`, which checks live-buffer GC
   safety, explicit release without double reclamation, and GC reclamation after
   simulated synchronous `Out_of_memory` exits following actual compressor and
   decoder processing, in bytecode and native modes. This is not allocator fault

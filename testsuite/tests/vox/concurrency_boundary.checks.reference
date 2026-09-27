@@ -1,0 +1,28 @@
+ok: one_shot was dumped
+ok: one_shot does not use caml_pref_own
+ok: one_shot does not use caml_pref_heap_
+ok: one_shot does not use caml_pref_split
+ok: one_shot does not use caml_pref_join
+ok: one_shot does not use caml_vox_atomic_key
+ok: one_shot does not use caml_unique_cell_location
+ok: channel_buffer was dumped
+ok: channel_buffer does not use caml_pref_own
+ok: channel_buffer does not use caml_pref_heap_
+ok: channel_buffer does not use caml_pref_split
+ok: channel_buffer does not use caml_pref_join
+ok: channel_buffer does not use caml_vox_atomic_key
+ok: channel_buffer does not use caml_unique_cell_location
+ok: unique_lock was dumped
+ok: unique_lock does not use caml_pref_own
+ok: unique_lock does not use caml_pref_heap_
+ok: unique_lock does not use caml_pref_split
+ok: unique_lock does not use caml_pref_join
+ok: unique_lock does not use caml_vox_atomic_key
+ok: unique_lock does not use caml_unique_cell_location
+ok: reference_lock was dumped
+ok: reference_lock does not use caml_pref_own
+ok: reference_lock does not use caml_pref_heap_
+ok: reference_lock does not use caml_pref_split
+ok: reference_lock does not use caml_pref_join
+ok: reference_lock does not use caml_vox_atomic_key
+ok: reference_lock does not use caml_unique_cell_location

@@ -50,7 +50,7 @@ let run_pair spawn a left_body right_body =
       let right = r in
       let left_end = ghost_ (Slice.final (borrow_ left)) in
       let right_end = ghost_ (Slice.final (borrow_ right)) in
-      let completed = Slice.parallel spawn left right left_post right_post
+      let _completed = Slice.parallel spawn left right left_post right_post
         (fun loan ->
           let s = loan in
           left_body ();

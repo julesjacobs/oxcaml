@@ -102,34 +102,27 @@ ordinary and diagnostic results, exact and insufficient
 budgets, unreachable states, default transitions, and 66 global labels spread
 across two states.
 
-To reproduce separate compilation, the public-only client, rejection checks,
-and the erasure audit, use the installed compiler:
+`dfa_boundary.ml` reproduces separate compilation, the public-only clients,
+the rejection checks and the erasure audit, with both compilers:
 
 ```sh
-make -s install
-python3 testsuite/tests/vox/dfa_boundary_check.py
+./dev test vox/dfa_boundary.ml
 ```
 
-An existing compatible installation can be used without rebuilding this
-checkout: pass `--compiler /path/to/installation/bin/ocamlopt.opt` for native
-checks or `--compiler /path/to/installation/bin/ocamlc.opt` for bytecode checks. All generated
-files and rejection fixtures remain in the script's private output directory.
-
-The script prints its output directory. It compiles the public `.mli` files,
+It compiles the public `.mli` files,
 then compiles `dfa_public_client.ml` with only `Dfa_semantics` and the public
 DFA interface available. `regex_public_client.ml` additionally gets the regex
 semantic module and public regex interface. No proof-module CMI is available
 to either client; the public interfaces are compiled with `-opaque`.
 The DFA client derives equality, a ghost distinguishing word, completion, and
 minimum state count. The regex client derives membership/matching and language
-preservation through lowering and minimization. The script links and runs
+preservation through lowering and minimization. The test links and runs
 smoke cases, rejects hidden certificate/definition helpers and proof modules,
 and rejects an unsupported universal equality claim.
 
-The script saves Lambda dumps for the selected compiler and checks transitive local calls starting
-at ordinary `compare` and `reduce`. Public theorem bodies must contain no
-runtime calls. Inspect the retained dumps as well, including indirect calls to
-the semantic modules. Expected ordinary paths:
+The test checks transitive local calls in the Lambda dumps starting at
+ordinary `compare` and `reduce`. Public theorem bodies must contain no
+runtime calls. Expected ordinary paths:
 
 - `compare` calls `comparison_proved`, `search_pairs_loop`,
   `expand_search_pairs`, and `push_search_pair`. Its `append` combines state

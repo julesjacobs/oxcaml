@@ -2,10 +2,56 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- prebuilt_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa_arithmetic.ml vox_rsa_number_theory.ml vox_rsa_fermat.ml vox_rsa.mli vox_rsa.ml";
- { bytecode; }
- { native; }
+ all_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa_arithmetic.ml";
+ all_modules += " vox_rsa_number_theory.ml vox_rsa_fermat.ml";
+ all_modules += " vox_rsa.mli vox_rsa.ml";
+ compile_only = "true";
+ set lib = "";
+ {
+   setup-ocamlc.opt-build-env;
+   ocamlc.opt;
+   lib = "${test_build_directory_prefix}/ocamlc.opt";
+   src = "${lib}/vox_rsa_spec.cmi ${lib}/vox_rsa.cmi";
+   dst = "${test_build_directory_prefix}/ocamlc.opt.public/";
+   compiler_directory_suffix = ".public";
+   all_modules = "rsa_public_client.ml";
+   setup-ocamlc.opt-build-env;
+   copy;
+   compile_only = "false";
+   binary_modules = "${lib}/vox_rsa_spec ${lib}/vox_rsa_arithmetic";
+   binary_modules += " ${lib}/vox_rsa_number_theory ${lib}/vox_rsa_fermat";
+   binary_modules += " ${lib}/vox_rsa";
+   ocamlc.opt;
+   check-ocamlc.opt-output;
+   run;
+   check-program-output;
+ }
+ {
+   setup-ocamlopt.opt-build-env;
+   ocamlopt.opt;
+   lib = "${test_build_directory_prefix}/ocamlopt.opt";
+   src = "${lib}/vox_rsa_spec.cmi ${lib}/vox_rsa.cmi";
+   src += " ${lib}/vox_rsa_spec.cmx ${lib}/vox_rsa_arithmetic.cmx";
+   src += " ${lib}/vox_rsa_number_theory.cmx ${lib}/vox_rsa_fermat.cmx";
+   src += " ${lib}/vox_rsa.cmx";
+   dst = "${test_build_directory_prefix}/ocamlopt.opt.public/";
+   compiler_directory_suffix = ".public";
+   all_modules = "rsa_public_client.ml";
+   setup-ocamlopt.opt-build-env;
+   copy;
+   compile_only = "false";
+   binary_modules = "${lib}/vox_rsa_spec ${lib}/vox_rsa_arithmetic";
+   binary_modules += " ${lib}/vox_rsa_number_theory ${lib}/vox_rsa_fermat";
+   binary_modules += " ${lib}/vox_rsa";
+   ocamlopt.opt;
+   check-ocamlopt.opt-output;
+   run;
+   check-program-output;
+ }
 *)
+
+(* The client is compiled with only the public interfaces, [Vox_rsa] and
+   [Vox_rsa_spec], available. *)
 
 open Bigint
 module Spec = Vox_rsa.Spec

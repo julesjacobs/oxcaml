@@ -1,0 +1,3 @@
+ok: the generic client is in the dump
+ok: the client reads none of the fields for Map and the ghost observers
+ok: the client calls no lemma and builds no certificate

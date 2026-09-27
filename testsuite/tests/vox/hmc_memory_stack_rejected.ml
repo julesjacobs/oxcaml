@@ -64,7 +64,7 @@ Line 4, characters 56-58:
 4 |   Stack.pop_correct G.Empty width B.End base top Q.Halt ());;
                                                             ^^
 Error: Refinement could not be proved (counterexample)
-File "hmc_memory_stack.ml", line 70, characters 16-72:
+File "hmc_memory_stack.ml", line 70, characters 29-72:
   The refinement is stated here.
 |}]
 
