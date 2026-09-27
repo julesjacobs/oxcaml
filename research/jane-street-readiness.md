@@ -72,8 +72,8 @@ this file.
         mode-solver · register-allocation · rsa | avl-sets · rings ·
         lists-trees | functional-queue · merge-sort · quicksort ·
         sparse-arrays.
-  - [ ] Waiting on other branches: dfa-equivalence, reference-locks and
-        sat-solver (deduplication), egraphs (inventory comments).
+  - [ ] Also in flight: egraphs | sat-solver | dfa-equivalence ·
+        reference-locks (after deduplication and the inventory comments).
   - [ ] hm-wasm-compiler, after item 3.
 - [ ] **3. HM-to-Wasm is not trivial** (AMD box).
   - [x] Example programs compiled by the verified compiler and run, with
@@ -109,7 +109,8 @@ this file.
 
 ## Should have
 
-- [ ] **7. Code presentation of the shown demos:** comments in large files
+- [x] **7. Code presentation of the shown demos** (presentation merged
+      `9a6bc6ab5d`, deduplication merged `70d651c363`): comments in large files
       (AVL, e-graphs, the compiler); hand-written interfaces instead of
       compiler-printed ones (HTTP, mode solver, SAT spec); remove duplicated
       code (two DFA pipelines, near-copy lock modules, SAT solver variants).
@@ -200,6 +201,11 @@ this file.
       each, before the first declaration; the inventory changes only in
       hashes and line numbers (`d7e234bcfa`, merged). Flat hash table
       page keeps its full interface (owner: yes).
+- [x] **Browser playground** (owner's request): `verification/playground/`,
+      merged `354f2c5dfd`; front end and verifier via js_of_ocaml, Z3 4.16.0
+      as Wasm; 0 disagreements with native on 265 inputs; clickable
+      locations. Hosting is the owner's decision (needs COOP/COEP headers
+      or the bundled coi-serviceworker).
 - [ ] **14. Upstream OxCaml reports:** the expect tool overwrites single
       blocks with principal output; the `node option` kind error.
 - [ ] **Small warts** (group 3 in the conversation of 27 September):
