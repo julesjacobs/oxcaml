@@ -68,6 +68,24 @@ compiler would otherwise receive the objects too) and listed in dependency
 order, loads their `.cmo` files before the script, as `#load` would. Keep an
 accepted phrase in each rejection test as a positive control.
 
+The boundary tests (`*_boundary.ml`, `rsa_public_client.ml`,
+`structures_erasure.ml`, `library_build.ml`) check a demo's public surface
+with ordinary ocamltest actions, which `./dev test` runs: the library is
+compiled in one build directory, `copy` puts only the public `.cmi` files
+(and, for native code, the `.cmx` files) into a second one made by another
+`setup-*-build-env` with a `compiler_directory_suffix`, and the client is
+compiled there and linked with the library's objects through
+`binary_modules`. Rejections are expect phrases run in that directory, so
+each pins its whole error. Emitted code is dumped by setting
+`compiler_output2` before a compile with `-dlambda` or `-dcmm`; a small
+checker program built on `emitted_code.ml` reads the dumps, prints one line
+per check and exits with status 1 after a failed check, so a failure cannot
+be promoted away. Name its reference so that it does not collide with a
+compiler's default reference (`<test>.byte.reference`,
+`<test>.native.reference`), and set `stdout` and `stderr` with `output`
+for every `run` after the first. A test stops at its first failing action,
+so a test with several new outputs may need several `--promote` runs.
+
 | Stage | Files | What is established |
 | --- | --- | --- |
 | Dev loop | `smoke.ml` | The expect-test workflow runs. |
