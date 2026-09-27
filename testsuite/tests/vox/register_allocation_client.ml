@@ -1,7 +1,7 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- all_modules = "register_allocation_spec.ml register_allocation.mli register_allocation.ml register_allocation_client.ml";
+ prebuilt_modules = "register_allocation_spec.ml register_allocation.mli register_allocation.ml";
  { bytecode; }
  { native; }
 *)

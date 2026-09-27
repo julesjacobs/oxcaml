@@ -65,6 +65,7 @@ let translate = ref false
 let style = ref Translate.Plain
 let compact = ref false
 let plan_incremental = ref false
+let list_sources = ref false
 
 
 let add_to_list r x =
@@ -101,6 +102,8 @@ let commandline_options =
    " If translating, preserve char offsets in the output.");
   ("-plan-incremental", Arg.Set plan_incremental,
    " Print the artifacts needed for incremental testing.");
+  ("-list-sources", Arg.Set list_sources,
+   " Print the source files that the given tests compile or read.");
   ("-color",
    Arg.Symbol (["auto"; "always"; "never"],
      (Misc.set_or_ignore Clflags.color_reader.parse Clflags.color)),
@@ -139,3 +142,4 @@ let translate = !translate
 let style = !style
 let compact = !compact
 let plan_incremental = !plan_incremental
+let list_sources = !list_sources

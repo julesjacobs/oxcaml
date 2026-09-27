@@ -2,12 +2,10 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml";
+ prebuilt_modules = "pref.mli pref.ml";
  readonly_files = "pref_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
    run-expect;
    check-program-output;
  }

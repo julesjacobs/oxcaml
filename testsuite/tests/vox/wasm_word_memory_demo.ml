@@ -1,7 +1,7 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- all_modules = "wasm_u32.ml hmc_word64.ml wasm_word_memory.ml wasm_word_memory_demo.ml";
+ prebuilt_modules = "wasm_u32.ml hmc_word64.ml wasm_word_memory.ml";
  { bytecode; }
 *)
 open Wasm_u32

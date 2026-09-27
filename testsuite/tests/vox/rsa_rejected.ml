@@ -2,15 +2,11 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa_arithmetic.ml";
- all_modules += " vox_rsa_number_theory.ml";
- all_modules += " vox_rsa_fermat.ml vox_rsa.mli vox_rsa.ml";
+ prebuilt_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa_arithmetic.ml vox_rsa_number_theory.ml vox_rsa_fermat.ml vox_rsa.mli vox_rsa.ml";
  readonly_files = "rsa_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
-   binary_modules = "vox_rsa_spec vox_rsa_arithmetic vox_rsa_number_theory vox_rsa_fermat vox_rsa";
+   binary_modules = "prebuilt/vox_rsa_spec prebuilt/vox_rsa_arithmetic prebuilt/vox_rsa_number_theory prebuilt/vox_rsa_fermat prebuilt/vox_rsa";
    run-expect;
    check-program-output;
  }

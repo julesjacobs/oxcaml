@@ -1,7 +1,7 @@
 (* TEST
  flags = "-extension refinement_types";
  has-z3;
- all_modules = "mode_solver_qe.ml mode_solver_toy.ml";
+ prebuilt_modules = "mode_solver_qe.ml";
  native;
 *)
 

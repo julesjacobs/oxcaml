@@ -1,7 +1,7 @@
 (* TEST
  flags = "-extension refinement_types";
  has-z3;
- all_modules = "mode_solver_semantics.mli mode_solver_semantics.ml mode_solver_three_qe_proof.ml mode_solver_graph_semantics.mli mode_solver_graph_semantics.ml mode_solver_graph_qe_proof.ml mode_solver_guarded_semantics.mli mode_solver_guarded_semantics.ml mode_solver_retained_symbolic.ml mode_solver_public.mli mode_solver_public.ml mode_solver_public_client.ml";
+ prebuilt_modules = "mode_solver_semantics.mli mode_solver_semantics.ml mode_solver_three_qe_proof.ml mode_solver_graph_semantics.mli mode_solver_graph_semantics.ml mode_solver_graph_qe_proof.ml mode_solver_guarded_semantics.mli mode_solver_guarded_semantics.ml mode_solver_retained_symbolic.ml mode_solver_public.mli mode_solver_public.ml";
  native;
 *)
 

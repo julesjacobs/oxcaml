@@ -2,12 +2,10 @@
  has-z3;
  flags = "-extension refinement_types -alert -do_not_spawn_domains";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml verified_atomic.mli verified_atomic.ml";
+ prebuilt_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml verified_atomic.mli verified_atomic.ml";
  readonly_files = "atomic_operations_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
    run-expect;
    check-program-output;
  }

@@ -2,13 +2,11 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml pref_ring.mli pref_ring.ml";
+ prebuilt_modules = "pref.mli pref.ml pref_ring.mli pref_ring.ml";
  readonly_files = "pref_ring_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
-   binary_modules = "pref pref_ring";
+   binary_modules = "prebuilt/pref prebuilt/pref_ring";
    run-expect;
    check-program-output;
  }

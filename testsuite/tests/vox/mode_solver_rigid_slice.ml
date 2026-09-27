@@ -1,7 +1,7 @@
 (* TEST
  flags = "-extension refinement_types";
  has-z3;
- all_modules = "mode_solver_semantics.mli mode_solver_semantics.ml mode_solver_three_qe_proof.ml mode_solver_rigid_slice.ml";
+ prebuilt_modules = "mode_solver_semantics.mli mode_solver_semantics.ml mode_solver_three_qe_proof.ml";
  native;
 *)
 

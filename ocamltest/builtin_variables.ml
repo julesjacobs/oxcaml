@@ -60,6 +60,9 @@ let ocamltest_log = Variables.make ("ocamltest_log",
 let output = Variables.make ("output",
   "Where the output of executing the program is saved")
 
+let prebuilt_modules = Variables.make ("prebuilt_modules",
+  "Modules taken from the prebuilt test library instead of being compiled")
+
 let program = Variables.make ("program",
   "Name of program produced by ocamlc.byte and ocamlopt.byte")
 let program2 = Variables.make ("program2",
@@ -136,6 +139,7 @@ let init () =
     ocamltest_response;
     ocamltest_log;
     output;
+    prebuilt_modules;
     program; program2;
     reason;
     reference;

@@ -2,12 +2,10 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml hmc_word64.ml hm_declarative.ml hm_primitive_constraints.ml";
+ prebuilt_modules = "pref.mli pref.ml copy_spec.ml hmc_word64.ml hm_declarative.ml hm_primitive_constraints.ml";
  readonly_files = "hm_primitive_constraints_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
    run-expect;
    check-program-output;
  }

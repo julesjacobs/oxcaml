@@ -413,6 +413,17 @@ install_for_test: install
 	# ocamltest itself
 	mkdir _runtest/ocamltest
 	cp $(boot_build)/ocamltest/ocamltest.native _runtest/ocamltest/ocamltest
+
+# Builds the modules that the given tests list in prebuilt_modules, with the
+# compilers in _runtest; see testsuite/vox-test-library.sh.
+vox_test_library = \
+  sh testsuite/vox-test-library.sh $$(pwd)/_build/vox-test-library \
+    $$(pwd)/_runtest/ocamltest/ocamltest $$(pwd)/_runtest/ocamlc.opt \
+    $$(pwd)/_runtest/ocamlopt.opt $$(pwd)/_runtest/stdlib
+selected_tests = \
+  $(if $(TEST),$$(pwd)/_runtest/testsuite/$(call locate_test,$(TEST))) \
+  $(if $(DIR),$$(pwd)/_runtest/testsuite/$(call locate_test,$(DIR)))
+
 test: install_for_test
 	if [ "$(middle_end)" = "flambda2" ]; then \
 	  for path in `cd testsuite; ls -1 -d tests/*`; do \
@@ -426,6 +437,7 @@ test: install_for_test
 	 if $$(which gfortran > /dev/null 2>&1); then \
 	   export LIBRARY_PATH=$$(dirname $$(gfortran -print-file-name=libgfortran.a)); \
 	 fi; \
+	 $(vox_test_library) $$(pwd)/_runtest/testsuite/tests && \
 	 cd _runtest/testsuite \
 	  && if $$(which parallel > /dev/null 2>&1); \
              then \
@@ -472,6 +484,7 @@ test-one-no-rebuild:
 	 if $$(which gfortran > /dev/null 2>&1); then \
 	   export LIBRARY_PATH=$$(dirname $$(gfortran -print-file-name=libgfortran.a)); \
 	 fi; \
+	 $(vox_test_library) $(selected_tests) && \
 	 cd _runtest/testsuite && make one $(if $(TEST),TEST=$(call locate_test,$(TEST))) $(if $(DIR),DIR=$(call locate_test,$(DIR))))
 
 promote-one: install_for_test
@@ -483,6 +496,7 @@ promote-one-no-rebuild:
 	 if $$(which gfortran > /dev/null 2>&1); then \
 	   export LIBRARY_PATH=$$(dirname $$(gfortran -print-file-name=libgfortran.a)); \
 	 fi; \
+	 $(vox_test_library) $(selected_tests) && \
 	 cd _runtest/testsuite && make promote $(if $(TEST),TEST=$(call locate_test,$(TEST))) $(if $(DIR),DIR=$(call locate_test,$(DIR))))
 
 # This target is like a polling version of upstream "make ocamlopt"

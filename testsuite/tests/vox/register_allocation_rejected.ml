@@ -1,12 +1,10 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- all_modules = "register_allocation_spec.ml register_allocation.mli register_allocation.ml";
+ prebuilt_modules = "register_allocation_spec.ml register_allocation.mli register_allocation.ml";
  readonly_files = "register_allocation_rejected.ml";
- compile_only = "true";
  {
    setup-ocamlc.opt-build-env;
-   ocamlc.opt;
    run-expect;
    check-program-output;
  }

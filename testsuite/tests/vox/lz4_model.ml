@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types -principal";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_sequence.mli vox_sequence.ml vox_lz4_model.ml lz4_model.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_lz4_model.ml";
  { native; }
 *)
 

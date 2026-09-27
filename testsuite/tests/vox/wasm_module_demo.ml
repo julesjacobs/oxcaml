@@ -1,7 +1,7 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- all_modules = "wasm_u32.ml wasm_framing.ml wasm_section.ml wasm_module.ml wasm_module_demo.ml";
+ prebuilt_modules = "wasm_u32.ml wasm_framing.ml wasm_section.ml wasm_module.ml";
  { bytecode; }
 *)
 module B = Wasm_u32
