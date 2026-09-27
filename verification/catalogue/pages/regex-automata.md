@@ -1,6 +1,6 @@
 title: Regular expressions and automata
 blurb: A regular-expression matcher proved to accept exactly the words its membership rules derive, and a conversion to DFA tables that, when it returns a table, returns a valid one with the same language.
-status: in-progress
+status: review-pending
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/regex_semantics.ml — Regular expressions and the membership rules
