@@ -27,6 +27,8 @@ that front end; they are identical to the installed ones. Options:
 - `--out DIR`: write the site elsewhere.
 - `--catalogue-url URL`: where the "Demonstrations" link points (default
   `../catalogue/index.html`).
+- `--home-url URL`: also link to URL as "Vox", the home page of the site
+  the playground is part of (default: no link).
 - `--library-prefix PREFIX`: also ship the verified library's interfaces from
   `PREFIX/lib/ocaml/vox` (installed by `verification/library/build.sh PREFIX`),
   so that programs can use `Vox_sequence` and the rest. The examples do not
