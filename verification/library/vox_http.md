@@ -173,6 +173,12 @@ beyond the bound.
   the returned suffix length, identifies the suffix by `drop`, and reconstructs
   the input by concatenating its consumed prefix with that suffix.
 
+Two outcomes described above are implemented but stated by no law:
+`Malformed Invalid_crlf` for a bare LF or a CR not followed by LF, and
+`Limit Message_bytes` when the budget runs out before a request completes,
+whether inside a line or in the body. `http_parser.ml` tests both, the second
+inside a header line and in the body.
+
 The serializer proof uses induction over forward-model byte transitions, lines,
 headers, and body, connected to the executable driver by simulation. Its unbudgeted `drain` helper is connected to `feed` by
 `feed_matches_drain` under a proved sufficient-budget condition. Neither helper

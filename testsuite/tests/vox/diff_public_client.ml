@@ -52,7 +52,6 @@ let (apply_equation @ total) : (old : int list) -> (script : script) ->
     | Insert x :: rest ->
       (match apply old rest with
        | None -> None | Some zs -> Some (x :: zs)))} = fun old script ->
-
   apply_characterization old script;
   source_def script;
   target_def script;

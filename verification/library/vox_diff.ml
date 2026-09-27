@@ -59,9 +59,8 @@ module Proof = struct
 
   let rec (suffix_bounds @ total) : (whole : int list) -> (tail : int list) ->
       {u : unit | if suffix whole tail then
-        size tail <= size whole && (if size tail = size whole then tail ===
-          whole
-          else true)
+        size tail <= size whole
+        && (if size tail = size whole then tail === whole else true)
         else true} = fun whole tail ->
     suffix_def whole tail;
     size_def whole;
@@ -72,8 +71,8 @@ module Proof = struct
 
   let rec (suffix_step @ total) : (whole : int list) -> (head : int) ->
       (tail : int list) ->
-      {u : unit | if suffix whole (head :: tail) then suffix whole tail else
-        true} =
+      {u : unit | if suffix whole (head :: tail) then suffix whole tail
+        else true} =
       fun whole head tail ->
     suffix_def whole (head :: tail);
     suffix_def whole tail;
@@ -106,18 +105,16 @@ module Proof = struct
     ()
 
   let (inverse_patch @ total) (script : script) :
-      {u : unit | apply (target script) (invert script) === Some (source
-        script)}
-        =
+      {u : unit |
+        apply (target script) (invert script) === Some (source script)} =
     invert_correct script;
     apply_source (invert script);
     ()
 
   let rec (script_bounds @ total) (script : script) :
       {u : unit | 0Z <= cost script && cost script <= script_size script
-        && script_size script <= Bigint.add (size (source script)) (size
-          (target
-          script))} =
+        && script_size script
+          <= Bigint.add (size (source script)) (size (target script))} =
     source_def script;
     target_def script;
     cost_def script;
@@ -135,12 +132,9 @@ module M = struct
       (old : int list) -> (fresh : int list) -> (a : int) -> (b : int) ->
       {u : unit | if fuel = Bigint.add (size old) (size fresh) then
         minimum_cost old fresh <= Bigint.add 1Z (minimum_cost (a :: old) fresh)
-        && minimum_cost (a :: old) fresh <= Bigint.add 1Z (minimum_cost old
-          fresh)
-        && minimum_cost old fresh <= Bigint.add 1Z (minimum_cost old (b ::
-          fresh))
-        && minimum_cost old (b :: fresh) <= Bigint.add 1Z (minimum_cost old
-          fresh)
+        && minimum_cost (a :: old) fresh <= Bigint.add 1Z (minimum_cost old fresh)
+        && minimum_cost old fresh <= Bigint.add 1Z (minimum_cost old (b :: fresh))
+        && minimum_cost old (b :: fresh) <= Bigint.add 1Z (minimum_cost old fresh)
         else true} = fun fuel old fresh a b ->
     if fuel <> Bigint.add (size old) (size fresh) then
       ()
@@ -167,30 +161,26 @@ module M = struct
       ())
   [@@decreases fuel]
 
-  let (neighbors @ total) (old : int list) (fresh : int list) (a : int) (b :
-    int)
-    :
+  let (neighbors @ total) (old : int list) (fresh : int list) (a : int)
+      (b : int) :
       {u : unit |
         minimum_cost old fresh <= Bigint.add 1Z (minimum_cost (a :: old) fresh)
-        && minimum_cost (a :: old) fresh <= Bigint.add 1Z (minimum_cost old
-          fresh)
-        && minimum_cost old fresh <= Bigint.add 1Z (minimum_cost old (b ::
-          fresh))
-        && minimum_cost old (b :: fresh) <= Bigint.add 1Z (minimum_cost old
-          fresh)} =
+        && minimum_cost (a :: old) fresh <= Bigint.add 1Z (minimum_cost old fresh)
+        && minimum_cost old fresh <= Bigint.add 1Z (minimum_cost old (b :: fresh))
+        && minimum_cost old (b :: fresh) <= Bigint.add 1Z (minimum_cost old fresh)} =
     neighbors_aux (Bigint.add (size old) (size fresh)) old fresh a b;
     ()
 
   let (strip @ total) (old : int list) (fresh : int list) (a : int) (b : int) :
-      {u : unit | minimum_cost old fresh <= minimum_cost (a :: old) (b ::
-        fresh)} =
+      {u : unit |
+        minimum_cost old fresh <= minimum_cost (a :: old) (b :: fresh)} =
     minimum_cost_equation (a :: old) (b :: fresh);
     neighbors old fresh a b;
     ()
 
   let rec (lower_bound @ total) (script : script) :
-      {u : unit | minimum_cost (source script) (target script) <= cost script}
-        =
+      {u : unit |
+        minimum_cost (source script) (target script) <= cost script} =
     source_def script;
     target_def script;
     cost_def script;
@@ -212,8 +202,8 @@ module M = struct
       {u : unit | if suffix old old_tail && suffix fresh new_tail
         && Bigint.sub (size old) (size old_tail) =
            Bigint.sub (size fresh) (size new_tail)
-        then minimum_cost old_tail new_tail <= minimum_cost old fresh else
-          true} =
+        then minimum_cost old_tail new_tail <= minimum_cost old fresh
+        else true} =
       fun old fresh old_tail new_tail ->
     suffix_bounds old old_tail;
     suffix_bounds fresh new_tail;
@@ -293,13 +283,14 @@ let[@def] optional_settled candidate =
   match candidate with None -> true | Some e -> settled e
 
 let[@def] good candidate budget =
-  match candidate with None -> false | Some e -> minimum_cost e.old_tail
-    e.new_tail
-    <= budget
+  match candidate with
+  | None -> false
+  | Some e -> minimum_cost e.old_tail e.new_tail <= budget
 
 let[@def] unfinished candidate =
-  match candidate with Some {old_tail = []; new_tail = []; _} -> false | _ ->
-    true
+  match candidate with
+  | Some {old_tail = []; new_tail = []; _} -> false
+  | _ -> true
 
 let[@def] rec frontier_valid old fresh k depth frontier =
   ghost_ (match frontier with
@@ -309,19 +300,20 @@ let[@def] rec frontier_valid old fresh k depth frontier =
     && frontier_valid old fresh (Bigint.add k 2Z) depth rest)
 
 let[@def] rec frontier_good frontier budget =
-  match frontier with [] -> false | e :: rest -> good e budget || frontier_good
-    rest budget
+  match frontier with
+  | [] -> false
+  | e :: rest -> good e budget || frontier_good rest budget
 
 let[@def] rec frontier_unfinished frontier =
-  match frontier with [] -> true | e :: rest -> unfinished e &&
-    frontier_unfinished rest
+  match frontier with
+  | [] -> true
+  | e :: rest -> unfinished e && frontier_unfinished rest
 
 let (dominance @ total) : (old : int list) -> (fresh : int list) ->
     (k : Bigint.t) -> (depth : Bigint.t) -> (a : entry) -> (b : entry) ->
     {u : unit | if valid old fresh k depth a && valid old fresh k depth b
-      && b.x <= a.x then minimum_cost a.old_tail a.new_tail <= minimum_cost
-        b.old_tail
-        b.new_tail
+      && b.x <= a.x
+      then minimum_cost a.old_tail a.new_tail <= minimum_cost b.old_tail b.new_tail
       else true} = fun old fresh k depth a b ->
   valid_def old fresh k depth a;
   valid_def old fresh k depth b;
@@ -409,12 +401,10 @@ end
 let rec (snake @ total) : (remaining : Bigint.t) @ ghost ->
     (old : int list) @ ghost -> (fresh : int list) @ ghost ->
     (k : Bigint.t) @ ghost -> (depth : Bigint.t) @ ghost ->
-    (candidate : {e : entry | valid old fresh k depth e && remaining = size
-      e.old_tail}) ->
-    {r : entry | let e = candidate in valid old fresh k depth r
-      && settled r && minimum_cost r.old_tail r.new_tail = minimum_cost
-        e.old_tail
-        e.new_tail} =
+    (candidate : {e : entry | valid old fresh k depth e
+      && remaining = size e.old_tail}) ->
+    {r : entry | let e = candidate in valid old fresh k depth r && settled r
+      && minimum_cost r.old_tail r.new_tail = minimum_cost e.old_tail e.new_tail} =
     fun remaining old fresh k depth candidate ->
   let e = candidate in
   ghost_ (valid_def old fresh k depth e);
@@ -428,8 +418,8 @@ let rec (snake @ total) : (remaining : Bigint.t) @ ghost ->
     let next = {x = e.x + 1; old_tail = ats; new_tail = bts; rev} in
     ghost_ (Entry_proof.keep_valid old fresh k depth e next a ats bts);
     let smaller = ghost_ (Bigint.sub remaining 1Z) in
-    let next : {e : entry | valid old fresh k depth e && smaller = size
-      e.old_tail} = next in
+    let next : {e : entry | valid old fresh k depth e
+      && smaller = size e.old_tail} = next in
     snake smaller old fresh k depth next
   | _ -> e
 [@@decreases remaining]
@@ -452,8 +442,8 @@ let[@def] inserted candidate result = ghost_ (
       | None -> false
       | Some r -> r.new_tail === tail && r.old_tail === e.old_tail)
 
-let (step_delete @ total) : (old : int list) @ ghost -> (fresh : int list) @
-  ghost ->
+let (step_delete @ total) :
+    (old : int list) @ ghost -> (fresh : int list) @ ghost ->
     (k : Bigint.t) @ ghost -> (depth : Bigint.t) @ ghost ->
     (candidate : {c : entry option | optional_valid old fresh k depth c}) ->
     {r : entry option | let c = candidate in deleted c r
@@ -478,8 +468,8 @@ let (step_delete @ total) : (old : int list) @ ghost -> (fresh : int list) @
     result);
   result
 
-let (step_insert @ total) : (old : int list) @ ghost -> (fresh : int list) @
-  ghost ->
+let (step_insert @ total) :
+    (old : int list) @ ghost -> (fresh : int list) @ ghost ->
     (k : Bigint.t) @ ghost -> (depth : Bigint.t) @ ghost ->
     (candidate : {c : entry option | optional_valid old fresh k depth c}) ->
     {r : entry option | let c = candidate in inserted c r
@@ -507,10 +497,10 @@ let (step_insert @ total) : (old : int list) @ ghost -> (fresh : int list) @
 let (branches @ total) (candidate : entry option) (deletion : entry option)
     (insertion : entry option) (budget : Bigint.t) :
     {u : unit | if optional_settled candidate && unfinished candidate
-      && good candidate budget && deleted candidate deletion && inserted
-        candidate insertion
-      then good deletion (Bigint.sub budget 1Z) || good insertion (Bigint.sub
-        budget 1Z)
+      && good candidate budget
+      && deleted candidate deletion && inserted candidate insertion
+      then good deletion (Bigint.sub budget 1Z)
+        || good insertion (Bigint.sub budget 1Z)
       else true} =
   optional_settled_def candidate;
   unfinished_def candidate;
@@ -581,14 +571,13 @@ module Choice_proof = struct
     ()
 end
 
-let (choose @ total) : (old : int list) @ ghost -> (fresh : int list) @ ghost
-  ->
-    (k : Bigint.t) @ ghost -> (depth : Bigint.t) @ ghost -> (budget : Bigint.t)
-      @ ghost ->
+let (choose @ total) :
+    (old : int list) @ ghost -> (fresh : int list) @ ghost ->
+    (k : Bigint.t) @ ghost -> (depth : Bigint.t) @ ghost ->
+    (budget : Bigint.t) @ ghost ->
     (deletion : {c : entry option | optional_valid old fresh k depth c}) ->
     (insertion : {c : entry option | optional_valid old fresh k depth c}) ->
-    {r : entry option | let a = deletion in let b = insertion
-      in
+    {r : entry option | let a = deletion in let b = insertion in
       optional_valid old fresh k depth r && optional_settled r
       && (if good a budget || good b budget then good r budget else true)} =
     fun old fresh k depth budget deletion insertion ->
@@ -603,8 +592,8 @@ let (choose @ total) : (old : int list) @ ghost -> (fresh : int list) @ ghost
     | None -> None
     | Some e ->
       let remaining = ghost_ (size e.old_tail) in
-      let candidate : {e : entry | valid old fresh k depth e && remaining =
-        size e.old_tail} = e in
+      let candidate : {e : entry | valid old fresh k depth e
+        && remaining = size e.old_tail} = e in
       let e = snake remaining old fresh k depth candidate in Some e
   in
   ghost_ (Choice_proof.settled_result old fresh k depth budget chosen result);
@@ -659,17 +648,16 @@ module Frontier_proof = struct
     ()
 end
 
-let rec (advance @ total) : (old : int list) @ ghost -> (fresh : int list) @
-  ghost ->
-    (k : Bigint.t) @ ghost -> (depth : Bigint.t) @ ghost -> (budget : Bigint.t)
-      @ ghost ->
-    (left : {c : entry option | optional_valid old fresh k (Bigint.add depth
-      1Z) c}) ->
+let rec (advance @ total) :
+    (old : int list) @ ghost -> (fresh : int list) @ ghost ->
+    (k : Bigint.t) @ ghost -> (depth : Bigint.t) @ ghost ->
+    (budget : Bigint.t) @ ghost ->
+    (left : {c : entry option |
+      optional_valid old fresh k (Bigint.add depth 1Z) c}) ->
     (frontier : {f : entry option list |
-      frontier_valid old fresh (Bigint.add k 1Z) depth f && frontier_unfinished
-        f}) ->
-    {r : entry option list | let c = left in let f = frontier
-      in
+      frontier_valid old fresh (Bigint.add k 1Z) depth f
+      && frontier_unfinished f}) ->
+    {r : entry option list | let c = left in let f = frontier in
       frontier_valid old fresh k (Bigint.add depth 1Z) r
       && width r = Bigint.add 1Z (width f)
       && (if good c (Bigint.sub budget 1Z) || frontier_good f budget
@@ -693,30 +681,30 @@ let rec (advance @ total) : (old : int list) @ ghost -> (fresh : int list) @
     ghost_ (Frontier_proof.singleton old fresh k next_depth lower last);
     result
   | right :: rest ->
-    let candidate : {c : entry option | optional_valid old fresh right_k depth
-      c} = right in
+    let candidate : {c : entry option |
+      optional_valid old fresh right_k depth c} = right in
     let deletion = step_delete old fresh right_k depth candidate in
     let insertion = step_insert old fresh right_k depth candidate in
     ghost_ (branches right deletion insertion budget);
-    let insertion : {c : entry option | optional_valid old fresh k next_depth
-      c} = insertion in
+    let insertion : {c : entry option |
+      optional_valid old fresh k next_depth c} = insertion in
     let next = choose old fresh k next_depth lower left insertion in
     let next_k = ghost_ (Bigint.add k 2Z) in
-    let deletion : {c : entry option | optional_valid old fresh next_k
-      next_depth c} = deletion in
+    let deletion : {c : entry option |
+      optional_valid old fresh next_k next_depth c} = deletion in
     let rest : {f : entry option list |
-      frontier_valid old fresh (Bigint.add next_k 1Z) depth f &&
-        frontier_unfinished f} = rest in
+      frontier_valid old fresh (Bigint.add next_k 1Z) depth f
+      && frontier_unfinished f} = rest in
     let tail = advance old fresh next_k depth budget deletion rest in
     let result = next :: tail in
     ghost_ (Frontier_proof.cons old fresh k next_depth lower next tail);
     result
 
-let rec (finished @ total) : (old : int list) @ ghost -> (fresh : int list) @
-  ghost ->
+let rec (finished @ total) :
+    (old : int list) @ ghost -> (fresh : int list) @ ghost ->
     (k : Bigint.t) @ ghost -> (depth : Bigint.t) @ ghost ->
-    (frontier : {f : entry option list | frontier_valid old fresh k depth f})
-      ->
+    (frontier : {f : entry option list |
+      frontier_valid old fresh k depth f}) ->
     {s : script option | let f = frontier in match s with
       | None -> frontier_unfinished f
       | Some s -> source s === old && target s === fresh && cost s = depth} =
@@ -738,17 +726,17 @@ let rec (finished @ total) : (old : int list) @ ghost -> (fresh : int list) @
       let result = Some result in result
     | _ ->
       let next_k = ghost_ (Bigint.add k 2Z) in
-      let rest : {f : entry option list | frontier_valid old fresh next_k depth
-        f} = rest in
+      let rest : {f : entry option list |
+        frontier_valid old fresh next_k depth f} = rest in
       finished old fresh next_k depth rest
 
 let rec (frontier_budget @ total) : (old : int list) -> (fresh : int list) ->
     (k : Bigint.t) -> (depth : Bigint.t) -> (frontier : entry option list) ->
-      (budget : Bigint.t) ->
-    {u : unit | if frontier_valid old fresh k depth frontier && frontier_good
-      frontier budget
-      then 0Z <= budget && (if frontier_unfinished frontier then 0Z < budget
-        else true)
+    (budget : Bigint.t) ->
+    {u : unit | if frontier_valid old fresh k depth frontier
+      && frontier_good frontier budget
+      then 0Z <= budget
+        && (if frontier_unfinished frontier then 0Z < budget else true)
       else true} = fun old fresh k depth frontier budget ->
   frontier_valid_def old fresh k depth frontier;
   frontier_good_def frontier budget;
@@ -765,17 +753,16 @@ let rec (frontier_budget @ total) : (old : int list) -> (fresh : int list) ->
      frontier_budget old fresh (Bigint.add k 2Z) depth rest budget);
   ()
 
-let rec (search @ total) : (old : int list) @ ghost -> (fresh : int list) @
-  ghost ->
-    (k : Bigint.t) @ ghost -> (depth : Bigint.t) @ ghost -> (budget : Bigint.t)
-      @ ghost ->
+let rec (search @ total) :
+    (old : int list) @ ghost -> (fresh : int list) @ ghost ->
+    (k : Bigint.t) @ ghost -> (depth : Bigint.t) @ ghost ->
+    (budget : Bigint.t) @ ghost ->
     (frontier : {f : entry option list | frontier_valid old fresh k depth f
       && frontier_good f budget
       && 0Z <= depth && width f = Bigint.add depth 1Z
-      && Bigint.add depth budget <= Bigint.add (size old) (size
-        fresh)}) ->
-    {s : script | source s === old && target s === fresh && cost s <=
-      Bigint.add depth budget} =
+      && Bigint.add depth budget <= Bigint.add (size old) (size fresh)}) ->
+    {s : script | source s === old && target s === fresh
+      && cost s <= Bigint.add depth budget} =
     fun old fresh k depth budget frontier ->
   let f = frontier in
   ghost_ (frontier_budget old fresh k depth f budget);
@@ -789,26 +776,26 @@ let rec (search @ total) : (old : int list) @ ghost -> (fresh : int list) @
     let next_depth = ghost_ (Bigint.add depth 1Z) in
     let lower = ghost_ (Bigint.sub budget 1Z) in
     ghost_ (optional_valid_def old fresh next_k next_depth None);
-    let left : {c : entry option | optional_valid old fresh next_k next_depth
-      c} = None in
+    let left : {c : entry option |
+      optional_valid old fresh next_k next_depth c} = None in
     let current : {f : entry option list |
-      frontier_valid old fresh (Bigint.add next_k 1Z) depth f &&
-        frontier_unfinished f} = f in
+      frontier_valid old fresh (Bigint.add next_k 1Z) depth f
+      && frontier_unfinished f} = f in
     let next = advance old fresh next_k depth budget left current in
-    let next : {f : entry option list | frontier_valid old fresh next_k
-      next_depth f
+    let next : {f : entry option list |
+      frontier_valid old fresh next_k next_depth f
       && frontier_good f lower
       && 0Z <= next_depth && width f = Bigint.add next_depth 1Z
-      && Bigint.add next_depth lower <= Bigint.add (size
-        old) (size fresh)} = next in
+      && Bigint.add next_depth lower <= Bigint.add (size old) (size fresh)} =
+      next in
     search old fresh next_k next_depth lower next
 [@@decreases budget]
 
 let rec (bounded_length @ total) : (bound : int) -> (values : int list) ->
     {r : int option | match r with
       | None -> Bigint.of_int bound < size values
-      | Some n -> 0 <= n && n <= bound && Bigint.of_int n = size values} = fun
-        bound values ->
+      | Some n -> 0 <= n && n <= bound && Bigint.of_int n = size values} =
+    fun bound values ->
   ghost_ (size_def values);
   ghost_ (size_nonnegative values);
   match values with
@@ -829,8 +816,8 @@ let (diff @ total) : (old : int list) -> (fresh : int list) ->
       | Ok s -> size old <= 1000000Z && size fresh <= 1000000Z
         && source s === old && target s === fresh
         && apply old s === Some fresh && cost s = minimum_cost old fresh
-        && 0Z <= cost s && script_size s <= Bigint.add (size old) (size fresh)}
-          = fun old fresh ->
+        && 0Z <= cost s && script_size s <= Bigint.add (size old) (size fresh)} =
+  fun old fresh ->
   let n = bounded_length 1000000 old in
   let m = bounded_length 1000000 fresh in
   match n, m with
@@ -838,8 +825,8 @@ let (diff @ total) : (old : int list) -> (fresh : int list) ->
     let initial = {x = 0; old_tail = old; new_tail = fresh; rev = []} in
     ghost_ (Entry_proof.initial_valid old fresh initial);
     let remaining = ghost_ (size old) in
-    let candidate : {e : entry | valid old fresh 0Z 0Z e && remaining = size
-      e.old_tail} = initial in
+    let candidate : {e : entry | valid old fresh 0Z 0Z e
+      && remaining = size e.old_tail} = initial in
     let first = snake remaining (ghost_ old) (ghost_ fresh) (ghost_ 0Z)
       (ghost_ 0Z) candidate in
     let frontier = [Some first] in
@@ -849,8 +836,8 @@ let (diff @ total) : (old : int list) -> (fresh : int list) ->
       && frontier_good f budget
       && width f = 1Z
       && budget <= Bigint.add (size old) (size fresh)} = frontier in
-    let script = search (ghost_ old) (ghost_ fresh) (ghost_ 0Z) (ghost_
-      0Z) budget frontier in
+    let script = search (ghost_ old) (ghost_ fresh) (ghost_ 0Z) (ghost_ 0Z)
+      budget frontier in
     ghost_ (M.lower_bound script);
     ghost_ (apply_source script);
     ghost_ (script_bounds script);
@@ -859,9 +846,8 @@ let (diff @ total) : (old : int list) -> (fresh : int list) ->
     let result : (script, error) result = Error Input_too_large in result
 
 let (optimal_at @ total) : (old : int list) -> (fresh : int list) ->
-    (computed : {s : script | cost s = minimum_cost old fresh}) -> (other :
-      script)
-      ->
+    (computed : {s : script | cost s = minimum_cost old fresh}) ->
+    (other : script) ->
     {u : unit |
       if apply old other === Some fresh then cost computed <= cost other
       else true} =
@@ -877,6 +863,6 @@ let (invert_correct @ total) (script : script) :
   Proof.invert_correct script
 
 let (inverse_patch @ total) (script : script) :
-    {u : unit | apply (target script) (invert script) === Some (source script)}
-      =
+    {u : unit |
+      apply (target script) (invert script) === Some (source script)} =
   Proof.inverse_patch script

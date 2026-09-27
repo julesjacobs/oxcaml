@@ -330,4 +330,13 @@ let () =
     ^ "\r\n\r\n" in
   check_splits wire [0; 1; String.length prefix; 16380; 16381; 16382; 16383; 16384];
   let over = prefix ^ String.make 16384 'x' in
-  check_splits over [0; String.length prefix; 16383; 16384; 16385]
+  check_splits over [0; String.length prefix; 16383; 16384; 16385];
+  (* The budget also runs out in the body: a header block of 16,334 bytes
+     announces 100 body bytes, of which 50 fit. *)
+  let prefix = "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 100\r\nX: " in
+  let head = prefix ^ String.make (16334 - String.length prefix - 4) 'x'
+    ^ "\r\n\r\n" in
+  let result = run (head ^ String.make 100 'b') in
+  assert (status result.state = Limit Message_bytes);
+  assert (consumed (initial ()) result.state = 16384);
+  assert (List.length result.rest = 50)

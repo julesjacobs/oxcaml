@@ -34,11 +34,11 @@ let[@def] rec apply (old : int list) (script : script) =
   | Insert x :: rest ->
     (match apply old rest with None -> None | Some zs -> Some (x :: zs))
 
-let rec (apply_characterization @ total) : (old : int list) -> (script :
-  script) ->
+let rec (apply_characterization @ total) :
+    (old : int list) -> (script : script) ->
     {u : unit | apply old script ===
       (if old === source script then Some (target script) else None)} =
-    fun old script ->
+  fun old script ->
   apply_def old script;
   source_def script;
   target_def script;
@@ -46,8 +46,7 @@ let rec (apply_characterization @ total) : (old : int list) -> (script :
    | [] -> ()
    | Insert _ :: rest -> apply_characterization old rest
    | Keep _ :: rest | Delete _ :: rest ->
-     match old with [] -> () | _ :: tail -> apply_characterization tail
-       rest);
+     match old with [] -> () | _ :: tail -> apply_characterization tail rest);
   ()
 
 let[@def] rec invert (script : script) =
@@ -83,9 +82,8 @@ let[@def] rec distance (fuel : Bigint.t) (old : int list) (fresh : int list) =
        if left <= right then left else right)
 [@@decreases fuel]
 
-let[@def] minimum_cost old fresh = distance (Bigint.add (size old) (size
-  fresh)) old
-  fresh
+let[@def] minimum_cost old fresh =
+  distance (Bigint.add (size old) (size fresh)) old fresh
 
 let (minimum_cost_equation @ total) (old : int list) (fresh : int list) :
     {u : unit | minimum_cost old fresh ===
