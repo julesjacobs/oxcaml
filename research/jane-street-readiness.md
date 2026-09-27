@@ -137,6 +137,12 @@ this file.
       Afterwards, compare the implementation with the independent design in
       `research/subsumption-design-20260927/DESIGN.md` and its tests, and
       report divergences before merging.
+      *27 September:* implemented (`IMPLEMENTATION.md` §7 lists deviations);
+      owner accepted deviation 1 (modes pass only to tuple components) and
+      deviation 2 (predicate node types compared by skeleton), the latter
+      subject to an independent check that the verifier's encoding depends
+      only on skeletons. Agent is merging trunk and dropping its own cache
+      fix in favour of trunk's.
 - [x] **13. Prebuilt test library** (wart 33), `./dev test --affected` and
       `VOX_TEST_TIMEOUT` (merged in `6390fe236b`): the full suite takes about
       3 minutes warm and 6.5 after a compiler change, from 43 and 60. Being
