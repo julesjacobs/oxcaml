@@ -84,6 +84,14 @@ this file.
   - [x] W9: the caches are keyed by the compiler digest and solver version
         (`4e24de3229`); follow-up: query cache keyed by solver only, and a
         timeout on the version probe.
+  - [ ] **Totality knot (found 27 September by the mastery investigation):**
+        a total function stored in a record whose domain is an existential
+        package, unpacked back to the record's type by a GADT witness,
+        diverges; `false` is then proved and `ghost_` erases the call
+        (`research/mastery-20260927/scratch/history-limits/knot.ml` prints
+        "verified to be 1: 2"). Agent on
+        `jujacobs/vox/totality-knot-20260927`: map every route, principled
+        fix, Codex review.
   - [ ] Compare refinement predicates with their types (subsumption
         stage 2; design in `research/subsumption-design-20260927`).
 - [ ] **2. Second review round** (brief:
