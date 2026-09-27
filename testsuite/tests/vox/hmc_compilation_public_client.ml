@@ -146,14 +146,14 @@ let (identity_steps @ total) : (w : W.t) @ immutable ->
     M.source_returns_def identity w (D.S (D.S (D.S (D.S (D.S (D.S (D.S D.Z))))))) w)
 
 (* If the identity compiles and the layout meets [sufficient] for 7 source
-   steps, the module returns its input. *)
-let (identity_returns @ total) : (artifact : C.artifact) @ immutable ->
+   steps, the module returns every input it is run on. *)
+let (identity_returns @ total) : (artifact : C.artifact) @ immutable -> (input : W.t) @ immutable ->
     {u : unit | C.source artifact === D.Lambda (D.Bound D.Z)
       && M.sufficient (C.layout artifact) (C.bytes artifact) (D.S (D.S (D.S (D.S (D.S (D.S (D.S D.Z)))))))} ->
-    {out : M.execution | Wasm_binary_execution.run out.M.fuel (C.bytes artifact)
+    {out : M.execution | Wasm_binary_execution.run out.M.fuel (C.bytes artifact) input
         (Wasm_code.Succ (C.layout artifact).M.host_capacity)
         === Wasm_binary_execution.Result (Wasm_calls.Finished out.M.after)
-      && M.returned out.M.after (C.input artifact)} @ immutable ghost =
-  fun artifact premise -> ghost_ (
-    identity_steps (C.input artifact);
-    C.normal artifact (C.input artifact) (D.S (D.S (D.S (D.S (D.S (D.S (D.S D.Z))))))) ())
+      && M.returned out.M.after input} @ immutable ghost =
+  fun artifact input premise -> ghost_ (
+    identity_steps input;
+    C.normal artifact input input (D.S (D.S (D.S (D.S (D.S (D.S (D.S D.Z))))))) ())
