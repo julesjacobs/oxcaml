@@ -103,9 +103,15 @@ this file.
 - [ ] **8. Remaining weak contracts** (fixed, or stated on the page):
   - [ ] LZ4 `decompress` contract, via labelled arguments in dependent
         types (wart 38).
-  - [ ] HTTP: malformed request and header lines must be rejected.
-  - [ ] Rings: insert and remove in the `Owned` interface.
-  - [ ] Lists/trees: lemma relating `contents`, `nodes` and `List.rev`.
+  - [x] HTTP: malformed request and header lines must be rejected (three
+        rejection laws; `Invalid_crlf` and mid-line budget exhaustion stay
+        unspecified, stated on the page; merged `a4f6450a19`).
+  - [x] Rings: insert and remove in the `Owned` interface (any length,
+        exact heap; uses the heap laws `put_law`/`commute_law`, stated;
+        `Pref_ring_general.Proofs` is public; merged `a4f6450a19`).
+  - [x] Lists/trees: lemma relating `contents`, `nodes` and `List.rev`
+        (via `rev_onto`; `Pref_tree.observe` returns an exact model; merged
+        `a4f6450a19`).
 - [ ] **9. Diagnostics and proof noise.**
   - [x] Name the failing conjunct of an `&&` goal (wart 14, `10d8f2bcd8`).
   - [ ] Erasure lints: total function with a ghost result whose body is not
