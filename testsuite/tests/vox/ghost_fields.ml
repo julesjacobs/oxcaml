@@ -98,7 +98,7 @@ let unwrap b = ghost_ b.ghost
 [%%expect{|
 type 'a box = { ghost : 'a @@ ghost; }
 val wrap : 'a @ total stateful -> 'a box = <fun>
-val unwrap : 'a box @ total -> 'a @ ghost = <fun>
+val unwrap : 'a box @ total -> 'a @ immutable ghost = <fun>
 |}]
 
 let bad = [ wrap 1; wrap 2 ]

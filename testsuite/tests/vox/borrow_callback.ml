@@ -78,7 +78,7 @@ module Model :
     }
     val contents :
       ('a : immutable_data).
-        'a t @ local immutable -> 'a list @ total stateful ghost
+        'a t @ local immutable -> 'a list @ total stateful immutable ghost
     val contents_def :
       ('a : immutable_data).
         (value : 'a t) @ local forkable unyielding immutable ->

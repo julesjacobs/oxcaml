@@ -318,14 +318,14 @@ module Unboxed_ghost_join = struct
     let refine_ joined = Pref.join left right in ())
 end;;
 [%%expect{|
-Line 6, characters 40-45:
-6 |     let refine_ joined = Pref.join left right in ())
-                                            ^^^^^
-Error: This value is used here, but it is also being used as unique at:
 Line 6, characters 35-39:
 6 |     let refine_ joined = Pref.join left right in ())
                                        ^^^^
-
+Error: This value is "aliased"
+         because it is the field "state" of the record at line 4, characters 15-18
+         which is "aliased"
+         because it is used in an expression (at lines 3-6, characters 24-52).
+       However, the highlighted expression is expected to be "unique".
 |}]
 
 module Typed_heap_diagonal = struct
