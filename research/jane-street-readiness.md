@@ -181,6 +181,18 @@ this file.
         argument, each `assume_`; batched goals need per-goal cores.
       - Measure the cost on the library; if small, consider running it in
         `dev test` by default.
+- [ ] **Warning 226 precision** (owner's decision, 27 September): keep 226
+      on by default; fix the check rather than suppressing. (a) An
+      application is erasable only if its arguments' required modes survive
+      capture by `ghost_` (immutable, aliased); (b) an undetermined mode is
+      not capturable; (c) report all layers at once: a candidate is
+      proof-only if every use is ghost or inside another proof-only
+      candidate's definition (fixpoint). Then remove the two
+      `[@warning "-226"]` in `maps.ml` and `dependent_expressions.ml`.
+      Start after subsumption merges (both touch `typecore.ml`).
+- [ ] **E-graph comments in the 13 inventory-locked files**, regenerating
+      `vox_egraph_rule_handle.spec.json` (owner: yes). Flat hash table page
+      keeps its full interface (owner: yes).
 - [ ] **14. Upstream OxCaml reports:** the expect tool overwrites single
       blocks with principal output; the `node option` kind error.
 - [ ] **Small warts** (group 3 in the conversation of 27 September):
