@@ -74,9 +74,42 @@ Error: The value "t" has type "Pref_list.node option Pref.token"
            immutable_data.
 |}]
 
-(* The v3 structures gate checked these outside ocamltest: private helpers are
-   hidden by the interface, and consumed owned handles or raw tokens cannot be
-   reused. *)
+(* Reversal reverses the values; they are not unchanged. *)
+module Unreversed_values = struct
+  let (claim @ total) (xs : model @ immutable) :
+      {u : unit | contents (rev_append xs Nil) === contents xs} @ ghost =
+    ghost_ (contents_rev_append xs Nil; contents_def Nil)
+end;;
+[%%expect{|
+Line 4, characters 40-56:
+4 |     ghost_ (contents_rev_append xs Nil; contents_def Nil)
+                                            ^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 3, characters 18-62:
+3 |       {u : unit | contents (rev_append xs Nil) === contents xs} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
+(* The nodes of a list carry its values in order, not reversed. *)
+module Reversed_nodes = struct
+  let (claim @ total) (xs : model @ immutable) :
+      {u : unit | node_values (nodes xs) === rev_onto (contents xs) []} @ ghost =
+    ghost_ (contents_nodes xs)
+end;;
+[%%expect{|
+Line 4, characters 11-30:
+4 |     ghost_ (contents_nodes xs)
+               ^^^^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 3, characters 18-70:
+3 |       {u : unit | node_values (nodes xs) === rev_onto (contents xs) []} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
+(* Private helpers are hidden by the interface, and consumed owned handles or
+   raw tokens cannot be reused. *)
 let hidden = Pref_list.reverse_into;;
 [%%expect{|
 Line 1, characters 13-35:

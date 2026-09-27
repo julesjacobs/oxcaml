@@ -200,6 +200,13 @@ val wire_headers_def : (headers : int Vox_sequence.t list) -> (tail : int
   [] -> 13 :: 10 :: tail | line::rest -> Vox_sequence.append line (13 :: 10 ::
   (wire_headers rest tail)))} @@ total
 
+val header_prefix : int Vox_sequence.t list -> int list -> int list @@ total
+
+val header_prefix_def : (headers : int Vox_sequence.t list) -> (tail : int
+  list) -> {u : unit | (header_prefix headers tail) === (match headers with |
+  [] -> tail | line::rest -> Vox_sequence.append line (13 :: 10 ::
+  (header_prefix rest tail)))} @@ total
+
 val serialize : request -> int Vox_sequence.t @@ total
 
 val serialize_def : (request : request) -> {u : unit | (serialize request) ===

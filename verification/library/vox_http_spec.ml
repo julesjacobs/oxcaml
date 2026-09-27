@@ -118,6 +118,10 @@ let[@def] rec wire_headers headers tail =
   match headers with [] -> 13 :: 10 :: tail
   | line :: rest -> Vox_sequence.append line (13 :: 10 :: wire_headers rest
     tail)
+let[@def] rec header_prefix headers tail =
+  match headers with [] -> tail
+  | line :: rest -> Vox_sequence.append line (13 :: 10 :: header_prefix rest
+    tail)
 let[@def] serialize request =
   Vox_sequence.append request.request_line (13 :: 10 :: wire_headers
     request.headers

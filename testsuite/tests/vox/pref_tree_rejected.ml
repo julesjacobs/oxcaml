@@ -69,8 +69,25 @@ Line 7, characters 28-40:
   The refinement is stated here.
 |}]
 
-(* The v3 structures gate checked these outside ocamltest: private helpers are
-   hidden by the interface, and a consumed owned handle cannot be reused. *)
+(* Mirroring a tree mirrors its shape. *)
+module Unmirrored_shape = struct
+  let (claim @ total) (tree : tree @ immutable) :
+      {u : unit | shape_of (flipped tree) === shape_of tree} @ ghost =
+    ghost_ (shape_flipped tree)
+end;;
+[%%expect{|
+Line 4, characters 11-31:
+4 |     ghost_ (shape_flipped tree)
+               ^^^^^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 3, characters 18-59:
+3 |       {u : unit | shape_of (flipped tree) === shape_of tree} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
+(* Private helpers are hidden by the interface, and a consumed owned handle
+   cannot be reused. *)
 let hidden = Pref_tree.set_links;;
 [%%expect{|
 Line 1, characters 13-32:

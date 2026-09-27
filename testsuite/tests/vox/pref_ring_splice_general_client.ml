@@ -12,7 +12,7 @@ module S = Pref_ring_splice_general
 
 let splice_owned : (prefix : node list) @ immutable ghost -> (first : node) @ immutable ->
     (rest : node list) @ immutable ghost ->
-    (final : {n : node | n === S.last first rest}) @ immutable ->
+    (final : {n : node | n === last first rest}) @ immutable ->
     (suffix : node list) @ immutable ghost ->
     (destination_prefix : node list) @ immutable ghost -> (destination_left : node) @ immutable ->
     (destination_suffix : node list) @ immutable ghost ->
@@ -22,11 +22,11 @@ let splice_owned : (prefix : node list) @ immutable ghost -> (first : node) @ im
       separated (append (b.#source :: b.#source_nodes) (b.#destination :: b.#destination_nodes)) &&
       b.#source_nodes === append prefix (append (first :: rest) suffix) &&
       b.#destination_nodes === append destination_prefix destination_suffix &&
-      destination_left === S.last b.#destination destination_prefix}) @ unique ->
+      destination_left === last b.#destination destination_prefix}) @ unique ->
     {r : S.paired | r.#source === b.#source && r.#destination === b.#destination &&
       r.#source_nodes === append prefix suffix &&
       r.#destination_nodes === append destination_prefix (append (first :: rest) destination_suffix) &&
-      Pref.own r.#state === S.spliced (Pref.own b.#state) (S.last b.#source prefix) first final
+      Pref.own r.#state === S.spliced (Pref.own b.#state) (last b.#source prefix) first final
         (head suffix b.#source) destination_left (head destination_suffix b.#destination) &&
       ring (Pref.own r.#state) r.#source r.#source_nodes &&
       ring (Pref.own r.#state) r.#destination r.#destination_nodes &&

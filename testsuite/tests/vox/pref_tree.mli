@@ -102,10 +102,21 @@ val observe_read :
     (t : {t : node option Pref.token | valid model && root model === pointer
       && Pref.own t === heap model}) @ local read -> {result : shape | result === shape_of model}
 
+type observation = { shape : shape @@ aliased; state : node option Pref.token; }
 val observe :
     (pointer : node option) @ immutable -> (model : tree) @ immutable ghost ->
     (t : {t : node option Pref.token | valid model && root model === pointer
-      && Pref.own t === heap model}) @ unique -> {result : shape | result === shape_of model}
+      && Pref.own t === heap model}) @ unique ->
+    {r : observation | r.shape === shape_of model
+      && Pref.own r.state === heap model} @ unique
+val mirror_shape : shape @ immutable -> shape @@ total
+val mirror_shape_def : (s : shape) @ immutable ->
+  {u : unit | mirror_shape s === (match s with Tip -> Tip
+    | Fork (value, l, r) -> Fork (value, mirror_shape r, mirror_shape l))}
+  @@ total
+val shape_flipped : (tree : tree) @ immutable ->
+  {u : unit | shape_of (flipped tree) === mirror_shape (shape_of tree)}
+  @ ghost @@ total
 
 module Owned : sig
   type t : value & void & void

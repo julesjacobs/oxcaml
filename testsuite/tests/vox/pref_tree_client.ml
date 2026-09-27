@@ -71,11 +71,30 @@ let () =
     && Pref.own t === heap flipped_model} = tree_token in
   let borrowed : {result : shape | result === shape_of flipped_model} =
     observe_read pointer flipped_model (borrow_ tree_token) in
-  let actual : {result : shape | result === shape_of flipped_model} =
-    observe pointer flipped_model tree_token in
-  assert (borrowed = actual);
-  assert (actual = Fork (1, Fork (3, Tip, Tip),
-    Fork (2, Tip, Fork (4, Tip, Tip))));
+  let observed = observe pointer flipped_model tree_token in
+  let actual = observed.shape in
+  let tree_token = observed.state in
+  ghost_ (
+    shape_flipped model;
+    (match model with
+     | Branch (_, left, _) ->
+       shape_of_def model; shape_of_def left;
+       (match left with
+        | Branch (_, _, right) -> shape_of_def right
+        | Empty -> ())
+     | Empty -> ());
+    let leaf4 = Fork (4, Tip, Tip) in
+    let leaf3 = Fork (3, Tip, Tip) in
+    mirror_shape_def (Fork (1, Fork (2, leaf4, Tip), leaf3));
+    mirror_shape_def (Fork (2, leaf4, Tip)); mirror_shape_def leaf4;
+    mirror_shape_def leaf3; mirror_shape_def Tip;
+    (() : {u : unit | borrowed === actual && actual ===
+      Fork (1, Fork (3, Tip, Tip), Fork (2, Tip, Fork (4, Tip, Tip)))}));
+  let tree_token : {t : node option Pref.token | valid flipped_model
+    && root flipped_model === pointer
+    && Pref.own t === heap flipped_model} = tree_token in
+  let again = observe_read pointer flipped_model (borrow_ tree_token) in
+  ghost_ ((() : {u : unit | again === actual}));
   let counter_value : {v : int | v = 42} =
     Pref.read counter_cell (borrow_ counter_token) in
   assert (counter_value = 42)
