@@ -6,6 +6,26 @@ Decisions and their reasons are in
 `research/warts-investigation-20260927/DECISIONS.md` (outside the repo, in
 the Vox research directory); the catalogue is `verification/catalogue`.
 
+## How this is being worked (27 September)
+
+Waves, merged into `vox` with a full suite run on the AMD box after each:
+1. **Now:** the ghost-field soundness fix; verifier and solver warts
+   (`jujacobs/vox/fix-verifier-20260927`); build, tooling and checks in the
+   suite (`jujacobs/vox/fix-tooling-20260927`); HM-to-Wasm examples, run-time
+   input and model tests on the AMD box; the subsumption design.
+2. **After the soundness fix merges:** typer bugs and small language warts;
+   diagnostics and lints; removal of stale proof workarounds; code
+   presentation; the remaining weak contracts.
+3. **After wave 2 merges:** the second review round of every page, page
+   corrections, then status **Ready for owner review**.
+4. **Then:** subsumption stages 1–4, medium warts, the prebuilt test
+   library, the x86 benchmark (on an idle AMD box).
+
+Catalogue statuses: **Reviewed** means checked by the owner. **Ready for owner
+review** means two independent reviews found no false claim and the page
+states every gap. Decisions that need the owner are collected at the end of
+this file.
+
 ## Must have
 
 - [ ] **1. Soundness.**
@@ -96,3 +116,7 @@ the Vox research directory); the catalogue is `verification/catalogue`.
 
 Automatic laws and quantifiers (16, 55); automatic unfolding (53, 54); one
 function for proving and running (48); termination for stateful code (88).
+
+## Decisions waiting for the owner
+
+(none yet)
