@@ -171,7 +171,7 @@ let caught x : zero =
 Line 3, characters 2-11:
 3 |   refine_ x;;
       ^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = -1)
 Line 1, characters 23-28:
 1 | type zero = {n : int | n = 0}
                            ^^^^^
