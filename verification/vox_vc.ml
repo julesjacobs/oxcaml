@@ -1052,22 +1052,60 @@ let symbolic_path ctx env ty path =
       value
     end
 
-let reinstantiate_nullary_constructor ctx env ty path constructor =
+(* A term built only from constructors and literals has the same shape at every
+   instance of a polymorphic value (parametricity), so it is rebuilt at the sort
+   of the use. Positions are fixed by the value's type scheme, so a constructor
+   is found by its label in the datatype at the same position. *)
+let rec rebuild_constructor_term ctx term target =
+  if term_sort term = target
+  then Some term
+  else
+    match expose_head ctx term, target with
+    | Construct (constructor, args), Datatype datatype ->
+      let label = Constructor.label constructor in
+      let target_constructor =
+        List.find_map
+          (fun (declaration : datatype_declaration) ->
+            if declaration.datatype = datatype
+            then
+              List.find_opt
+                (fun candidate -> Constructor.label candidate = label)
+                declaration.constructors
+            else None)
+          (declarations_of_sort ctx.encoding target)
+      in
+      begin match target_constructor with
+      | Some target_constructor
+        when List.compare_lengths (Constructor.fields target_constructor) args
+             = 0 ->
+        Option.map
+          (fun args -> Construct (target_constructor, args))
+          (Misc.Stdlib.List.map_option Fun.id
+             (List.map2
+                (fun arg (_, sort) -> rebuild_constructor_term ctx arg sort)
+                args
+                (Constructor.fields target_constructor)))
+      | _ -> None
+      end
+    | _ -> None
+
+let reinstantiate_constructor_term ctx env ty path term expected =
   match Subst.Lazy.force_value_description (Env.find_value path env) with
-  | source
-    when Constructor.fields constructor = []
-         && same_nominal_data_type env source.val_type ty ->
-    construct ctx env ty (Constructor.label constructor) []
+  | source when same_nominal_data_type env source.val_type ty ->
+    register_sort ctx expected;
+    Option.map
+      (fun term -> Scalar term)
+      (rebuild_constructor_term ctx term expected)
   | _ -> None
   | exception Not_found -> None
 
 let instantiate_path ctx env ty path value =
   match value, sort ctx.encoding env ty with
   | Some (Scalar term), Some expected when term_sort term <> expected ->
-    begin match term with
-    | Construct (constructor, []) ->
+    begin match expose_head ctx term with
+    | Construct _ ->
       begin match
-        reinstantiate_nullary_constructor ctx env ty path constructor
+        reinstantiate_constructor_term ctx env ty path term expected
       with
       | Some _ as value -> value
       | None -> symbolic_path ctx env ty path
