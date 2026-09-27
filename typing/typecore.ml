@@ -16150,10 +16150,31 @@ let make_definition_lemma_at_level env binding =
     match params, get_desc (expand_head env ty) with
     | [], _ -> []
     | (id, _) :: params, Tarrow ((_, mode, _, _), _, ret, _) ->
-        let source = Alloc.zap_to_legacy mode in
-        (id, {Typemode.dependent_argument_mode with
-          visibility = source.visibility; contention = source.contention;
-          areality = source.areality})
+        (* The lemma shares these axes with the function's parameter, and
+           takes the others from [dependent_argument_mode]. Zapping [mode]
+           instead would fix the modes of the function's partial
+           applications before its uses are typed. *)
+        let dependent = Typemode.dependent_argument_mode in
+        let low =
+          { dependent with areality = Alloc.Const.min.areality;
+            visibility = Alloc.Const.min.visibility;
+            contention = Alloc.Const.min.contention }
+        in
+        let high =
+          { dependent with areality = Alloc.Const.max.areality;
+            visibility = Alloc.Const.max.visibility;
+            contention = Alloc.Const.max.contention }
+        in
+        let lemma_mode = Alloc.newvar () in
+        Alloc.submode_exn (Alloc.of_const low) lemma_mode;
+        Alloc.submode_exn lemma_mode (Alloc.of_const high);
+        Locality.equate_exn (Alloc.proj_comonadic Areality lemma_mode)
+          (Alloc.proj_comonadic Areality mode);
+        Visibility.equate_exn (Alloc.proj_monadic Visibility lemma_mode)
+          (Alloc.proj_monadic Visibility mode);
+        Contention.equate_exn (Alloc.proj_monadic Contention lemma_mode)
+          (Alloc.proj_monadic Contention mode);
+        (id, lemma_mode)
         :: argument_modes ret params
     | _ -> assert false
   in
@@ -16162,7 +16183,7 @@ let make_definition_lemma_at_level env binding =
     let binder =
       if Ctype.refinement_ident_occurs id ret then Some id else None
     in
-    newty (Tarrow ((Nolabel, Alloc.of_const (List.assoc id argument_modes),
+    newty (Tarrow ((Nolabel, List.assoc id argument_modes,
                 Alloc.legacy, binder),
                newmono arg, ret, commu_ok)) in
   let body_ir = Refinement_predicate.logical_definition_body body_ir in
