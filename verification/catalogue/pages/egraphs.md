@@ -64,7 +64,7 @@ The same test rejects a transitivity step whose two halves do not meet (`0 = 0` 
 - `Fixed_point` is closure of the returned graph under the rules and congruence. That `Not_proved` means "not derivable" is not stated.
 - Integer addition in the evaluator is 63-bit and wraps.
 - The node, sort and union-find arrays are immutable arrays updated by copying, so adding a node or merging two classes copies 512-element arrays.
-- The implementation and proofs are 59 `.ml` and `.mli` files, about 7,500 lines. The thirteen files in the declaration inventory carry no comments; every other `.ml` file has a header comment saying what it does and where it fits.
+- The implementation and proofs are 59 `.ml` and `.mli` files, about 7,600 lines. Every file has a header comment saying what it does and where it fits.
 
 ## Reproduce
 

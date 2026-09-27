@@ -1,3 +1,15 @@
+(* Congruence closure of the model, stated on pairs of nodes; part of the
+   trusted specification. It does not mention the node signatures that
+   rebuilding compares to find congruent nodes (Vox_egraph_congruence_proof
+   shows the two agree). [same_node graph left
+   right]: the two nodes have the same constructor, equal literals and
+   children pairwise in the same class. [pair graph left right]: if the
+   ids [left] and [right] have such nodes, they are in the same class.
+   [row] checks [left] against every id below [count], and [rows] checks
+   every [left] below [count]; [closed graph] is [pair] for every two ids
+   below the node count. It is not least congruence: it does not say that
+   classes are merged only when a rule or congruence requires it. *)
+
 module Q = Vox_egraph_match_spec
 
 let[@def] (same_node @ total) (graph : Q.graph @ immutable)

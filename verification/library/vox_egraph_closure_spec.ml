@@ -1,3 +1,20 @@
+(* Closure under one rule for one assignment of its variables; part of the
+   trusted specification. Vox_egraph_quantifier ranges over the
+   assignments. An assignment ([bindings]) gives each variable of the rule
+   an id, or a negative id for no node. [binding_valid graph vars
+   bindings]: there is one id per variable and each nonnegative id has a
+   node of its variable's sort ([node_sort]). [closed_roots graph rule
+   bindings count]: for every root id below [count], if the assignment is
+   valid and the left side of [rule] matches at the root, so does the right
+   side.
+
+   A variable bound to a negative id matches nothing
+   ([Vox_egraph_match_spec.classes]), so such an assignment holds trivially
+   when the variable occurs in the left side. The negative case matters for
+   a variable that occurs in neither side: without it, a variable of a sort
+   that no node has would leave no valid assignment, and the rule would be
+   closed vacuously. [snoc] appends an id to an assignment. *)
+
 module L = Vox_egraph_language_spec
 module R = Vox_egraph_rule_spec
 module Q = Vox_egraph_match_spec

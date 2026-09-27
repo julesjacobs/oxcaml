@@ -1,3 +1,14 @@
+(* The expression an id stands for; part of the trusted specification.
+   [origin graph id] rebuilds it from the model's nodes: a leaf gives the
+   corresponding expression, and a node with children gives its
+   constructor applied to the children's origins. Each child must be a
+   smaller id, which also makes the recursion terminate; [origin] is [None]
+   for an id with no node or with a child that is not smaller. The
+   implementation always puts children below their parent. [origin] does
+   not read class labels, so merging classes does not change it.
+   [Vox_egraph_rule_handle.admit] promises that the returned id's origin is
+   exactly the admitted expression. *)
+
 module Q = Vox_egraph_match_spec
 module L = Vox_egraph_language_spec
 

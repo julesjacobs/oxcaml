@@ -1,3 +1,10 @@
+(* What every public operation preserves; part of the trusted
+   specification. [origins before after count]: every id below [count] has
+   the same [Vox_egraph_snapshot_spec.origin] in both graphs. [extends
+   before after]: the node count has not decreased and every id of
+   [before] keeps its origin, so an id returned by [admit] stands for the
+   same expression from then on. It says nothing about classes. *)
+
 module Q = Vox_egraph_match_spec
 module S = Vox_egraph_snapshot_spec
 
