@@ -11,3 +11,6 @@
 11 (no version, working, strict): rejected
 12 (version 4.16.0, working, strict): accepted
 13 (version 4.16.0, failing, strict, unit cache): accepted
+14 (version 4.16.0, failing, altered unit entry): rejected
+15 (version 4.16.0, failing, world-writable cache): rejected
+16 (version 4.16.0, failing, private cache): accepted

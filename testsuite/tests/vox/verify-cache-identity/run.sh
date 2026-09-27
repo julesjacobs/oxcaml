@@ -6,7 +6,7 @@
 OCAMLC="$1"; STDLIB="$2"
 Z3=$(command -v z3) || exit 1
 VOX_VERIFY_CACHE="$PWD/verify-cache"; export VOX_VERIFY_CACHE
-rm -rf "$VOX_VERIFY_CACHE" queries; mkdir "$VOX_VERIFY_CACHE"
+rm -rf "$VOX_VERIFY_CACHE" queries; mkdir -m 755 "$VOX_VERIFY_CACHE"
 # solver VERSION BEHAVIOUR: install the wrapper at ./solver.
 solver() {
   rm -f solver
@@ -79,3 +79,13 @@ solver "4.16.0 - 64 bit" works
 strict "12 (version 4.16.0, working, strict)" "$OCAMLC"
 solver "4.16.0 - 64 bit" fails
 strict "13 (version 4.16.0, failing, strict, unit cache)" "$OCAMLC"
+# Only an entry the compiler wrote counts, not any file at its path.
+mkdir -p queries; mv "$VOX_VERIFY_CACHE"/query-* queries/
+for entry in "$VOX_VERIFY_CACHE"/*; do printf verified > "$entry"; done
+strict "14 (version 4.16.0, failing, altered unit entry)" "$OCAMLC"
+# A cache directory that other users can write to is not used.
+mv queries/* "$VOX_VERIFY_CACHE"/
+chmod o+w "$VOX_VERIFY_CACHE"
+strict "15 (version 4.16.0, failing, world-writable cache)" "$OCAMLC" -w +a
+chmod o-w "$VOX_VERIFY_CACHE"
+strict "16 (version 4.16.0, failing, private cache)" "$OCAMLC" -w +a

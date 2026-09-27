@@ -63,11 +63,25 @@ let abstract_multiplication (query : Vox_smt.query) =
    across compiler rebuilds. Unit entries record only clean successes. The
    compiler is identified by a digest of its executable and the solver by the
    version it reports, both computed once per process; when either is
-   unavailable, the caches that need it are not used. *)
+   unavailable, the caches that need it are not used.
+
+   Whoever can write to the cache directory can mark units and queries as
+   proved, so a directory that another user owns or that other users can
+   write to is not used. *)
+let trusted_directory directory =
+  match Unix.stat directory with
+  | { st_kind = S_DIR; st_uid; st_perm; _ } ->
+    st_uid = Unix.getuid () && st_perm land 0o022 = 0
+  | _ -> false
+  (* [record_entry] creates it. *)
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> true
+  | exception Unix.Unix_error _ -> false
+
 let cache_directory () =
   match Sys.getenv_opt "VOX_VERIFY_CACHE" with
   | None | Some "" -> None
   | Some _ when !dump_vc || !dump_smtlib || !dump_resources -> None
+  | Some directory when not (trusted_directory directory) -> None
   | directory -> directory
 
 let record_entry file contents =
@@ -200,6 +214,14 @@ let unit_cache_file ~whole_unit =
      which are not part of this key. *)
   | Some _ when not (whole_unit && List.mem !Location.input_name arguments) ->
     None
+  (* The key has the source's digest, not that of what a preprocessor makes
+     of it, and the command line, not the arguments read from a file. *)
+  | Some _
+    when Option.is_some !Clflags.preprocessor
+         || !Clflags.all_ppx <> []
+         || List.mem "-args" arguments
+         || List.mem "-args0" arguments ->
+    None
   | Some directory -> (
     match
       ( Lazy.force compiler_digest,
@@ -234,11 +256,17 @@ let unit_cache_file ~whole_unit =
              compiler;
              solver;
              Digest.to_hex source;
-             Option.value (Sys.getenv_opt "OCAMLPARAM") ~default:"" ]
+             Option.value (Sys.getenv_opt "OCAMLPARAM") ~default:"";
+             (* The settings that change how the source is typed or what
+                verification may rely on, however they were set. *)
+             Vox_trust.config () ]
           @ List.sort compare imports
           @ flags (match arguments with _ :: rest -> rest | [] -> []))
       in
-      Some (Filename.concat directory (Digest.to_hex (Digest.string key))))
+      (* The entry names its key, so that only an entry this code wrote for
+         this unit counts as a verification, not any file at that path. *)
+      let digest = Digest.to_hex (Digest.string key) in
+      Some (Filename.concat directory digest, "verified unit " ^ digest))
 
 type outcome =
   | Proved of int option  (** with the resources used, when known *)
@@ -639,14 +667,20 @@ let install () =
     Verification.install (fun ~whole_unit structure ->
         if not !assume_verified
         then
+          let recorded (file, entry) =
+            match In_channel.with_open_bin file In_channel.input_all with
+            | contents -> String.equal contents entry
+            | exception Sys_error _ -> false
+          in
           match unit_cache_file ~whole_unit with
-          | Some file when Sys.file_exists file -> ()
-          | file ->
+          | Some cache when recorded cache -> ()
+          | cache ->
             cacheable := true;
             with_prover (fun poll prove ->
                 Vox_vc.generate ~poll ~prove structure);
             if !cacheable
-            then Option.iter (fun file -> record_entry file "verified") file);
+            then
+              Option.iter (fun (file, entry) -> record_entry file entry) cache);
     Verification.install_termination (fun ~self ~fn ~measure ->
         if not !assume_verified
         then
