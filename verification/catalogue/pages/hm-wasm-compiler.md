@@ -14,6 +14,7 @@ sources:
   - testsuite/tests/vox/wasm_calls.ml — WebAssembly model: execution with calls
   - testsuite/tests/vox/wasm_instruction.ml — WebAssembly model: the instruction subset and its encoding
   - testsuite/tests/vox/wasm_static_module.ml — WebAssembly model: validation
+  - testsuite/tests/vox/wasm_differential.ml — Differential test of the WebAssembly model against Node
   - testsuite/tests/vox/hmc_compilation.ml — The interface implemented over the compiler
   - testsuite/tests/vox/hmc_compiler.ml — The compiler pipeline
   - testsuite/tests/vox/hmc_frontend.ml — Frontend: scope check, inference, grounding and admission; the type-error lemmas
@@ -35,7 +36,7 @@ sources:
 
 The compiler infers types with the verified [Hindley–Milner inference](hindley-milner.html), rebuilds a typed derivation, specializes polymorphic functions, converts closures, builds a control-flow graph, marks tail calls and lowers to WebAssembly. Every stage is proved in the same composition and connected to the theorems above; no intermediate invariant is assumed. The stages' own contracts are internal and are not part of the interface.
 
-Not proved: when `compile` rejects for `Layout_rejected`, `Initialization_exhausted` or `Encoding_rejected`. These depend on the layout, memory image and page count and on the compiled program (its largest frame, its closure table, its compiled globals and its encoding), which is not a function of the source in the proofs because the inference is not proved deterministic; so an implementation that rejected every program for one of these reasons would still satisfy the interface. The meaning of `Unsupported_polymorphic_local_let` is weaker than its name: a monomorphic local `let` is admitted and a polymorphic one is not, but whether a local `let` is generalized depends on the inferred derivation, so the interface only says that some local `let` exists. The resource premise of `normal` grows linearly with the number of source steps, whatever the program uses, so `normal` applies only to short runs (see Scope). For a source program that does not return, a finished run is not proved to be either a return or an exhaustion. The WebAssembly model is assumed to agree with the standard and with engines, and `compile` is not proved to terminate.
+Not proved: when `compile` rejects for `Layout_rejected`, `Initialization_exhausted` or `Encoding_rejected`. These depend on the layout, memory image and page count and on the compiled program (its largest frame, its closure table, its compiled globals and its encoding), which is not a function of the source in the proofs because the inference is not proved deterministic; so an implementation that rejected every program for one of these reasons would still satisfy the interface. The meaning of `Unsupported_polymorphic_local_let` is weaker than its name: a monomorphic local `let` is admitted and a polymorphic one is not, but whether a local `let` is generalized depends on the inferred derivation, so the interface only says that some local `let` exists. The resource premise of `normal` grows linearly with the number of source steps, whatever the program uses, so `normal` applies only to short runs (see Scope). For a source program that does not return, a finished run is not proved to be either a return or an exhaustion. The WebAssembly model's agreement with the standard and with engines is tested, not proved (see Trusted base), and `compile` is not proved to terminate.
 
 ## Client example
 
@@ -85,7 +86,7 @@ The same test checks that the proof evidence inside an artifact cannot be read: 
 
 ## Trusted base
 
-- The WebAssembly model: the 43 `wasm_*.ml` files (2,572 lines) that define decoding, validation and execution of the emitted subset. The theorems are about this model; its agreement with the WebAssembly specification and with engines is assumed, and nothing on the trunk compares them.
+- The WebAssembly model: the 43 `wasm_*.ml` files (2,572 lines) that define decoding, validation and execution of the emitted subset. The theorems are about this model; its agreement with the WebAssembly specification and with engines is not proved. It is tested: `wasm_differential.ml` generates modules in the model's subset, variants with one mutation (most of them invalid), modules with a corrupted byte, and valid modules outside the subset, with its own encoder, which shares no code with the model's. For each module it checks that the model and Node agree on validity and, when both run the module, on trap or return, the returned value, every global and every byte of final memory. On 100,000 modules (seed 1, Node 22) there was no disagreement. The model has none of the implementation limits that the JavaScript API sets for engines, so it validates, for example, a function with more than 50,000 locals, which Node rejects. It decodes and validates `i32.mul`, `i32.and`, `i32.or`, `i64.and`, `i64.or`, `i64.shl` and `i64.shr_u` but stops with `Not_supported` when it reaches one; `safe` rules this out for the compiler's output.
 - The engine that runs the bytes: loading, allocation of the memory and table, and the host call depth it allows.
 - `wasm_u32.ml` declares `divide` and `remainder` as `external` (`%divint`, `%modint`) with a nonzero-divisor precondition; the checker gives them OCaml's truncating meaning.
 - What the [Hindley–Milner page](hindley-milner.html) lists: the `Vox_iarray` externals and `raise_any`.
@@ -110,3 +111,11 @@ After `make install` and `./dev init`:
 ```
 
 Each test compiles, and so checks, the whole composition in dependency order: 774 files for the public client and 953 for the sample-program test, which also compares its output with `hmc_wasm_relayout_demo.reference`. The public client runs on both backends.
+
+The differential test of the WebAssembly model runs 300 fixed modules and compares its tally with `wasm_differential.reference`; it is skipped where `node` is not installed:
+
+```
+./dev test vox/wasm_differential.ml
+```
+
+`verification/wasm-differential/run.sh` runs the same check without ocamltest, and `verification/wasm-differential/run.sh --jobs 16 -count 100000 -seed 1 -pages 2 -detail` repeats the run of 100,000 modules.
