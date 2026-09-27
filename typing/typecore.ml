@@ -131,6 +131,9 @@ type submode_reason =
   | Function_value
   | Application of type_expr
   | Constructor of Longident.t
+  | Ghost_expression
+  | Assume_check of submode_reason
+  | Real_result of submode_reason
   | Other
 
 type always_heap_allocation =
@@ -480,6 +483,11 @@ type expected_mode =
 
         Each location points to the corresponding sub-pattern of [Ppat_tuple].
     *)
+
+    real_required : bool;
+    (** The ghostliness of [mode] was bounded by [real] before this position
+        was typed, by an annotation or the expected type, so wrapping the
+        expression in [ghost_] cannot help. Only used for error hints. *)
   }
 
 type position_and_mode = {
@@ -549,7 +557,8 @@ let mode_default mode =
   { position = RNontail;
     mode = Value.disallow_left mode;
     strictly_local = false;
-    tuple_modes = None }
+    tuple_modes = None;
+    real_required = false }
 
 let mode_legacy = mode_default Value.legacy
 
@@ -674,7 +683,8 @@ let mode_region ?region mode =
 let enter_region_if cond ?region env expected_mode =
   if cond then
     Env.add_region_lock env,
-    mode_region ?region (as_single_mode expected_mode),
+    { (mode_region ?region (as_single_mode expected_mode))
+      with real_required = expected_mode.real_required },
     [(Texp_ghost_region, Location.none, [])]
   else
     env, expected_mode, []
@@ -853,6 +863,26 @@ let mode_argument ~funct ~index ~position_and_mode ~partial_app marg =
     mode_default vmode, vmode
   end
 
+(* Marks a function body whose ghostliness is already bounded by [real],
+   by an annotation or the expected type. *)
+let mark_real_required (expected_mode : expected_mode) =
+  if Ghostliness.is_real
+       (Value.proj_comonadic Ghostliness expected_mode.mode)
+  then { expected_mode with real_required = true }
+  else expected_mode
+
+(* Set while [assume_] types the predicate it checks at run time. *)
+let checking_assume = ref false
+
+(* Only the ghostliness hint reads these reasons; the other axes use the
+   wrapped one. *)
+let ghostliness_reason reason (expected_mode : expected_mode) =
+  match reason with
+  | _ when !checking_assume -> Assume_check reason
+  | Ghost_expression -> reason
+  | _ when expected_mode.real_required -> Real_result reason
+  | _ -> reason
+
 (* expected_mode.locality_context explains why expected_mode.mode is low;
    shared_context explains why mode.uniqueness is high *)
 let submode ~loc ~env ?(reason = Other) mode expected_mode =
@@ -870,6 +900,7 @@ let submode ~loc ~env ?(reason = Other) mode expected_mode =
   match res with
   | Ok () -> ()
   | Error failure_reason ->
+      let reason = ghostliness_reason reason expected_mode in
       let error = Submode_failed(failure_reason, reason) in
       raise (Error(loc, env, error))
 
@@ -10134,7 +10165,7 @@ and type_expect_
       if Env.in_ghost_context env && not loc.loc_ghost
          && not (!typing_refinement_predicate || Resolved_predicate.active ())
       then Location.prerr_warning loc Warnings.Redundant_ghost;
-      submode ~loc ~env
+      submode ~loc ~env ~reason:Ghost_expression
         (Value.of_const { Value.Const.min with ghostliness = Ghost })
         expected_mode;
       let env = enter_total_ghost_context loc env in
@@ -11295,6 +11326,7 @@ and type_function
       match body with
       | Pfunction_body body ->
           let body_loc = body.pexp_loc in
+          let expected_mode = mark_real_required expected_mode in
           let body =
             match ret_type_constraint with
             | None -> type_expect env expected_mode body (mk_expected ty_expected)
@@ -14519,7 +14551,8 @@ let escaping_submode_reason_hint =
           n args qualifier ]
     | None -> []
     end
-  | Constructor _ | Function_value | Other -> []
+  | Constructor _ | Function_value | Ghost_expression | Assume_check _
+  | Real_result _ | Other -> []
 
 let report_type_expected_explanation_opt expl =
   match expl with
@@ -15285,6 +15318,12 @@ let report_error ~loc env =
     (* CR-soon zqian: move the following hints into the new hint system, then
       we can invoke [submode_err] instead of [submode], and remove this
       exception. *)
+    let ghostliness_reason = submode_reason in
+    let submode_reason =
+      match submode_reason with
+      | Assume_check reason | Real_result reason -> reason
+      | reason -> reason
+    in
     let sub =
       match ax with
       | Comonadic Areality -> escaping_submode_reason_hint submode_reason
@@ -15293,10 +15332,24 @@ let report_error ~loc env =
              annotation after the arrow constrains the result value.@]"
              Style.inline_code "(f : (int -> int) @ total)"
              Style.inline_code "total"]
-      | Comonadic Ghostliness ->
-          [Location.msg "@[Hint: if this is proof code, wrap the enclosing \
-             expression in %a.@]"
-             Style.inline_code "ghost_ (...)"]
+      | Comonadic Ghostliness -> begin
+          match ghostliness_reason with
+          | Ghost_expression ->
+              [Location.msg "@[Hint: %a makes this value ghost,@ but it is \
+                 used here at run time.@ Move %a outward to cover the code \
+                 that uses it,@ or remove it.@]"
+                 Style.inline_code "ghost_" Style.inline_code "ghost_"]
+          | Assume_check _ ->
+              [Location.msg "@[Hint: %a checks this predicate at run time,@ \
+                 where ghost values are unavailable.@ State the fact as a \
+                 static refinement instead.@]"
+                 Style.inline_code "assume_"]
+          | Real_result _ -> []
+          | Function_value | Application _ | Constructor _ | Other ->
+              [Location.msg "@[Hint: if this is proof code, wrap the enclosing \
+                 expression in %a.@]"
+                 Style.inline_code "ghost_ (...)"]
+        end
       | _ -> []
     in
     let sub =
@@ -15306,7 +15359,8 @@ let report_error ~loc env =
         [ Location.msg "@[Hint: All arguments of the constructor %a@\n\
           must cross this axis to use it in this position.@]"
           quoted_longident name ]
-      | Application _ | Function_value | Other -> sub
+      | Application _ | Function_value | Ghost_expression | Assume_check _
+      | Real_result _ | Other -> sub
     in
     Location.error_of_printer ~loc ~sub (fun ppf e ->
       let open Format_doc in
@@ -16396,8 +16450,10 @@ let () =
        let return_env = Env.add_value ~mode:(total_mode ()) binder desc env in
        let predicate, return =
          with_resolved_refinement predicate_env loc predicate (fun syntax ->
-             let predicate = type_expect_in_expression predicate_env syntax
-                 (mk_expected Predef.type_bool) in
+             let predicate =
+               Misc.protect_refs [Misc.R (checking_assume, true)] (fun () ->
+                 type_expect_in_expression predicate_env syntax
+                   (mk_expected Predef.type_bool)) in
              let return = type_expect_in_expression return_env
                  ~mode:expected_mode
                  (Ast_helper.Exp.ident ~loc

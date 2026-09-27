@@ -6188,6 +6188,8 @@ module Ghostliness = struct
 
   let is_ghost m = Const.le Const.Ghost (Guts.get_floor m)
 
+  let is_real m = Const.le (Guts.get_ceil m) Const.Real
+
   let legacy = of_const Const.legacy
 
   let zap_to_legacy = zap_to_floor

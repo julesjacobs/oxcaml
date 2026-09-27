@@ -178,5 +178,6 @@ Line 1, characters 38-51:
 1 | let rejected_option () = defaulted ?a:(ghost_ None) ();;
                                           ^^^^^^^^^^^^^
 Error: This value is "ghost" but is expected to be "real".
-Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
+Hint: "ghost_" makes this value ghost, but it is used here at run time.
+Move "ghost_" outward to cover the code that uses it, or remove it.
 |}]

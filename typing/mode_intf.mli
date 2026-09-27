@@ -594,6 +594,10 @@ module type S = sig
     (** Inspect the inferred mode without committing solver changes: the value
         is certainly ghost. *)
     val is_ghost : (allowed * 'r) t -> bool
+
+    (** The mode is certainly bounded by [real], for example by an annotation.
+    *)
+    val is_real : ('l * allowed) t -> bool
   end
 
   module Visibility : sig
