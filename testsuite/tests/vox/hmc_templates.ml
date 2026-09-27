@@ -1,3 +1,14 @@
+(* A program split into its top-level definitions and its entry. A
+   [catalog] lists the definitions, the innermost [let] first, so that a de
+   Bruijn index in the entry selects a definition directly ([select]). Each
+   definition keeps its scheme, its source and its derivation.
+
+   [ready] is the invariant the later passes assume: every definition is
+   well typed in the context of the earlier ones, is a function, has only
+   monomorphic local [let]s and no free type variables, and the entry is
+   such a function typed at [word -> word]. [rebuild] gives back the source
+   term; the end-to-end theorems use it to name the source of a compiled
+   program. *)
 module D = Hm_declarative
 module A = Hmc_admission
 module G = Hmc_grounding

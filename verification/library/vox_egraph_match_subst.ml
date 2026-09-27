@@ -1,3 +1,11 @@
+(* Checking a list of bindings (one id per rule variable, -1 for none)
+   against the variables' sorts, and building the corresponding ghost
+   substitution. [accepts] requires every id to be below the node count and
+   every bound id's origin to have its variable's sort. [build] decides this
+   at run time from the [sorts] array and, when it accepts, returns a
+   substitution that is valid for the variables and [agrees] with the
+   bindings; a variable bound to -1 gets [default] of its sort. *)
+
 module V = Vox_egraph_rule_store
 module P = Vox_egraph_match_evidence
 module S = Vox_egraph_rule_semantics

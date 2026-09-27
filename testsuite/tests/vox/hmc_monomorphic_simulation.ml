@@ -1,3 +1,17 @@
+(* The monomorphic program against the source machine.
+
+   A state of Hmc_monomorphic_states is one machine state from which both a
+   source state ([H.source]) and a monomorphic state ([H.target]) are read
+   off; [H.valid] is the simulation relation. [Hmc_monomorphic_step.step]
+   takes one step of it, which is one step of each machine, so [advance]
+   runs the two in lockstep.
+
+   The machines start differently: the source machine evaluates the
+   top-level [let]s and reaches the entry after [source_offset] steps,
+   while the monomorphic program, which has no top-level [let]s, reaches it
+   after one step ([initial]). The [normal_return_*] lemmas compare word
+   results with these offsets; since [Done] is absorbing, a longer run gives
+   the same result. *)
 module D = Hm_declarative
 module C = Hmc_monomorphic
 module M = Hmc_manifest

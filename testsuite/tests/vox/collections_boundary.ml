@@ -1044,7 +1044,7 @@ let invalid : (a : int Sparse_overlay.t) -> (index : int) -> (value : int) ->
     {u : unit | 0 <= index && index < Sparse_overlay.length a} -> unit =
   fun a index value bound ->
   let _bounds = bound in
-  let b = Sparse_overlay.set index value a in
+  let b = ghost_ (Sparse_overlay.set index value a) in
   ghost_ (L.set_lookup a index value index);
   let u = () in
   let false_claim : {u : unit |

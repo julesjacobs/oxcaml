@@ -81,7 +81,7 @@ let rec emit :
       let extensions =
         if literals >= 15 then Vox_lz4_spec_bytes.extension_count (literals - 15)
         else 0 in
-      let needed = 1 + extensions + literals in
+      let needed = ghost_ (1 + extensions + literals) in
       ghost_ (Vox_lz4_spec_wire.extra_count_def literals);
       let _ : {u : unit | needed <= M.length block - used} =
         ghost_ (()) in
@@ -101,7 +101,7 @@ let rec emit :
         if match_code >= 15 then Vox_lz4_spec_bytes.extension_count (match_code - 15)
         else 0 in
       let needed =
-        1 + literal_extensions + literals + 2 + match_extensions in
+        ghost_ (1 + literal_extensions + literals + 2 + match_extensions) in
       ghost_ (
         Vox_lz4_spec_wire.extra_count_def literals;
         Vox_lz4_spec_wire.extra_count_def match_code;

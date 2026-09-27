@@ -1,3 +1,8 @@
+(* [preserved before after count]: two ghost origin arrays agree at every id
+   below [count]. Admission writes origins only at fresh ids and merges never
+   write them, so every mutating operation returns [preserved] for the old
+   count; the lemmas here compose, weaken and read that relation. *)
+
 module I = Vox_iarray
 module L = Vox_egraph_language_spec
 

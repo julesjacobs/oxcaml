@@ -23,54 +23,44 @@ Error: This expression has type "'a iarray"
 |}]
 
 let invalid_removal () =
-  let refine_ source = Sorted_array.empty in
+  let source = Sorted_array.empty in
   let index = 0 in
-  let u = () in
-  let refine_ result = Sorted_array.remove_at source index (refine_ u) in
+  let result = Sorted_array.remove_at source index () in
   ignore result;;
 [%%expect{|
-Line 5, characters 59-70:
-5 |   let refine_ result = Sorted_array.remove_at source index (refine_ u) in
-                                                               ^^^^^^^^^^^
+Line 4, characters 51-53:
+4 |   let result = Sorted_array.remove_at source index () in
+                                                       ^^
 Error: Refinement could not be proved (counterexample)
 File "sorted_array.mli", line 29, characters 31-55:
   The refinement is stated here.
 |}]
 
 let invalid_search_result (source : Sorted_array.t) (value : int) =
-  let refine_ result = Sorted_array.find_first source value in
-  match result with
-  | None ->
-    let u = () in
-    let proof : {u : unit | Sorted_array.occurs source value} = refine_ u in
-    let refine_ proof = proof in
-    ()
+  match Sorted_array.find_first source value with
+  | None -> (() : {u : unit | Sorted_array.occurs source value})
   | Some _ -> ();;
 [%%expect{|
-Line 6, characters 64-73:
-6 |     let proof : {u : unit | Sorted_array.occurs source value} = refine_ u in
-                                                                    ^^^^^^^^^
+Line 3, characters 13-15:
+3 |   | None -> (() : {u : unit | Sorted_array.occurs source value})
+                 ^^
 Error: Refinement could not be proved (counterexample)
-Line 6, characters 28-60:
-6 |     let proof : {u : unit | Sorted_array.occurs source value} = refine_ u in
-                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Line 3, characters 30-62:
+3 |   | None -> (() : {u : unit | Sorted_array.occurs source value})
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
 |}]
 
 let invalid_insert_position (source : Sorted_array.t) (value : int) =
-  let refine_ pair = Sorted_array.insert source value in
-  let (position : int), (_ : Sorted_array.t) = pair in
-  let u = () in
-  let proof : {u : unit | position = 0} = refine_ u in
-  let refine_ proof = proof in
-  ();;
+  let position, _ = Sorted_array.insert source value in
+  (() : {u : unit | position = 0});;
 [%%expect{|
-Line 5, characters 42-51:
-5 |   let proof : {u : unit | position = 0} = refine_ u in
-                                              ^^^^^^^^^
+Line 3, characters 3-5:
+3 |   (() : {u : unit | position = 0});;
+       ^^
 Error: Refinement could not be proved (counterexample)
-Line 5, characters 26-38:
-5 |   let proof : {u : unit | position = 0} = refine_ u in
-                              ^^^^^^^^^^^^
+Line 3, characters 20-32:
+3 |   (() : {u : unit | position = 0});;
+                        ^^^^^^^^^^^^
   The refinement is stated here.
 |}]

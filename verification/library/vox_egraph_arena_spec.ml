@@ -1,3 +1,7 @@
+(* [allocated arena count]: the first [count] cells of the hash-cons arena of
+   [Vox_egraph_owner] hold a key. [append_preserves] keeps this when the
+   next cell is filled. *)
+
 module I = Vox_iarray
 module K = Vox_egraph_key
 

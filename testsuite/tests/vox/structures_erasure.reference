@@ -61,12 +61,25 @@ ok: pref_ring_general.reverse#1 calls no model or proof function
 ok: pref_ring_general.reverse#1 uses no model module
 ok: pref_ring_general.reverse#2 calls no model or proof function
 ok: pref_ring_general.reverse#2 uses no model module
+ok: pref_ring_general.insert is defined
+ok: pref_ring_general.insert#1 calls no model or proof function
+ok: pref_ring_general.insert#1 uses no model module
+ok: pref_ring_general.insert#2 calls no model or proof function
+ok: pref_ring_general.insert#2 uses no model module
+ok: pref_ring_general.remove is defined
+ok: pref_ring_general.remove#1 calls no model or proof function
+ok: pref_ring_general.remove#1 uses no model module
+ok: pref_ring_general.remove#2 calls no model or proof function
+ok: pref_ring_general.remove#2 uses no model module
 ok: pref_ring_general.adopt is defined
 ok: pref_ring_general.adopt#1 calls no model or proof function
 ok: pref_ring_general.adopt#1 uses no model module
 ok: pref_ring_general.release is defined
 ok: pref_ring_general.release#1 calls no model or proof function
 ok: pref_ring_general.release#1 uses no model module
+ok: pref_ring_general.sentinel_node is defined
+ok: pref_ring_general.sentinel_node#1 calls no model or proof function
+ok: pref_ring_general.sentinel_node#1 uses no model module
 ok: pref_ring_splice_general.splice is defined
 ok: pref_ring_splice_general.splice#1 calls no model or proof function
 ok: pref_ring_splice_general.splice#1 uses no model module

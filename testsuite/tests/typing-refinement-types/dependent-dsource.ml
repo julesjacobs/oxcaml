@@ -35,3 +35,14 @@ type immutable_argument =
 type immutable_argument = (x : int) @ immutable -> {y : int | equal y x};;
 type immutable_argument = (x : int) @ immutable -> {y : int | equal y x}
 |}]
+
+type labelled_arguments =
+  size:(n : int) -> ?fill:(f : int) -> {y : int | equal y n}
+;;
+[%%expect{|
+
+type labelled_arguments =
+  size:(n : int) -> ?fill:(f : int) -> {y : int | equal y n};;
+type labelled_arguments =
+    size:(n : int) -> ?fill:int -> {y : int | equal y n}
+|}]

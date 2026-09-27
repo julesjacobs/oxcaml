@@ -1,3 +1,13 @@
+(* The closure program against the monomorphic program, in lockstep, as in
+   Hmc_monomorphic_simulation: a state of Hmc_closure_states projects to a
+   state of each machine, and [Hmc_closure_step.step] steps both.
+
+   [source_preservation] and [source_reflection] compose this with
+   Hmc_monomorphic_simulation to relate the closure machine to the source
+   machine. [safe]: the closure machine is never [Stuck], because the
+   monomorphic machine is not (Hmc_monomorphic_safety: the typed source
+   machine is never stuck, and the lockstep simulation carries this
+   over). *)
 module D = Hm_declarative
 module C = Hmc_monomorphic
 module K = Hmc_closure_ir

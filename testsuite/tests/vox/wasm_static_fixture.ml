@@ -137,7 +137,7 @@ let emitter_fixtures () =
         Wasm_memory_lowering.write_code Wasm_memory.W64 0 0 2;
         Mixed.emit writes 0; Registers.load_code registers; Registers.store_code registers] in
       List.iter (fun code -> if Q.check context code state <> Some state then failwith "emitter changed stack types") codes;
-      let empty = V.initial () in
+      let empty = ghost_ (V.initial ()) in
       let _ = ghost_ (Check.check_def context (Check.Label (Check.Root F.Void)) T.Empty empty;
         V.finish_def F.Void empty; V.consume_result_def F.Void empty; V.initial_def ();
         R.wrapper context (Check.Root F.Void) registers T.Empty registers T.Empty state empty ()) in

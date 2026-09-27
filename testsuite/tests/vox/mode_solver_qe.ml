@@ -106,6 +106,6 @@ let (rigid_counterexample @ total) :
     {u : unit |
       not (admits (for_rigid c (all_project_failure c)) z)} =
  fun c z ->
-  let r = all_project_failure c in
+  let r = ghost_ (all_project_failure c) in
   ghost_ (project_sound (for_rigid c r) z);
   ()

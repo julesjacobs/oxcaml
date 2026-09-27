@@ -20,8 +20,10 @@ The API is partial: allocation can fail, and unsupported source sizes raise
   classifies success, malformed input, or output limit exactly as the total
   decoder does. On success, its length and every output
   byte equal the allocation-independent total decoder's result. The public
-  result has no heap witness. `Vox_lz4.decompress` adds an optional capacity
-  argument and checks unsupported capacities.
+  result has no heap witness. `Vox_lz4.decompress` takes the capacity as an
+  optional argument: its result satisfies `matches_model` at that capacity,
+  or at 4,194,304 without one, and is `Error Invalid_capacity` for a
+  capacity outside 0 to 4,194,304.
 - `Vox_lz4.roundtrip` is a total ghost theorem: if the wire
   satisfies `compresses`, the decoded result satisfies `matches_model`, and
   capacity is at least the source length, decoding succeeds and the output

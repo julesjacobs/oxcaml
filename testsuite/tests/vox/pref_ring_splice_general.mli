@@ -1,11 +1,6 @@
 open Pref_ring
 open Pref_ring_general
 
-val last : node @ immutable -> node list @ immutable -> node @ ghost @@ total
-val last_def : (fallback : node) @ immutable -> (ns : node list) @ immutable ->
-  {u : unit | last fallback ns === (ghost_ (match ns with
-    | [] -> fallback | n :: rest -> last n rest))} @@ total
-
 val spliced : node option Pref.heap @ immutable -> node @ immutable -> node @ immutable ->
   node @ immutable -> node @ immutable -> node @ immutable -> node @ immutable -> node option Pref.heap @ ghost @@ total
 val spliced_def : (h : node option Pref.heap) @ immutable -> (left : node) @ immutable ->

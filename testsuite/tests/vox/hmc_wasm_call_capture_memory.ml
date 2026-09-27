@@ -68,7 +68,7 @@ let (correct @ total) : (captures : Heap.cells) @ immutable -> (count : Hmc_wasm
       Q.prefix after_words bytes bytes raw.Raw.suffix raw.Raw.suffix width ();
       Wasm_cell.shift state.X.memory frame_base width stop before ();
       Wasm_cell.shift memory frame_base width stop bytes ());
-    let old_captured = Q.split split.Split.prefix split.Split.rest before raw.Raw.suffix () in
+    let old_captured = ghost_ (Q.split split.Split.prefix split.Split.rest before raw.Raw.suffix ()) in
     let captured = Q.split split.Split.prefix values bytes raw.Raw.suffix () in
     ghost_ (Q.prefix split.Split.prefix before bytes old_captured captured offset ();
       Hmc_linear_prefix_join.correct state.X.memory memory frame_base offset (frame_base + offset) before bytes ();

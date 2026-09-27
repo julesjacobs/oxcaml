@@ -40,8 +40,8 @@ let (correct @ total) : (signature : G.signature) @ immutable -> (activation : F
         (match Codec.decode_temporaries schema after with
         | None -> unreachable_ ()
         | Some (temporaries, _) ->
-          let truncated = Repad.temporaries schema after temporaries padding H.Empty () in
-          let compact = Repad.environment context start env after truncated () in
+          let truncated = ghost_ (Repad.temporaries schema after temporaries padding H.Empty ()) in
+          let compact = ghost_ (Repad.environment context start env after truncated ()) in
           let saved = {activation with F.pc = next; env; temporaries} in
           ghost_ (Seg.environment context start env after ();
             Repad.add (Codec.locals_size context) (Codec.temporaries_size schema) start after H.Empty truncated compact ();

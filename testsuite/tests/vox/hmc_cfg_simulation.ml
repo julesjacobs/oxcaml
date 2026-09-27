@@ -1,3 +1,15 @@
+(* The CFG program against the closure program. Unlike the earlier passes
+   this is not lockstep. A state of Hmc_cfg_states is read off as a closure
+   state ([W.source]) and a CFG state ([W.target]), related by [W.valid]. A
+   CFG step matches one closure step, or none when it returns through a
+   scope or a call frame ([W.source_steps]). [Hmc_cfg_step.advance] runs
+   the CFG machine and counts the closure steps (reflection);
+   [Hmc_cfg_normalize.advance] runs the closure machine and counts the CFG
+   steps, including the extra ones (preservation). [Height], the number of
+   pending continuation frames, bounds the extra steps.
+
+   Hmc_tail_simulation proves the same statements for the tail program,
+   which is what the compiler emits; only [initial] is used there. *)
 module Height = Hmc_cfg_height
 module D = Hm_declarative
 module K = Hmc_closure_ir

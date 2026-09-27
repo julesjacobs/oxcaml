@@ -1,3 +1,21 @@
+(* Emission, and the theorems about running the bytes.
+
+   [compile] initializes the program for the placeholder input
+   (Hmc_wasm_program_initialize) and encodes the module [image]: one
+   function per block and then the dispatcher, exported as [run]; the eight
+   globals that hold the registers; a table and a memory of fixed size; and
+   the initial memory as a data segment. [emit] checks that the image can
+   be instantiated ([Execute.materialized]); by the contract of the
+   encoder, the bytes decode to [image] ([built]).
+
+   The theorems about runs share one step, [launch]: running the bytes on
+   [input] is running the decoded module ([Execute.correspondence]), and
+   the five steps of the prologue reach the dispatcher loop in the state
+   [target] that the initializer builds for [input] ([targets], from
+   Hmc_wasm_program_input). From there the lemmas of Hmc_wasm_program_run
+   and Hmc_wasm_program_source_execution apply to the loop, and
+   [Body.compose] or [Dispatch.split_prologue] adds the prologue's five
+   steps back. *)
 module I = Hmc_tail_ir
 module B = Wasm_u32
 module C = Wasm_code
@@ -187,6 +205,9 @@ let (normal @ total) : (program : I.program) @ immutable -> (layout : Init.layou
     let checkpoint = launch program layout memory start prepared pages bytes input target (Fuel.add (Dispatch.five ()) (C.Succ out.E.prefix)) () in
     Body.compose (Dispatch.five ()) (C.Succ out.E.prefix) module_ checkpoint;
     out)
+(* Compilation. [accepted] is what the theorems above need of the result.
+   [compilable] says that initialization and encoding succeed; each
+   rejection comes with its negation. *)
 type compiled = {start : Heap.start; prepared : Init.prepared; bytes : B.bytes}
 type compilation = Layout_rejected | Initialization_exhausted of Hmc_heap_objects.heap * D.index
   | Encoding_rejected | Compiled of compiled
@@ -232,6 +253,8 @@ let (sufficient @ total) : (program : I.program) @ immutable -> (layout : Init.l
     match compile program layout memory pages () with
     | Compiled compiled -> compiled | _ -> unreachable_ ()
 
+(* A run that finished with a status of exhaustion stopped at a guard that
+   failed: Hmc_wasm_program_observe finds the block step that ran it. *)
 module Guard = Hmc_failed_guard_calls
 module Failed = Hmc_failed_guard_model
 module Observe = Hmc_wasm_program_observe

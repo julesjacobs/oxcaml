@@ -1,3 +1,9 @@
+(* The initial ghost arrays of [Vox_egraph_rule_union]: 512 origins
+   ([Int_input], a placeholder for ids not yet allocated) and 512 empty
+   edges. Both are erased; the length is stated in the result type.
+   testsuite/tests/vox/egraph_ghost_arrays_erasure.ml checks that neither
+   builds an array at run time. *)
+
 module L = Vox_egraph_language_spec
 module E = Vox_egraph_derivation_spec
 

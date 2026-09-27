@@ -63,7 +63,12 @@ let check values =
   let observed = observe pointer ys list in
   let reversed_nodes = observed.nodes in
   let state = observed.state in
-  assert (List.map (fun n -> n.value) reversed_nodes = List.rev values);
+  ghost_ (contents_nodes ys; contents_rev_append xs Nil; contents_def Nil;
+    nodes_rev_append xs Nil; nodes_def Nil;
+    (() : {u : unit | node_values reversed_nodes === rev_onto values []
+      && reversed_nodes === rev_onto original_nodes []}));
+  (* The proof above equates node records by their fields; that they are the
+     same records, not copies, is checked here at run time. *)
   assert (List.for_all2 ( == ) reversed_nodes (List.rev original_nodes));
   let t = Pref.join state frame_token in
   let t : {t : node option Pref.token | valid ys && root ys === pointer

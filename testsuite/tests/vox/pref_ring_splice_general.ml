@@ -1,14 +1,6 @@
 open Pref_ring
 open Pref_ring_general
-
-let[@def] rec (member @ total) (n : node @ immutable) (ns : node list @ immutable) =
-  ghost_ (match ns with [] -> false | x :: rest -> n === x || member n rest)
-
-let[@def] rec (last @ total) (fallback : node @ immutable) (ns : node list @ immutable) =
-  ghost_ (match ns with [] -> fallback | n :: rest -> last n rest)
-
-let[@def] rec (apart_lists @ total) (xs : node list @ immutable) (ys : node list @ immutable) =
-  ghost_ (match xs with [] -> true | x :: rest -> apart_all x ys && apart_lists rest ys)
+open Pref_ring_general.Proofs
 
 let rec (member_append @ total) : (n : node) @ immutable ->
     (xs : node list) @ immutable -> (ys : node list) @ immutable ->
@@ -16,185 +8,6 @@ let rec (member_append @ total) : (n : node) @ immutable ->
   fun n xs ys -> ghost_ (
     append_def xs ys; member_def n xs; member_def n (append xs ys);
     match xs with [] -> () | _ :: rest -> member_append n rest ys; ())
-
-let rec (last_append @ total) : (fallback : node) @ immutable ->
-    (xs : node list) @ immutable -> (ys : node list) @ immutable ->
-    {u : unit | last fallback (append xs ys) === last (last fallback xs) ys} @ ghost =
-  fun fallback xs ys -> ghost_ (
-    append_def xs ys; last_def fallback xs; last_def fallback (append xs ys);
-    match xs with [] -> () | n :: rest -> last_append n rest ys; ())
-
-let rec (last_member @ total) : (fallback : node) @ immutable ->
-    (ns : node list) @ immutable ->
-    {u : unit | match ns with [] -> last fallback ns === fallback
-      | _ :: _ -> member (last fallback ns) ns} @ ghost =
-  fun fallback ns -> ghost_ (
-    last_def fallback ns;
-    match ns with [] -> () | n :: rest ->
-      last_member n rest; member_def (last fallback ns) ns; ())
-
-let rec (apart_member @ total) : (n : node) @ immutable ->
-    (xs : node list) @ immutable -> (x : node) @ immutable ->
-    {u : unit | if apart_all n xs && member x xs then apart n x else true} @ ghost =
-  fun n xs x -> ghost_ (
-    apart_all_def n xs; member_def x xs;
-    match xs with [] -> () | _ :: rest -> apart_member n rest x; ())
-
-let rec (apart_lists_member @ total) : (xs : node list) @ immutable ->
-    (ys : node list) @ immutable -> (x : node) @ immutable ->
-    {u : unit | if apart_lists xs ys && member x xs then apart_all x ys else true} @ ghost =
-  fun xs ys x -> ghost_ (
-    apart_lists_def xs ys; member_def x xs;
-    match xs with [] -> () | _ :: rest -> apart_lists_member rest ys x; ())
-
-let rec (apart_append @ total) : (n : node) @ immutable ->
-    (xs : node list) @ immutable -> (ys : node list) @ immutable ->
-    {u : unit | apart_all n (append xs ys) =
-      (apart_all n xs && apart_all n ys)} @ ghost =
-  fun n xs ys -> ghost_ (
-    append_def xs ys; apart_all_def n xs; apart_all_def n (append xs ys);
-    match xs with [] -> () | _ :: rest -> apart_append n rest ys; ())
-
-let rec (separated_append @ total) : (xs : node list) @ immutable ->
-    (ys : node list) @ immutable ->
-    {u : unit | separated (append xs ys) =
-      (separated xs && separated ys && apart_lists xs ys)} @ ghost =
-  fun xs ys -> ghost_ (
-    append_def xs ys; separated_def xs; separated_def (append xs ys);
-    apart_lists_def xs ys;
-    match xs with [] -> () | n :: rest ->
-      apart_append n rest ys;
-      separated_append rest ys; ())
-
-let[@def] rec (chain @ total) (h : node option Pref.heap @ immutable) (ns : node list @ immutable) =
-  ghost_ (match ns with [] -> true | n :: rest -> present h n &&
-    (match rest with [] -> true | next :: _ ->
-      H.at h n.next === Some (Some next) && H.at h next.prev === Some (Some n)) &&
-    chain h rest)
-
-let[@def] rec (ordinary @ total) (ns : node list @ immutable) =
-  ghost_ (match ns with [] -> true | n :: rest -> not n.sentinel && ordinary rest)
-
-let rec (chain_split @ total) : (h : node option Pref.heap) @ immutable ->
-    (xs : node list) @ immutable -> (ys : node list) @ immutable ->
-    {u : unit | not (chain h (append xs ys)) || (chain h xs && chain h ys)} @ ghost =
-  fun h xs ys -> ghost_ (
-    append_def xs ys; chain_def h xs; chain_def h (append xs ys);
-    match xs with [] -> () | _ :: rest ->
-      append_def rest ys; chain_split h rest ys; ())
-
-let rec (chain_join @ total) : (h : node option Pref.heap) @ immutable ->
-    (fallback : node) @ immutable -> (xs : node list) @ immutable ->
-    (ys : node list) @ immutable ->
-    {u : unit | if chain h xs && chain h ys &&
-      (match xs, ys with [], _ | _, [] -> true | _, y :: _ ->
-        H.at h (last fallback xs).next === Some (Some y) &&
-        H.at h y.prev === Some (Some (last fallback xs)))
-      then chain h (append xs ys) else true} @ ghost =
-  fun h fallback xs ys -> ghost_ (
-    append_def xs ys; chain_def h xs; chain_def h (append xs ys);
-    last_def fallback xs;
-    match xs with [] -> () | n :: rest ->
-      append_def rest ys; last_def n rest;
-      chain_def h ys;
-      chain_join h n rest ys; ())
-
-let rec (linked_chain @ total) : (h : node option Pref.heap) @ immutable ->
-    (previous : node) @ immutable -> (ns : node list) @ immutable ->
-    (stop : node) @ immutable ->
-    {u : unit | if linked h previous ns stop && present h previous &&
-      H.at h previous.next === Some (Some (head ns stop)) then
-      chain h (previous :: ns) && ordinary ns &&
-      H.at h (last previous ns).next === Some (Some stop) &&
-      H.at h stop.prev === Some (Some (last previous ns)) else true} @ ghost =
-  fun h previous ns stop -> ghost_ (
-    linked_def h previous ns stop; head_def ns stop; last_def previous ns;
-    chain_def h (previous :: ns); ordinary_def ns;
-    match ns with [] -> chain_def h []; () | n :: rest ->
-      linked_chain h n rest stop; ())
-
-let rec (chain_linked @ total) : (h : node option Pref.heap) @ immutable ->
-    (previous : node) @ immutable -> (ns : node list) @ immutable ->
-    (stop : node) @ immutable ->
-    {u : unit | if chain h (previous :: ns) && ordinary ns &&
-      H.at h (last previous ns).next === Some (Some stop) &&
-      H.at h stop.prev === Some (Some (last previous ns)) then
-      linked h previous ns stop && H.at h previous.next === Some (Some (head ns stop))
-      else true} @ ghost =
-  fun h previous ns stop -> ghost_ (
-    chain_def h (previous :: ns); ordinary_def ns;
-    linked_def h previous ns stop; head_def ns stop; last_def previous ns;
-    match ns with [] -> () | n :: rest ->
-      chain_def h (n :: rest); chain_linked h n rest stop; ())
-
-let rec (separated_pair @ total) : (ns : node list) @ immutable ->
-    (x : node) @ immutable -> (y : node) @ immutable ->
-    {u : unit | if separated ns && member x ns && member y ns then
-      x === y || apart x y else true} @ ghost =
-  fun ns x y -> ghost_ (
-    separated_def ns; member_def x ns; member_def y ns;
-    match ns with [] -> () | n :: rest ->
-      apart_member n rest x; apart_member n rest y;
-      apart_def n x; apart_def x n;
-      separated_pair rest x y; ())
-
-let rec (member_present @ total) : (h : node option Pref.heap) @ immutable ->
-    (ns : node list) @ immutable -> (x : node) @ immutable ->
-    {u : unit | if chain h ns && member x ns then present h x else true} @ ghost =
-  fun h ns x -> ghost_ (
-    chain_def h ns; member_def x ns;
-    match ns with [] -> () | _ :: rest -> member_present h rest x; ())
-
-let[@def] rec (safe_cell @ total) (ns : node list @ immutable)
-    (p : node option Pref.t @ immutable) =
-  ghost_ (match ns with [] -> true | n :: rest ->
-    (match rest with [] -> true | next :: _ ->
-      not (p === n.next) && not (p === next.prev)) && safe_cell rest p)
-
-let rec (safe_external @ total) : (ns : node list) @ immutable ->
-    (n : node) @ immutable ->
-    {u : unit | if apart_all n ns then safe_cell ns n.prev && safe_cell ns n.next
-      else true} @ ghost =
-  fun ns n -> ghost_ (
-    apart_all_def n ns; safe_cell_def ns n.prev; safe_cell_def ns n.next;
-    match ns with [] -> () | x :: rest ->
-      apart_def n x; apart_all_def n rest;
-      (match rest with [] -> () | next :: _ -> apart_def n next; ());
-      safe_external rest n; ())
-
-let (safe_head @ total) (n : node @ immutable) (rest : node list @ immutable) :
-    {u : unit | if separated (n :: rest) then safe_cell (n :: rest) n.prev else true}
-      @ ghost = ghost_ (
-  separated_def (n :: rest); safe_cell_def (n :: rest) n.prev;
-  apart_all_def n rest;
-  (match rest with [] -> () | next :: _ -> apart_def n next; ());
-  safe_external rest n; ())
-
-let rec (safe_last @ total) : (fallback : node) @ immutable ->
-    (ns : node list) @ immutable ->
-    {u : unit | not (separated ns) || safe_cell ns (last fallback ns).next} @ ghost =
-  fun fallback ns -> ghost_ (
-    separated_def ns; last_def fallback ns; safe_cell_def ns (last fallback ns).next;
-    match ns with [] -> () | n :: rest ->
-      safe_last n rest; last_member n rest;
-      apart_member n rest (last n rest); apart_def n (last n rest);
-      (match rest with [] -> () | next :: _ ->
-        member_def next rest; separated_pair rest next (last n rest);
-        separated_def rest; apart_def next (last n rest); ()); ())
-
-let rec (chain_put @ total) : (h : node option Pref.heap) @ immutable ->
-    (ns : node list) @ immutable -> (p : node option Pref.t) @ immutable ->
-    (v : node option) @ immutable ->
-    {u : unit | if chain h ns && safe_cell ns p then chain (H.put h p v) ns
-      else true} @ ghost =
-  fun h ns p v -> ghost_ (
-    chain_def h ns; safe_cell_def ns p; chain_def (H.put h p v) ns;
-    match ns with [] -> () | n :: rest ->
-      Pref_ring_proofs.put_observations h p v n;
-      present_def h n; present_def (H.put h p v) n;
-      (match rest with [] -> () | next :: _ ->
-        Pref_ring_proofs.put_observations h p v next; ());
-      chain_put h rest p v; ())
 
 type cuts : immutable_data = { left : node; first : node; final : node;
   right : node; destination_left : node; destination_right : node }
@@ -261,42 +74,6 @@ let (updated_view @ total) (h : node option Pref.heap @ immutable) (c : cuts @ i
   let h = H.put h c.final.next (Some c.destination_right) in
   Pref_ring_proofs.put_observations h c.destination_right.prev (Some c.final) n; ())
 
-let rec (apart_lists_right @ total) : (xs : node list) @ immutable ->
-    (ys : node list) @ immutable -> (n : node) @ immutable ->
-    {u : unit | if apart_lists xs ys && member n ys then apart_all n xs else true}
-      @ ghost = fun xs ys n -> ghost_ (
-    apart_lists_def xs ys; apart_all_def n xs;
-    match xs with [] -> () | x :: rest ->
-      apart_member x ys n; apart_def x n; apart_def n x;
-      apart_lists_right rest ys n; ())
-
-let rec (apart_lists_append_right @ total) : (xs : node list) @ immutable ->
-    (ys : node list) @ immutable -> (zs : node list) @ immutable ->
-    {u : unit | apart_lists xs (append ys zs) =
-      (apart_lists xs ys && apart_lists xs zs)} @ ghost =
-  fun xs ys zs -> ghost_ (
-    apart_lists_def xs (append ys zs); apart_lists_def xs ys; apart_lists_def xs zs;
-    match xs with [] -> () | x :: rest ->
-      apart_append x ys zs; apart_lists_append_right rest ys zs; ())
-
-let rec (apart_lists_append_left @ total) : (xs : node list) @ immutable ->
-    (ys : node list) @ immutable -> (zs : node list) @ immutable ->
-    {u : unit | apart_lists (append xs ys) zs =
-      (apart_lists xs zs && apart_lists ys zs)} @ ghost =
-  fun xs ys zs -> ghost_ (
-    append_def xs ys; apart_lists_def (append xs ys) zs; apart_lists_def xs zs;
-    match xs with [] -> () | _ :: rest -> apart_lists_append_left rest ys zs; ())
-
-let rec (apart_lists_symmetric @ total) : (xs : node list) @ immutable ->
-    (ys : node list) @ immutable ->
-    {u : unit | not (apart_lists xs ys) || apart_lists ys xs} @ ghost =
-  fun xs ys -> ghost_ (
-    apart_lists_def ys xs;
-    match ys with [] -> () | y :: rest ->
-      member_def y ys; apart_lists_right xs ys y;
-      append_def [y] rest; append_def [] rest; apart_lists_append_right xs [y] rest;
-      apart_lists_symmetric xs rest; ())
-
 let (partition_separated @ total) (a : node list @ immutable)
     (b : node list @ immutable) (c : node list @ immutable)
     (d : node list @ immutable) (e : node list @ immutable) :
@@ -312,18 +89,6 @@ let (partition_separated @ total) (a : node list @ immutable)
   apart_lists_append_right a c (append d e); apart_lists_append_right a d e;
   apart_lists_append_right b c (append d e); apart_lists_append_right b d e;
   apart_lists_append_right c d e; ())
-
-let rec (ordinary_append @ total) : (xs : node list) @ immutable ->
-    (ys : node list) @ immutable ->
-    {u : unit | ordinary (append xs ys) = (ordinary xs && ordinary ys)} @ ghost =
-  fun xs ys -> ghost_ (
-    append_def xs ys; ordinary_def xs; ordinary_def (append xs ys);
-    match xs with [] -> () | _ :: rest -> ordinary_append rest ys; ())
-
-let rec (last_nonempty @ total) : (a : node) @ immutable ->
-    (b : node) @ immutable -> (ns : node list) @ immutable ->
-    {u : unit | match ns with [] -> true | _ :: _ -> last a ns === last b ns}
-      @ ghost = fun a b ns -> ghost_ (last_def a ns; last_def b ns; ())
 
 let[@def] (boundaries @ total) (s : node @ immutable) (prefix : node list @ immutable)
     (first : node @ immutable) (rest : node list @ immutable) (suffix : node list @ immutable)

@@ -1,3 +1,9 @@
+(* Introduction for the trusted [Vox_egraph_match_spec.matches]: if a node in
+   [root]'s class has the pattern's top constructor and its children lie in
+   the classes matched by the subpatterns, the pattern matches at [root].
+   [first], [second] and [third] are those child class lists, and
+   [collect_contains] shows that the node's class is collected. *)
+
 module Q = Vox_egraph_match_spec
 module R = Vox_egraph_rule_spec
 

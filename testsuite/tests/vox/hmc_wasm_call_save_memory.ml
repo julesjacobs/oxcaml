@@ -45,7 +45,7 @@ let (correct @ total) : (fragment : Save.fragment) @ immutable -> (tail_plan : P
       && Bytes.drop out.memory (S.add32 base (extent count)) === Some out.suffix
       && V.length out.memory === V.length state.X.memory && Bounds.covers out.memory limit} @ immutable =
   fun fragment tail_plan old_pc current accumulator rest position count state source base limit source_local base_local premise ->
-    let leading = header old_pc current accumulator in
+    let leading = ghost_ (header old_pc current accumulator) in
     let old_cells = cells old_pc current accumulator rest in
     let new_cells = cells fragment.Save.pc current accumulator rest in
     let width : B.u32 = 48 + 16 * count in

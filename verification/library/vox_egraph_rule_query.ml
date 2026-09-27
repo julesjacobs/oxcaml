@@ -1,3 +1,10 @@
+(* The implementation of [Vox_egraph_rule_handle.query]. [expressions] admits
+   both expressions and compares their classes; it does not rebuild or
+   saturate. An [Equal] answer carries the derivation from
+   [Vox_egraph_rule_union.same_evidence]; since each admitted id has the
+   admitted expression as its origin, the derivation's endpoints are the two
+   expressions. *)
+
 module H = Vox_egraph_rule_hashcons
 module G = Vox_egraph_rule_union
 module V = Vox_egraph_rule_store
@@ -110,6 +117,7 @@ let expressions : (state : {s : H.t | H.O.valid s.owner && V.valid s.store &&
          | None -> Invalid_input | Some _ -> Node_limit in
        #{status; state; proof = ghost_ None}
      | Some second ->
+       (* Admitting [right] may add nodes but keeps [first]'s origin. *)
        ghost_ (
          let view = borrow_ state in
          F.at before view.store.semantic.origins count first ();

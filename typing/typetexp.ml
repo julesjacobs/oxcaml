@@ -1046,26 +1046,39 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
             Option.iter
               (fun binder ->
                  Language_extension.assert_enabled ~loc:binder.loc
-                   Refinement_types ();
-                 if l <> Asttypes.Nolabel then
-                   raise
-                     (Error_forward
-                        (Location.errorf ~loc:binder.loc
-                           "dependent function binders are supported only on \
-                            unlabelled arrows")))
+                   Refinement_types ())
               source_binder;
             check_arg_type arg;
             let l = transl_label l (Some arg) in
-            let arg_cty =
+            Option.iter
+              (fun binder ->
+                 if Btype.is_position l then
+                   raise
+                     (Error_forward
+                        (Location.errorf ~loc:binder.loc
+                           "dependent function binders are not supported on \
+                            call-position arguments")))
+              source_binder;
+            let arg_cty, binder_ty =
               with_local_level_generalize_structure_if
                 (Option.is_some source_binder && !Clflags.principal)
                 (fun () ->
-                  if Btype.is_position l then
-                    ctyp Ttyp_call_pos
-                      (newconstr Predef.path_lexing_position [])
-                  else
-                    transl_type env ~policy ~row_context
-                      arg_mode.mode_modes arg)
+                  let arg_cty =
+                    if Btype.is_position l then
+                      ctyp Ttyp_call_pos
+                        (newconstr Predef.path_lexing_position [])
+                    else
+                      transl_type env ~policy ~row_context
+                        arg_mode.mode_modes arg
+                  in
+                  (* An optional argument's binder denotes the option the
+                     caller passed. *)
+                  let binder_ty =
+                    if Btype.is_optional l then
+                      newconstr Predef.path_option [arg_cty.ctyp_type]
+                    else arg_cty.ctyp_type
+                  in
+                  arg_cty, binder_ty)
             in
             let arg_ty =
               if Btype.is_Tpoly arg_cty.ctyp_type then arg_cty.ctyp_type
@@ -1090,7 +1103,7 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
                       source_binder.txt
                   in
                   ( Some (binder, source_binder),
-                    !add_dependent_binder env binder arg_cty.ctyp_type
+                    !add_dependent_binder env binder binder_ty
                       source_binder.loc )
             in
             let prepared_rest, ret_cty =

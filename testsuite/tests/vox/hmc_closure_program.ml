@@ -1,3 +1,17 @@
+(* Closure conversion. Hmc_closure_lower replaces each function term of the
+   monomorphic program by [Closure id], where [id] names an entry of a
+   closure table (Hmc_closure_ir) that holds the function's body, whether
+   it is recursive, and the types of the local environment, which the
+   closure captures whole. Each specialized definition becomes a closure
+   with an empty environment; [globals] lists their ids.
+
+   The relation proved here is syntactic and typed: [K.related] matches a
+   monomorphic term with its code and [K.typed] types the code. [valid]
+   states both for every definition ([mapped]) and for the entry. The table
+   only grows as terms are converted ([K.extends]), and [preserve] carries
+   the facts about earlier definitions over to the larger table.
+   Hmc_closure_simulation proves the closure semantics against the
+   monomorphic semantics from [valid]. *)
 module D = Hm_declarative
 module C = Hmc_monomorphic
 module M = Hmc_manifest
@@ -91,6 +105,7 @@ let (build @ total) : (origin : C.program) @ immutable -> {p : program | p.origi
     let out : program = refine_ out in out
   | _ -> unreachable_ ()
 
+(* Looking up a definition's closure, used by the simulation proofs. *)
 let rec (same_size @ total) : (interface : M.table) @ immutable -> (table : K.table) @ immutable ->
     (source : C.definitions) @ immutable -> (globals : globals) @ immutable ->
     {u : unit | mapped interface table source globals} ->

@@ -52,8 +52,8 @@ let (correct @ total) : (signature : G.signature) @ immutable -> (next_signature
       && Wire.decode_cells (D.S (Heap.length out.Invariant.cells)) out.Invariant.bytes === Some (Heap.Cell (V.Word (Header.number fragment.Lower.pc), out.Invariant.cells), tail)} @ immutable =
   fun signature next_signature activation next_activation frames result_type head_type next context schema fragment capacity max_pc old_pc left right heap_base heap_end heap_local cells old_padding heap frame_stop state base_local base before_frame tail premise ->
     let out = Invariant.correct signature next_signature activation next_activation frames result_type head_type next context schema fragment capacity max_pc old_pc left right heap_base heap_end heap_local cells old_padding state base_local base before_frame tail () in
-    let before_cells = Heap.Cell (V.Word (Header.number old_pc), cells) in
-    let after_cells = Heap.Cell (V.Word (Header.number fragment.Lower.pc), out.Invariant.cells) in
+    let before_cells = ghost_ (Heap.Cell (V.Word (Header.number old_pc), cells)) in
+    let after_cells = ghost_ (Heap.Cell (V.Word (Header.number fragment.Lower.pc), out.Invariant.cells)) in
     ghost_ (Heap.length_def before_cells; Heap.length_def after_cells;
       Index.represents_def (D.S (Heap.length cells)) (capacity + 1);
       Hmc_wasm_frame_suffix.preserve_heap state.X.memory out.Invariant.memory heap base frame_stop (capacity + 1)

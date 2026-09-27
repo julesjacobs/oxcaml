@@ -61,11 +61,11 @@ let (correct @ total) : (captures : Heap.cells) @ immutable -> (count : Hmc_wasm
       let suffix = raw.Raw.suffix in
       let prefix = Q.Word (old_tag, Q.Word (old_code, Q.End)) in
       let copied_words = Q.Word (old_tag, Q.Word (old_code, values)) in
-      let copied_frame = Q.encode copied_words suffix in
-      let copied = Splice.replace state.X.memory heap_base before copied_frame () in
+      let copied_frame = ghost_ (Q.encode copied_words suffix) in
+      let copied = ghost_ (Splice.replace state.X.memory heap_base before copied_frame ()) in
       let tagged_words = Q.Word (tag, Q.Word (old_code, values)) in
-      let tagged_frame = Q.encode tagged_words suffix in
-      let tagged = Splice.replace state.X.memory heap_base before tagged_frame () in
+      let tagged_frame = ghost_ (Q.encode tagged_words suffix) in
+      let tagged = ghost_ (Splice.replace state.X.memory heap_base before tagged_frame ()) in
       let bytes = Q.encode layout suffix in
       let memory = Splice.replace state.X.memory heap_base before bytes () in
       ghost_ (

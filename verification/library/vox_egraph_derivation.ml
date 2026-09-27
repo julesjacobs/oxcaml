@@ -1,3 +1,9 @@
+(* Constructors for derivations: each builds one [Sym], [Trans], congruence
+   or [Rule] step and proves it [valid] for the rules, with its endpoints
+   stated in terms of the endpoints of its parts. [sort_sound] shows that
+   the two endpoints of a valid derivation have the same, defined sort; the
+   engine uses it where it needs the origins it relates to be well sorted. *)
+
 open Vox_egraph_derivation_spec
 module R = Vox_egraph_rule_spec
 module RP = Vox_egraph_rules

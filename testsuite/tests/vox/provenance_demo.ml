@@ -38,7 +38,7 @@ let () =
   let refine_ state = state in
   let refine_ r = Pooled_allocator.allocate allocation_heap0 1 desc1 pool0 (refine_ state) in
   let p1 = r.#value in let pool1 = r.#pool in let state = r.#state in
-  let h1 = ghost_ (Pref.own (borrow_ state)) in let v1 = cell desc1 1 in
+  let h1 = ghost_ (Pref.own (borrow_ state)) in let v1 = ghost_ (cell desc1 1) in
   ghost_ (cell_def desc1 1; payload_scoped_def h0 v1);
   let scope1 : ((x : node Pref.t) @ immutable ->
       {u : unit | if H.mem h1 x then source_ok h1 x else H.at h1 x === None})
@@ -61,7 +61,7 @@ let () =
   let refine_ state = state in
   let refine_ r = Pooled_allocator.allocate allocation_heap1 2 desc2 pool1 (refine_ state) in
   let p2 = r.#value in let pool2 = r.#pool in let state = r.#state in
-  let h2 = ghost_ (Pref.own (borrow_ state)) in let v2 = cell desc2 2 in
+  let h2 = ghost_ (Pref.own (borrow_ state)) in let v2 = ghost_ (cell desc2 2) in
   ghost_ (cell_def desc2 2; payload_scoped_def h1 v2);
   let scope2 : ((x : node Pref.t) @ immutable ->
       {u : unit | if H.mem h2 x then source_ok h2 x else H.at h2 x === None})
@@ -85,7 +85,7 @@ let () =
   let refine_ state = state in
   let refine_ r = Pooled_allocator.allocate allocation_heap2 2 desc3 pool2 (refine_ state) in
   let p3 = r.#value in let pool3 = r.#pool in let state = r.#state in
-  let h3 = ghost_ (Pref.own (borrow_ state)) in let v3 = cell desc3 2 in
+  let h3 = ghost_ (Pref.own (borrow_ state)) in let v3 = ghost_ (cell desc3 2) in
   ghost_ (cell_def desc3 2; payload_scoped_def h2 v3);
   let scope3 : ((x : node Pref.t) @ immutable ->
       {u : unit | if H.mem h3 x then source_ok h3 x else H.at h3 x === None})

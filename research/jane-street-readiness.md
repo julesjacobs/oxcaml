@@ -57,10 +57,18 @@ this file.
 - [ ] **2. Second review round** (brief:
       `research/demo-review-20260926/ROUND2-BRIEF.md`, Claude and Codex per
       demo), after item 1 merges; correct each page until **Reviewed**.
+  - [x] flat-hash-table, one-shot-channels: **owner-review** (merged
+        `103a45730c`; the rejected table example lacked the proof that
+        made its false claim the only reason for failure, fixed; the Cmm
+        excerpt regenerated from the current build on x86-64). Owner:
+        keep the full 201-line interface or use excerpts? The Cmm stamps
+        go stale on compiler changes and nothing checks the excerpt.
   - [ ] binary-search · constant-folding · dfa-equivalence · egraphs ·
-        flat-hash-table · hindley-milner · http · lz4 · mode-solver ·
-        one-shot-channels · online-union-find · reference-locks ·
-        regex-automata (its lowering gap stays, stated as an open question)
+        hindley-milner · http · lz4 · mode-solver · online-union-find ·
+        reference-locks · regex-automata (its lowering gap stays, stated as
+        an open question). In flight: regex/HM, binary-search/
+        constant-folding/union-find; dfa and locks after deduplication;
+        the rest after the presentation branch.
   - [ ] hm-wasm-compiler, after item 3.
 - [ ] **3. HM-to-Wasm is not trivial** (AMD box).
   - [x] Example programs compiled by the verified compiler and run, with
@@ -101,11 +109,20 @@ this file.
       compiler-printed ones (HTTP, mode solver, SAT spec); remove duplicated
       code (two DFA pipelines, near-copy lock modules, SAT solver variants).
 - [ ] **8. Remaining weak contracts** (fixed, or stated on the page):
-  - [ ] LZ4 `decompress` contract, via labelled arguments in dependent
-        types (wart 38).
-  - [ ] HTTP: malformed request and header lines must be rejected.
-  - [ ] Rings: insert and remove in the `Owned` interface.
-  - [ ] Lists/trees: lemma relating `contents`, `nodes` and `List.rev`.
+  - [x] LZ4 `decompress` contract, via labelled arguments in dependent
+        types (wart 38; `?capacity:(c : int) ->`; merged `2c5c38bbb0`).
+        Follow-ups: `parsing/attributes.ml` and `parsing/extensions.ml`
+        `-dparsetree` references lack the `None` binder line (pre-existing);
+        Merlin not updated for Vox typer changes.
+  - [x] HTTP: malformed request and header lines must be rejected (three
+        rejection laws; `Invalid_crlf` and mid-line budget exhaustion stay
+        unspecified, stated on the page; merged `a4f6450a19`).
+  - [x] Rings: insert and remove in the `Owned` interface (any length,
+        exact heap; uses the heap laws `put_law`/`commute_law`, stated;
+        `Pref_ring_general.Proofs` is public; merged `a4f6450a19`).
+  - [x] Lists/trees: lemma relating `contents`, `nodes` and `List.rev`
+        (via `rev_onto`; `Pref_tree.observe` returns an exact model; merged
+        `a4f6450a19`).
 - [ ] **9. Diagnostics and proof noise.**
   - [x] Name the failing conjunct of an `&&` goal (wart 14, `10d8f2bcd8`).
   - [ ] Erasure lints: total function with a ghost result whose body is not
@@ -164,6 +181,18 @@ this file.
         argument, each `assume_`; batched goals need per-goal cores.
       - Measure the cost on the library; if small, consider running it in
         `dev test` by default.
+- [ ] **Warning 226 precision** (owner's decision, 27 September): keep 226
+      on by default; fix the check rather than suppressing. (a) An
+      application is erasable only if its arguments' required modes survive
+      capture by `ghost_` (immutable, aliased); (b) an undetermined mode is
+      not capturable; (c) report all layers at once: a candidate is
+      proof-only if every use is ghost or inside another proof-only
+      candidate's definition (fixpoint). Then remove the two
+      `[@warning "-226"]` in `maps.ml` and `dependent_expressions.ml`.
+      Start after subsumption merges (both touch `typecore.ml`).
+- [ ] **E-graph comments in the 13 inventory-locked files**, regenerating
+      `vox_egraph_rule_handle.spec.json` (owner: yes). Flat hash table page
+      keeps its full interface (owner: yes).
 - [ ] **14. Upstream OxCaml reports:** the expect tool overwrites single
       blocks with principal output; the `node option` kind error.
 - [ ] **Small warts** (group 3 in the conversation of 27 September):

@@ -1,3 +1,11 @@
+(* Facts about bindings that survive admitting new nodes, for
+   [Vox_egraph_pattern_admit], which admits the parts of a right-hand side
+   one after another. [bounded] (every id below a count) and [available]
+   (every variable of a pattern bound to an existing id) only weaken as the
+   count grows; [preserve] keeps [agrees] across a [preserved] origin array.
+   [rhs_admissible] collects the premises of [Vox_egraph_pattern_admit.admit]
+   for the right-hand side of a matched rule. *)
+
 module L = Vox_egraph_language_spec
 module R = Vox_egraph_rule_spec
 module Q = Vox_egraph_match_spec

@@ -1,3 +1,11 @@
+(* Implementation of the trusted interface vox_egraph_quantifier.mli, which
+   gives [closed_bindings] only through its defining equation
+   [closed_bindings_def]. This file shows that a total function satisfying
+   that equation exists: [quantify] either drops the first variable (and
+   restarts [count] at the node count) or keeps the variables and lowers
+   [count], so it terminates by the lexicographic measure
+   (length of [vars], [count]). *)
+
 module C = Vox_egraph_closure_spec
 module L = Vox_egraph_language_spec
 module R = Vox_egraph_rule_spec

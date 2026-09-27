@@ -54,8 +54,8 @@ let (correct @ total) : (table : K.table) @ immutable -> (heap : Heap.heap) @ im
           && L.get out.state.X.machine.E.locals base_local === Some (S.I32 (Heap.used allocation.A.heap))
           && V.length out.state.X.memory === V.length state.X.memory)} @ immutable =
   fun table heap id captures count fragment frame_base frame_local state base limit base_local limit_local premise ->
-    let body = Allocate.emit fragment frame_local base_local in
-    let success = Lift.embed body T.Empty in
+    let body = ghost_ (Allocate.emit fragment frame_local base_local) in
+    let success = ghost_ (Lift.embed body T.Empty) in
     ghost_ (Select.correct fragment.Write.bytes base_local limit_local base limit state T.No_labels success T.Empty T.Empty ();
       emit_def fragment frame_local base_local limit_local;
       cost_def base limit fragment frame_local base_local limit_local;

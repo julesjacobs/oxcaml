@@ -1,3 +1,9 @@
+(* Proof of [Vox_egraph_interpret_wrapping.sound] by structural recursion on
+   the derivation. [holds] is the caller's proof that every valid instance
+   of every rule preserves evaluation in [env]; it is used only at [Rule]
+   steps. The congruence cases unfold [as_int] and [as_bool] because [eval]
+   combines coerced values. *)
+
 module L = Vox_egraph_language_spec
 module LP = Vox_egraph_language_proof
 module R = Vox_egraph_rule_spec

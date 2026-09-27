@@ -18,9 +18,9 @@ sources:
   - testsuite/tests/vox/vox_lz4_public_client.ml — Public-only client
   - testsuite/tests/vox/lz4_boundary.ml — Public-only compile, erasure check, rejected clients and finalizer checks
 ---
-`Vox_lz4` compresses and decompresses independent raw LZ4 blocks of up to 4 MiB (4,194,304 bytes), with no frame header, checksum or dictionary. Its specification is two models written as total functions in `vox_lz4_spec_*.ml`: a compressor model that fixes which positions are hashed, which earlier position is tried as a match and how the matches are laid out on the wire, and a decoder model that fixes the status and output bytes for every input. `compress source` is proved to return exactly the wire bytes of the compressor model, not merely some valid encoding. `decompress_verified wire capacity` is proved to agree with the decoder model: the same status (success, malformed or output limit) and, on success, the same length and every byte. `roundtrip`, an erased theorem, proves that decoding the compressor model's output with a capacity from the source length to 4,194,304 gives back the source, and `compress_decompress source`, which runs both functions, is proved to return the source.
+`Vox_lz4` compresses and decompresses independent raw LZ4 blocks of up to 4 MiB (4,194,304 bytes), with no frame header, checksum or dictionary. Its specification is two models written as total functions in `vox_lz4_spec_*.ml`: a compressor model that fixes which positions are hashed, which earlier position is tried as a match and how the matches are laid out on the wire, and a decoder model that fixes the status and output bytes for every input. `compress source` is proved to return exactly the wire bytes of the compressor model, not merely some valid encoding. `decompress_verified wire capacity` is proved to agree with the decoder model: the same status (success, malformed or output limit) and, on success, the same length and every byte. The ordinary entry point `decompress ?capacity wire` is proved to agree with the same model at the capacity it is given, or at 4,194,304 without one, and to return `Invalid_capacity` for a capacity outside 0 to 4,194,304. `roundtrip`, an erased theorem, proves that decoding the compressor model's output with a capacity from the source length to 4,194,304 gives back the source, and `compress_decompress source`, which runs both functions, is proved to return the source.
 
-The ordinary entry point `decompress` has no contract: its type is `?capacity:int -> string -> (string, decode_error) result`, and only its comment says that it checks the capacity and calls `decompress_verified`. The position carried by `Malformed` is not specified. The models are the definition of LZ4 here; their agreement with liblz4 is tested, not proved. Only normal return is specified; the codec functions may raise `Out_of_memory`, and `compress` raises `Invalid_argument` above 4 MiB.
+The position carried by `Malformed` is not specified. The models are the definition of LZ4 here; their agreement with liblz4 is tested, not proved. Only normal return is specified; the codec functions may raise `Out_of_memory`, and `compress` raises `Invalid_argument` above 4 MiB.
 
 ## Client example
 
@@ -36,13 +36,13 @@ The decoder model classifies inputs precisely enough to refute false claims abou
 
 @code testsuite/tests/vox/lz4_boundary.ml "let f (wire : string) :" "|}]"
 
-The same test also requires rejection of a claim that `compress` returns its input, a runtime use of the erased `contents`, and two references to implementation modules that the client cannot see, each with its exact error.
+The same test checks three uses of `decompress`'s contract (an invalid capacity, the default capacity and a given one) and requires rejection of a claim that the default capacity is 0, of a claim that `compress` returns its input, a runtime use of the erased `contents`, and two references to implementation modules that the client cannot see, each with its exact error.
 
 ## Interface
 
 @code verification/library/vox_lz4.mli
 
-`@ ghost` marks `roundtrip`'s result as erased and `@@ total` says it terminates without effects. The two relations are defined in `vox_lz4_spec.ml`. `let[@def]` also generates a lemma, such as `matches_model_def`, that states the definition's equation for proofs to invoke:
+In `decompress`, `?capacity:(c : int)` names the optional argument as the caller passed it: `c` is an `int option`, `None` when the argument is left out. `@ ghost` marks `roundtrip`'s result as erased and `@@ total` says it terminates without effects. The two relations are defined in `vox_lz4_spec.ml`. `let[@def]` also generates a lemma, such as `matches_model_def`, that states the definition's equation for proofs to invoke:
 
 @code verification/library/vox_lz4_spec.ml "let[@def] (matches_model @ total)" "from_source model))"
 
@@ -59,11 +59,11 @@ The same test also requires rejection of a claim that `compress` returns its inp
 ## Scope
 
 - Operations: `compress`, `decompress_verified`, `decompress`, `compress_decompress` and `roundtrip`. There is no frame format, streaming across blocks or dictionary.
-- Sizes: sources above 4,194,304 bytes make `compress` and `compress_decompress` raise `Invalid_argument`. `decompress_verified` requires a capacity from 0 to 4,194,304 as a precondition; `decompress` returns `Invalid_capacity` outside that range, by its code, not by a contract. The limit is on uncompressed bytes: `compress` output can be longer, and the wire model allows up to 4,210,768 bytes.
+- Sizes: sources above 4,194,304 bytes make `compress` and `compress_decompress` raise `Invalid_argument`. `decompress_verified` requires a capacity from 0 to 4,194,304 as a precondition; `decompress` returns `Invalid_capacity` outside that range, as its contract states. The limit is on uncompressed bytes: `compress` output can be longer, and the wire model allows up to 4,210,768 bytes.
 - Each decoding call with a valid capacity allocates a raw buffer of `capacity` bytes, so `decompress` without `~capacity` allocates 4 MiB whatever the input. Allocation failure raises `Out_of_memory`.
 - `compress`'s contract fixes the output bytes. A compressor that chose different matches would not meet it, and nothing requires the output to be shorter than the input.
 - The decoder model rejects a final token whose low four bits are nonzero, and, in a block with a match, requires the last five decoded bytes to be literals and the last match to start at least 12 bytes before the end.
-- Errors: only the kind of error is specified (`Malformed`, `Output_limit`, never `Invalid_capacity` from `decompress_verified`); the `malformed` reason and position are not. `lz4_fast_decoder_reference.ml` compares them with an unverified reference decoder, `vox_lz4_baseline.ml`, by testing.
+- Errors: only the kind of error is specified (`Malformed`, `Output_limit`, never `Invalid_capacity` from `decompress_verified`, and from `decompress` exactly when the capacity is out of range); the `malformed` reason and position are not. `lz4_fast_decoder_reference.ml` compares them with an unverified reference decoder, `vox_lz4_baseline.ml`, by testing.
 - An exception while scanning or decoding consumes the ownership of the raw buffer, which the finalizer then frees at some later collection; an exception from the final copy releases the buffer before it is re-raised. There is no exception-safety or prompt-cleanup theorem.
 - The ghost `roundtrip` is total; the codec functions are specified for normal return only.
 

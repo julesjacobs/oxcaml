@@ -122,9 +122,9 @@ let (correct @ total) : (outer : T.labels) @ immutable -> (depth : B.u32) -> (en
     let captured = {X.memory = state.X.memory; machine = {E.locals = captured_locals; stack = state.X.machine.E.stack}} in
     let exhausted = Branch.target depth (Continue.labels T.Empty outer) captured () in
     let out = Hmc_wasm_cons_continue.correct T.Empty outer depth exhausted program globals stack_limit signature next_signature activation next_activation frames result_type head_type next context schema fragment capacity max_pc old_pc left right heap_base heap_local limit_local cells old_padding table heap limit slots.Capture.head_tag slots.Capture.head_payload slots.Capture.tail_tag slots.Capture.tail_payload frame_stop captured base_local base before_frame tail () in
-    let capture_code = Capture.emit fragment.Lower.head_tag fragment.Lower.head_payload slots base_local in
-    let body = Success.emit fragment base_local heap_local slots.Capture.head_tag slots.Capture.head_payload slots.Capture.tail_tag slots.Capture.tail_payload in
-    let guarded = Exit.emit (Wasm_four_words.width ()) heap_local limit_local body depth T.Empty in
+    let capture_code = ghost_ (Capture.emit fragment.Lower.head_tag fragment.Lower.head_payload slots base_local) in
+    let body = ghost_ (Success.emit fragment base_local heap_local slots.Capture.head_tag slots.Capture.head_payload slots.Capture.tail_tag slots.Capture.tail_payload) in
+    let guarded = ghost_ (Exit.emit (Wasm_four_words.width ()) heap_local limit_local body depth T.Empty) in
     let target = match out.Guarded.allocation with
       | A.Exhausted -> exhausted
       | A.Allocated _ -> {T.code = T.Empty; labels = outer; state = out.Guarded.state} in

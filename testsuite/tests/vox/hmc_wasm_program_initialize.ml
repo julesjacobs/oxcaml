@@ -1,3 +1,21 @@
+(* Initialization: the heap and the memory image of the module, built for
+   a given input.
+
+   Hmc_heap_initialize allocates a closure for each top-level definition
+   and one for the entry, and enters the entry on [input]: the result is a
+   heap-machine configuration that decodes to the initial state of the tail
+   machine ([Heap.correct]). [install] then lowers the program
+   (Hmc_wasm_program_lower) and writes the linear memory: the closure
+   descriptors at [table_base], the current frame at [frame_base], the
+   stack of saved frames from [stack_base] and the heap from [heap_base].
+   [installed] says that the result satisfies [State.valid], the invariant
+   of the proofs about the Wasm run, at step zero of the tail machine.
+
+   The compiler calls [initialize] once, for the placeholder input;
+   Hmc_wasm_program_input shows that the prologue turns that state into the
+   one [initialize] builds for the run's input. [Layout_rejected] and
+   [Heap_exhausted] are characterized only by this construction
+   ([layout_accepts]). *)
 include Hmc_layout
 module B = Wasm_u32
 module D = Hm_declarative

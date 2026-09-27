@@ -39,7 +39,7 @@ module Make (Key : Vox_table_map.Key) = struct
         P.own r.state === H.put (P.own token) (T.location r.table) r.view.model}
       @ unique = fun capacity plan token ->
     let allocated = T.create capacity token in
-    let entry = empty_entry allocated.value in
+    let entry = ghost_ (empty_entry allocated.value) in
     let view = {I.model = ghost_ (M.initial capacity entry);
       routes = ghost_ (M.repeat capacity (0, 0)); plan} in
     ghost_ (Initial.initial capacity entry view);
@@ -53,7 +53,7 @@ module Make (Key : Vox_table_map.Key) = struct
         P.own r.state === H.put (P.own token) (T.location r.table) r.view.model}
       @ unique = fun token ->
     let allocated = T.create 16 token in
-    let entry = empty_entry allocated.value in
+    let entry = ghost_ (empty_entry allocated.value) in
     let view = {I.model = ghost_ (M.initial 16 entry);
       routes = ghost_ (M.repeat 16 (0, 0)); plan = Vox_table_probe.One} in
     ghost_ (
@@ -73,7 +73,7 @@ module Make (Key : Vox_table_map.Key) = struct
         P.own r.#state === H.put (P.own token) (T.location table) r.#view.model}
       @ unique = fun table before token ->
     let state = T.clear table {T.model = before.model} token in
-    let entry = empty_entry table in
+    let entry = ghost_ (empty_entry table) in
     let view = {I.model = ghost_ (M.initial before.model.capacity entry);
       routes = ghost_ (M.repeat before.model.capacity (0, 0)); plan =
         before.plan} in

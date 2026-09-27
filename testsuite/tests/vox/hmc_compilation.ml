@@ -1,3 +1,28 @@
+(* The public interface, hmc_compilation.mli, implemented over
+   Hmc_compiler.
+
+   Pipeline: the one of Hmc_compiler, whose [compile] this module wraps. It
+   maps the internal results to the public [error]s and states the theorems
+   in terms of Hmc_compilation_model, which restates what it needs rather
+   than using the definitions of the passes.
+
+   Theorem shape. [compile] returns [Rejected r], where [reason r] states
+   what is wrong with the term, or [Compiled a]. [artifact] is a refinement
+   type whose invariant is [Core.correct] of erased evidence, so each lemma
+   below needs only the artifact, an input word and a step count:
+
+     static_validity  the bytes pass validation
+     safe             at every step count, a run is running or finished
+     reflection       a word returned by a run is the source's result on
+                      that input
+     preservation     if the source returns a word, a run finishes returning
+                      it or reporting exhaustion
+     normal           under the resource premise [M.sufficient], a run
+                      finishes returning it
+     exhaustion       a reported exhaustion happened at a failed guard
+
+   [untypable] and [no_entry_type] give the meaning of the two type
+   errors. *)
 module D = Hm_declarative
 module W = Hmc_word64
 module B = Wasm_u32
@@ -12,6 +37,8 @@ module S = Wasm_scalar
 module G = Wasm_globals
 module GE = Wasm_global_execution
 
+(* Only [code] exists at run time. The erased fields are the evidence for
+   [Core.correct], which the refinement of [artifact] carries. *)
 type payload = {code : B.bytes; term : D.term @@ ghost;
   configuration : M.layout @@ ghost; memory : B.bytes @@ ghost; pages : B.u32 @@ ghost;
   evidence : Core.artifact @@ ghost}
@@ -36,6 +63,10 @@ let[@def] (layout @ total) (artifact : artifact @ immutable) = ghost_ artifact.c
 let[@def] (reason @ total) (rejection : rejection @ immutable) = rejection.cause
 let[@def] (program @ total) (rejection : rejection @ immutable) = ghost_ rejection.rejected
 
+(* A rejection keeps, erased, the rejected term and the inference run. Its
+   refinement says that [Type_error] comes with a run that found no type,
+   and [Entry_type_mismatch] with one whose type has no instance
+   [word -> word]. *)
 let (refuse @ total) : (cause : error) -> (term : D.term) @ immutable -> (run : inference) @ immutable ->
     {u : unit | match cause with
       | Type_error -> (match run with Inference run -> F.untyped term run | No_inference -> false)
@@ -47,6 +78,9 @@ let (refuse @ total) : (cause : error) -> (term : D.term) @ immutable -> (run : 
     let rejection : rejection = {cause; rejected = ghost_ term; run = ghost_ run} in
     ghost_ (reason_def rejection; program_def rejection); Rejected rejection
 
+(* The model restates the shape predicates of Hmc_admission, and below
+   [stack_fits], [target_budget] and [heap_budget]; each [*_agrees] lemma
+   proves a restatement equal to the compiler's definition. *)
 let rec (let_free_agrees @ total) : (term : D.term) @ immutable ->
     {u : unit | M.let_free term = A.let_free term} @ ghost = fun term -> ghost_ (
   M.let_free_def term; A.let_free_def term;
@@ -105,6 +139,9 @@ let compile : (term : D.term) @ immutable -> (configuration : M.layout) @ immuta
     | Core.Initialization_exhausted _ -> refuse Initialization_exhausted term No_inference ()
     | Core.Encoding_rejected -> refuse Encoding_rejected term No_inference ()
 
+(* The two type errors mean that the term has no typing, or none at
+   [word -> word]; Hmc_frontend proves this from the principality of the
+   verified inference. *)
 let (untypable @ total) : (rejection : rejection) @ immutable -> (ty : Copy_spec.ty) @ immutable ->
     (typing : D.typing) @ immutable ->
     {u : unit | reason rejection === Type_error
@@ -126,6 +163,8 @@ let (no_entry_type @ total) : (rejection : rejection) @ immutable -> (typing : D
     | Inference run -> F.no_entry_type rejection.rejected run typing ()
     | No_inference -> ())
 
+(* Runs of the bytes. Each lemma unfolds the artifact's invariant and uses
+   the lemma of Hmc_compiler or Hmc_wasm_program_binary of the same name. *)
 let (safe @ total) : (artifact : artifact) @ immutable -> (input : W.t) @ immutable -> (prefix : C.count) @ immutable ->
     {u : unit | match Wasm_binary_execution.run prefix (bytes artifact) input
         (C.Succ (layout artifact).M.host_capacity) with
@@ -151,6 +190,8 @@ let (reflection @ total) : (artifact : artifact) @ immutable -> (input : W.t) @ 
   fun artifact input prefix after word premise -> ghost_ (
     bytes_def artifact; source_def artifact; layout_def artifact;
     M.returned_def after word;
+    (* [M.returned] reads the eight globals by position; rebuild the
+       registers from them to use the internal statement. *)
     match after.GE.globals.G.values, after.GE.globals.G.permissions with
     | S.Push (S.I32 frame, S.Push (S.I32 heap, S.Push (S.I32 heap_limit, S.Push (S.I32 top,
         S.Push (S.I32 stack_limit, S.Push (S.I32 status, S.Push (S.I64 tag, S.Push (S.I64 payload, S.Empty)))))))),
@@ -174,6 +215,8 @@ module Input = Hmc_wasm_program_input
 module Dispatch = Hmc_wasm_program_dispatch
 module Fuel = Wasm_control_compose
 
+(* The final Wasm state of a stopped run, and the model's [M.returned] or
+   [M.exhausted] read off the internal endpoint. *)
 let (observe @ total) : (program : Hmc_tail_ir.program) @ immutable ->
     (globals : Hmc_heap_machine.globals) @ immutable -> (lowered : Hmc_wasm_program_lower.program) @ immutable ->
     (context : State.context) @ immutable -> (endpoint : E.endpoint) @ immutable -> (word : W.t) @ immutable ->
@@ -238,6 +281,12 @@ let (preservation @ total) : (artifact : artifact) @ immutable -> (input : W.t) 
       target.Init.context execution.E.endpoint word () in
     {M.fuel = Fuel.add (Dispatch.five ()) (C.Succ execution.E.fuel); after})
 
+(* The resource premise. By Hmc_tail_simulation, a source run of [n] steps
+   is matched by a tail-machine run of at most [M.target_budget n] = 2(n+1)
+   steps. Each of these steps allocates at most [capacity] heap cells, where
+   [capacity] is the largest frame and fits in [M.frame_room] bytes, and
+   saves at most one frame on the stack (Hmc_heap_bound.initial_plans).
+   [M.sufficient] leaves room for both, so [Binary.normal] applies. *)
 let rec (stack_fits_agrees @ total) : (frames : D.index) @ immutable -> (capacity : D.index) @ immutable ->
     {u : unit | M.stack_fits frames capacity = Hmc_frame_capacity.le frames capacity} @ ghost =
   fun frames capacity -> ghost_ (
@@ -318,6 +367,9 @@ let (normal @ total) : (artifact : artifact) @ immutable -> (input : W.t) @ immu
     let after = observe program globals lowered context execution.E.endpoint word () in
     {M.fuel = Fuel.add (Dispatch.five ()) (C.Succ execution.E.fuel); after})
 
+(* A run that finished with status 2 (heap) or 3 (stack) stopped at a guard
+   that found too little space. The witness is the state at the guard, the
+   number of steps that reach it and the number from it to the end. *)
 module Failed = Hmc_failed_guard_model
 module Guard = Hmc_failed_guard_calls
 let (exhaustion @ total) : (artifact : artifact) @ immutable -> (input : W.t) @ immutable -> (prefix : C.count) @ immutable ->

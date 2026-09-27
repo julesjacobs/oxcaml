@@ -1,3 +1,8 @@
+(* On a valid store, the trusted typing condition
+   [Vox_egraph_closure_spec.binding_valid] on the model coincides with the
+   executable check [Vox_egraph_match_subst.accepts] with which the rewriter
+   accepts a list of bindings. Used by [Vox_egraph_rule_scan]. *)
+
 module C = Vox_egraph_closure_spec
 module V = Vox_egraph_rule_store
 module B = Vox_egraph_match_subst

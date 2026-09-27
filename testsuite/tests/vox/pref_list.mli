@@ -94,6 +94,28 @@ val of_list : (values : int list) ->
       && Pref.own b.state === heap b.model
       && contents b.model === values} @ unique
 
+val node_values : node list @ immutable -> int list @@ total
+val node_values_def : (ns : node list) @ immutable ->
+  {u : unit | node_values ns ===
+    (match ns with [] -> [] | n :: rest -> n.value :: node_values rest)}
+  @@ total
+(** [rev_onto xs ys] is [List.rev_append xs ys]. *)
+val rev_onto : ('a : immutable_data).
+  'a list @ immutable total -> 'a list @ immutable total ->
+  'a list @ immutable total @@ total
+val rev_onto_def : ('a : immutable_data).
+  (xs : 'a list) @ immutable -> (ys : 'a list) @ immutable ->
+  {u : unit | rev_onto xs ys ===
+    (match xs with [] -> ys | x :: rest -> rev_onto rest (x :: ys))} @@ total
+val contents_nodes : (xs : model) @ immutable ->
+  {u : unit | contents xs === node_values (nodes xs)} @ ghost @@ total
+val nodes_rev_append : (xs : model) @ immutable -> (ys : model) @ immutable ->
+  {u : unit | nodes (rev_append xs ys) === rev_onto (nodes xs) (nodes ys)}
+  @ ghost @@ total
+val contents_rev_append : (xs : model) @ immutable -> (ys : model) @ immutable ->
+  {u : unit | contents (rev_append xs ys) ===
+    rev_onto (contents xs) (contents ys)} @ ghost @@ total
+
 module Owned : sig
   type t : value & void & void
   val model : t @ local immutable total ghost -> model @ ghost @@ total

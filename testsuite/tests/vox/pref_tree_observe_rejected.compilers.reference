@@ -1,0 +1,8 @@
+File "pref_tree_observe_rejected.ml", line 27, characters 2-9:
+27 |   r.state
+       ^^^^^^^
+Error: Refinement could not be proved (counterexample)
+File "pref_tree_observe_rejected.ml", line 19, characters 43-68:
+19 | let bad () : {t : node option Pref.token | Pref.own t === heap Empty} @ unique =
+                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.

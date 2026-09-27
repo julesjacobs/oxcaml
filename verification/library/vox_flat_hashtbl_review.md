@@ -41,8 +41,9 @@ other collection operations are unused by this contract.
 This document supplies the trust and resource conventions accompanying that
 list. The semantic surface contains no probe invariant or opaque correctness
 predicate. `Map.t` is abstract; clients reason only with its laws
-(`lookup_empty`, `put_get`, `erase_get`, `count_put`, `count_erase`) and
-the type of `empty`, which has count zero.
+(`lookup_empty`, `put_get`, `erase_get`, `count_put`, `count_erase`,
+`lookup_equal`, `count_nonnegative`) and the type of `empty`, which has
+count zero.
 Each law is proved in `vox_table_bindings.ml`, where the map is an
 association list with at most one binding per `Key.equal` class. That
 invariant is what makes `count` the number of bindings.
@@ -57,6 +58,10 @@ Physical empty slots are absent from the public model. Checked ghost
 compaction bridges preserve lookup, key equivalence, distinctness, map
 updates and cardinality.
 `version` identifies the exact owned storage state associated with a snapshot.
+`current table view heap`, the precondition of every operation but `create`,
+says that `heap` holds `version view` at `location table`; it is a
+transparent definition, so the verifier assumes `current_def` wherever it is
+fully applied and clients never call it.
 The snapshot has void layout and is immutable. A saved snapshot grants no
 access without the matching current ownership token.
 

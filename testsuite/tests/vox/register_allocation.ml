@@ -344,19 +344,18 @@ let rec (write_preserves @ total) :
   fun xs n value m -> ghost_ (
   write_def xs n value;
   nth_def xs m;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
     if n = 0 then begin
       nth_def (value :: rest) m;
-      u
+      ()
     end else begin
       write_preserves rest (n - 1) value (m - 1);
       (match write rest (n - 1) value with
        | None -> ()
        | Some result -> nth_def (head :: result) m);
-      u
+      ()
     end)
 
 let rec (write_reads @ total) :
@@ -368,17 +367,16 @@ let rec (write_reads @ total) :
   @ ghost =
   fun xs n value -> ghost_ (
   write_def xs n value;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
-    if n = 0 then begin nth_def (value :: rest) n; u end
+    if n = 0 then begin nth_def (value :: rest) n; () end
     else begin
       write_reads rest (n - 1) value;
       (match write rest (n - 1) value with
        | None -> ()
        | Some result -> nth_def (head :: result) n);
-      u
+      ()
     end)
 
 let rec (subset_member @ total) :
@@ -389,12 +387,11 @@ let rec (subset_member @ total) :
   fun xs ys reg -> ghost_ (
   subset_def xs ys;
   member_def reg xs;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
-    if head = reg then u
-    else begin subset_member rest ys reg; u end)
+    if head = reg then ()
+    else begin subset_member rest ys reg; () end)
 
 let (subset_add @ total) :
   (value : int) -> (xs : int list) -> (ys : int list) ->
@@ -429,27 +426,25 @@ let rec (subset_cons @ total) :
   fun xs ys head -> ghost_ (
   subset_def xs ys;
   subset_def xs (head :: ys);
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | reg :: rest ->
     subset_cons rest ys head;
     member_def reg (head :: ys);
-    u)
+    ())
 
 let rec (subset_reflexive @ total) :
   (xs : int list) -> {u : unit | subset xs xs}
   @ ghost =
   fun xs -> ghost_ (
   subset_def xs xs;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
     subset_reflexive rest;
     subset_cons rest rest head;
     member_def head xs;
-    u)
+    ())
 
 let rec (remove_keeps @ total) :
   (removed : int) -> (xs : int list) -> (reg : int) ->
@@ -460,12 +455,11 @@ let rec (remove_keeps @ total) :
   remove_def removed xs;
   member_def reg xs;
   member_def reg (remove removed xs);
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
     remove_keeps removed rest reg;
-    u)
+    ())
 
 let rec (union_keeps_right @ total) :
   (xs : int list) -> (ys : int list) -> (reg : int) ->
@@ -473,14 +467,13 @@ let rec (union_keeps_right @ total) :
   @ ghost =
   fun xs ys reg -> ghost_ (
   union_def xs ys;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
     union_keeps_right rest ys reg;
     add_def head (union rest ys);
     member_def reg (head :: union rest ys);
-    u)
+    ())
 
 let (add_keeps @ total) :
   (value : int) -> (xs : int list) -> (reg : int) ->
@@ -498,15 +491,14 @@ let rec (union_keeps_left @ total) :
   fun xs ys reg -> ghost_ (
   union_def xs ys;
   member_def reg xs;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
     union_keeps_left rest ys reg;
     add_keeps head (union rest ys) reg;
     add_def head (union rest ys);
     member_def reg (head :: union rest ys);
-    u)
+    ())
 
 let rec (live_out_contains @ total) :
   (live : int list list) -> (successors : int list) ->
@@ -519,19 +511,18 @@ let rec (live_out_contains @ total) :
   fun live successors successor reg row -> ghost_ (
   live_out_def live successors;
   member_def successor successors;
-  let u = () in
   match successors with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
     if head = successor then begin
       union_keeps_left row (live_out live rest) reg;
-      u
+      ()
     end else begin
       live_out_contains live rest successor reg row;
       union_keeps_right
         (match nth live head with None -> [] | Some xs -> xs)
         (live_out live rest) reg;
-      u
+      ()
     end)
 
 let (successor_live @ total) :
@@ -549,15 +540,14 @@ let (successor_live @ total) :
   fun live instruction current successor row reg -> ghost_ (
   survivors_def live instruction;
   live_out_contains live (successors instruction) successor reg row;
-  let u = () in
   match definition instruction with
   | None ->
     subset_member (survivors live instruction) current reg;
-    u
+    ()
   | Some dst ->
     remove_keeps dst (live_out live (successors instruction)) reg;
     subset_member (survivors live instruction) current reg;
-    u)
+    ())
 
 let rec (closed_lookup @ total) :
   (code : instruction list) -> (live : int list list) ->
@@ -574,14 +564,13 @@ let rec (closed_lookup @ total) :
   fun code live index pc instruction -> ghost_ (
   closed_from_def code live index;
   nth_def code pc;
-  let u = () in
   match code with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
-    if pc = 0 then u
+    if pc = 0 then ()
     else begin
       closed_lookup rest live (index + 1) (pc - 1) instruction;
-      u
+      ()
     end)
 
 let rec (sweep_closed @ total) :
@@ -593,15 +582,14 @@ let rec (sweep_closed @ total) :
   fun code live index -> ghost_ (
   sweep_def code live index;
   closed_from_def code live index;
-  let u = () in
   match code with
-  | [] -> u
+  | [] -> ()
   | instruction :: rest ->
     let old = match nth live index with None -> [] | Some xs -> xs in
     transfer_def live instruction;
     subset_union (uses instruction) (survivors live instruction) old;
     sweep_closed rest live (index + 1);
-    u)
+    ())
 
 let rec (stabilize_closed @ total) :
   (fuel : int) -> (code : instruction list) -> (live : int list list) ->
@@ -611,16 +599,15 @@ let rec (stabilize_closed @ total) :
     | Some result -> closed_from code result 0} @ ghost =
   fun fuel code live -> ghost_ (
   stabilize_def fuel code live;
-  let u = () in
-  if fuel <= 0 then u
+  if fuel <= 0 then ()
   else
     let next, changed = sweep code live 0 in
     if changed then begin
       stabilize_closed (fuel - 1) code next;
-      u
+      ()
     end else begin
       sweep_closed code live 0;
-      u
+      ()
     end)
 [@@decreases fuel]
 
@@ -633,12 +620,11 @@ let (add_edge_covers @ total) :
   fun a b graph -> ghost_ (
   add_edge_def a b graph;
   adjacent_def a b (add_edge a b graph);
-  let u = () in
-  if a = b then u
-  else if member_edge (edge a b) graph then u
+  if a = b then ()
+  else if member_edge (edge a b) graph then ()
   else begin
     member_edge_def (edge a b) ((edge a b) :: graph);
-    u
+    ()
   end)
 
 let (add_edge_preserves @ total) :
@@ -647,11 +633,10 @@ let (add_edge_preserves @ total) :
   @ ghost =
   fun pair a b graph -> ghost_ (
   add_edge_def a b graph;
-  let u = () in
-  if a = b || member_edge (edge a b) graph then u
+  if a = b || member_edge (edge a b) graph then ()
   else begin
     member_edge_def pair ((edge a b) :: graph);
-    u
+    ()
   end)
 
 let rec (connect_one_preserves @ total) :
@@ -663,13 +648,12 @@ let rec (connect_one_preserves @ total) :
   @ ghost =
   fun pair vertex vertices graph -> ghost_ (
   connect_one_def vertex vertices graph;
-  let u = () in
   match vertices with
-  | [] -> u
+  | [] -> ()
   | other :: rest ->
     add_edge_preserves pair vertex other graph;
     connect_one_preserves pair vertex rest (add_edge vertex other graph);
-    u)
+    ())
 
 let rec (connect_one_covers @ total) :
   (vertex : int) -> (vertices : int list) -> (graph : edge list) ->
@@ -681,9 +665,8 @@ let rec (connect_one_covers @ total) :
   fun vertex vertices graph other -> ghost_ (
   connect_one_def vertex vertices graph;
   member_def other vertices;
-  let u = () in
   match vertices with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
     if head = other then begin
       add_edge_covers vertex head graph;
@@ -691,10 +674,10 @@ let rec (connect_one_covers @ total) :
         (add_edge vertex head graph);
       adjacent_def vertex other (connect_one vertex rest (add_edge vertex head graph));
       adjacent_def vertex other (add_edge vertex head graph);
-      u
+      ()
     end else begin
       connect_one_covers vertex rest (add_edge vertex head graph) other;
-      u
+      ()
     end)
 
 let (edge_symmetric @ total) :
@@ -712,13 +695,12 @@ let rec (clique_preserves @ total) :
   @ ghost =
   fun pair vertices graph -> ghost_ (
   clique_def vertices graph;
-  let u = () in
   match vertices with
-  | [] -> u
+  | [] -> ()
   | vertex :: rest ->
     connect_one_preserves pair vertex rest graph;
     clique_preserves pair rest (connect_one vertex rest graph);
-    u)
+    ())
 
 let rec (clique_covers @ total) :
   (vertices : int list) -> (graph : edge list) -> (a : int) -> (b : int) ->
@@ -730,26 +712,25 @@ let rec (clique_covers @ total) :
   clique_def vertices graph;
   member_def a vertices;
   member_def b vertices;
-  let u = () in
   match vertices with
-  | [] -> u
+  | [] -> ()
   | vertex :: rest ->
     if vertex = a then begin
       connect_one_covers vertex rest graph b;
       clique_preserves (edge a b) rest (connect_one vertex rest graph);
       adjacent_def a b (connect_one vertex rest graph);
       adjacent_def a b (clique rest (connect_one vertex rest graph));
-      u
+      ()
     end else if vertex = b then begin
       connect_one_covers vertex rest graph a;
       edge_symmetric a b;
       clique_preserves (edge a b) rest (connect_one vertex rest graph);
       adjacent_def vertex a (connect_one vertex rest graph);
       adjacent_def a b (clique rest (connect_one vertex rest graph));
-      u
+      ()
     end else begin
       clique_covers rest (connect_one vertex rest graph) a b;
-      u
+      ()
     end)
 
 let rec (interference_preserves @ total) :
@@ -761,9 +742,8 @@ let rec (interference_preserves @ total) :
   @ ghost =
   fun pair code live index graph -> ghost_ (
   interference_def code live index graph;
-  let u = () in
   match code with
-  | [] -> u
+  | [] -> ()
   | instruction :: rest ->
     (match definition instruction with
      | None -> interference_preserves pair rest live (index + 1) graph
@@ -772,7 +752,7 @@ let rec (interference_preserves @ total) :
          connect_one dst (live_out live (successors instruction)) graph in
        connect_one_preserves pair dst (live_out live (successors instruction)) graph;
        interference_preserves pair rest live (index + 1) next_graph);
-    u)
+    ())
 
 let rec (interference_covers @ total) :
   (code : instruction list) -> (live : int list list) ->
@@ -790,9 +770,8 @@ let rec (interference_covers @ total) :
   fun code live index graph pc dst other -> ghost_ (
   nth_def code pc;
   interference_def code live index graph;
-  let u = () in
   match code with
-  | [] -> u
+  | [] -> ()
   | instruction :: rest ->
     let next_graph = match definition instruction with
       | None -> graph
@@ -807,11 +786,11 @@ let rec (interference_covers @ total) :
          interference_preserves (edge dst other) rest live (index + 1) next_graph;
          adjacent_def dst other next_graph;
          adjacent_def dst other (interference rest live (index + 1) next_graph));
-      u
+      ()
     end else begin
       interference_covers rest live (index + 1) next_graph
         (pc - 1) dst other;
-      u
+      ()
     end)
 
 let (graph_entry_covers @ total) :
@@ -826,15 +805,14 @@ let (graph_entry_covers @ total) :
   @ ghost =
   fun code live a b -> ghost_ (
   graph_def code live;
-  let u = () in
   match live with
-  | [] -> u
+  | [] -> ()
   | entry :: _ ->
     clique_covers entry [] a b;
     interference_preserves (edge a b) code live 0 (clique entry []);
     adjacent_def a b (clique entry []);
     adjacent_def a b (graph code live);
-    u)
+    ())
 
 let (graph_write_covers @ total) :
   (code : instruction list) -> (live : int list list) ->
@@ -864,14 +842,13 @@ let rec (conflicts_pair @ total) :
   fun graph vertex candidate colors index offset -> ghost_ (
   conflicts_def graph vertex candidate colors index;
   nth_def colors offset;
-  let u = () in
   match colors with
-  | [] -> u
+  | [] -> ()
   | color :: rest ->
-    if offset = 0 then u
+    if offset = 0 then ()
     else begin
       conflicts_pair graph vertex candidate rest (index + 1) (offset - 1);
-      u
+      ()
     end)
 
 let rec (first_color_sound @ total) :
@@ -884,14 +861,13 @@ let rec (first_color_sound @ total) :
     @ ghost =
   fun graph vertex colors other_index choices -> ghost_ (
   first_color_def graph vertex colors other_index choices;
-  let u = () in
   match choices with
-  | [] -> u
+  | [] -> ()
   | candidate :: rest ->
     if conflicts graph vertex candidate colors other_index then begin
       first_color_sound graph vertex colors other_index rest;
-      u
-    end else u)
+      ()
+    end else ())
 
 let rec (proper_separates @ total) :
   (graph : edge list) -> (index : int) -> (colors : int list) ->
@@ -907,17 +883,16 @@ let rec (proper_separates @ total) :
   proper_from_def graph index colors;
   nth_def colors (left - index);
   nth_def colors (right - index);
-  let u = () in
   match colors with
-  | [] -> u
+  | [] -> ()
   | chosen :: rest ->
     if left = index then begin
       conflicts_pair graph index chosen rest (index + 1)
         (right - index - 1);
-      u
+      ()
     end else begin
       proper_separates graph (index + 1) rest left right color;
-      u
+      ()
     end)
 
 let (proper_distinct @ total) :
@@ -932,17 +907,16 @@ let (proper_distinct @ total) :
     || color_a <> color_b}
   @ ghost =
   fun graph colors a b color_a color_b -> ghost_ (
-  let u = () in
-  if color_a <> color_b || a = b || a < 0 || b < 0 then u
+  if color_a <> color_b || a = b || a < 0 || b < 0 then ()
   else if a < b then begin
     proper_separates graph 0 colors a b color_a;
-    u
+    ()
   end else begin
     edge_symmetric a b;
     adjacent_def a b graph;
     adjacent_def b a graph;
     proper_separates graph 0 colors b a color_a;
-    u
+    ()
   end)
 
 let rec (color_sound @ total) :
@@ -955,22 +929,21 @@ let rec (color_sound @ total) :
     @ ghost =
   fun graph choices index vertices -> ghost_ (
   color_def graph choices index vertices;
-  let u = () in
   match vertices with
   | [] ->
     proper_from_def graph index [];
-    u
+    ()
   | _ :: rest ->
     color_sound graph choices (index + 1) rest;
     (match color graph choices (index + 1) rest with
-     | None -> u
+     | None -> ()
      | Some colors ->
        first_color_sound graph index colors (index + 1) choices;
        (match first_color graph index colors (index + 1) choices with
-        | None -> u
+        | None -> ()
         | Some chosen ->
           proper_from_def graph index (chosen :: colors);
-          u)))
+          ())))
 
 let (color_separates @ total) :
   (graph : edge list) -> (choices : int list) ->
@@ -985,21 +958,20 @@ let (color_separates @ total) :
   @ ghost =
   fun graph choices vertices a b chosen -> ghost_ (
   color_sound graph choices 0 vertices;
-  let u = () in
   match color graph choices 0 vertices with
-  | None -> u
+  | None -> ()
   | Some colors ->
-    if a < 0 || b < 0 then u
+    if a < 0 || b < 0 then ()
     else if a < b then begin
       proper_separates graph 0 colors a b chosen;
-      u
+      ()
     end else if b < a then begin
       edge_symmetric a b;
       adjacent_def a b graph;
       adjacent_def b a graph;
       proper_separates graph 0 colors b a chosen;
-      u
-    end else u)
+      ()
+    end else ())
 
 (* Renaming, finite-list and bounds proofs. *)
 
@@ -1016,23 +988,22 @@ let rec (rename_nth @ total) :
   fun colors code pc instruction -> ghost_ (
   rename_def colors code;
   nth_def code pc;
-  let u = () in
   match code with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
     if pc = 0 then begin
       (match rename_instruction colors head, rename colors rest with
        | Some target_head, Some target_rest ->
          nth_def (target_head :: target_rest) pc
        | _ -> ());
-      u
+      ()
     end else begin
       rename_nth colors rest (pc - 1) instruction;
       (match rename_instruction colors head, rename colors rest with
        | Some target_head, Some target_rest ->
          nth_def (target_head :: target_rest) pc
        | _ -> ());
-      u
+      ()
     end)
 
 let rec (agree_lookup @ total) :
@@ -1050,12 +1021,11 @@ let rec (agree_lookup @ total) :
   fun live colors source target reg -> ghost_ (
   agree_on_def live colors source target;
   member_def reg live;
-  let u = () in
   match live with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
-    if head = reg then u
-    else begin agree_lookup rest colors source target reg; u end)
+    if head = reg then ()
+    else begin agree_lookup rest colors source target reg; () end)
 
 let rec (target_write_keeps_agreement @ total) :
   (regs : int list) -> (colors : int list) ->
@@ -1073,25 +1043,24 @@ let rec (target_write_keeps_agreement @ total) :
   fun regs colors source target head physical word -> ghost_ (
   agree_on_def regs colors source target;
   separate_from_def regs colors head physical;
-  let u = () in
   match regs with
   | [] ->
     (match write target physical word with
      | None -> ()
      | Some after -> agree_on_def [] colors source after);
-    u
+    ()
   | reg :: rest ->
     target_write_keeps_agreement rest colors source target head physical word;
     (match nth colors reg with
-     | None -> u
+     | None -> ()
      | Some chosen ->
        if reg = head then write_reads target physical word
        else write_preserves target physical word chosen;
        (match write target physical word with
-        | None -> u
+        | None -> ()
         | Some after ->
           agree_on_def regs colors source after;
-          u)))
+          ())))
 
 let (value_agrees @ total) :
   (live : int list) -> (colors : int list) ->
@@ -1107,19 +1076,18 @@ let (value_agrees @ total) :
   fun live colors source target operand -> ghost_ (
   rename_operand_def colors operand;
   value_def source operand;
-  let u = () in
   match operand with
-  | Imm word -> value_def target (Imm word); u
+  | Imm word -> value_def target (Imm word); ()
   | Reg reg ->
     operand_uses_def operand;
     member_def reg [reg];
     subset_member (operand_uses operand) live reg;
     agree_lookup live colors source target reg;
     (match nth colors reg with
-     | None -> u
+     | None -> ()
      | Some physical ->
        value_def target (Reg physical);
-       u))
+       ()))
 
 let (value_agrees_live @ total) :
   (live : int list) -> (colors : int list) ->
@@ -1135,16 +1103,15 @@ let (value_agrees_live @ total) :
   operand_live_def live operand;
   rename_operand_def colors operand;
   value_def source operand;
-  let u = () in
   match operand with
-  | Imm word -> value_def target (Imm word); u
+  | Imm word -> value_def target (Imm word); ()
   | Reg reg ->
     agree_lookup live colors source target reg;
     (match nth colors reg with
-     | None -> u
+     | None -> ()
      | Some physical ->
        value_def target (Reg physical);
-       u))
+       ()))
 
 let (binary_operands_live @ total) :
   (before : int list) -> (dst : int) -> (operation : operation) ->
@@ -1156,7 +1123,6 @@ let (binary_operands_live @ total) :
   fun before dst operation left right next -> ghost_ (
   let instruction = Binary (dst, operation, left, right, next) in
   uses_def instruction;
-  let u = () in
   (match left with
    | Imm _ -> operand_live_def before left
    | Reg reg ->
@@ -1173,7 +1139,7 @@ let (binary_operands_live @ total) :
      union_keeps_right (operand_uses left) (operand_uses right) reg;
      subset_member (uses instruction) before reg;
      operand_live_def before right);
-  u)
+  ())
 
 let rec (write_agreement @ total) :
   (next : int list) -> (before : int list) ->
@@ -1193,9 +1159,8 @@ let rec (write_agreement @ total) :
   agree_on_def next colors
     (match write source dst word with None -> [] | Some xs -> xs)
     (match write target physical word with None -> [] | Some xs -> xs);
-  let u = () in
   match next with
-  | [] -> u
+  | [] -> ()
   | reg :: rest ->
     write_agreement rest before colors source target dst physical word;
     (match write source dst word, write target physical word with
@@ -1203,17 +1168,17 @@ let rec (write_agreement @ total) :
        if reg = dst then begin
          write_reads source dst word;
          write_reads target physical word;
-         u
+         ()
        end else begin
          agree_lookup before colors source target reg;
          write_preserves source dst word reg;
          (match nth colors reg with
-          | None -> u
+          | None -> ()
           | Some color ->
             write_preserves target physical word color;
-            u)
+            ())
        end
-     | _ -> u))
+     | _ -> ()))
 
 let rec (empty_live_length @ total) :
   (code : instruction list) ->
@@ -1222,17 +1187,16 @@ let rec (empty_live_length @ total) :
   fun code -> ghost_ (
   length_def code;
   empty_live_def code;
-  let u = () in
   match code with
   | [] ->
     length_def [];
     length_def (empty_live code);
-    u
+    ()
   | _ :: rest ->
     empty_live_length rest;
     let tail = empty_live rest in
     length_def ([] :: tail);
-    u)
+    ())
 
 let rec (sweep_length @ total) :
   (code : instruction list) -> (live : int list list) -> (index : int) ->
@@ -1243,12 +1207,11 @@ let rec (sweep_length @ total) :
   fun code live index -> ghost_ (
   sweep_def code live index;
   length_def code;
-  let u = () in
   match code with
   | [] ->
     (match sweep code live index with next, _ -> length_def next);
     length_def [];
-    u
+    ()
   | instruction :: rest ->
     sweep_length rest live (index + 1);
     (match sweep rest live (index + 1) with
@@ -1256,7 +1219,7 @@ let rec (sweep_length @ total) :
        let old = match nth live index with None -> [] | Some xs -> xs in
        let next = union old (transfer live instruction) in
        length_def (next :: tail));
-    u)
+    ())
 
 let rec (stabilize_length @ total) :
   (fuel : int) -> (code : instruction list) -> (live : int list list) ->
@@ -1268,14 +1231,13 @@ let rec (stabilize_length @ total) :
   @ ghost =
   fun fuel code live -> ghost_ (
   stabilize_def fuel code live;
-  let u = () in
-  if fuel <= 0 then u
+  if fuel <= 0 then ()
   else begin
     sweep_length code live 0;
     (match sweep code live 0 with
      | next, changed ->
        if changed then stabilize_length (fuel - 1) code next);
-    u
+    ()
   end)
 [@@decreases fuel]
 
@@ -1290,17 +1252,16 @@ let rec (color_length @ total) :
   fun graph choices index vertices -> ghost_ (
   color_def graph choices index vertices;
   length_def vertices;
-  let u = () in
   match vertices with
-  | [] -> length_def []; u
+  | [] -> length_def []; ()
   | _ :: rest ->
     color_length graph choices (index + 1) rest;
     (match color graph choices (index + 1) rest with
-     | None -> u
+     | None -> ()
      | Some colors ->
        (match first_color graph index colors (index + 1) choices with
-        | None -> u
-        | Some chosen -> length_def (chosen :: colors); u)))
+        | None -> ()
+        | Some chosen -> length_def (chosen :: colors); ())))
 
 let rec (rename_length @ total) :
   (colors : int list) -> (code : instruction list) ->
@@ -1312,16 +1273,15 @@ let rec (rename_length @ total) :
   fun colors code -> ghost_ (
   rename_def colors code;
   length_def code;
-  let u = () in
   match code with
-  | [] -> length_def []; u
+  | [] -> length_def []; ()
   | instruction :: rest ->
     rename_length colors rest;
     (match rename_instruction colors instruction, rename colors rest with
      | Some renamed, Some renamed_rest ->
        length_def (renamed :: renamed_rest);
-       u
-     | _ -> u))
+       ()
+     | _ -> ()))
 
 let rec (zeros_length @ total) :
   (count : int) ->
@@ -1329,17 +1289,16 @@ let rec (zeros_length @ total) :
   @ ghost =
   fun count -> ghost_ (
   zeros_def count;
-  let u = () in
-  if count < 0 then u
+  if count < 0 then ()
   else if count = 0 then begin
     length_def [];
     length_def (zeros count);
-    u
+    ()
   end
   else begin
     zeros_length (count - 1);
     length_def (0 :: zeros (count - 1));
-    u
+    ()
   end)
 [@@decreases count]
 
@@ -1352,12 +1311,11 @@ let rec (nth_present @ total) :
   fun xs index -> ghost_ (
   nth_def xs index;
   length_def xs;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | _ :: rest ->
-    if index = 0 then u
-    else begin nth_present rest (index - 1); u end)
+    if index = 0 then ()
+    else begin nth_present rest (index - 1); () end)
 
 let rec (nth_live_present @ total) :
   (xs : int list list) -> (index : int) ->
@@ -1368,12 +1326,11 @@ let rec (nth_live_present @ total) :
   fun xs index -> ghost_ (
   nth_def xs index;
   length_def xs;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | _ :: rest ->
-    if index = 0 then u
-    else begin nth_live_present rest (index - 1); u end)
+    if index = 0 then ()
+    else begin nth_live_present rest (index - 1); () end)
 
 let rec (nth_code_present @ total) :
   (xs : instruction list) -> (index : int) ->
@@ -1384,12 +1341,11 @@ let rec (nth_code_present @ total) :
   fun xs index -> ghost_ (
   nth_def xs index;
   length_def xs;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | _ :: rest ->
-    if index = 0 then u
-    else begin nth_code_present rest (index - 1); u end)
+    if index = 0 then ()
+    else begin nth_code_present rest (index - 1); () end)
 
 let rec (write_present @ total) :
   (xs : int list) -> (index : int) -> (word : int) ->
@@ -1400,12 +1356,11 @@ let rec (write_present @ total) :
   fun xs index word -> ghost_ (
   write_def xs index word;
   length_def xs;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | _ :: rest ->
-    if index = 0 then u
-    else begin write_present rest (index - 1) word; u end)
+    if index = 0 then ()
+    else begin write_present rest (index - 1) word; () end)
 
 let rec (write_length @ total) :
   (xs : int list) -> (index : int) -> (word : int) ->
@@ -1417,17 +1372,16 @@ let rec (write_length @ total) :
   fun xs index word -> ghost_ (
   write_def xs index word;
   length_def xs;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
-    if index = 0 then begin length_def (word :: rest); u end
+    if index = 0 then begin length_def (word :: rest); () end
     else begin
       write_length rest (index - 1) word;
       (match write rest (index - 1) word with
        | None -> ()
        | Some result -> length_def (head :: result));
-      u
+      ()
     end)
 
 let (value_present @ total) :
@@ -1439,13 +1393,12 @@ let (value_present @ total) :
   fun count file operand -> ghost_ (
   valid_operand_def count operand;
   value_def file operand;
-  let u = () in
   match operand with
-  | Imm _ -> u
+  | Imm _ -> ()
   | Reg reg ->
     valid_reg_def count reg;
     nth_present file reg;
-    u)
+    ())
 
 let rec (all_valid_reg_weaken @ total) :
   (smaller : int) -> (larger : int) -> (regs : int list) ->
@@ -1456,32 +1409,30 @@ let rec (all_valid_reg_weaken @ total) :
   fun smaller larger regs -> ghost_ (
   all_valid_reg_def smaller regs;
   all_valid_reg_def larger regs;
-  let u = () in
   match regs with
-  | [] -> u
+  | [] -> ()
   | reg :: rest ->
     valid_reg_def smaller reg;
     valid_reg_def larger reg;
     all_valid_reg_weaken smaller larger rest;
-    u)
+    ())
 
 let rec (range_down_valid @ total) :
   (count : int) ->
   {u : unit | all_valid_reg count (range_down count)}
   @ ghost =
   fun count -> ghost_ (
-  let u = () in
   if count <= 0 then begin
     range_down_def count;
     all_valid_reg_def count [];
-    u
+    ()
   end else begin
     range_down_valid (count - 1);
     all_valid_reg_weaken (count - 1) count (range_down (count - 1));
     range_down_def count;
     all_valid_reg_def count ((count - 1) :: range_down (count - 1));
     valid_reg_def count (count - 1);
-    u
+    ()
   end)
 [@@decreases count]
 
@@ -1493,14 +1444,13 @@ let rec (reverse_into_valid @ total) :
   @ ghost =
   fun count xs acc -> ghost_ (
   reverse_into_def xs acc;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
     all_valid_reg_def count xs;
     all_valid_reg_def count (head :: acc);
     reverse_into_valid count rest (head :: acc);
-    u)
+    ())
 
 let (range_valid @ total) :
   (count : int) -> {u : unit | all_valid_reg count (range count)}
@@ -1526,12 +1476,11 @@ let rec (first_color_valid @ total) :
   fun graph vertex colors index choices count -> ghost_ (
   first_color_def graph vertex colors index choices;
   all_valid_reg_def count choices;
-  let u = () in
   match choices with
-  | [] -> u
+  | [] -> ()
   | _ :: rest ->
     first_color_valid graph vertex colors index rest count;
-    u)
+    ())
 
 let rec (color_valid @ total) :
   (graph : edge list) -> (choices : int list) ->
@@ -1544,20 +1493,19 @@ let rec (color_valid @ total) :
   @ ghost =
   fun graph choices index vertices count -> ghost_ (
   color_def graph choices index vertices;
-  let u = () in
   match vertices with
-  | [] -> all_valid_reg_def count []; u
+  | [] -> all_valid_reg_def count []; ()
   | _ :: rest ->
     color_valid graph choices (index + 1) rest count;
     (match color graph choices (index + 1) rest with
-     | None -> u
+     | None -> ()
      | Some colors ->
        first_color_valid graph index colors (index + 1) choices count;
        (match first_color graph index colors (index + 1) choices with
-        | None -> u
+        | None -> ()
         | Some chosen ->
           all_valid_reg_def count (chosen :: colors);
-          u)))
+          ())))
 
 let rec (all_valid_reg_lookup @ total) :
   (count : int) -> (regs : int list) -> (index : int) -> (reg : int) ->
@@ -1568,14 +1516,13 @@ let rec (all_valid_reg_lookup @ total) :
   fun count regs index reg -> ghost_ (
   all_valid_reg_def count regs;
   nth_def regs index;
-  let u = () in
   match regs with
-  | [] -> u
+  | [] -> ()
   | _ :: rest ->
-    if index = 0 then u
+    if index = 0 then ()
     else begin
       all_valid_reg_lookup count rest (index - 1) reg;
-      u
+      ()
     end)
 
 let (color_total @ total) :
@@ -1608,16 +1555,15 @@ let (color_lookup @ total) :
   @ ghost =
   fun graph registers physical reg -> ghost_ (
   color_total graph registers physical;
-  let u = () in
   match color graph (range physical) 0 (zeros registers) with
-  | None -> u
+  | None -> ()
   | Some colors ->
     nth_present colors reg;
     (match nth colors reg with
-     | None -> u
+     | None -> ()
      | Some chosen ->
        all_valid_reg_lookup physical colors reg chosen;
-       u))
+       ()))
 
 let rec (valid_instruction_lookup @ total) :
   (registers : int) -> (nodes : int) -> (code : instruction list) ->
@@ -1630,14 +1576,13 @@ let rec (valid_instruction_lookup @ total) :
   fun registers nodes code pc instruction -> ghost_ (
   all_valid_instructions_def registers nodes code;
   nth_def code pc;
-  let u = () in
   match code with
-  | [] -> u
+  | [] -> ()
   | _ :: rest ->
-    if pc = 0 then u
+    if pc = 0 then ()
     else begin
       valid_instruction_lookup registers nodes rest (pc - 1) instruction;
-      u
+      ()
     end)
 
 let (valid_successor @ total) :
@@ -1651,26 +1596,25 @@ let (valid_successor @ total) :
   fun registers nodes instruction successor -> ghost_ (
   valid_instruction_def registers nodes instruction;
   successors_def instruction;
-  let u = () in
   match instruction with
   | Move (_, _, next) ->
     member_def successor [next];
     member_def successor [];
     valid_reg_def nodes next;
     valid_reg_def nodes successor;
-    u
+    ()
   | Binary (_, _, _, _, next) ->
     member_def successor [next];
     member_def successor [];
     valid_reg_def nodes next;
     valid_reg_def nodes successor;
-    u
+    ()
   | Jump next ->
     member_def successor [next];
     member_def successor [];
     valid_reg_def nodes next;
     valid_reg_def nodes successor;
-    u
+    ()
   | Branch (_, yes, no) ->
     member_def successor [yes; no];
     member_def successor [no];
@@ -1678,8 +1622,8 @@ let (valid_successor @ total) :
     valid_reg_def nodes yes;
     valid_reg_def nodes no;
     valid_reg_def nodes successor;
-    u
-  | Return _ -> member_def successor []; u)
+    ()
+  | Return _ -> member_def successor []; ())
 
 let (rename_operand_valid @ total) :
   (colors : int list) -> (registers : int) -> (physical : int) ->
@@ -1695,16 +1639,15 @@ let (rename_operand_valid @ total) :
   fun colors registers physical operand -> ghost_ (
   rename_operand_def colors operand;
   valid_operand_def registers operand;
-  let u = () in
   match operand with
-  | Imm _ -> valid_operand_def physical operand; u
+  | Imm _ -> valid_operand_def physical operand; ()
   | Reg reg ->
     (match nth colors reg with
-     | None -> u
+     | None -> ()
      | Some chosen ->
        all_valid_reg_lookup physical colors reg chosen;
        valid_operand_def physical (Reg chosen);
-       u))
+       ()))
 
 let (rename_instruction_valid @ total) :
   (colors : int list) -> (registers : int) -> (physical : int) ->
@@ -1720,7 +1663,6 @@ let (rename_instruction_valid @ total) :
   fun colors registers physical nodes instruction -> ghost_ (
   rename_instruction_def colors instruction;
   valid_instruction_def registers nodes instruction;
-  let u = () in
   match instruction with
   | Move (dst, operand, next) ->
     rename_operand_valid colors registers physical operand;
@@ -1728,8 +1670,8 @@ let (rename_instruction_valid @ total) :
      | Some chosen, Some renamed ->
        all_valid_reg_lookup physical colors dst chosen;
        valid_instruction_def physical nodes (Move (chosen, renamed, next));
-       u
-     | _ -> u)
+       ()
+     | _ -> ())
   | Binary (dst, operation, left, right, next) ->
     rename_operand_valid colors registers physical left;
     rename_operand_valid colors registers physical right;
@@ -1738,25 +1680,25 @@ let (rename_instruction_valid @ total) :
        all_valid_reg_lookup physical colors dst chosen;
        valid_instruction_def physical nodes
          (Binary (chosen, operation, left, right, next));
-       u
-     | _ -> u)
+       ()
+     | _ -> ())
   | Jump next ->
     valid_instruction_def physical nodes (Jump next);
-    u
+    ()
   | Branch (condition, yes, no) ->
     rename_operand_valid colors registers physical condition;
     (match rename_operand colors condition with
-     | None -> u
+     | None -> ()
      | Some renamed ->
        valid_instruction_def physical nodes (Branch (renamed, yes, no));
-       u)
+       ())
   | Return operand ->
     rename_operand_valid colors registers physical operand;
     (match rename_operand colors operand with
-     | None -> u
+     | None -> ()
      | Some renamed ->
        valid_instruction_def physical nodes (Return renamed);
-       u))
+       ()))
 
 (* Liveness validity and allocation prerequisites. *)
 
@@ -1770,12 +1712,11 @@ let rec (all_valid_live_lookup @ total) :
   fun count live index row -> ghost_ (
   all_valid_live_def count live;
   nth_def live index;
-  let u = () in
   match live with
-  | [] -> u
+  | [] -> ()
   | _ :: rest ->
-    if index = 0 then u
-    else begin all_valid_live_lookup count rest (index - 1) row; u end)
+    if index = 0 then ()
+    else begin all_valid_live_lookup count rest (index - 1) row; () end)
 
 let (add_valid @ total) :
   (count : int) -> (value : int) -> (xs : int list) ->
@@ -1797,13 +1738,12 @@ let rec (union_valid @ total) :
   fun count xs ys -> ghost_ (
   union_def xs ys;
   all_valid_reg_def count xs;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
     union_valid count rest ys;
     add_valid count head (union rest ys);
-    u)
+    ())
 
 let rec (remove_valid @ total) :
   (count : int) -> (removed : int) -> (xs : int list) ->
@@ -1814,15 +1754,14 @@ let rec (remove_valid @ total) :
   fun count removed xs -> ghost_ (
   remove_def removed xs;
   all_valid_reg_def count xs;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | head :: rest ->
     remove_valid count removed rest;
-    if head = removed then u
+    if head = removed then ()
     else begin
       all_valid_reg_def count (head :: remove removed rest);
-      u
+      ()
     end)
 
 let (operand_uses_valid @ total) :
@@ -1834,13 +1773,12 @@ let (operand_uses_valid @ total) :
   fun count operand -> ghost_ (
   operand_uses_def operand;
   valid_operand_def count operand;
-  let u = () in
   match operand with
-  | Imm _ -> all_valid_reg_def count []; u
+  | Imm _ -> all_valid_reg_def count []; ()
   | Reg reg ->
     all_valid_reg_def count [reg];
     all_valid_reg_def count [];
-    u)
+    ())
 
 let (uses_valid @ total) :
   (count : int) -> (nodes : int) -> (instruction : instruction) ->
@@ -1851,17 +1789,16 @@ let (uses_valid @ total) :
   fun count nodes instruction -> ghost_ (
   valid_instruction_def count nodes instruction;
   uses_def instruction;
-  let u = () in
   match instruction with
   | Move (_, operand, _) | Branch (operand, _, _) | Return operand ->
     operand_uses_valid count operand;
-    u
+    ()
   | Binary (_, _, left, right, _) ->
     operand_uses_valid count left;
     operand_uses_valid count right;
     union_valid count (operand_uses left) (operand_uses right);
-    u
-  | Jump _ -> all_valid_reg_def count []; u)
+    ()
+  | Jump _ -> all_valid_reg_def count []; ())
 
 let rec (live_out_valid @ total) :
   (count : int) -> (live : int list list) -> (successors : int list) ->
@@ -1871,9 +1808,8 @@ let rec (live_out_valid @ total) :
   @ ghost =
   fun count live successors -> ghost_ (
   live_out_def live successors;
-  let u = () in
   match successors with
-  | [] -> all_valid_reg_def count []; u
+  | [] -> all_valid_reg_def count []; ()
   | successor :: rest ->
     live_out_valid count live rest;
     (match nth live successor with
@@ -1882,7 +1818,7 @@ let rec (live_out_valid @ total) :
     union_valid count
       (match nth live successor with None -> [] | Some xs -> xs)
       (live_out live rest);
-    u)
+    ())
 
 let (transfer_valid @ total) :
   (count : int) -> (nodes : int) ->
@@ -1897,12 +1833,11 @@ let (transfer_valid @ total) :
   uses_valid count nodes instruction;
   live_out_valid count live (successors instruction);
   survivors_def live instruction;
-  let u = () in
   (match definition instruction with
    | None -> ()
    | Some dst -> remove_valid count dst (live_out live (successors instruction)));
   union_valid count (uses instruction) (survivors live instruction);
-  u)
+  ())
 
 let rec (empty_live_valid @ total) :
   (count : int) -> (code : instruction list) ->
@@ -1911,13 +1846,12 @@ let rec (empty_live_valid @ total) :
   fun count code -> ghost_ (
   empty_live_def code;
   all_valid_live_def count (empty_live code);
-  let u = () in
   match code with
-  | [] -> u
+  | [] -> ()
   | _ :: rest ->
     empty_live_valid count rest;
     all_valid_reg_def count [];
-    u)
+    ())
 
 let rec (sweep_valid @ total) :
   (count : int) -> (nodes : int) ->
@@ -1931,9 +1865,8 @@ let rec (sweep_valid @ total) :
   fun count nodes code live index -> ghost_ (
   sweep_def code live index;
   all_valid_instructions_def count nodes code;
-  let u = () in
   match code with
-  | [] -> all_valid_live_def count []; u
+  | [] -> all_valid_live_def count []; ()
   | instruction :: rest ->
     sweep_valid count nodes rest live (index + 1);
     transfer_valid count nodes live instruction;
@@ -1945,7 +1878,7 @@ let rec (sweep_valid @ total) :
     (match sweep rest live (index + 1) with
      | tail, _ ->
        all_valid_live_def count (union old (transfer live instruction) :: tail));
-    u)
+    ())
 
 let rec (stabilize_valid @ total) :
   (fuel : int) -> (count : int) -> (nodes : int) ->
@@ -1959,14 +1892,13 @@ let rec (stabilize_valid @ total) :
   @ ghost =
   fun fuel count nodes code live -> ghost_ (
   stabilize_def fuel code live;
-  let u = () in
-  if fuel <= 0 then u
+  if fuel <= 0 then ()
   else begin
     sweep_valid count nodes code live 0;
     (match sweep code live 0 with
      | next, changed ->
        if changed then stabilize_valid (fuel - 1) count nodes code next);
-    u
+    ()
   end)
 [@@decreases fuel]
 
@@ -2042,13 +1974,12 @@ let rec (safe_write_from @ total) :
   safe_write_def next before colors dst physical;
   subset_def next row;
   all_valid_reg_def registers next;
-  let u = () in
   match next with
-  | [] -> u
+  | [] -> ()
   | reg :: rest ->
     safe_write_from code live colors registers pc instruction before
       successor row rest dst physical;
-    if reg = dst then u
+    if reg = dst then ()
     else begin
       member_def reg next;
       subset_member next row reg;
@@ -2057,11 +1988,11 @@ let rec (safe_write_from @ total) :
       valid_reg_def registers dst;
       nth_present colors reg;
       (match nth colors reg with
-       | None -> u
+       | None -> ()
        | Some color ->
          protected_color code live colors pc instruction successor row
            dst reg physical color;
-         u)
+         ())
     end)
 
 let (successor_row_present @ total) :
@@ -2101,9 +2032,8 @@ let rec (agree_no_write @ total) :
   ghost_ (
   agree_on_def next colors source target;
   subset_def next row;
-  let u = () in
   match next with
-  | [] -> u
+  | [] -> ()
   | reg :: rest ->
     agree_no_write code live colors pc instruction before successor row rest
       source target;
@@ -2111,7 +2041,7 @@ let rec (agree_no_write @ total) :
     subset_member next row reg;
     protected_before code live pc instruction before successor row reg;
     agree_lookup before colors source target reg;
-    u)
+    ())
 
 let (entry_pair_distinct @ total) :
   (code : instruction list) -> (live : int list list) ->
@@ -2128,13 +2058,12 @@ let (entry_pair_distinct @ total) :
   @ ghost =
   fun code live whole colors a b color_a color_b -> ghost_ (
   nth_def live 0;
-  let u = () in
   match live with
-  | [] -> u
+  | [] -> ()
   | entry :: _ ->
     graph_entry_covers code live a b;
     proper_distinct (graph code live) colors a b color_a color_b;
-    u)
+    ())
 
 let rec (entry_separate @ total) :
   (code : instruction list) -> (live : int list list) ->
@@ -2156,12 +2085,11 @@ let rec (entry_separate @ total) :
   separate_from_def rest colors head physical;
   subset_def rest whole;
   all_valid_reg_def registers rest;
-  let u = () in
   match rest with
-  | [] -> u
+  | [] -> ()
   | reg :: tail ->
     entry_separate code live whole colors registers head tail physical;
-    if reg = head then u
+    if reg = head then ()
     else begin
       member_def reg rest;
       subset_member rest whole reg;
@@ -2169,10 +2097,10 @@ let rec (entry_separate @ total) :
       valid_reg_def registers head;
       nth_present colors reg;
       (match nth colors reg with
-       | None -> u
+       | None -> ()
        | Some chosen ->
          entry_pair_distinct code live whole colors head reg physical chosen;
-         u)
+         ())
     end)
 
 let (allocation_ready @ total) :
@@ -2260,8 +2188,7 @@ let (allocate_sound @ total) :
   @ ghost =
   fun program physical -> ghost_ (
   allocate_def program physical;
-  let u = () in
-  if not (valid program) || physical <= 0 || physical > 32 then u
+  if not (valid program) || physical <= 0 || physical > 32 then ()
   else begin
     valid_def program;
     let initial_live = empty_live program.code in
@@ -2272,23 +2199,23 @@ let (allocate_sound @ total) :
     stabilize_valid 2049 program.registers (length program.code)
       program.code initial_live;
     (match stabilize 2049 program.code initial_live with
-     | None -> u
+     | None -> ()
      | Some live ->
        let entry = match live with [] -> [] | row :: _ -> row in
-       if not (subset entry program.inputs) then u
+       if not (subset entry program.inputs) then ()
        else begin
          let edges = graph program.code live in
          color_sound edges (range physical) 0 (zeros program.registers);
          color_total edges program.registers physical;
          (match color edges (range physical) 0 (zeros program.registers) with
-          | None -> u
+          | None -> ()
           | Some coloring ->
             all_valid_live_def program.registers live;
             all_valid_reg_def program.registers [];
             let _code = rename_total coloring (length program.code)
               program.code in
             let _slots = build_slots_total coloring entry in
-            u)
+            ())
        end)
   end
   )
@@ -2304,16 +2231,15 @@ let rec (load_inputs_length @ total) :
   @ ghost =
   fun file registers values -> ghost_ (
   load_inputs_def file registers values;
-  let u = () in
   match registers, values with
   | reg :: rest, word :: words ->
     (match write file reg word with
-     | None -> u
+     | None -> ()
      | Some after ->
        write_length file reg word;
        load_inputs_length after rest words;
-       u)
-  | _ -> u)
+       ())
+  | _ -> ())
 
 let rec (load_inputs_present @ total) :
   (file : int list) -> (registers : int list) ->
@@ -2330,19 +2256,18 @@ let rec (load_inputs_present @ total) :
   load_inputs_def file registers values;
   same_shape_def registers values;
   all_valid_reg_def count registers;
-  let u = () in
   match registers, values with
-  | [], [] -> u
+  | [], [] -> ()
   | reg :: rest, word :: words ->
     valid_reg_def count reg;
     write_present file reg word;
     (match write file reg word with
-     | None -> u
+     | None -> ()
      | Some after ->
        write_length file reg word;
        load_inputs_present after rest words count;
-       u)
-  | _ -> u)
+       ())
+  | _ -> ())
 
 let rec (load_slots_length @ total) :
   (file : int list) -> (source : int list) ->
@@ -2354,15 +2279,14 @@ let rec (load_slots_length @ total) :
   @ ghost =
   fun file source slots -> ghost_ (
   load_slots_def file source slots;
-  let u = () in
   match slots with
-  | [] -> u
+  | [] -> ()
   | (reg, physical) :: rest ->
     load_slots_length file source rest;
     (match load_slots file source rest, nth source reg with
      | Some middle, Some word -> write_length middle physical word
      | _ -> ());
-    u)
+    ())
 
 let (related_observable @ total) :
   (registers : int) -> (physical : int) -> (nodes : int) ->
@@ -2375,10 +2299,9 @@ let (related_observable @ total) :
   fun registers physical nodes live colors source target -> ghost_ (
   related_def registers physical nodes live colors source target;
   observable_equal_def source target;
-  let u = () in
   match source, target with
-  | Done _, Done _ | Running _, Running _ -> u
-  | _ -> u)
+  | Done _, Done _ | Running _, Running _ -> ()
+  | _ -> ())
 
 let (execute_related @ total) :
   (code : instruction list) -> (live : int list list) ->
@@ -2408,9 +2331,8 @@ let (execute_related @ total) :
   rename_instruction_def colors instruction;
   execute_def instruction source;
   execute_def renamed target;
-  let u = () in
   match nth live pc with
-  | None -> u
+  | None -> ()
   | Some before ->
     closed_lookup code live 0 pc instruction;
     (match instruction with
@@ -2420,7 +2342,7 @@ let (execute_related @ total) :
        definition_def instruction;
        successor_row_present registers nodes instruction next live;
        (match nth live next with
-        | None -> u
+        | None -> ()
         | Some row ->
           subset_reflexive row;
           agree_no_write code live colors pc instruction before next row row
@@ -2428,14 +2350,14 @@ let (execute_related @ total) :
           valid_successor registers nodes instruction next;
           related_def registers physical nodes live colors
             (Running (next, source)) (Running (next, target));
-          u)
+          ())
      | Return operand ->
        uses_def instruction;
        valid_instruction_def registers nodes instruction;
        value_agrees before colors source target operand;
        value_present registers source operand;
        (match rename_operand colors operand with
-        | None -> u
+        | None -> ()
         | Some renamed_operand ->
           rename_instruction_def colors (Return operand);
           execute_def (Return operand) source;
@@ -2446,8 +2368,8 @@ let (execute_related @ total) :
            | Some left, Some right ->
              related_def registers physical nodes live colors
                (Done left) (Done right);
-             u
-           | _ -> u))
+             ()
+           | _ -> ()))
      | Branch (condition, yes, no) ->
        uses_def instruction;
        definition_def instruction;
@@ -2455,7 +2377,7 @@ let (execute_related @ total) :
        value_agrees before colors source target condition;
        value_present registers source condition;
        (match rename_operand colors condition with
-        | None -> u
+        | None -> ()
         | Some renamed_condition ->
           rename_instruction_def colors instruction;
           execute_def (Branch (condition, yes, no)) source;
@@ -2468,7 +2390,7 @@ let (execute_related @ total) :
              member_def next [no];
              successor_row_present registers nodes instruction next live;
              (match nth live next with
-              | None -> u
+              | None -> ()
               | Some row ->
                 subset_reflexive row;
                 agree_no_write code live colors pc instruction before
@@ -2476,8 +2398,8 @@ let (execute_related @ total) :
                 valid_successor registers nodes instruction next;
                 related_def registers physical nodes live colors
                   (Running (next, source)) (Running (next, target));
-                u)
-           | _ -> u))
+                ())
+           | _ -> ()))
      | Move (dst, operand, next) ->
        uses_def instruction;
        definition_def instruction;
@@ -2513,10 +2435,10 @@ let (execute_related @ total) :
                 related_def registers physical nodes live colors
                   (Running (next, source_after))
                   (Running (next, target_after));
-                u
-              | _ -> u)
-           | _ -> u)
-        | _ -> u)
+                ()
+              | _ -> ())
+           | _ -> ())
+        | _ -> ())
      | Binary (dst, operation, left, right, next) ->
        uses_def instruction;
        definition_def instruction;
@@ -2561,10 +2483,10 @@ let (execute_related @ total) :
                 related_def registers physical nodes live colors
                   (Running (next, source_after))
                   (Running (next, target_after));
-                u
-              | _ -> u)
-           | _ -> u)
-        | _ -> u)))
+                ()
+              | _ -> ())
+           | _ -> ())
+        | _ -> ())))
 
 let (step_related @ total) :
   (code : instruction list) -> (live : int list list) ->
@@ -2588,29 +2510,28 @@ let (step_related @ total) :
   related_def registers physical (length code) live colors source target;
   step_def code source;
   step_def target_code target;
-  let u = () in
   match source, target with
   | Done left, Done right ->
     related_def registers physical (length code) live colors
       (Done left) (Done right);
-    u
+    ()
   | Running (pc, source_file), Running (target_pc, target_file) ->
     valid_reg_def (length code) pc;
     nth_code_present code pc;
     rename_length colors code;
     nth_code_present target_code pc;
     (match nth code pc with
-     | None -> u
+     | None -> ()
      | Some instruction ->
        valid_instruction_lookup registers (length code) code pc instruction;
        rename_nth colors code pc instruction;
        (match rename_instruction colors instruction with
-        | None -> u
+        | None -> ()
         | Some renamed ->
           execute_related code live colors registers physical (length code)
             pc instruction renamed source_file target_file;
-          u))
-  | _ -> u)
+          ()))
+  | _ -> ())
 
 let rec (advance_related @ total) :
   (fuel : fuel) -> (code : instruction list) ->
@@ -2635,14 +2556,13 @@ let rec (advance_related @ total) :
   ghost_ (
   advance_def code fuel source;
   advance_def target_code fuel target;
-  let u = () in
   match fuel with
-  | Z -> u
+  | Z -> ()
   | S rest ->
     step_related code live colors registers physical target_code source target;
     advance_related rest code live colors registers physical target_code
       (step code source) (step target_code target);
-    u)
+    ())
 
 let rec (copy_agreement @ total) :
   (code : instruction list) -> (live : int list list) ->
@@ -2669,12 +2589,11 @@ let rec (copy_agreement @ total) :
   build_slots_def entry colors;
   subset_def entry whole;
   all_valid_reg_def registers entry;
-  let u = () in
   match entry with
   | [] ->
     load_slots_def target source [];
     agree_on_def [] colors source target;
-    u
+    ()
   | head :: rest ->
     copy_agreement code live whole rest colors registers physical source target;
     member_def head entry;
@@ -2695,13 +2614,13 @@ let rec (copy_agreement @ total) :
             head chosen word;
           write_present middle chosen word;
           (match write middle chosen word with
-           | None -> u
+           | None -> ()
            | Some after ->
              write_reads middle chosen word;
              agree_on_def entry colors source after;
-             u)
-        | _ -> u)
-     | _ -> u))
+             ())
+        | _ -> ())
+     | _ -> ()))
 
 let rec (copy_present @ total) :
   (entry : int list) -> (colors : int list) ->
@@ -2723,9 +2642,8 @@ let rec (copy_present @ total) :
   fun entry colors registers physical source target -> ghost_ (
   build_slots_def entry colors;
   all_valid_reg_def registers entry;
-  let u = () in
   match entry with
-  | [] -> load_slots_def target source []; u
+  | [] -> load_slots_def target source []; ()
   | head :: rest ->
     copy_present rest colors registers physical source target;
     valid_reg_def registers head;
@@ -2740,9 +2658,9 @@ let rec (copy_present @ total) :
         | Some middle, Some word ->
           write_present middle chosen word;
           load_slots_def target source ((head, chosen) :: slots);
-          u
-        | _ -> u)
-     | _ -> u))
+          ()
+        | _ -> ())
+     | _ -> ()))
 
 let (initial_related @ total) :
   (program : program) -> (physical : int) ->
@@ -2773,9 +2691,8 @@ let (initial_related @ total) :
   subset_reflexive entry;
   load_inputs_present (zeros program.registers) program.inputs args
     program.registers;
-  let u = () in
   match load_inputs (zeros program.registers) program.inputs args with
-  | None -> u
+  | None -> ()
   | Some source ->
     load_inputs_length (zeros program.registers) program.inputs args;
     copy_present entry colors program.registers physical source
@@ -2783,13 +2700,13 @@ let (initial_related @ total) :
     copy_agreement program.code live entry entry colors program.registers
       physical source (zeros physical);
     (match load_slots (zeros physical) source slots with
-     | None -> u
+     | None -> ()
      | Some target ->
        load_slots_length (zeros physical) source slots;
        valid_reg_def (length program.code) 0;
        related_def program.registers physical (length program.code)
          live colors (Running (0, source)) (Running (0, target));
-       u))
+       ()))
 
 (* Public theorems. *)
 
@@ -2807,27 +2724,26 @@ let (preserves @ total) :
   @ ghost =
   fun program physical args fuel -> ghost_ (
   allocate_sound program physical;
-  let u = () in
   match allocate program physical with
-  | None -> u
+  | None -> ()
   | Some ({code = target_code; physical = out_physical;
            source_registers; source_inputs; input_slots} as allocation) ->
     initial_of_allocation_def allocation args;
-    if not (same_shape program.inputs args) then u
+    if not (same_shape program.inputs args) then ()
     else begin
       valid_def program;
       (match stabilize 2049 program.code (empty_live program.code) with
-       | None -> u
+       | None -> ()
        | Some live ->
          let entry = match live with [] -> [] | row :: _ -> row in
          (match color (graph program.code live) (range physical) 0
                   (zeros program.registers) with
-          | None -> u
+          | None -> ()
           | Some colors ->
             length_def live;
             nth_def live 0;
             (match live with
-             | [] -> u
+             | [] -> ()
              | _ :: _ ->
                initial_related program physical live colors entry input_slots args;
                advance_related fuel program.code live colors program.registers
@@ -2840,7 +2756,7 @@ let (preserves @ total) :
                  (advance target_code fuel
                     (target_initial out_physical source_registers
                        source_inputs input_slots args));
-               u)))
+               ())))
     end
   )
 
@@ -2857,5 +2773,4 @@ let (allocation_domain @ total) :
   @ ghost =
   fun program physical -> ghost_ (
     allocate_sound program physical;
-    let u = () in
-    u)
+    ())

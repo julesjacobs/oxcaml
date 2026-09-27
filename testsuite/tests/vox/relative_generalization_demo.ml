@@ -45,7 +45,7 @@ let () =
   let refine_ state = state in
   let refine_ r = Pooled_allocator.allocate allocation_heap0 1 desc1 pool0 (refine_ state) in
   let p1 = r.#value in let pool1 = r.#pool in let state = r.#state in
-  let h1 = ghost_ (Pref.own (borrow_ state)) in let v1 = cell desc1 1 in
+  let h1 = ghost_ (Pref.own (borrow_ state)) in let v1 = ghost_ (cell desc1 1) in
   ghost_ (cell_def desc1 1; payload_scoped_def h0 v1);
   ghost_ (allocatable_def h0 v1);
   let trees1 : ((x : node Pref.t) @ immutable ->
@@ -72,7 +72,7 @@ let () =
   let refine_ state = state in
   let refine_ r = Pooled_allocator.allocate allocation_heap1 2 desc2 pool1 (refine_ state) in
   let p2 = r.#value in let pool2 = r.#pool in let state = r.#state in
-  let h2 = ghost_ (Pref.own (borrow_ state)) in let v2 = cell desc2 2 in
+  let h2 = ghost_ (Pref.own (borrow_ state)) in let v2 = ghost_ (cell desc2 2) in
   ghost_ (cell_def desc2 2; payload_scoped_def h1 v2);
   ghost_ (allocatable_def h1 v2);
   let trees2 : ((x : node Pref.t) @ immutable ->
@@ -100,7 +100,7 @@ let () =
   let refine_ state = state in
   let refine_ r = Pooled_allocator.allocate allocation_heap2 2 desc3 pool2 (refine_ state) in
   let p3 = r.#value in let pool3 = r.#pool in let state = r.#state in
-  let h3 = ghost_ (Pref.own (borrow_ state)) in let v3 = cell desc3 2 in
+  let h3 = ghost_ (Pref.own (borrow_ state)) in let v3 = ghost_ (cell desc3 2) in
   ghost_ (cell_def desc3 2; payload_scoped_def h2 v3);
   ghost_ (allocatable_def h2 v3);
   let trees3 : ((x : node Pref.t) @ immutable ->
@@ -182,7 +182,7 @@ let () =
   let refine_ state = state in
   let refine_ allocated = Pooled_allocator.allocate allocation_heap3 2 desc5 pool3 (refine_ state) in
   let root = allocated.#value in let pool5 = allocated.#pool in let state = allocated.#state in
-  let h5 = ghost_ (Pref.own (borrow_ state)) in let v5 = cell desc5 2 in
+  let h5 = ghost_ (Pref.own (borrow_ state)) in let v5 = ghost_ (cell desc5 2) in
   ghost_ (cell_def desc5 2; payload_scoped_def h4 v5; allocatable_def h4 v5;
     below_def h4 p2 2; below_def h4 p3 2);
   let trees5 : ((x : node Pref.t) @ immutable ->

@@ -42,14 +42,12 @@ let sort_range : (parallel : bool) -> (s : int Slice.t) @ local unique ->
     let _done =
       if parallel then Quicksort.parallel_sort ~max_domains:2 ~cutoff:2 slice
       else Quicksort.sort slice in
-    let u = () in
-    ghost_ (post_def u after);
-    u) in
+    ghost_ (post_def () after);
+    ()) in
   let {state; _} = step in
   let after = ghost_ (Model.sub (Slice.current (borrow_ state))
     (Bigint.of_int i) (Bigint.of_int j)) in
-  let u = () in
-  ghost_ (post_def u after);
+  ghost_ (post_def () after);
   state)
 
 let run_range parallel values first past =
@@ -72,9 +70,8 @@ let run_range parallel values first past =
         let state = sort_range parallel s i j in state
       else s in
     Slice.finish state;
-    let u = () in
-    ghost_ (post_def u eventual);
-    u) in
+    ghost_ (post_def () eventual);
+    ()) in
   let {state; _} = result in
   let output = Owned_array.into_iarray state in output
 

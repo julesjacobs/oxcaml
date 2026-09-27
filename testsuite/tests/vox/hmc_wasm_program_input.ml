@@ -50,6 +50,9 @@ let[@def] (restart @ total) (start : Heap.start @ immutable) (input : W.t @ immu
       {X.heap = start.Heap.configuration.X.heap; state = Q.Running (entered activation input, frames)}
     | _ -> start.Heap.configuration}
 
+(* [restart start input] satisfies [Heap.correct] for [input]: words are
+   stored in cells rather than on the heap, so the heap is unchanged and
+   only the entry's argument cell differs. *)
 let (heap @ total) : (program : I.program) @ immutable -> (base : W.limb) -> (limit : W.limb) ->
     (old : W.t) @ immutable -> (input : W.t) @ immutable -> (start : Heap.start) @ immutable ->
     {u : unit | Heap.correct program base limit old (Heap.Initialized start)} ->
@@ -134,10 +137,10 @@ let (frame_words @ total) : (count : D.index) @ immutable -> (bytes : B.bytes) @
           match V.decode b3 with
           | None -> unreachable_ ()
           | Some (_, rest) ->
-            let m0 = Words.parts bytes a b1 () in
-            let m1 = Words.parts b1 b b2 () in
-            let m2 = Words.parts b2 c b3 () in
-            let m3 = Words.parts b3 d rest () in
+            let m0 = ghost_ (Words.parts bytes a b1 ()) in
+            let m1 = ghost_ (Words.parts b1 b b2 ()) in
+            let m2 = ghost_ (Words.parts b2 c b3 ()) in
+            let m3 = ghost_ (Words.parts b3 d rest ()) in
             ghost_ (
               let w7 = Sequence.Word (V.payload d, Sequence.End) in
               let w6 = Sequence.Word (V.tag d, w7) in
@@ -190,6 +193,10 @@ let[@def] (retargeted @ total) (prepared : Init.prepared @ immutable) (input : W
   && Memory.store prepared.Init.state.State.memory prepared.Init.state.State.registers.Registers.frame
     (Runtime.input_offset ()) (S.I64 input) === Some target.Init.state.State.memory)
 
+(* The proof that the prologue's store of the input at byte
+   [Runtime.input_offset] of the entry frame yields a state that satisfies
+   [Init.ready] for [input], so that the proofs about runs, stated for the
+   initializer's state, apply to the module built for the placeholder. *)
 let (install @ total) : (program : I.program) @ immutable -> (layout : Init.layout) @ immutable ->
     (memory : B.bytes) @ immutable -> (start : Heap.start) @ immutable -> (prepared : Init.prepared) @ immutable ->
     (input : W.t) @ immutable ->

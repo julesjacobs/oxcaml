@@ -33,7 +33,7 @@ module Fibonacci = struct
     if n < 1 || n > 90 then raise Overflow;
     let a = a in
     let b = b in
-    let next = n + 1 in
+    let next = ghost_ (n + 1) in
     ghost_ (fib_def next);
     let r = a + b in
     r
@@ -49,7 +49,7 @@ module Fibonacci = struct
       if j = n then b
       else
         let c = a + b in
-        let k = j + 1 in
+        let k = ghost_ (j + 1) in
         ghost_ (fib_def k);
         let a : {v : int | v = fib j} = b in
         let b : {v : int | v = fib (j + 1)} = c in
@@ -88,9 +88,9 @@ module Fibonacci = struct
       let prev = n - 1 in
       double prev;
       doubling_identity prev;
-      let next = n + 1 in
-      let twice = 2 * n in
-      let twice_next = twice + 1 in
+      let next = ghost_ (n + 1) in
+      let twice = ghost_ (2 * n) in
+      let twice_next = ghost_ (twice + 1) in
       ghost_ (fib_def next);
       ghost_ (fib_def twice);
       ghost_ (fib_def twice_next);

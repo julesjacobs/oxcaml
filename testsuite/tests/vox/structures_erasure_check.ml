@@ -4,7 +4,8 @@ open Emitted_code
 
 let proofs =
   [ "heap"; "valid"; "rev_append"; "flipped"; "flipped_all"; "reversed";
-    "append"; "spliced"; "last"; "chain"; "fold_correct"; "add_correct" ]
+    "append"; "spliced"; "last"; "chain"; "inserted"; "removed";
+    "fold_correct"; "add_correct" ]
 
 let models =
   [ "Pref_ring_checks"; "Pref_ring_reverse_model"; "Pref_ring_splice_model";
@@ -50,6 +51,7 @@ let () =
       "pref_ring", [ "splice_range"; "reverse_nodes" ];
       "pref_ring_splice", [ "splice_demo" ];
       "pref_ring_reverse", [ "reverse_demo" ];
-      "pref_ring_general", [ "reverse"; "adopt"; "release" ];
+      "pref_ring_general",
+      [ "reverse"; "insert"; "remove"; "adopt"; "release"; "sentinel_node" ];
       "pref_ring_splice_general", [ "splice"; "adopt"; "release"; "swap" ] ];
   finish ()

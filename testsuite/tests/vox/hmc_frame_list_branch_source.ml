@@ -28,7 +28,7 @@ let (correct @ total) : (signature : G.signature) @ immutable -> (element : D.mo
         let saved = Seg.append env temporary_tail in
         let both = Seg.append env saved in
         let after = Heap.Cell (head, Heap.Cell (tail, both)) in
-        let next_signature = Model.successor signature element in
+        let next_signature = ghost_ (Model.successor signature element) in
         ghost_ (Seg.join_environment signature.G.locals env temporary_tail ();
           Codec.decode_temporaries_def next_signature.G.temporaries saved;
           Seg.join_environment signature.G.locals env saved ();

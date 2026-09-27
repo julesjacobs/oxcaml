@@ -20,9 +20,9 @@ The array is reached through `Borrow`, a library of exclusively borrowed array s
 
 ## Client example
 
-From the client test. `{v : t | p}` is the type `t` refined by the predicate `p`. `let refine_ x = e in` binds `x` to the value of `e` and keeps the refinement of `e`'s type as a known fact; `refine_ result` at the end checks that `result` has the refined result type. `Owned_array.t` is a uniquely owned mutable array: `of_iarray` copies an immutable array into one, and `into_iarray` freezes it again. `Model.of_iarray` is the list of an array's elements, used only in specifications.
+From the client test. `{v : t | p}` is the type `t` refined by the predicate `p`. The checker proves the refined result type from the contracts of the three calls. `Owned_array.t` is a uniquely owned mutable array: `of_iarray` copies an immutable array into one, and `into_iarray` freezes it again. `Model.of_iarray` is the list of an array's elements, used only in specifications.
 
-@code testsuite/tests/vox/quicksort_client.ml "let verified_sort" "  refine_ result"
+@code testsuite/tests/vox/quicksort_client.ml "let verified_sort" "  Owned_array.into_iarray sorted"
 
 The rest of the test runs this on fixed and random inputs of up to 8,192 elements and compares the results with `List.sort` at run time.
 

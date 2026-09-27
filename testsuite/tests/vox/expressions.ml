@@ -30,12 +30,11 @@ module Expr = struct
     eval_def left input;
     eval_def right input;
     eval_def result input;
-    let u = () in
     match left, right with
-    | Lit _, Lit _ -> refine_ u
-    | Lit 0, _ -> refine_ u
-    | _, Lit 0 -> refine_ u
-    | _ -> refine_ u
+    | Lit _, Lit _ -> ()
+    | Lit 0, _ -> ()
+    | _, Lit 0 -> ()
+    | _ -> ()
 
   let[@def] rec fold (expression @ total) : t @ total =
     match expression with
@@ -49,22 +48,21 @@ module Expr = struct
     fun expression input ->
     fold_def expression;
     eval_def expression input;
-    let u = () in
     match expression with
-    | Lit _ | Input -> refine_ u
+    | Lit _ | Input -> ()
     | Add (left, right) ->
       fold_correct left input;
       fold_correct right input;
       let left = fold left in
       let right = fold right in
       add_correct left right input;
-      refine_ u
+      ()
 
   let (eval_folded @ total) (expression @ total) input :
       {result : int | result === eval expression input} =
     let (result @ total) = (eval (fold expression) input : int @ total) in
     ghost_ (fold_correct expression input);
-    refine_ result
+    result
 end
 ;;
 [%%expect{|
@@ -126,11 +124,11 @@ let () =
   Format.printf "input=4 result=%d; input=10 result=%d@."
     (eval expression 4) (eval expression 10);
   let input = 4 in
-  let refine_ result = eval_folded expression input in
+  let result = eval_folded expression input in
   Format.printf "folded=%d@." result;
   let overflow = Add (Lit max_int, Lit 1) in
   let input = 0 in
-  let refine_ result = eval_folded overflow input in
+  let result = eval_folded overflow input in
   Format.printf "wrapping addition preserved=%b@."
     (result = min_int)
 ;;
@@ -152,13 +150,12 @@ let bad_fold (a : int) (b : int) input :
   Expr.eval_def right input;
   Expr.eval_def original input;
   Expr.eval_def result input;
-  let u = () in
-  refine_ u
+  ()
 ;;
 [%%expect{|
-Line 14, characters 2-11:
-14 |   refine_ u
-       ^^^^^^^^^
+Line 13, characters 2-4:
+13 |   ()
+       ^^
 Error: Refinement could not be proved (counterexample)
 Lines 3-4, characters 6-61:
 3 | ......Expr.eval (Expr.Lit (a - b)) input

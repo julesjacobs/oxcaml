@@ -41,7 +41,7 @@ let fixture (counter : B.u32) (word : W.t @ immutable) =
       (match Registers.store stores {GE.globals = imported.GE.globals; execution = after} with
       | None -> failwith "register export"
       | Some exported ->
-        let labels = Continue.labels (Block.epilogue stores T.Empty) T.No_labels in
+        let labels = ghost_ (Continue.labels (Block.epilogue stores T.Empty) T.No_labels) in
         ghost_ (Wasm_control_success.straight body imported.GE.execution after ();
           Lift.correct body T.Empty labels imported.GE.execution after ());
         (match imported.GE.execution.X.machine.E.stack, after.X.machine.E.stack with

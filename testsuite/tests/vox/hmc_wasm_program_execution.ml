@@ -1,3 +1,22 @@
+(* Running the dispatcher loop for a bounded number of block steps.
+
+   [State.valid] relates a Wasm state (the registers, held in globals, and
+   the linear memory) to a heap-machine configuration, and through
+   Hmc_heap_invariant to the state of the tail machine after [elapsed]
+   steps. [Hmc_wasm_program_step.step] runs one iteration of the loop,
+   which calls the current block's function. From a valid state it either
+   continues in a valid state one heap-machine step later, or returns, or
+   reports exhaustion; there is no case for a trap.
+
+   [run budget] takes at most [budget] block steps. It returns the endpoint
+   ([Paused] after [budget] steps, or [Stopped]), the number of Wasm steps
+   [fuel] that reach it, and, through [source], the heap-machine run it
+   matches. The erased [prefix] counts the Wasm steps to [checkpoint], the
+   loop state before the block that stopped; it locates a failed guard.
+   Each block step takes at least one Wasm step, so a run still paused
+   after [budget] block steps has taken at least [budget] Wasm steps
+   ([covers]): Hmc_wasm_program_observe uses this to reach any given Wasm
+   step count. *)
 module D = Hm_declarative
 module I = Hmc_tail_ir
 module Machine = Hmc_heap_machine

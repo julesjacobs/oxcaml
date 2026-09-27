@@ -1,3 +1,15 @@
+(* One rule application under given bindings at a given id [root] (the id
+   at which the left-hand side is matched), the step of the rule search.
+   [matched_rule] checks the bindings ([B.build]) and matches the left-hand
+   side at [root] with the executable matcher. If the right-hand side
+   already matches at [root], nothing changes. Otherwise it admits the
+   right-hand side ([Vox_egraph_pattern_admit]) and merges it with [root],
+   justified by the erased derivation from [root]'s origin to the left-hand
+   instance ([P.derive]) followed by the [Rule] step. When nothing changes,
+   the contract shows the rule holds at this root: the bindings are
+   rejected, the left-hand side does not match, or the right-hand side
+   matches. *)
+
 module Frame = Vox_egraph_origin_frame
 module H = Vox_egraph_rule_hashcons
 module V = Vox_egraph_rule_store

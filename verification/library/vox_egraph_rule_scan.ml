@@ -1,3 +1,14 @@
+(* The search for one rule. [rule] enumerates every assignment of ids to
+   the rule's variables ([Vox_egraph_assignments.enumerate]), [cases] goes
+   through them, and [roots] tries [Vox_egraph_rule_rewrite.matched_rule]
+   with every id from [count - 1] down to 0 as the root of the match (not
+   a union-find root). The search stops at the first application that
+   merges or adds a node ([Changed]). If it finishes without a change, the
+   store is unchanged and every attempt showed the rule closed at its root
+   and binding, which adds up to [Vox_egraph_saturation_spec.closed_rule]
+   ([Equiv.closed_rule]). Each case, each root attempt and each enumeration
+   step costs one unit of fuel. *)
+
 module Frame = Vox_egraph_origin_frame
 module H = Vox_egraph_rule_hashcons
 module V = Vox_egraph_rule_store
@@ -63,6 +74,9 @@ let rec roots : (state : {s : H.t | H.O.valid s.owner && V.valid s.store &&
         let after = (let view = borrow_ state in view.owner.count) in
         if merged || after > before then #{status = Changed; fuel = fuel - 1; state}
         else
+          (* No change: by the contract of [matched_rule], the bindings are
+             ill-typed, the left-hand side does not match at this root, or
+             the right-hand side does. *)
           let {H.owner; store} = state in
           ghost_ (
             CP.binding_valid store rule.vars bindings ();

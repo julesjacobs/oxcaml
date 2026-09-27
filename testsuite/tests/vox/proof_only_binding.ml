@@ -1,10 +1,10 @@
 (* TEST
- flags = "-extension refinement_types -smt-assume-verified -w +proof-only-binding";
+ flags = "-extension refinement_types -smt-assume-verified";
  expect;
 *)
 
 (* A local value computed at run time but used only in ghost code
-   (warning 226). *)
+   (warning 226, on by default). *)
 
 module M = struct
   let (witness @ total) (a : int) (b : int) : int = a * b

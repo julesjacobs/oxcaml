@@ -1,3 +1,9 @@
+(* The hash-cons key of an e-node: a constructor tag, a literal payload and
+   up to three child ids, with zero in unused fields. [equal] and [hash]
+   satisfy the laws that [Vox_table_map.Key] requires of a hash table key;
+   [exact] adds that [equal] is logical equality, so a table hit identifies
+   the stored key exactly. *)
+
 type t = {
   tag : int;
   payload : int;

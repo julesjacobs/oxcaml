@@ -27,8 +27,8 @@ let (correct @ total) : (prefix : Heap.cells) @ immutable -> (rest : Heap.cells)
       && M.store middle base payload_offset (S.I64 (V.payload value)) === Some after} @ immutable =
   fun prefix rest old value count before after base offset payload_offset before_frame after_frame tail premise ->
     let p = Words.words prefix in let r = Words.words rest in
-    let old_tag = V.tag old in let new_tag = V.tag value in
-    let old_payload = V.payload old in let new_payload = V.payload value in
+    let old_tag = ghost_ (V.tag old) in let new_tag = V.tag value in
+    let old_payload = V.payload old in let new_payload = ghost_ (V.payload value) in
     let middle_words = Q.append p (Q.Word (new_tag, Q.Word (old_payload, r))) in
     let middle_frame = Q.encode middle_words tail in
     let middle = Splice.replace before base before_frame middle_frame () in

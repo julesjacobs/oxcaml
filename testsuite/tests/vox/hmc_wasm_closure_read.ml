@@ -33,7 +33,7 @@ let (correct @ total) : (table : Hmc_closure_ir.table) @ immutable -> (heap : He
       && Wire.decode_cells (D.S (Heap.length captures)) out.bytes === Some (Heap.Cell (V.Word (Header.number out.code), captures), out.tail)} @ immutable =
   fun table heap memory address id captures count premise ->
     let object_ = Heap.Closure (id, captures) in
-    let allocation = Hmc_heap_bounds.allocation table heap address object_ () in
+    let allocation = ghost_ (Hmc_heap_bounds.allocation table heap address object_ ()) in
     ghost_ (Heap.slots_def object_; Index.represents_def (D.S (Heap.length captures)) (count + 1);
       Hmc_wasm_reservation.span (D.S (Heap.length captures)) (count + 1) address allocation.Heap.stop ());
     let wire = Image.fetch memory heap address object_ () in

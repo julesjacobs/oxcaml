@@ -119,46 +119,70 @@ let rec (drain_line @ total) : (phase : phase) @ immutable total -> (prefix :
       ())
     else ())
 
-let rec (drain_headers @ total) : (request_line : bytes) -> (prefix : int list
-  list) ->
-    (headers : int list list) -> (body : bytes) ->
+let rec (wire_headers_prefix @ total) : (headers : int list list) ->
+    (body : bytes) ->
+    {u : unit | wire_headers headers body ===
+      header_prefix headers (13 :: 10 :: body)} @ ghost =
+  fun headers body -> ghost_ (
+  wire_headers_def headers body;
+  header_prefix_def headers (13 :: 10 :: body);
+  match headers with
+  | [] -> ()
+  | _ :: rest -> wire_headers_prefix rest body;
+    ())
+
+let rec (drain_header_lines @ total) : (request_line : bytes) ->
+    (prefix : int list list) -> (headers : int list list) -> (tail : bytes) ->
+    {u : unit | if header_lines headers then
+      drain (Line (Headers (request_line, prefix), [], false))
+        (header_prefix headers tail) ===
+      drain (Line (Headers (request_line, S.append prefix headers), [], false))
+        tail
+      else true} @ ghost =
+  fun request_line prefix headers tail -> ghost_ (
+  header_lines_def headers;
+  header_prefix_def headers tail;
+  let phase = Headers (request_line, prefix) in
+  let start = Line (phase, [], false) in
+  match headers with
+  | [] -> S.append_nil prefix; ()
+  | line :: rest ->
+    if header_lines headers then (
+      let segment = S.append line [13;10] in
+      let rest_wire = header_prefix rest tail in
+      drain_line phase [] line;
+      S.append_def [] line;
+      drain_append start segment rest_wire;
+      S.append_associative line [13;10] rest_wire;
+      S.append_def [13;10] rest_wire; S.append_def [10] rest_wire;
+      S.append_def [] rest_wire;
+      finish_line_def phase line;
+      let next_prefix = S.append prefix [line] in
+      let next = Line (Headers (request_line, next_prefix), [], false) in
+      terminal_def next;
+      drain_header_lines request_line next_prefix rest tail;
+      S.append_associative prefix [line] rest;
+      S.append_def [line] rest; S.append_def [] rest;
+      ())
+    else ())
+
+let (drain_headers @ total) (request_line : bytes) (prefix : int list list)
+    (headers : int list list) (body : bytes) :
     {u : unit | if header_lines headers then
       drain (Line (Headers (request_line, prefix), [], false)) (wire_headers
         headers body) ===
       drain (finish_line (Headers (request_line, S.append prefix headers)) [])
         body
-      else true} @ ghost =
-  fun request_line prefix headers body -> ghost_ (
-  header_lines_def headers;
-  wire_headers_def headers body;
-  let phase = Headers (request_line, prefix) in
+      else true} @ ghost = ghost_ (
+  wire_headers_prefix headers body;
+  drain_header_lines request_line prefix headers (13 :: 10 :: body);
+  let phase = Headers (request_line, S.append prefix headers) in
   let start = Line (phase, [], false) in
-  match headers with
-  | [] ->
-    S.append_nil prefix;
-    terminal_def start; drain_def start (13 :: 10 :: body);
-    step_def start 13; byte_def 13;
-    let cr = Line (phase, [], true) in
-    terminal_def cr; drain_def cr (10 :: body); step_def cr 10; byte_def 10;
-    ()
-  | line :: rest ->
-    if header_lines headers then (
-      let segment = S.append line [13;10] in
-      let tail = wire_headers rest body in
-      drain_line phase [] line;
-      S.append_def [] line;
-      drain_append start segment tail;
-      S.append_associative line [13;10] tail;
-      S.append_def [13;10] tail; S.append_def [10] tail; S.append_def [] tail;
-      finish_line_def phase line;
-      let next_prefix = S.append prefix [line] in
-      let next = Line (Headers (request_line, next_prefix), [], false) in
-      terminal_def next; S.append_def [] tail;
-      drain_headers request_line next_prefix rest body;
-      S.append_associative prefix [line] rest;
-      S.append_def [line] rest; S.append_def [] rest;
-      ())
-    else ())
+  terminal_def start; drain_def start (13 :: 10 :: body);
+  step_def start 13; byte_def 13;
+  let cr = Line (phase, [], true) in
+  terminal_def cr; drain_def cr (10 :: body); step_def cr 10; byte_def 10;
+  ())
 
 let rec (drain_body @ total) : (request_line : bytes) -> (headers : int list
   list) ->
@@ -387,11 +411,6 @@ let[@def] valid_core core =
   | Complete request -> semantic_request request
   | Malformed _ | Limit _ -> true
 
-let[@def] rec header_prefix headers tail =
-  match headers with
-  | [] -> tail
-  | line :: rest -> S.append line (13 :: 10 :: header_prefix rest tail)
-
 let[@def] observed core =
   match core with Malformed _ | Limit _ -> false | _ -> true
 
@@ -607,18 +626,6 @@ let rec (header_prefix_concat @ total) : (left : int list list) ->
   | line :: rest ->
     header_prefix_def (S.append left right) tail;
     header_prefix_concat rest right tail;
-    ())
-
-let rec (wire_headers_prefix @ total) : (headers : int list list) ->
-    (body : bytes) ->
-    {u : unit | wire_headers headers body ===
-      header_prefix headers (13 :: 10 :: body)} @ ghost =
-  fun headers body -> ghost_ (
-  wire_headers_def headers body;
-  header_prefix_def headers (13 :: 10 :: body);
-  match headers with
-  | [] -> ()
-  | _ :: rest -> wire_headers_prefix rest body;
     ())
 
 let[@def] request_prefix request_line headers tail =
@@ -1038,6 +1045,76 @@ let (header_outcome @ total) (line : bytes) (headers : int list list) :
   drain_empty ending;
   finish_line_def (Headers (line, headers)) []; nonempty_def [];
   initial_def (); feed_matches_drain (initial ()) wire;
+  ())
+
+let (terminal_prefix @ total) (wire : bytes) (core : core) (suffix : bytes) :
+    {u : unit | if fits 16384 wire && terminal core
+        && drain (initial ()).core wire === (core, []) then
+      let result = feed (initial ()) (S.append wire suffix) in
+      result.state.core === core && result.rest === suffix
+      else true} @ ghost = ghost_ (
+  let start = initial () in
+  initial_def ();
+  feed_matches_drain start wire;
+  let first = feed start wire in
+  chunking_invariance start wire suffix;
+  S.append_def [] suffix;
+  terminal_def first.state.core;
+  feed_def first.state suffix;
+  ())
+
+let (request_line_rejection @ total) (line : bytes) (suffix : bytes) :
+    {u : unit | if safe_line line && not (valid_request_line line)
+        && fits 16384 (S.append line [13; 10]) then
+      let result = feed (initial ()) (S.append line (13 :: 10 :: suffix)) in
+      result.state.core === Malformed Invalid_request_line
+      && result.rest === suffix
+      else true} @ ghost = ghost_ (
+  let wire = S.append line [13; 10] in
+  drain_line Request_line [] line; S.append_def [] line;
+  finish_line_def Request_line line;
+  terminal_def (Malformed Invalid_request_line);
+  initial_def ();
+  terminal_prefix wire (Malformed Invalid_request_line) suffix;
+  S.append_associative line [13; 10] suffix;
+  crlf_append [] suffix; S.append_def [] suffix;
+  ())
+
+let (header_rejection @ total) (request_line : bytes)
+    (headers : int list list) (line : bytes) (suffix : bytes) :
+    {u : unit | if valid_request_line request_line && safe_line request_line
+        && header_lines headers && nonempty line && safe_line line
+        && not (valid_header line)
+        && fits 16384 (request_prefix request_line headers (S.append line [13; 10]))
+      then
+      let result = feed (initial ())
+        (request_prefix request_line headers (S.append line (13 :: 10 :: suffix))) in
+      result.state.core === Malformed Invalid_header && result.rest === suffix
+      else true} @ ghost = ghost_ (
+  let ending = S.append line [13; 10] in
+  let tail = header_prefix headers ending in
+  let wire = request_prefix request_line headers ending in
+  request_prefix_def request_line headers ending;
+  let segment = S.append request_line [13; 10] in
+  let start = Line (Request_line, [], false) in
+  drain_line Request_line [] request_line; S.append_def [] request_line;
+  drain_append start segment tail;
+  S.append_associative request_line [13; 10] tail;
+  crlf_append [] tail; S.append_def [] tail;
+  finish_line_def Request_line request_line;
+  let phase = Headers (request_line, []) in
+  terminal_def (Line (phase, [], false));
+  drain_header_lines request_line [] headers ending;
+  S.append_def [] headers;
+  let last = Headers (request_line, headers) in
+  drain_line last [] line; S.append_def [] line;
+  finish_line_def last line;
+  terminal_def (Malformed Invalid_header);
+  initial_def ();
+  terminal_prefix wire (Malformed Invalid_header) suffix;
+  request_prefix_append request_line headers ending suffix;
+  S.append_associative line [13; 10] suffix;
+  crlf_append [] suffix; S.append_def [] suffix;
   ())
 
 let rec (incomplete_suffix @ total) : (state : state) -> (input : bytes) ->
@@ -1530,6 +1607,67 @@ let (header_outcome @ total) (line : bytes) (headers : int list list) :
   Internal.header_outcome line headers;
   status_model result.state; machine_of_def result.state;
   Driver.model_def result.state;
+  ())
+
+let (request_line_rejection @ total) (line : bytes) (suffix : bytes) :
+    {u : unit | if safe_line line && not (valid_request_line line)
+        && fits 16384 (S.append line [13; 10]) then
+      let result = feed (initial ()) (S.append line (13 :: 10 :: suffix)) in
+      status result.state === Malformed Invalid_request_line
+      && result.rest === suffix
+      else true} @ ghost = ghost_ (
+  let input = S.append line (13 :: 10 :: suffix) in
+  let result = feed (initial ()) input in
+  initial_machine (); feed_machine (initial ()) input;
+  Internal.request_line_rejection line suffix;
+  status_model result.state; machine_of_def result.state;
+  Driver.model_def result.state;
+  ())
+
+let (header_rejection @ total) (request_line : bytes)
+    (headers : int list list) (line : bytes) (suffix : bytes) :
+    {u : unit | if valid_request_line request_line && safe_line request_line
+        && header_lines headers && nonempty line && safe_line line
+        && not (valid_header line)
+        && fits 16384 (S.append request_line (13 :: 10 ::
+          header_prefix headers (S.append line [13; 10]))) then
+      let result = feed (initial ()) (S.append request_line
+        (13 :: 10 :: header_prefix headers
+          (S.append line (13 :: 10 :: suffix)))) in
+      status result.state === Malformed Invalid_header
+      && result.rest === suffix
+      else true} @ ghost = ghost_ (
+  let input = S.append request_line
+    (13 :: 10 :: header_prefix headers (S.append line (13 :: 10 :: suffix))) in
+  let result = feed (initial ()) input in
+  initial_machine (); feed_machine (initial ()) input;
+  Internal.request_prefix_def request_line headers (S.append line [13; 10]);
+  Internal.request_prefix_def request_line headers
+    (S.append line (13 :: 10 :: suffix));
+  Internal.header_rejection request_line headers line suffix;
+  status_model result.state; machine_of_def result.state;
+  Driver.model_def result.state;
+  ())
+
+let (invalid_byte_rejection @ total) (state : state) (b : int) (rest : bytes) :
+    {u : unit | if status state === Incomplete && total_consumed state < 16384
+        && not (byte b) then
+      let result = feed state (b :: rest) in
+      status result.state === Malformed Invalid_byte && result.rest === rest
+      else true} @ ghost = ghost_ (
+  let result = feed state (b :: rest) in
+  let machine = machine_of state in
+  feed_machine state (b :: rest);
+  machine_of_def state; Driver.model_def state; good_def machine;
+  status_model state; total_consumed_def state;
+  Internal.terminal_def machine.core;
+  Internal.feed_def machine (b :: rest);
+  Internal.advance_def machine b;
+  Internal.step_def machine.core b;
+  let next = Internal.advance machine b in
+  Internal.terminal_def next.core;
+  Internal.feed_def next rest;
+  status_model result.state;
   ())
 
 let (framing_rejection @ total) (headers : int list list) :

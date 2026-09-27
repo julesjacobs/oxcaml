@@ -1,3 +1,12 @@
+(* The union-find with proof edges: [Vox_egraph_union] at run time, plus the
+   ghost rules, origins and edges of [Vox_egraph_rule_semantics]. [merge]
+   takes a derivation from the origin of the larger root to that of the
+   smaller one and stores it as the loser's edge; [merge_nodes] takes one
+   between the origins of any two ids and converts it with [root_proof].
+   So a merge needs evidence, and any two ids of a class have a derivation
+   between their origins ([same_evidence]). Only [union] remains at run
+   time. *)
+
 module I = Vox_iarray
 module L = Vox_egraph_language_spec
 module LP = Vox_egraph_language_proof
@@ -71,6 +80,9 @@ let add : (state : {s : t | valid s}) @ immutable ->
     ghost_ (valid_def next);
     #{value = Some id; state = next}
 
+(* A derivation between the origins of [a] and [b], extended by [explain]
+   on both sides into one between their roots' origins, larger root first,
+   as [merge] requires. *)
 let (root_proof @ total) :
     (state : t) @ immutable ->
     (a : int) -> (b : int) ->
@@ -140,10 +152,10 @@ let merge : (state : {s : t | valid s}) @ immutable ->
   let #{U.merged; winner = _; state = union} = U.union state.union a b in
   if not merged then #{merged = false; state}
   else
-    let ra = M.root state.union.parents a in
-    let rb = M.root state.union.parents b in
-    let loser = U.larger ra rb in
-    let winner = U.smaller ra rb in
+    let ra = ghost_ (M.root state.union.parents a) in
+    let rb = ghost_ (M.root state.union.parents b) in
+    let loser = ghost_ (U.larger ra rb) in
+    let winner = ghost_ (U.smaller ra rb) in
     let edges = ghost_ (I.updated state.edges loser (Some proof)) in
     ghost_ (
       M.root_spec state.union.parents state.union.count a ();
