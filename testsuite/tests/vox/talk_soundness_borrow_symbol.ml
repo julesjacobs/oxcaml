@@ -14,14 +14,14 @@
 (* Talk, section 6 ("how we hunt soundness bugs"), row "name-keyed
    built-ins", second half: the borrow transitions. The first half, a user
    external named "caml_bigint_add" "caml_bigint_sub" that proves
-   2 + 3 = 5 while native code subtracts, is builtin_declaration_identity.ml
-   on the fix's branch.
+   2 + 3 = 5 while native code subtracts, is
+   builtin_declaration_identity.ml.
 
-   EXPECTS THE FIX. This test fails on trunk until the name-keyed built-ins
+   The forged program below was accepted before the name-keyed built-ins
    fix (commit b5f3e0c50e, "Vox: key built-in meanings of C primitives by
-   their declaration", on branch jujacobs/vox/trust-hardening-20260927) is
-   merged: on trunk the forged program below is accepted. Its expected
-   output is the output with that commit applied.
+   their declaration", merged in a187b9ab9c). With the fix it is rejected;
+   the expected output records the rejection and the accepted control.
+
 
    The verifier gave the borrow transitions their meaning by C symbol name,
    so a client external bound to "caml_borrow_finish" with a borrowed,

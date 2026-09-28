@@ -84,7 +84,7 @@ this file.
   - [x] W9: the caches are keyed by the compiler digest and solver version
         (`4e24de3229`); follow-up: query cache keyed by solver only, and a
         timeout on the version probe.
-  - [ ] **Totality knot (found 27 September by the mastery investigation):**
+  - [x] **Totality knot (found 27 September by the mastery investigation; fixed by the hidden-types rule below, merged `09dfd7e2fa`):**
         a total function stored in a record whose domain is an existential
         package, unpacked back to the record's type by a GADT witness,
         diverges; `false` is then proved and `ghost_` erases the call
@@ -97,7 +97,7 @@ this file.
         arguments even when a callback argument is partial and stateful
         (`apply tick 0 = apply tick 0` proved, false at run time). Agent on
         `jujacobs/vox/call-congruence-20260927`.
-  - [ ] **Hidden types in the totality check:** the knot above, plus an
+  - [x] **Hidden types in the totality check (fixed, merged `09dfd7e2fa`; one route open: an abstract type equal to a function type consumed by an exported total function, agent on `jujacobs/vox/matchability-20260928` adding a declared matchability attribute):** the knot above, plus an
         abstract type in a signature hiding negative recursion. One rule for
         existentials, abstract/open types and unpacked modules (possibly
         recursive unless the jkind excludes functions or a recorded guarantee
