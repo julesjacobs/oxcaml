@@ -22,7 +22,7 @@ let (mixed_instance @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t
     rho_def q; choices_def p; let wanted = Function (Variable p, Boolean) in D.embed_def wanted;
     let sigma = P.scheme rho schema in
     let _checked : {u : unit | D.open_scheme sigma args === D.embed wanted} = refine_ () in
-    let u = () in refine_ u)
+    refine_ ())
 
 let (shared_parameter @ total) : (p : node Pref.t) @ immutable ->
     (root : node Pref.t) @ immutable -> (t : ty) @ immutable -> {u : unit | true} @ ghost = fun p root t -> ghost_ (
@@ -33,4 +33,4 @@ let (shared_parameter @ total) : (p : node Pref.t) @ immutable ->
     interpret_def rho choices schema; interpret_def rho choices parameter; choices_def p;
     let wanted = Function (t, t) in let sigma = P.scheme rho schema in
     let _checked : {u : unit | D.open_scheme sigma args === D.embed wanted} = refine_ () in
-    let u = () in refine_ u)
+    refine_ ())

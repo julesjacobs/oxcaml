@@ -66,18 +66,17 @@
           if same_repr left right then left === right else true}
           @ immutable contended =
       fun left right ->
-      let u = () in
       if same_repr left right then
         (same_repr_def left right;
         match left with
-        | Nil -> u
+        | Nil -> ()
         | Cons (_, left_tail) ->
           match right with
-          | Nil -> u
+          | Nil -> ()
           | Cons (_, right_tail) ->
             same_repr_equal left_tail right_tail;
-            u)
-      else u
+            ())
+      else ()
 
     let rec (lookup_add_repr @ total) :
         (element : int) ->
@@ -108,18 +107,17 @@
           then all_greater lower xs
           else true} @ immutable contended =
       fun lower middle xs ->
-      let u = () in
       if lower < middle && all_greater middle xs then
         match xs with
         | Nil ->
           all_greater_def lower xs;
-          u
+          ()
         | Cons (_, tail) ->
           all_greater_def middle xs;
           all_greater_def lower xs;
           all_greater_transitive lower middle tail;
-          u
-      else u
+          ()
+      else ()
 
     let rec (add_preserves_lower @ total) :
         (lower : int) ->
@@ -130,25 +128,24 @@
           then all_greater lower (add_repr element xs)
           else true} @ immutable contended =
       fun lower element xs ->
-      let u = () in
       if lower < element && all_greater lower xs then
         let result = add_repr element xs in
         add_repr_def element xs;
         match xs with
         | Nil ->
           all_greater_def lower result;
-          u
+          ()
         | Cons (head, tail) ->
           all_greater_def lower xs;
-          if element = head then u
+          if element = head then ()
           else if element < head then
             (all_greater_def lower result;
-            u)
+            ())
           else
             (add_preserves_lower lower element tail;
             all_greater_def lower result;
-            u)
-      else u
+            ())
+      else ()
 
     let rec (add_valid @ total) :
         (element : int) ->
@@ -157,7 +154,6 @@
           if valid xs then valid (add_repr element xs) else true}
           @ immutable contended =
       fun element xs ->
-      let u = () in
       if valid xs then
         let result = add_repr element xs in
         add_repr_def element xs;
@@ -165,21 +161,21 @@
         | Nil ->
           valid_def result;
           all_greater_def element xs;
-          u
+          ()
         | Cons (head, tail) ->
           valid_def xs;
-          if element = head then u
+          if element = head then ()
           else if element < head then
             (all_greater_transitive element head tail;
             valid_def result;
             all_greater_def element xs;
-            u)
+            ())
           else
             (add_preserves_lower head element tail;
             add_valid element tail;
             valid_def result;
-            u)
-      else u
+            ())
+      else ()
 
     let[@def] (add @ total) :
         int -> t -> t @ immutable contended =
@@ -227,18 +223,17 @@
           then valid (union_repr left right)
           else true} @ immutable contended =
       fun left right ->
-      let u = () in
       if valid left && valid right then
         (union_repr_def left right;
         match left with
-        | Nil -> u
+        | Nil -> ()
         | Cons (head, tail) ->
           let added = add_repr head right in
           valid_def left;
           add_valid head right;
           union_valid tail added;
-          u)
-      else u
+          ())
+      else ()
 
     let rec (lookup_union_repr @ total) :
         (element : int) ->
@@ -343,18 +338,17 @@
           then lookup_repr element xs === false
           else true} @ immutable contended =
       fun lower element xs ->
-      let u = () in
       if element <= lower && all_greater lower xs then
         match xs with
         | Nil ->
           lookup_repr_def element xs;
-          u
+          ()
         | Cons (_, tail) ->
           all_greater_def lower xs;
           lookup_repr_def element xs;
           lookup_below lower element tail;
-          u
-      else u
+          ()
+      else ()
 
     let rec (extensional_repr @ total) :
         (left : repr) ->
@@ -367,26 +361,25 @@
           if valid left && valid right then left === right else true}
           @ immutable contended =
       fun left right premise ->
-      let u = () in
       if valid left && valid right then
         (valid_def left;
         valid_def right;
         match left with
         | Nil ->
           (match right with
-           | Nil -> u
+           | Nil -> ()
            | Cons (right_head, _) ->
              premise right_head;
              lookup_repr_def right_head left;
              lookup_repr_def right_head right;
-             u)
+             ())
         | Cons (left_head, left_tail) ->
           match right with
           | Nil ->
             premise left_head;
             lookup_repr_def left_head left;
             lookup_repr_def left_head right;
-            u
+            ()
           | Cons (right_head, right_tail) ->
             premise left_head;
             premise right_head;
@@ -396,10 +389,10 @@
             lookup_repr_def right_head right;
             if left_head < right_head then
               (lookup_below right_head left_head right_tail;
-              u)
+              ())
             else if right_head < left_head then
               (lookup_below left_head right_head left_tail;
-              u)
+              ())
             else
               let (tail_premise @ total) :
                   (element : int) ->
@@ -413,12 +406,12 @@
                 if element = left_head then
                   (lookup_below left_head element left_tail;
                   lookup_below right_head element right_tail;
-                  u)
-                else u
+                  ())
+                else ()
               in
               extensional_repr left_tail right_tail tail_premise;
-              u)
-      else u
+              ())
+      else ()
 
     let (extensional @ total) :
         (left : t) ->

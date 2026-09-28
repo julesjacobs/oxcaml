@@ -204,9 +204,8 @@ let rec unify :
               {u : unit | not (H.mem middle x) || scoped middle x}) @ total ghost =
             ghost_ (fun x ->
               scope x;
-              let u = () in
-              unified_frame h a c left_ok middle ld x (refine_ u);
-              refine_ u) in
+              unified_frame h a c left_ok middle ld x (refine_ ());
+              refine_ ()) in
           let proof = ghost_ (
             let u = () in
             unified_frame h a c left_ok middle ld b (refine_ u);

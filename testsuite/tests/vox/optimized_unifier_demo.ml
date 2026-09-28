@@ -28,12 +28,12 @@ let run mode =
   let active_all : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || active h x}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; let desc = Bool in cell_def desc 4;
     cell_def left_desc 4; cell_def right_desc 4;
-    active_def h x; at_level_def h x; let u = () in refine_ u) in
+    active_def h x; at_level_def h x; refine_ ()) in
   let scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || finite_scope h x}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; let desc = Bool in cell_def desc 4;
     cell_def left_desc 4; cell_def right_desc 4;
     active_all a; active_all b; active_all child;
-    finite_scope_def h x; source_ok_def h x; let u = () in refine_ u) in
+    finite_scope_def h x; source_ok_def h x; refine_ ()) in
   let p, q = match mode with 1 -> a, left | 3 -> b, left | 4 -> a, right | 5 -> a, a | _ -> left, right in
   ghost_ (active_all p; active_all q);
   let state : {t : node Pref.token | Pref.own t === h && H.mem h p && H.mem h q && active h p && active h q} = refine_ state in
@@ -41,7 +41,7 @@ let run mode =
     {u : unit | match H.at h x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; let desc = Bool in cell_def desc 4;
     cell_def left_desc 4; cell_def right_desc 4;
-    let u = () in refine_ u) in
+    refine_ ()) in
   let trees : ((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem h x then finite h t else observe h x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
       let desc = Var in cell_def desc 0; let desc = Bool in cell_def desc 4;
@@ -61,7 +61,7 @@ let desc = Var in cell_def desc 0; let desc = Bool in cell_def desc 4;
     at_level_def h a; at_level_def h b; at_level_def h child;
     children_below_def h left_desc 4; children_below_def h right_desc 4;
     let v = Var in children_below_def h v 0; let v = Bool in children_below_def h v 4; children_below_def h v 0;
-    ordered_def h x; at_level_def h x; let u = () in refine_ u) in
+    ordered_def h x; at_level_def h x; refine_ ()) in
   let h_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h)} in
   let scope_witness2 : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h_witness1.Ghost.ghost x) || finite_scope h_witness1.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope)} in
   let unmarked_witness3 : (((x : node Pref.t) @ immutable -> {u : unit | match H.at h_witness1.Ghost.ghost x with None -> true | Some v -> not v.visited})) Ghost.t = {Ghost.ghost = ghost_ (refine_ unmarked)} in
@@ -72,10 +72,10 @@ let desc = Var in cell_def desc 0; let desc = Bool in cell_def desc 4;
   let refine_ result = Optimized_unifier.unify h_witness1 scope_witness2 unmarked_witness3 order_witness4 trees_witness5 p q (refine_ state_argument6) in
   let ok = result.#ok in let d = ghost_ result.#derivation in
   let after = ghost_ (Pref.own (borrow_ result.#state)) in
-  ghost_ (let u = () in unified_frame h p q ok after d a (refine_ u));
-  ghost_ (let u = () in
-    let refine_ tree = Optimized_finite_proofs.unified_finite_at h trees p q ok after d left (refine_ u) in
-    unified_frame h p q ok after d left (refine_ u); ());
+  ghost_ (unified_frame h p q ok after d a (refine_ ()));
+  ghost_ (
+    let refine_ tree = Optimized_finite_proofs.unified_finite_at h trees p q ok after d left (refine_ ()) in
+    unified_frame h p q ok after d left (refine_ ()); ());
   let state = result.#state in let state : {t : node Pref.token | H.mem (Pref.own t) a} = refine_ state in
   let refine_ av = Pref.read a (borrow_ state) in
   let refine_ state = state in

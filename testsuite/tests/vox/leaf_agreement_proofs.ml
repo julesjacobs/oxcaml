@@ -11,7 +11,7 @@ let (child_below @ total) : (h : node Pref.heap) @ immutable ->
   fun h order cut p q premise -> ghost_ (
     let refine_ premise = premise in let stop = Stop in let path = Step (q, stop) in
     reaches_def h p q path; reaches_def h q q stop;
-    let u = () in Generalize_proofs.environment_bound h order cut p q path (refine_ u); refine_ u)
+    Generalize_proofs.environment_bound h order cut p q path (refine_ ()); refine_ ())
 
 let rec (low_unfolded_agreement @ total) : (saved : node Pref.heap) @ immutable ->
     (h : node Pref.heap) @ immutable -> (cut : int) ->
@@ -30,20 +30,20 @@ let rec (low_unfolded_agreement @ total) : (saved : node Pref.heap) @ immutable 
   fun saved h cut prior order rho rho_model eta eta_model equal tree premise -> ghost_ (
     let refine_ premise = premise in unfolded_def h tree; bound_root_def tree;
     let p = bound_root tree in rho_model p; eta_model p;
-    equation_def h rho p; equation_def h eta p; let u = () in
+    equation_def h rho p; equation_def h eta p; 
     match tree with
     | Tip _ -> low_var_def h p cut; Level_unifier_spec.observe_def h p;
       if low_var h p cut then (
         let refine_ origin = prior p in
-        Relative_generalization.origin_agreement saved h cut rho rho_model eta eta_model equal p origin (refine_ u); refine_ u)
-      else refine_ u
+        Relative_generalization.origin_agreement saved h cut rho rho_model eta eta_model equal p origin (refine_ ()); refine_ ())
+      else refine_ ()
     | Through (_, child) -> let q = bound_root child in edge_def h p q;
-      child_below h order cut p q (refine_ u);
-      low_unfolded_agreement saved h cut prior order rho rho_model eta eta_model equal child (refine_ u); refine_ u
+      child_below h order cut p q (refine_ ());
+      low_unfolded_agreement saved h cut prior order rho rho_model eta eta_model equal child (refine_ ()); refine_ ()
     | Fork (_, a, b) -> let q = bound_root a in let r = bound_root b in
-      edge_def h p q; edge_def h p r; child_below h order cut p q (refine_ u); child_below h order cut p r (refine_ u);
-      low_unfolded_agreement saved h cut prior order rho rho_model eta eta_model equal a (refine_ u);
-      low_unfolded_agreement saved h cut prior order rho rho_model eta eta_model equal b (refine_ u); refine_ u)
+      edge_def h p q; edge_def h p r; child_below h order cut p q (refine_ ()); child_below h order cut p r (refine_ ());
+      low_unfolded_agreement saved h cut prior order rho rho_model eta eta_model equal a (refine_ ());
+      low_unfolded_agreement saved h cut prior order rho rho_model eta eta_model equal b (refine_ ()); refine_ ())
 
 let rec (relative_interpret @ total) : (saved : node Pref.heap) @ immutable ->
     (h : node Pref.heap) @ immutable -> (cut : int) ->
@@ -62,13 +62,13 @@ let rec (relative_interpret @ total) : (saved : node Pref.heap) @ immutable ->
     let refine_ premise = premise in unfolded_def h tree; bound_root_def tree;
     let p = bound_root tree in let schema = scheme h cut tree in
     scheme_def h cut tree; interpret_def rho eta schema; at_level_def h p;
-    let level = at_level h p in close_level_def cut level; let u = () in
+    let level = at_level h p in close_level_def cut level; 
     if not (close_level cut level === Generic) then (
       order p; ordered_def h p; below_def h p cut;
-      low_unfolded_agreement saved h cut prior order rho rho_model eta eta_model equal tree (refine_ u); refine_ u)
+      low_unfolded_agreement saved h cut prior order rho rho_model eta eta_model equal tree (refine_ ()); refine_ ())
     else (
       eta_model p; equation_def h eta p;
-      match tree with Tip _ -> refine_ u
-      | Through (_, child) -> relative_interpret saved h cut prior order rho rho_model eta eta_model equal child (refine_ u); refine_ u
-      | Fork (_, a, b) -> relative_interpret saved h cut prior order rho rho_model eta eta_model equal a (refine_ u);
-        relative_interpret saved h cut prior order rho rho_model eta eta_model equal b (refine_ u); refine_ u))
+      match tree with Tip _ -> refine_ ()
+      | Through (_, child) -> relative_interpret saved h cut prior order rho rho_model eta eta_model equal child (refine_ ()); refine_ ()
+      | Fork (_, a, b) -> relative_interpret saved h cut prior order rho rho_model eta eta_model equal a (refine_ ());
+        relative_interpret saved h cut prior order rho rho_model eta eta_model equal b (refine_ ()); refine_ ()))

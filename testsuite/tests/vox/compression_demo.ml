@@ -22,12 +22,12 @@ let run () =
   let h = ghost_ (Pref.own (borrow_ state)) in
   let active_all : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || x === generic || active h x}) @ total ghost = ghost_ (fun x ->
     let boolean = Bool in cell_def boolean 0; cell_def qd 1; cell_def pd 2;
-    active_def h x; at_level_def h x; let u = () in refine_ u) in
+    active_def h x; at_level_def h x; refine_ ()) in
   let scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || finite_scope h x}) @ total ghost = ghost_ (fun x ->
     let boolean = Bool in cell_def boolean 0; cell_def qd 1; cell_def pd 2;
     active_all root; active_all q;
     active_def h x; at_level_def h x;
-    finite_scope_def h x; source_ok_def h x; let u = () in refine_ u) in
+    finite_scope_def h x; source_ok_def h x; refine_ ()) in
   ghost_ (active_all p);
   let state : {t : node Pref.token | Pref.own t === h && H.mem h p && active h p} = refine_ state in
   let h_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h)} in
@@ -36,10 +36,10 @@ let run () =
   let refine_ out = Compressed_representative.representative h_witness1 scope_witness2 p (refine_ state_argument3) in
   let after = ghost_ (Pref.own (borrow_ out.#state)) in
   let edits = ghost_ out.#edits in
-  ghost_ (let u = () in
-    Compression_proofs.frame h after edits p (refine_ u);
-    Compression_proofs.frame h after edits q (refine_ u);
-    Compression_proofs.frame h after edits generic (refine_ u);
+  ghost_ (
+    Compression_proofs.frame h after edits p (refine_ ());
+    Compression_proofs.frame h after edits q (refine_ ());
+    Compression_proofs.frame h after edits generic (refine_ ());
     Level_unifier_metadata.scratch_frame_def h after generic;
     let boolean = Bool in cell_def boolean 0; cell_def qd 1; cell_def pd 2;
     let leaf = Level_finite_spec.Constant_tree root in
@@ -50,7 +50,7 @@ let run () =
     Level_finite_spec.finite_def h leaf;
     Level_finite_spec.finite_def h qt; Level_finite_spec.finite_def h tree;
     observe_def h p; observe_def h q; observe_def h root;
-    let refine_ final_tree = Compression_proofs.finite h after edits tree (refine_ u) in
+    let refine_ final_tree = Compression_proofs.finite h after edits tree (refine_ ()) in
     ());
   assert (out.#value = root);
   let state = out.#state in

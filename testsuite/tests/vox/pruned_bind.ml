@@ -54,13 +54,13 @@ let bind_searched :
       let refine_ lowered = Pruned_lower.lower lower_heap_witness lower_scope_witness lower_order_witness lower_trees_witness bound q (refine_ t) in
       let levels = ghost_ lowered.#edits in
       let middle = ghost_ (Pref.own (borrow_ lowered.#state)) in
-      ghost_ (let u = () in let flag = false in
-        lower_searched h.Ghost.ghost bound levels p q flag search.Ghost.ghost (refine_ u);
-        lower_observe h.Ghost.ghost bound levels p (refine_ u); lower_observe h.Ghost.ghost bound levels q (refine_ u);
-        lowering_at h.Ghost.ghost bound levels p (refine_ u); frame_active h.Ghost.ghost middle p (refine_ u);
-        lowering_at h.Ghost.ghost bound levels q (refine_ u); frame_active h.Ghost.ghost middle q (refine_ u);
-        below_def h.Ghost.ghost p bound; lower_fixed h.Ghost.ghost bound levels p (refine_ u); at_level_def middle p;
-        let tree = lowered.#tree in lower_bounded_at middle bound tree q (refine_ u));
+      ghost_ (let flag = false in
+        lower_searched h.Ghost.ghost bound levels p q flag search.Ghost.ghost (refine_ ());
+        lower_observe h.Ghost.ghost bound levels p (refine_ ()); lower_observe h.Ghost.ghost bound levels q (refine_ ());
+        lowering_at h.Ghost.ghost bound levels p (refine_ ()); frame_active h.Ghost.ghost middle p (refine_ ());
+        lowering_at h.Ghost.ghost bound levels q (refine_ ()); frame_active h.Ghost.ghost middle q (refine_ ());
+        below_def h.Ghost.ghost p bound; lower_fixed h.Ghost.ghost bound levels p (refine_ ()); at_level_def middle p;
+        let tree = lowered.#tree in lower_bounded_at middle bound tree q (refine_ ()));
       let t = lowered.#state in
       let t : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ t in
       let refine_ current = Pref.read p (borrow_ t) in let refine_ t = t in
@@ -102,21 +102,21 @@ let bind :
     let found = checked.#found in let mid = ghost_ (scan_heap h.Ghost.ghost marks) in
     let scope_mid : ((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem mid x) || finite_scope mid x}) @ total ghost = ghost_ (fun x ->
-      let u = () in let refine_ u = scan_scope h.Ghost.ghost scope.Ghost.ghost p marks x (refine_ u) in refine_ u) in
-    ghost_ (let u = () in scan_heap_def h.Ghost.ghost marks;
-      scan_observe h.Ghost.ghost p marks p (refine_ u); scan_observe h.Ghost.ghost p marks q (refine_ u);
+      let refine_ u = scan_scope h.Ghost.ghost scope.Ghost.ghost p marks x (refine_ ()) in refine_ u) in
+    ghost_ (scan_heap_def h.Ghost.ghost marks;
+      scan_observe h.Ghost.ghost p marks p (refine_ ()); scan_observe h.Ghost.ghost p marks q (refine_ ());
       terminal_def h.Ghost.ghost q; terminal_def mid q;
-      scan_searched h.Ghost.ghost p marks p q found search (refine_ u));
+      scan_searched h.Ghost.ghost p marks p q found search (refine_ ()));
     let t = checked.#state in
     let t : {t : node Pref.token | Pref.own t === mid && H.mem mid p && H.mem mid q
       && active mid p && active mid q && observe mid p === Some Var
       && terminal mid q && not (p === q) && searched mid p q found search} = refine_ t in
     let order_mid : ((x : node Pref.t) @ immutable -> {u : unit | ordered mid x}) @ total ghost = ghost_ (fun x ->
-      order.Ghost.ghost x; let u = () in Marked_occurs_proofs.scan_ordered h.Ghost.ghost p marks x (refine_ u); refine_ u) in
+      order.Ghost.ghost x; Marked_occurs_proofs.scan_ordered h.Ghost.ghost p marks x (refine_ ()); refine_ ()) in
     let trees_mid : ((x : node Pref.t) @ immutable ->
       {t : tree | tree_root t === x && (if H.mem mid x then finite mid t else observe mid x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-        let refine_ tree = trees.Ghost.ghost x in let u = () in Marked_occurs_proofs.scan_at h.Ghost.ghost p marks x (refine_ u);
-        if H.mem h.Ghost.ghost x then (Level_finite_proofs.scan_finite h.Ghost.ghost p marks tree (refine_ u); refine_ tree)
+        let refine_ tree = trees.Ghost.ghost x in Marked_occurs_proofs.scan_at h.Ghost.ghost p marks x (refine_ ());
+        if H.mem h.Ghost.ghost x then (Level_finite_proofs.scan_finite h.Ghost.ghost p marks tree (refine_ ()); refine_ tree)
         else (observe_def h.Ghost.ghost x; observe_def mid x; refine_ tree)) in
     let h_witness5 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (mid)} in
     let scope_witness6 : (((q : node Pref.t) @ immutable ->

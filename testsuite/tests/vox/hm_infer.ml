@@ -39,7 +39,7 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
     match runtime_term with
     | T.Bound index ->
       let i = ghost_ index.T.original in
-      ghost_ (let u = () in env_lookup_owned h.Ghost.ghost env i (refine_ u);
+      ghost_ (env_lookup_owned h.Ghost.ghost env i (refine_ ());
         F.lookup_encoded env i index.T.number; ());
       let premise : ({u : unit | F.valid_forest runtime_env && index.T.number >= 0}) Ghost.t =
         {Ghost.ghost = ghost_ (refine_ ())} in
@@ -50,7 +50,7 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
       let refine_ p = p in
       let scope : ((x : node Pref.t) @ immutable ->
           {u : unit | if H.mem h.Ghost.ghost x then source_ok h.Ghost.ghost x else H.at h.Ghost.ghost x === None}) @ total ghost = ghost_ (fun x ->
-        facts x; runtime_at_def h.Ghost.ghost depth pool x; safe_def h.Ghost.ghost x; let u = () in refine_ u) in
+        facts x; runtime_at_def h.Ghost.ghost depth pool x; safe_def h.Ghost.ghost x; refine_ ()) in
       let p : {p : node Pref.t | H.mem h.Ghost.ghost p} = refine_ p in
       let level : {n : int | n >= 0} = refine_ depth in
       let state : {t : node Pref.token | Pref.own t === h.Ghost.ghost && pool_scoped h.Ghost.ghost pool} = refine_ state in
@@ -72,7 +72,7 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
       let state : {t : node Pref.token | Pref.own t === h.Ghost.ghost && pool_scoped h.Ghost.ghost pool} = refine_ state in
       let clean : ((x : node Pref.t) @ immutable ->
         {u : unit | match H.at h.Ghost.ghost x with None -> true | Some v -> v.memo === Empty_memo}) @ total ghost = ghost_ (fun x ->
-        facts x; runtime_at_def h.Ghost.ghost depth pool x; safe_def h.Ghost.ghost x; let u = () in refine_ u) in
+        facts x; runtime_at_def h.Ghost.ghost depth pool x; safe_def h.Ghost.ghost x; refine_ ()) in
       let saved_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
       let clean_witness2 : (((x : node Pref.t) @ immutable ->
       {u : unit | match H.at saved_witness1.Ghost.ghost x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t = {Ghost.ghost = ghost_ (refine_ clean)} in
@@ -114,18 +114,18 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
       let arg = allocated.#value in let pool1 = allocated.#pool in let state = allocated.#state in
       let h1 = ghost_ (Pref.own (borrow_ state)) in
       let facts1 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h1 depth pool1 x}) @ total ghost = ghost_ (fun x ->
-        facts x; let u = () in let refine_ u = allocate_runtime h.Ghost.ghost depth pool arg var x (refine_ u) in refine_ u) in
+        facts x; let refine_ u = allocate_runtime h.Ghost.ghost depth pool arg var x (refine_ ()) in refine_ u) in
       let next_env = ghost_ (Bind (arg, env)) in
       let input : {f : F.forest | F.valid_forest f} = refine_ runtime_env in
       let refine_ next_runtime_env = F.cons arg input in let refine_ input = input in
-      ghost_ (let v = cell var depth in let u = () in allocation_env h.Ghost.ghost arg v env (refine_ u);
+      ghost_ (let v = cell var depth in allocation_env h.Ghost.ghost arg v env (refine_ ());
         below_def h1 arg depth; env_owned_def h1 next_env; env_depth_def next_env);
       let state : {t : node Pref.token | Pref.own t === h1 && depth >= 0 && pool_scoped h1 pool1
         && env_owned h1 next_env && D.scoped_term (env_depth next_env) body} = refine_ state in
       let trees1 : ((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-      allocated_def h.Ghost.ghost depth arg var; let u = () in
-      let next = Hm_forest_proofs.allocated_forest h.Ghost.ghost trees depth arg var (refine_ u) in
+      allocated_def h.Ghost.ghost depth arg var; 
+      let next = Hm_forest_proofs.allocated_forest h.Ghost.ghost trees depth arg var (refine_ ()) in
       let refine_ t = next x in refine_ t) in
       let h1_witness : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h1)} in
       let facts1_witness : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at h1_witness.Ghost.ghost depth pool1 x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ facts1)} in
@@ -147,11 +147,11 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
           let_free_def execution; source_def execution; result_def execution);
         let r = #{value = None; state; pool = body_pool; execution} in use (refine_ r)
       | Some b ->
-        ghost_ (let u = () in run_pool_scoped h1 depth pool1 facts1 next_env body_run middle body_pool (refine_ u);
-          run_result_below h1 depth pool1 facts1 next_env body_run middle body_pool b (refine_ u);
-          fresh_active h.Ghost.ghost depth arg var (refine_ u);
-          run_active h1 depth pool1 facts1 next_env body_run middle body_pool arg (refine_ u);
-          run_runtime h1 depth pool1 facts1 next_env body_run middle body_pool arg (refine_ u);
+        ghost_ (run_pool_scoped h1 depth pool1 facts1 next_env body_run middle body_pool (refine_ ());
+          run_result_below h1 depth pool1 facts1 next_env body_run middle body_pool b (refine_ ());
+          fresh_active h.Ghost.ghost depth arg var (refine_ ());
+          run_active h1 depth pool1 facts1 next_env body_run middle body_pool arg (refine_ ());
+          run_runtime h1 depth pool1 facts1 next_env body_run middle body_pool arg (refine_ ());
           runtime_at_def middle depth body_pool arg; depth_bound_def middle depth arg;
           active_def middle arg; finite_node_def middle arg; at_level_def middle arg);
         let desc = Arrow (arg, b) in ghost_ (children_below_def middle desc depth);
@@ -191,14 +191,14 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
         let r = #{value = None; state; pool = pool1; execution} in use (refine_ r)
       | Some f ->
         let facts1 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h1 depth pool1 x}) @ total ghost = ghost_ (fun x ->
-          let u = () in let refine_ u = run_runtime h.Ghost.ghost depth pool facts env left_run h1 pool1 x (refine_ u) in refine_ u) in
-        ghost_ (let u = () in run_pool_scoped h.Ghost.ghost depth pool facts env left_run h1 pool1 (refine_ u);
-          run_env_owned h.Ghost.ghost depth pool env left_run h1 pool1 (refine_ u));
+          let refine_ u = run_runtime h.Ghost.ghost depth pool facts env left_run h1 pool1 x (refine_ ()) in refine_ u) in
+        ghost_ (run_pool_scoped h.Ghost.ghost depth pool facts env left_run h1 pool1 (refine_ ());
+          run_env_owned h.Ghost.ghost depth pool env left_run h1 pool1 (refine_ ()));
         let state : {t : node Pref.token | Pref.own t === h1 && depth >= 0 && pool_scoped h1 pool1
           && env_owned h1 env && D.scoped_term (env_depth env) right} = refine_ state in
         let trees1 : ((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-      let u = () in let refine_ t = Hm_forest_proofs.run_forest h.Ghost.ghost trees depth pool env left_run h1 pool1 x (refine_ u) in refine_ t) in
+      let refine_ t = Hm_forest_proofs.run_forest h.Ghost.ghost trees depth pool env left_run h1 pool1 x (refine_ ()) in refine_ t) in
       let h1_witness2 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h1)} in
       let facts1_witness2 : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at h1_witness2.Ghost.ghost depth pool1 x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ facts1)} in
       let trees1_witness2 : (((x : node Pref.t) @ immutable ->
@@ -219,11 +219,11 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
           let r = #{value = None; state; pool = pool2; execution} in use (refine_ r)
         | Some a ->
           let facts2 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h2 depth pool2 x}) @ total ghost = ghost_ (fun x ->
-            let u = () in let refine_ u = run_runtime h1 depth pool1 facts1 env right_run h2 pool2 x (refine_ u) in refine_ u) in
-          ghost_ (let u = () in run_pool_scoped h1 depth pool1 facts1 env right_run h2 pool2 (refine_ u);
-            run_result_below h1 depth pool1 facts1 env right_run h2 pool2 a (refine_ u);
-            run_result_active h.Ghost.ghost depth pool facts env left_run h1 pool1 f (refine_ u);
-            run_active h1 depth pool1 facts1 env right_run h2 pool2 f (refine_ u));
+            let refine_ u = run_runtime h1 depth pool1 facts1 env right_run h2 pool2 x (refine_ ()) in refine_ u) in
+          ghost_ (run_pool_scoped h1 depth pool1 facts1 env right_run h2 pool2 (refine_ ());
+            run_result_below h1 depth pool1 facts1 env right_run h2 pool2 a (refine_ ());
+            run_result_active h.Ghost.ghost depth pool facts env left_run h1 pool1 f (refine_ ());
+            run_active h1 depth pool1 facts1 env right_run h2 pool2 f (refine_ ()));
           let var : desc = Var in ghost_ (children_below_def h2 var depth);
           let state : {t : node Pref.token | Pref.own t === h2 && pool_scoped h2 pool2 && depth >= 0 && children_below h2 var depth} = refine_ state in
           let allocation_heap : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (h2)} in
@@ -232,10 +232,10 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
           let p = reserved.#value in let pool3 = reserved.#pool in let state = reserved.#state in
           let h3 = ghost_ (Pref.own (borrow_ state)) in
           let facts3 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h3 depth pool3 x}) @ total ghost = ghost_ (fun x ->
-            facts2 x; let u = () in let refine_ u = allocate_runtime h2 depth pool2 p var x (refine_ u) in refine_ u) in
-          ghost_ (let v = cell var depth in let u = () in
-            Pooled_allocation_proofs.allocation_below h2 p v a depth (refine_ u);
-            allocation_active h2 p v f (refine_ u); ());
+            facts2 x; let refine_ u = allocate_runtime h2 depth pool2 p var x (refine_ ()) in refine_ u) in
+          ghost_ (let v = cell var depth in 
+            Pooled_allocation_proofs.allocation_below h2 p v a depth (refine_ ());
+            allocation_active h2 p v f (refine_ ()); ());
           let desc = Arrow (a, p) in ghost_ (children_below_def h3 desc depth);
           let state : {t : node Pref.token | Pref.own t === h3 && pool_scoped h3 pool3 && depth >= 0 && children_below h3 desc depth} = refine_ state in
           let allocation_heap : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (h3)} in
@@ -244,31 +244,31 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
           let arrow = expected.#value in let pool4 = expected.#pool in let state = expected.#state in
           let h4 = ghost_ (Pref.own (borrow_ state)) in
           let facts4 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h4 depth pool4 x}) @ total ghost = ghost_ (fun x ->
-            facts3 x; let u = () in let refine_ u = allocate_runtime h3 depth pool3 arrow desc x (refine_ u) in refine_ u) in
+            facts3 x; let refine_ u = allocate_runtime h3 depth pool3 arrow desc x (refine_ ()) in refine_ u) in
           let scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h4 x) || finite_scope h4 x}) @ total ghost = ghost_ (fun x ->
             facts4 x; runtime_at_def h4 depth pool4 x;
-            let u = () in let refine_ u = safe_finite_scope h4 x (refine_ u) in refine_ u) in
+            let refine_ u = safe_finite_scope h4 x (refine_ ()) in refine_ u) in
           let unmarked : ((x : node Pref.t) @ immutable ->
             {u : unit | match H.at h4 x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
-            facts4 x; runtime_at_def h4 depth pool4 x; safe_def h4 x; let u = () in refine_ u) in
-          ghost_ (let v = cell desc depth in let u = () in allocation_active h3 arrow v f (refine_ u);
+            facts4 x; runtime_at_def h4 depth pool4 x; safe_def h4 x; refine_ ()) in
+          ghost_ (let v = cell desc depth in allocation_active h3 arrow v f (refine_ ());
             below_def h4 arrow depth; active_def h4 arrow; active_def h4 f);
           let state : {t : node Pref.token | Pref.own t === h4 && H.mem h4 f && H.mem h4 arrow && active h4 f && active h4 arrow} = refine_ state in
           let trees2 : ((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-      let u = () in let refine_ t = Hm_forest_proofs.run_forest h1 trees1 depth pool1 env right_run h2 pool2 x (refine_ u) in refine_ t) in
+      let refine_ t = Hm_forest_proofs.run_forest h1 trees1 depth pool1 env right_run h2 pool2 x (refine_ ()) in refine_ t) in
       let trees3 : ((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem h3 x then finite h3 t else observe h3 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-      allocated_def h2 depth p var; let u = () in
-      let next = Hm_forest_proofs.allocated_forest h2 trees2 depth p var (refine_ u) in
+      allocated_def h2 depth p var; 
+      let next = Hm_forest_proofs.allocated_forest h2 trees2 depth p var (refine_ ()) in
       let refine_ t = next x in refine_ t) in
       let trees4 : ((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem h4 x then finite h4 t else observe h4 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-      allocated_def h3 depth arrow desc; let u = () in
-      let next = Hm_forest_proofs.allocated_forest h3 trees3 depth arrow desc (refine_ u) in
+      allocated_def h3 depth arrow desc; 
+      let next = Hm_forest_proofs.allocated_forest h3 trees3 depth arrow desc (refine_ ()) in
       let refine_ t = next x in refine_ t) in
       let order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h4 x}) @ total ghost = ghost_ (fun x ->
-        facts4 x; runtime_at_def h4 depth pool4 x; safe_def h4 x; let u = () in refine_ u) in
+        facts4 x; runtime_at_def h4 depth pool4 x; safe_def h4 x; refine_ ()) in
       let h_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h4)} in
       let scope_witness2 : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h_witness1.Ghost.ghost x) || finite_scope h_witness1.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope)} in
       let unmarked_witness3 : (((x : node Pref.t) @ immutable -> {u : unit | match H.at h_witness1.Ghost.ghost x with None -> true | Some v -> not v.visited})) Ghost.t = {Ghost.ghost = ghost_ (refine_ unmarked)} in
@@ -296,7 +296,7 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
       let arg = first.#value in let pool1 = first.#pool in let state = first.#state in
       let h1 = ghost_ (Pref.own (borrow_ state)) in
       let facts1 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h1 depth pool1 x}) @ total ghost = ghost_ (fun x ->
-        facts x; let u = () in let refine_ u = allocate_runtime h.Ghost.ghost depth pool arg var x (refine_ u) in refine_ u) in
+        facts x; let refine_ u = allocate_runtime h.Ghost.ghost depth pool arg var x (refine_ ()) in refine_ u) in
       ghost_ (children_below_def h1 var depth);
       let state : {t : node Pref.token | Pref.own t === h1 && pool_scoped h1 pool1 && depth >= 0 && children_below h1 var depth} = refine_ state in
       let allocation_heap : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (h1)} in
@@ -305,8 +305,8 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
       let res = second.#value in let pool2 = second.#pool in let state = second.#state in
       let h2 = ghost_ (Pref.own (borrow_ state)) in
       let facts2 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h2 depth pool2 x}) @ total ghost = ghost_ (fun x ->
-        facts1 x; let u = () in let refine_ u = allocate_runtime h1 depth pool1 res var x (refine_ u) in refine_ u) in
-      ghost_ (let v = cell var depth in let u = () in Pooled_allocation_proofs.allocation_below h1 res v arg depth (refine_ u); ());
+        facts1 x; let refine_ u = allocate_runtime h1 depth pool1 res var x (refine_ ()) in refine_ u) in
+      ghost_ (let v = cell var depth in Pooled_allocation_proofs.allocation_below h1 res v arg depth (refine_ ()); ());
       let desc = Arrow (arg, res) in ghost_ (children_below_def h2 desc depth);
       let state : {t : node Pref.token | Pref.own t === h2 && pool_scoped h2 pool2 && depth >= 0 && children_below h2 desc depth} = refine_ state in
       let allocation_heap : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (h2)} in
@@ -315,14 +315,14 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
       let self = third.#value in let pool3 = third.#pool in let state = third.#state in
       let h3 = ghost_ (Pref.own (borrow_ state)) in
       let facts3 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h3 depth pool3 x}) @ total ghost = ghost_ (fun x ->
-        facts2 x; let u = () in let refine_ u = allocate_runtime h2 depth pool2 self desc x (refine_ u) in refine_ u) in
+        facts2 x; let refine_ u = allocate_runtime h2 depth pool2 self desc x (refine_ ()) in refine_ u) in
       let self_env = ghost_ (Bind (self, env)) in let next_env = ghost_ (Bind (arg, self_env)) in
       let input : {f : F.forest | F.valid_forest f} = refine_ runtime_env in
       let refine_ self_runtime_env = F.cons self input in let refine_ input = input in
       let input : {f : F.forest | F.valid_forest f} = refine_ self_runtime_env in
       let refine_ next_runtime_env = F.cons arg input in let refine_ input = input in
-      ghost_ (let v = cell var depth in let w = cell desc depth in let u = () in
-        allocation_env h.Ghost.ghost arg v env (refine_ u); allocation_env h1 res v env (refine_ u); allocation_env h2 self w env (refine_ u);
+      ghost_ (let v = cell var depth in let w = cell desc depth in 
+        allocation_env h.Ghost.ghost arg v env (refine_ ()); allocation_env h1 res v env (refine_ ()); allocation_env h2 self w env (refine_ ());
         Copy_heap_proofs.put_frame h1 res v arg; Copy_heap_proofs.put_frame h2 self w arg;
         below_def h1 arg depth; below_def h3 self depth;
         env_owned_def h3 self_env; env_owned_def h3 next_env;
@@ -331,18 +331,18 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
         && env_owned h3 next_env && D.scoped_term (env_depth next_env) body} = refine_ state in
       let trees1 : ((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-      allocated_def h.Ghost.ghost depth arg var; let u = () in
-      let next = Hm_forest_proofs.allocated_forest h.Ghost.ghost trees depth arg var (refine_ u) in
+      allocated_def h.Ghost.ghost depth arg var; 
+      let next = Hm_forest_proofs.allocated_forest h.Ghost.ghost trees depth arg var (refine_ ()) in
       let refine_ t = next x in refine_ t) in
       let trees2 : ((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-      allocated_def h1 depth res var; let u = () in
-      let next = Hm_forest_proofs.allocated_forest h1 trees1 depth res var (refine_ u) in
+      allocated_def h1 depth res var; 
+      let next = Hm_forest_proofs.allocated_forest h1 trees1 depth res var (refine_ ()) in
       let refine_ t = next x in refine_ t) in
       let trees3 : ((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem h3 x then finite h3 t else observe h3 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-      allocated_def h2 depth self desc; let u = () in
-      let next = Hm_forest_proofs.allocated_forest h2 trees2 depth self desc (refine_ u) in
+      allocated_def h2 depth self desc; 
+      let next = Hm_forest_proofs.allocated_forest h2 trees2 depth self desc (refine_ ()) in
       let refine_ t = next x in refine_ t) in
       let h3_witness : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h3)} in
       let facts3_witness : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at h3_witness.Ghost.ghost depth pool3 x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ facts3)} in
@@ -365,24 +365,24 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
         let r = #{value = None; state; pool = body_pool; execution} in use (refine_ r)
       | Some b ->
         let middle_facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at middle depth body_pool x}) @ total ghost = ghost_ (fun x ->
-          let u = () in let refine_ u = run_runtime h3 depth pool3 facts3 next_env body_run middle body_pool x (refine_ u) in refine_ u) in
+          let refine_ u = run_runtime h3 depth pool3 facts3 next_env body_run middle body_pool x (refine_ ()) in refine_ u) in
         let scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem middle x) || finite_scope middle x}) @ total ghost = ghost_ (fun x ->
           middle_facts x; runtime_at_def middle depth body_pool x;
-          let u = () in let refine_ u = safe_finite_scope middle x (refine_ u) in refine_ u) in
+          let refine_ u = safe_finite_scope middle x (refine_ ()) in refine_ u) in
         let unmarked : ((x : node Pref.t) @ immutable ->
           {u : unit | match H.at middle x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
-          middle_facts x; runtime_at_def middle depth body_pool x; safe_def middle x; let u = () in refine_ u) in
-        ghost_ (let u = () in run_result_active h3 depth pool3 facts3 next_env body_run middle body_pool b (refine_ u);
-          fresh_active h1 depth res var (refine_ u); let w = cell desc depth in
-          allocation_active h2 self w res (refine_ u);
-          run_active h3 depth pool3 facts3 next_env body_run middle body_pool res (refine_ u);
+          middle_facts x; runtime_at_def middle depth body_pool x; safe_def middle x; refine_ ()) in
+        ghost_ (run_result_active h3 depth pool3 facts3 next_env body_run middle body_pool b (refine_ ());
+          fresh_active h1 depth res var (refine_ ()); let w = cell desc depth in
+          allocation_active h2 self w res (refine_ ());
+          run_active h3 depth pool3 facts3 next_env body_run middle body_pool res (refine_ ());
           active_def middle b; active_def middle res);
         let state : {t : node Pref.token | Pref.own t === middle && H.mem middle b && H.mem middle res && active middle b && active middle res} = refine_ state in
         let middle_trees : ((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-      let u = () in let refine_ t = Hm_forest_proofs.run_forest h3 trees3 depth pool3 next_env body_run middle body_pool x (refine_ u) in refine_ t) in
+      let refine_ t = Hm_forest_proofs.run_forest h3 trees3 depth pool3 next_env body_run middle body_pool x (refine_ ()) in refine_ t) in
       let order : ((x : node Pref.t) @ immutable -> {u : unit | ordered middle x}) @ total ghost = ghost_ (fun x ->
-        middle_facts x; runtime_at_def middle depth body_pool x; safe_def middle x; let u = () in refine_ u) in
+        middle_facts x; runtime_at_def middle depth body_pool x; safe_def middle x; refine_ ()) in
       let h_witness7 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (middle)} in
       let scope_witness8 : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h_witness7.Ghost.ghost x) || finite_scope h_witness7.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope)} in
       let unmarked_witness9 : (((x : node Pref.t) @ immutable -> {u : unit | match H.at h_witness7.Ghost.ghost x with None -> true | Some v -> not v.visited})) Ghost.t = {Ghost.ghost = ghost_ (refine_ unmarked)} in
@@ -407,7 +407,7 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
         raise_any (Failure "type inference level capacity") else (
       let child_pool : pool = Generalize_spec.Empty in
       let child_facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h.Ghost.ghost child_depth child_pool x}) @ total ghost = ghost_ (fun x ->
-        facts x; let u = () in enter_runtime h.Ghost.ghost depth pool x (refine_ u); refine_ u) in
+        facts x; enter_runtime h.Ghost.ghost depth pool x (refine_ ()); refine_ ()) in
       ghost_ (pool_scoped_def h.Ghost.ghost child_pool);
       let state : {t : node Pref.token | Pref.own t === h.Ghost.ghost && child_depth >= 0 && pool_scoped h.Ghost.ghost child_pool
         && env_owned h.Ghost.ghost env && D.scoped_term (env_depth env) rhs} = refine_ state in
@@ -431,34 +431,34 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
         let r = #{value = None; state; pool = rhs_pool; execution} in use (refine_ r)
       | Some p ->
         let middle_facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at middle (depth + 1) rhs_pool x}) @ total ghost = ghost_ (fun x ->
-          let u = () in run_runtime h.Ghost.ghost child_depth child_pool child_facts env rhs_run middle rhs_pool x (refine_ u); refine_ u) in
-        ghost_ (let u = () in run_pool_scoped h.Ghost.ghost child_depth child_pool child_facts env rhs_run middle rhs_pool (refine_ u);
-          run_saved_pool h.Ghost.ghost child_depth child_pool child_facts env rhs_run middle rhs_pool pool (refine_ u);
-          run_env_owned h.Ghost.ghost child_depth child_pool env rhs_run middle rhs_pool (refine_ u);
-          Hm_execution_proofs.run_result h.Ghost.ghost child_depth child_pool env rhs_run middle rhs_pool p (refine_ u));
+          run_runtime h.Ghost.ghost child_depth child_pool child_facts env rhs_run middle rhs_pool x (refine_ ()); refine_ ()) in
+        ghost_ (run_pool_scoped h.Ghost.ghost child_depth child_pool child_facts env rhs_run middle rhs_pool (refine_ ());
+          run_saved_pool h.Ghost.ghost child_depth child_pool child_facts env rhs_run middle rhs_pool pool (refine_ ());
+          run_env_owned h.Ghost.ghost child_depth child_pool env rhs_run middle rhs_pool (refine_ ());
+          Hm_execution_proofs.run_result h.Ghost.ghost child_depth child_pool env rhs_run middle rhs_pool p (refine_ ()));
         let state : {t : node Pref.token | Pref.own t === middle && pool_scoped middle rhs_pool && pool_scoped middle pool} = refine_ state in
         let close_heap : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (middle)} in
         let refine_ state = state in
         let refine_ closed = Nested_pool.close close_heap depth rhs_pool pool (refine_ state) in
         let start = ghost_ (Pref.own (borrow_ closed.#state)) in let parent_pool = closed.#parent in let state = closed.#state in
         let parent_facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at start depth parent_pool x}) @ total ghost = ghost_ (fun x ->
-          let u = () in close_runtime h.Ghost.ghost depth pool facts env rhs_run middle rhs_pool middle_facts x (refine_ u); refine_ u) in
+          close_runtime h.Ghost.ghost depth pool facts env rhs_run middle rhs_pool middle_facts x (refine_ ()); refine_ ()) in
         let next_env = ghost_ (Bind (p, env)) in
         let input : {f : F.forest | F.valid_forest f} = refine_ runtime_env in
         let refine_ next_runtime_env = F.cons p input in let refine_ input = input in
         ghost_ (let frame : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem middle x) || H.mem start x}) @ total = fun x ->
-            let u = () in Generalize_proofs.closed_observe middle depth rhs_pool x (refine_ u);
-            closed_at_def middle start depth rhs_pool x; refine_ u in
-          let u = () in env_extend middle start frame env (refine_ u); frame p;
+            Generalize_proofs.closed_observe middle depth rhs_pool x (refine_ ());
+            closed_at_def middle start depth rhs_pool x; refine_ () in
+          env_extend middle start frame env (refine_ ()); frame p;
           env_owned_def start next_env; env_depth_def next_env);
         let state : {t : node Pref.token | Pref.own t === start && depth >= 0 && pool_scoped start parent_pool
           && env_owned start next_env && D.scoped_term (env_depth next_env) body} = refine_ state in
         let middle_trees : ((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-      let u = () in let refine_ t = Hm_forest_proofs.run_forest h.Ghost.ghost trees child_depth child_pool env rhs_run middle rhs_pool x (refine_ u) in refine_ t) in
+      let refine_ t = Hm_forest_proofs.run_forest h.Ghost.ghost trees child_depth child_pool env rhs_run middle rhs_pool x (refine_ ()) in refine_ t) in
       let closed_trees : ((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem start x then finite start t else observe start x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-      let u = () in let refine_ t = Forest_transport.closed_forest_at middle middle_trees depth rhs_pool x (refine_ u) in refine_ t) in
+      let refine_ t = Forest_transport.closed_forest_at middle middle_trees depth rhs_pool x (refine_ ()) in refine_ t) in
       let start_witness : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (start)} in
       let parent_facts_witness : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at start_witness.Ghost.ghost depth parent_pool x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ parent_facts)} in
       let closed_trees_witness : (((x : node Pref.t) @ immutable ->
@@ -515,7 +515,7 @@ let closed_compiled : (input : {e : T.term | T.valid e && D.scoped_term D.Z (T.s
   let pool : pool = Generalize_spec.Empty in let env : env = Hm_environment_spec.Empty in
   let facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h 0 pool x}) @ total ghost = ghost_ (fun x ->
     runtime_at_def h 0 pool x; safe_def h x; depth_bound_def h 0 x; covered_def h (-1) pool x;
-    ordered_def h x; let u = () in refine_ u) in
+    ordered_def h x; refine_ ()) in
   ghost_ (pool_scoped_def h pool; env_owned_def h env; env_depth_def env);
   let state : {t : node Pref.token | Pref.own t === h && 0 >= 0 && pool_scoped h pool && env_owned h env
     && D.scoped_term (env_depth env) e} = refine_ state in

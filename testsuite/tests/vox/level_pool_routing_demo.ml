@@ -16,12 +16,12 @@ let (close_frame @ total) : (h : node Pref.heap) @ immutable ->
     {u : unit | pool_scoped h pool} ->
     {u : unit | H.mem h p === H.mem (S.close_heap h cut pool) p} @ ghost =
   fun h cut pool p premise -> ghost_ (
-    let refine_ premise = premise in let u = () in
-    S.close_heap_def h cut pool; R.representatives_scoped h pool (refine_ u);
+    let refine_ premise = premise in 
+    S.close_heap_def h cut pool; R.representatives_scoped h pool (refine_ ());
     let filtered = R.representatives h pool in
     let after = S.close_heap h cut pool in
-    Generalize_proofs.closed_observe h cut filtered p (refine_ u);
-    closed_at_def h after cut filtered p; refine_ u)
+    Generalize_proofs.closed_observe h cut filtered p (refine_ ());
+    closed_at_def h after cut filtered p; refine_ ())
 
 let rec repeat : (h : node Pref.heap Ghost.t) @ immutable ->
     (n : int) -> (p : node Pref.t) @ immutable ->
@@ -83,8 +83,8 @@ let run count =
   assert ((Iarray.get values 1) = existing);
   assert ((Iarray.get values 2) = Entry (q, Empty));
   assert ((Iarray.get values 3) = Empty);
-  ghost_ (let u = () in close_frame h 3 child r (refine_ u);
-    close_frame h 3 child link (refine_ u));
+  ghost_ (close_frame h 3 child r (refine_ ());
+    close_frame h 3 child link (refine_ ()));
   let state : {t : node Pref.token | H.mem (Pref.own t) r} = refine_ state in
   let refine_ rv = Pref.read r (borrow_ state) in let refine_ state = state in
   let state : {t : node Pref.token | H.mem (Pref.own t) link} = refine_ state in

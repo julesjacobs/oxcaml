@@ -20,8 +20,8 @@ let rec solve : (h : node Pref.heap) @ immutable ghost ->
     | Equal (p, q) ->
       let scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || scoped h x})
           @ total ghost = ghost_ (fun x ->
-        let refine_ tree = trees x in let u = () in
-        if H.mem h x then (finite_scope_at h tree (refine_ u); refine_ u) else refine_ u) in
+        let refine_ tree = trees x in 
+        if H.mem h x then (finite_scope_at h tree (refine_ ()); refine_ ()) else refine_ ()) in
       let t : {t : node Pref.token | Pref.own t === h && H.mem h p && H.mem h q} = refine_ t in
       let refine_ step = Unifier.unify h scope p q t in
       let ok = step.#ok in let solving = ghost_ (Unified step.#derivation) in
@@ -36,13 +36,13 @@ let rec solve : (h : node Pref.heap) @ immutable ghost ->
       if left.#ok then (
         let middle_trees : ((x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
             (if H.mem middle x then finite middle t else H.at middle x === None)} @ immutable)
-            @ total ghost = ghost_ (fun x -> let u = () in
-          let refine_ t = solved_finite_at h trees a true middle left.#solving x (refine_ u) in refine_ t) in
+            @ total ghost = ghost_ (fun x -> 
+          let refine_ t = solved_finite_at h trees a true middle left.#solving x (refine_ ()) in refine_ t) in
         ghost_ (
           let keep : (x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || H.mem middle x}
-              @ total = fun x -> let u = () in
-            solved_frame h a true middle left.#solving x (refine_ u); refine_ u in
-          let u = () in equations_frame h middle keep b (refine_ u));
+              @ total = fun x -> 
+            solved_frame h a true middle left.#solving x (refine_ ()); refine_ () in
+          equations_frame h middle keep b (refine_ ()));
         let b : {b : equations | equations_allocated middle b} = refine_ b in
         let t = left.#state in let t : {t : node Pref.token | Pref.own t === middle} = refine_ t in
         let refine_ right = solve middle middle_trees b t in let refine_ b = b in

@@ -15,11 +15,11 @@ let (abstracted_id_id @ total) : (p : Copy_spec.node Pref.t) @ immutable ->
       (Let (Lambda (Bound Z), Apply (Bound Z, Bound Z)))
       (Function (Parameter Z, Parameter Z)) d} @ immutable ghost = fun p -> ghost_ (
     let z = Z in let a = Free p in mono_wf_def z a;
-    let u = () in let refine_ original = Hm_declarative_demo.id_id a (refine_ u) in
+    let refine_ original = Hm_declarative_demo.id_id a (refine_ ()) in
     let no_names = No_names in let names = Name (p, no_names) in
     let empty = Empty_context in context_avoids_def names empty;
     let bound = Bound z in let source = Let (Lambda bound, Apply (bound, bound)) in
-    let t = Function (a, a) in generalize_typing names z empty source t original (refine_ u);
+    let t = Function (a, a) in generalize_typing names z empty source t original (refine_ ());
     count_def no_names; count_def names; let one = S z in add_def one z; add_def z z;
     weaken_context_def one empty; abstract_type_def names z t; abstract_type_def names z a;
     abstract_free_def names z p; position_def names p;
@@ -33,7 +33,7 @@ let (abstract_then_substitute @ total) : (p : Copy_spec.node Pref.t) @ immutable
     let refine_ original = abstracted_id_id p in
     let z = Z in let one = S z in let a = Parameter z in let t = Function (a, a) in
     let g = Empty_context in let bound = Bound z in let source = Let (Lambda bound, Apply (bound, bound)) in
-    let u = () in Hm_substitution_proofs.substitution_typed rho one g source t original (refine_ u);
+    Hm_substitution_proofs.substitution_typed rho one g source t original (refine_ ());
     Hm_substitution.substitute_context_def rho g;
     Hm_substitution.substitute_type_def rho t; Hm_substitution.substitute_type_def rho a;
     let d = Hm_substitution.substitute_typing rho original in refine_ d)

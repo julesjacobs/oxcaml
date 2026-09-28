@@ -26,12 +26,12 @@ let run mode =
   let active_all : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || active h x}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; let desc = Bool in cell_def desc 4;
     cell_def left_desc 4; cell_def right_desc 4;
-    active_def h x; at_level_def h x; let u = () in refine_ u) in
+    active_def h x; at_level_def h x; refine_ ()) in
   let scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || finite_scope h x}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; let desc = Bool in cell_def desc 4;
     cell_def left_desc 4; cell_def right_desc 4;
     active_all a; active_all b; active_all child;
-    finite_scope_def h x; source_ok_def h x; let u = () in refine_ u) in
+    finite_scope_def h x; source_ok_def h x; refine_ ()) in
   let p, q = match mode with 1 -> a, left | 3 -> b, left | 4 -> a, right | 5 -> a, a | _ -> left, right in
   ghost_ (active_all p; active_all q);
   let state : {t : node Pref.token | Pref.own t === h && H.mem h p && H.mem h q && active h p && active h q} = refine_ state in
@@ -39,11 +39,11 @@ let run mode =
     {u : unit | match H.at h x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; let desc = Bool in cell_def desc 4;
     cell_def left_desc 4; cell_def right_desc 4;
-    let u = () in refine_ u) in
+    refine_ ()) in
   let refine_ result = Level_unifier.unify h scope unmarked p q state in
   let ok = result.#ok in let d = ghost_ result.#derivation in
   let after = ghost_ (Pref.own (borrow_ result.#state)) in
-  ghost_ (let u = () in unified_frame h p q ok after d a (refine_ u));
+  ghost_ (unified_frame h p q ok after d a (refine_ ()));
   let state = result.#state in let state : {t : node Pref.token | H.mem (Pref.own t) a} = refine_ state in
   let refine_ av = Pref.read a (borrow_ state) in
   match mode with

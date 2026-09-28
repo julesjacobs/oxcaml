@@ -121,11 +121,11 @@ let refine_ result = result in
           if not ok then finish_roots (refine_ #{ok; state = t; derivation = d}) else (
             let trees_after : ((x : node Pref.t) @ immutable ->
               {t : tree | tree_root t === x && (if H.mem after x then finite after t else observe after x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-                let u = () in let refine_ tree = Optimized_finite_proofs.unified_finite_at h.Ghost.ghost trees.Ghost.ghost r s ok after d x (refine_ u) in refine_ tree) in
+                let refine_ tree = Optimized_finite_proofs.unified_finite_at h.Ghost.ghost trees.Ghost.ghost r s ok after d x (refine_ ()) in refine_ tree) in
             let scope_after : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem after x) || finite_scope after x}) @ total ghost = ghost_ (fun x ->
-              let u = () in let refine_ u = unified_scope h.Ghost.ghost scope.Ghost.ghost r s ok after d x (refine_ u) in refine_ u) in
-            ghost_ (let u = () in unified_frame h.Ghost.ghost r s ok after d r (refine_ u); unified_frame h.Ghost.ghost r s ok after d s (refine_ u);
-              unified_active h.Ghost.ghost r s ok after d r (refine_ u); unified_active h.Ghost.ghost r s ok after d s (refine_ u); ());
+              let refine_ u = unified_scope h.Ghost.ghost scope.Ghost.ghost r s ok after d x (refine_ ()) in refine_ u) in
+            ghost_ (unified_frame h.Ghost.ghost r s ok after d r (refine_ ()); unified_frame h.Ghost.ghost r s ok after d s (refine_ ());
+              unified_active h.Ghost.ghost r s ok after d r (refine_ ()); unified_active h.Ghost.ghost r s ok after d s (refine_ ()); ());
             let t : {t : node Pref.token | Pref.own t === after && unified h.Ghost.ghost r s true after d
               && H.mem after r && H.mem after s && active after r && active after s} = refine_ t in
             let before_witness7 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
@@ -160,9 +160,8 @@ let refine_ result = result in
           let scope_middle : ((x : node Pref.t) @ immutable ->
               {u : unit | not (H.mem middle x) || finite_scope middle x}) @ total ghost =
             ghost_ (fun x ->
-              let u = () in
-              unified_scope h.Ghost.ghost scope.Ghost.ghost a c left_ok middle ld x (refine_ u);
-              refine_ u) in
+              unified_scope h.Ghost.ghost scope.Ghost.ghost a c left_ok middle ld x (refine_ ());
+              refine_ ()) in
           let proof = ghost_ (
             let u = () in
             unified_frame h.Ghost.ghost a c left_ok middle ld b (refine_ u);
@@ -174,13 +173,13 @@ let refine_ result = result in
           let t : {t : node Pref.token | Pref.own t === middle && H.mem middle b && H.mem middle e && active middle b && active middle e} = refine_ t in
           let unmarked_middle : ((x : node Pref.t) @ immutable ->
             {u : unit | match H.at middle x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
-            unmarked.Ghost.ghost x; let u = () in unified_scratch h.Ghost.ghost a c left_ok middle ld x (refine_ u);
-            scratch_frame_def h.Ghost.ghost middle x; refine_ u) in
+            unmarked.Ghost.ghost x; unified_scratch h.Ghost.ghost a c left_ok middle ld x (refine_ ());
+            scratch_frame_def h.Ghost.ghost middle x; refine_ ()) in
           let trees_middle : ((x : node Pref.t) @ immutable ->
             {t : tree | tree_root t === x && (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-              let u = () in let refine_ tree = Optimized_finite_proofs.unified_finite_at h.Ghost.ghost trees.Ghost.ghost a c left_ok middle ld x (refine_ u) in refine_ tree) in
+              let refine_ tree = Optimized_finite_proofs.unified_finite_at h.Ghost.ghost trees.Ghost.ghost a c left_ok middle ld x (refine_ ()) in refine_ tree) in
           let order_middle : ((x : node Pref.t) @ immutable -> {u : unit | ordered middle x}) @ total ghost = ghost_ (fun x ->
-            let u = () in let refine_ u = unified_ordered h.Ghost.ghost order.Ghost.ghost a c left_ok middle ld x (refine_ u) in refine_ u) in
+            let refine_ u = unified_ordered h.Ghost.ghost order.Ghost.ghost a c left_ok middle ld x (refine_ ()) in refine_ u) in
           let h_witness31 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (middle)} in
           let scope_witness32 : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h_witness31.Ghost.ghost x) || finite_scope h_witness31.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope_middle)} in
           let unmarked_witness33 : (((x : node Pref.t) @ immutable -> {u : unit | match H.at h_witness31.Ghost.ghost x with None -> true | Some v -> not v.visited})) Ghost.t = {Ghost.ghost = ghost_ (refine_ unmarked_middle)} in
@@ -198,11 +197,11 @@ let refine_ result = result in
           if not ok then finish_roots (refine_ #{ok; state = t; derivation = d}) else (
             let trees_after : ((x : node Pref.t) @ immutable ->
               {t : tree | tree_root t === x && (if H.mem after x then finite after t else observe after x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-                let u = () in let refine_ tree = Optimized_finite_proofs.unified_finite_at h.Ghost.ghost trees.Ghost.ghost r s ok after d x (refine_ u) in refine_ tree) in
+                let refine_ tree = Optimized_finite_proofs.unified_finite_at h.Ghost.ghost trees.Ghost.ghost r s ok after d x (refine_ ()) in refine_ tree) in
             let scope_after : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem after x) || finite_scope after x}) @ total ghost = ghost_ (fun x ->
-              let u = () in let refine_ u = unified_scope h.Ghost.ghost scope.Ghost.ghost r s ok after d x (refine_ u) in refine_ u) in
-            ghost_ (let u = () in unified_frame h.Ghost.ghost r s ok after d r (refine_ u); unified_frame h.Ghost.ghost r s ok after d s (refine_ u);
-              unified_active h.Ghost.ghost r s ok after d r (refine_ u); unified_active h.Ghost.ghost r s ok after d s (refine_ u); ());
+              let refine_ u = unified_scope h.Ghost.ghost scope.Ghost.ghost r s ok after d x (refine_ ()) in refine_ u) in
+            ghost_ (unified_frame h.Ghost.ghost r s ok after d r (refine_ ()); unified_frame h.Ghost.ghost r s ok after d s (refine_ ());
+              unified_active h.Ghost.ghost r s ok after d r (refine_ ()); unified_active h.Ghost.ghost r s ok after d s (refine_ ()); ());
             let t : {t : node Pref.token | Pref.own t === after && unified h.Ghost.ghost r s true after d
               && H.mem after r && H.mem after s && active after r && active after s} = refine_ t in
             let before_witness7 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
@@ -248,8 +247,8 @@ and unify_work : (goal : unify_goal) @ immutable -> (h : (node Pref.heap) Ghost.
     let refine_ first = Compressed_representative.representative h_witness1 scope_witness2 p (refine_ state_argument3) in
     let h1 = ghost_ (Pref.own (borrow_ first.#state)) in let edits1 = ghost_ first.#edits in
     let scope1 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h1 x) || finite_scope h1 x}) @ total ghost = ghost_ (fun x ->
-      let u = () in let refine_ u = Compression_proofs.scope h.Ghost.ghost h1 edits1 scope.Ghost.ghost x (refine_ u) in refine_ u) in
-    ghost_ (let u = () in Compression_proofs.frame h.Ghost.ghost h1 edits1 q (refine_ u);
+      let refine_ u = Compression_proofs.scope h.Ghost.ghost h1 edits1 scope.Ghost.ghost x (refine_ ()) in refine_ u) in
+    ghost_ (Compression_proofs.frame h.Ghost.ghost h1 edits1 q (refine_ ());
       scratch_frame_def h.Ghost.ghost h1 q; active_def h.Ghost.ghost q; active_def h1 q; at_level_def h.Ghost.ghost q; at_level_def h1 q; ());
     let state : {t : node Pref.token | Pref.own t === h1 && H.mem h1 q && active h1 q} = refine_ first.#state in
     let h_witness4 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h1)} in
@@ -258,45 +257,45 @@ and unify_work : (goal : unify_goal) @ immutable -> (h : (node Pref.heap) Ghost.
     let refine_ second = Compressed_representative.representative h_witness4 scope_witness5 q (refine_ state_argument6) in
     let h2 = ghost_ (Pref.own (borrow_ second.#state)) in let edits2 = ghost_ second.#edits in
     let scope2 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h2 x) || finite_scope h2 x}) @ total ghost = ghost_ (fun x ->
-      let u = () in let refine_ u = Compression_proofs.scope h1 h2 edits2 scope1 x (refine_ u) in refine_ u) in
+      let refine_ u = Compression_proofs.scope h1 h2 edits2 scope1 x (refine_ ()) in refine_ u) in
     let unmarked2 : ((x : node Pref.t) @ immutable -> {u : unit | match H.at h2 x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
-      unmarked.Ghost.ghost x; let u = () in Compression_proofs.frame h.Ghost.ghost h1 edits1 x (refine_ u); Compression_proofs.frame h1 h2 edits2 x (refine_ u);
-      scratch_frame_def h.Ghost.ghost h1 x; scratch_frame_def h1 h2 x; refine_ u) in
+      unmarked.Ghost.ghost x; Compression_proofs.frame h.Ghost.ghost h1 edits1 x (refine_ ()); Compression_proofs.frame h1 h2 edits2 x (refine_ ());
+      scratch_frame_def h.Ghost.ghost h1 x; scratch_frame_def h1 h2 x; refine_ ()) in
     let trees2 : ((x : node Pref.t) @ immutable ->
       {t : tree | tree_root t === x && (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
-        let refine_ tree = trees.Ghost.ghost x in let u = () in
-        Compression_proofs.frame h.Ghost.ghost h1 edits1 x (refine_ u); Compression_proofs.frame h1 h2 edits2 x (refine_ u);
+        let refine_ tree = trees.Ghost.ghost x in 
+        Compression_proofs.frame h.Ghost.ghost h1 edits1 x (refine_ ()); Compression_proofs.frame h1 h2 edits2 x (refine_ ());
         if H.mem h.Ghost.ghost x then (
-          let refine_ tree1 = Compression_proofs.finite h.Ghost.ghost h1 edits1 tree (refine_ u) in
-          let refine_ tree2 = Compression_proofs.finite h1 h2 edits2 tree1 (refine_ u) in refine_ tree2)
+          let refine_ tree1 = Compression_proofs.finite h.Ghost.ghost h1 edits1 tree (refine_ ()) in
+          let refine_ tree2 = Compression_proofs.finite h1 h2 edits2 tree1 (refine_ ()) in refine_ tree2)
         else (scratch_frame_def h.Ghost.ghost h1 x; scratch_frame_def h1 h2 x;
           observe_def h.Ghost.ghost x; observe_def h1 x; observe_def h2 x; refine_ tree)) in
-    ghost_ (let u = () in Compression_proofs.frame h.Ghost.ghost h1 edits1 p (refine_ u); Compression_proofs.frame h1 h2 edits2 p (refine_ u);
-      Compression_proofs.frame h1 h2 edits2 q (refine_ u);
+    ghost_ (Compression_proofs.frame h.Ghost.ghost h1 edits1 p (refine_ ()); Compression_proofs.frame h1 h2 edits2 p (refine_ ());
+      Compression_proofs.frame h1 h2 edits2 q (refine_ ());
       active_def h.Ghost.ghost p; active_def h1 p; active_def h2 p; active_def h2 q;
       at_level_def h.Ghost.ghost p; at_level_def h1 p; at_level_def h2 p;
       at_level_def h1 q; at_level_def h2 q; ());
     let state : {t : node Pref.token | Pref.own t === h2 && H.mem h2 p && H.mem h2 q && active h2 p && active h2 q} = refine_ second.#state in
     let order1 : ((x : node Pref.t) @ immutable -> {u : unit | ordered h1 x}) @ total ghost = ghost_ (fun x ->
-      let u = () in let refine_ u = Compression_proofs.ordered h.Ghost.ghost h1 edits1 order.Ghost.ghost x (refine_ u) in refine_ u) in
+      let refine_ u = Compression_proofs.ordered h.Ghost.ghost h1 edits1 order.Ghost.ghost x (refine_ ()) in refine_ u) in
     let order2 : ((x : node Pref.t) @ immutable -> {u : unit | ordered h2 x}) @ total ghost = ghost_ (fun x ->
-      let u = () in let refine_ u = Compression_proofs.ordered h1 h2 edits2 order1 x (refine_ u) in refine_ u) in
+      let refine_ u = Compression_proofs.ordered h1 h2 edits2 order1 x (refine_ ()) in refine_ u) in
     let r = first.#value in let s = second.#value in
     let rp : {out : resolved | H.mem h2 out.#value && active h2 out.#value && terminal h2 out.#value
       && resolves h2 p out.#value out.#path} =
-      let path : {d : resolution | resolves h2 p r d} @ immutable ghost = ghost_ (let u = () in
-        let refine_ path1 = Compression_proofs.resolution h.Ghost.ghost h1 edits1 p r first.#path (refine_ u) in
-        let refine_ path2 = Compression_proofs.resolution h1 h2 edits2 p r path1 (refine_ u) in refine_ path2) in
+      let path : {d : resolution | resolves h2 p r d} @ immutable ghost = ghost_ (
+        let refine_ path1 = Compression_proofs.resolution h.Ghost.ghost h1 edits1 p r first.#path (refine_ ()) in
+        let refine_ path2 = Compression_proofs.resolution h1 h2 edits2 p r path1 (refine_ ()) in refine_ path2) in
       let refine_ path = path in
-      ghost_ (let u = () in
-        Compression_proofs.frame h1 h2 edits2 r (refine_ u);
+      ghost_ (
+        Compression_proofs.frame h1 h2 edits2 r (refine_ ());
         active_def h.Ghost.ghost r; active_def h1 r; active_def h2 r;
-        Compression_path_proofs.resolution_terminal h2 p r path (refine_ u); ());
+        Compression_path_proofs.resolution_terminal h2 p r path (refine_ ()); ());
       let out = #{value = r; path} in refine_ out in
     let sq : {out : resolved | H.mem h2 out.#value && active h2 out.#value && terminal h2 out.#value
       && resolves h2 q out.#value out.#path} =
-      let path : {d : resolution | resolves h2 q s d} @ immutable ghost = ghost_ (let u = () in
-        let refine_ path = Compression_proofs.resolution h1 h2 edits2 q s second.#path (refine_ u) in refine_ path) in
+      let path : {d : resolution | resolves h2 q s d} @ immutable ghost = ghost_ (
+        let refine_ path = Compression_proofs.resolution h1 h2 edits2 q s second.#path (refine_ ()) in refine_ path) in
       let refine_ path = path in let out = #{value = s; path} in refine_ out in
     let refine_ rp = rp in let refine_ sq = sq in
     let h_witness37 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h2)} in

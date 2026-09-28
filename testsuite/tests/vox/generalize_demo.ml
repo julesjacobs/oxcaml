@@ -24,12 +24,12 @@ let run shared =
   let h = ghost_ (Pref.own (borrow_ state)) in
   let scope : ((x : node Pref.t) @ immutable -> {u : unit | if H.mem h x then source_ok h x else H.at h x === None}) @ total ghost = ghost_ (fun x ->
     let d = Bool in cell_def d 0; let d = Var in cell_def d 2; cell_def desc 2;
-    source_ok_def h x; let u = () in refine_ u) in
+    source_ok_def h x; refine_ ()) in
   let order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x}) @ total ghost = ghost_ (fun x ->
     let d = Bool in cell_def d 0; let d = Var in cell_def d 2; cell_def desc 2;
     at_level_def h a; at_level_def h b; below_def h a 2; below_def h b 2;
     children_below_def h desc 2; let d = Var in children_below_def h d 2; let d = Bool in children_below_def h d 0;
-    ordered_def h x; let u = () in refine_ u) in
+    ordered_def h x; refine_ ()) in
   let forest : ((x : node Pref.t) @ immutable -> {t : bounded | not (H.mem h x) || (bound_root t === x && unfolded h t)} @ immutable) @ total ghost = ghost_ (fun x ->
     let d = Bool in cell_def d 0; let d = Var in cell_def d 2; cell_def desc 2;
     let ta = Tip a in let tb = Tip boundary in let tc = if shared then ta else tb in let tr = Fork (root, ta, tc) in
@@ -42,17 +42,17 @@ let run shared =
   let coverage : ((x : node Pref.t) @ immutable -> {u : unit | covered h 0 pool x}) @ total ghost = ghost_ (fun x ->
     let d = Bool in cell_def d 0;
     at_level_def h x; listed_def pool x; listed_def rest x; listed_def empty x; covered_def h 0 pool x;
-    let u = () in refine_ u) in
+    refine_ ()) in
   let state : {t : node Pref.token | Pref.own t === h && pool_scoped h pool} = refine_ state in
   let refine_ state = Generalize.close h 0 pool state in
   let saved = ghost_ (Pref.own (borrow_ state)) in
   let scope_saved : ((x : node Pref.t) @ immutable -> {u : unit | if H.mem saved x then source_ok saved x else H.at saved x === None}) @ total ghost = ghost_ (fun x ->
-    let u = () in let refine_ u = closed_scope h scope 0 pool x (refine_ u) in refine_ u) in
+    let refine_ u = closed_scope h scope 0 pool x (refine_ ()) in refine_ u) in
   let order_saved : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem saved x) || ordered saved x}) @ total ghost = ghost_ (fun x ->
-    coverage x; order x; let u = () in closed_observe h 0 pool x (refine_ u); closed_at_def h saved 0 pool x;
-    if H.mem h x then (closed_ordered h 0 pool x (refine_ u); refine_ u) else refine_ u) in
-  ghost_ (let refine_ tree = forest root in let u = () in scheme_valid h 0 pool coverage tree (refine_ u);
-    closed_observe h 0 pool root (refine_ u); closed_at_def h saved 0 pool root);
+    coverage x; order x; closed_observe h 0 pool x (refine_ ()); closed_at_def h saved 0 pool x;
+    if H.mem h x then (closed_ordered h 0 pool x (refine_ ()); refine_ ()) else refine_ ()) in
+  ghost_ (let refine_ tree = forest root in scheme_valid h 0 pool coverage tree (refine_ ());
+    closed_observe h 0 pool root (refine_ ()); closed_at_def h saved 0 pool root);
   let p : {p : node Pref.t | H.mem saved p} = refine_ root in
   let depth = 1 in let depth : {n : int | n >= 0} = refine_ depth in
   let state : {t : node Pref.token | Pref.own t === saved} = refine_ state in
@@ -61,15 +61,15 @@ let run shared =
   let after_copy = ghost_ (Pref.own (borrow_ copied.#state)) in
   let d = ghost_ copied.#history in let epoch = ghost_ copied.#epoch in
   let copy_scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem after_copy x) || finite_scope after_copy x}) @ total ghost = ghost_ (fun x ->
-    let u = () in let refine_ u = Level_copy_proofs.copy_finite_scope saved scope_saved order_saved epoch depth d x (refine_ u) in refine_ u) in
+    let refine_ u = Level_copy_proofs.copy_finite_scope saved scope_saved order_saved epoch depth d x (refine_ ()) in refine_ u) in
   let unmarked_saved : ((x : node Pref.t) @ immutable ->
       {u : unit | match H.at saved x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
     let d = Bool in cell_def d 0; let d = Var in cell_def d 2; cell_def desc 2;
-    let u = () in closed_observe h 0 pool x (refine_ u);
-    closed_at_def h saved 0 pool x; refine_ u) in
+    closed_observe h 0 pool x (refine_ ());
+    closed_at_def h saved 0 pool x; refine_ ()) in
   let unmarked : ((x : node Pref.t) @ immutable ->
       {u : unit | match H.at after_copy x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
-    let u = () in let refine_ u = Copy_heap_proofs.history_unmarked saved unmarked_saved epoch depth d x (refine_ u) in refine_ u) in
+    let refine_ u = Copy_heap_proofs.history_unmarked saved unmarked_saved epoch depth d x (refine_ ()) in refine_ u) in
   let result = copied.#value in
   let _models = ghost_ (
     let[@def] rho : node Pref.t @ immutable total -> ty @ immutable total = fun x ->
@@ -77,7 +77,7 @@ let run shared =
     let model : ((x : node Pref.t) @ immutable -> {u : unit | equation h rho x}) @ total = fun x ->
       rho_def x; rho_def a; rho_def boundary;
       let d = Bool in cell_def d 0; let d = Var in cell_def d 2; cell_def desc 2;
-      equation_def h rho x; let u = () in refine_ u in
+      equation_def h rho x; refine_ () in
     let choices : node Pref.t @ immutable total -> ty @ immutable total = fun _ -> Function (Boolean, Boolean) in
     let refine_ tree = forest root in let claim = true in
     let use : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
@@ -87,15 +87,15 @@ let run shared =
       fun tau next equal fit -> let refine_ fit = fit in
         let accept : ((eta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
           {u : unit | tau result === interpret tau eta (scheme h 0 tree)} -> {u : unit | claim}) @ total =
-          fun _eta fit -> let refine_ fit = fit in let u = () in refine_ u in
-        let u = () in let refine_ u = with_generalized_choices h 0 pool coverage epoch depth d tau next tree result (refine_ u) claim accept in refine_ u in
-    let u = () in let refine_ u = with_generalized_instance h scope forest 0 pool coverage rho model choices epoch depth d tree result (refine_ u) claim use in ()) in
-  ghost_ (let u = () in Copy_heap_proofs.target_allocated saved epoch depth d p result (refine_ u);
+          fun _eta fit -> let refine_ fit = fit in refine_ () in
+        let refine_ u = with_generalized_choices h 0 pool coverage epoch depth d tau next tree result (refine_ ()) claim accept in refine_ u in
+    let refine_ u = with_generalized_instance h scope forest 0 pool coverage rho model choices epoch depth d tree result (refine_ ()) claim use in ()) in
+  ghost_ (Copy_heap_proofs.target_allocated saved epoch depth d p result (refine_ ());
     Copy_spec.extends_def d d;
-    Level_copy_proofs.target_active_at saved order_saved epoch depth d d p result (refine_ u);
+    Level_copy_proofs.target_active_at saved order_saved epoch depth d d p result (refine_ ());
     copy_scope result; finite_scope_def after_copy result;
-    Copy_heap_proofs.history_at saved epoch depth d boundary (refine_ u);
-    closed_observe h 0 pool boundary (refine_ u); closed_at_def h saved 0 pool boundary;
+    Copy_heap_proofs.history_at saved epoch depth d boundary (refine_ ());
+    closed_observe h 0 pool boundary (refine_ ()); closed_at_def h saved 0 pool boundary;
     let v = Bool in cell_def v 0; let level = Finite 0 in close_level_def 0 level;
     active_def after_copy boundary; at_level_def after_copy boundary);
   let state = copied.#state in let state : {t : node Pref.token | H.mem (Pref.own t) result} = refine_ state in
@@ -110,10 +110,10 @@ let run shared =
     let refine_ unified = Level_unifier.unify after_copy copy_scope unmarked x boundary state in
     assert unified.#ok;
     let final = ghost_ (Pref.own (borrow_ unified.#state)) in
-    ghost_ (let u = () in let ok = unified.#ok in
-      Level_unifier_proofs.unified_frame after_copy x boundary ok final unified.#derivation a (refine_ u);
-      Copy_heap_proofs.history_grows saved epoch depth d a (refine_ u);
-      closed_observe h 0 pool a (refine_ u); closed_at_def h saved 0 pool a);
+    ghost_ (let ok = unified.#ok in
+      Level_unifier_proofs.unified_frame after_copy x boundary ok final unified.#derivation a (refine_ ());
+      Copy_heap_proofs.history_grows saved epoch depth d a (refine_ ());
+      closed_observe h 0 pool a (refine_ ()); closed_at_def h saved 0 pool a);
     let state = unified.#state in let state : {t : node Pref.token | H.mem (Pref.own t) a} = refine_ state in
     let refine_ original = Pref.read a (borrow_ state) in
     assert (original.desc = Var && original.level = Generic)

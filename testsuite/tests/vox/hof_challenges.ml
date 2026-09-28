@@ -96,14 +96,12 @@ let upper_separate :
       {u : unit | inv tail acc && upper_relation x acc result} ->
       {u : unit | inv (x :: tail) result}) @ total ghost = ghost_ (fun x tail acc result premise ->
     premise;
-    let u = () in
     upper_preserved initial x tail acc result
-      (u);
-    u) in
+      ();
+    ()) in
   ghost_ (upper_base initial);
-  let u = () in
   let result = fold_right upper_relation inv f preserve xs initial
-    (u) in
+    () in
   result
 
 let upper_trace :
@@ -120,10 +118,9 @@ let upper_trace :
       {u : unit | inv tail acc && upper_relation x acc result} ->
       {u : unit | inv (x :: tail) result}) = fun x tail acc result premise ->
     premise;
-    let u = () in
     upper_preserved initial x tail acc result
-      (u);
-    u in
+      ();
+    () in
     let trace = evidence.trace in
     upper_base initial;
     let u = () in
@@ -144,13 +141,11 @@ let upper_ih :
       fun x tail acc premise ->
     premise;
     let result = f x acc in
-    let u = () in
     ghost_
-      (upper_preserved initial x tail acc result (u));
+      (upper_preserved initial x tail acc result ());
     result in
   ghost_ (upper_base initial);
-  let u = () in
-  let result = fold_right_ih inv step xs initial (u) in
+  let result = fold_right_ih inv step xs initial () in
   result
 
 let choose_upper : (x : int) @ immutable -> (acc : int) @ immutable ->
@@ -206,10 +201,9 @@ let rec (mapped_lower_bound @ total) :
     | y :: outputs ->
       Vox_int_sequence.accepts_def x bound lower;
       Vox_int_sequence.accepts_def y mapped lower;
-      let u = () in
-      let _ = monotone bound x mapped y (u) in
-      mapped_lower_bound r monotone tail outputs bound mapped (u);
-      u
+      let _ = monotone bound x mapped y () in
+      mapped_lower_bound r monotone tail outputs bound mapped ();
+      ()
 
 let rec (map_sorted @ total) :
     (r : (int @ immutable total -> int @ immutable total -> bool)) @ total ->
@@ -229,10 +223,9 @@ let rec (map_sorted @ total) :
     match ys with
     | [] -> ()
     | y :: outputs ->
-      let u = () in
-      mapped_lower_bound r monotone tail outputs x y (u);
-      map_sorted r monotone tail outputs (u);
-      u
+      mapped_lower_bound r monotone tail outputs x y ();
+      map_sorted r monotone tail outputs ();
+      ()
 
 let[@def] clamp_relation : int @ immutable total ->
     (int @ immutable -> bool) @ total = fun x y ->
@@ -262,10 +255,9 @@ let sorted_clamp (xs : int list)
   premise;
   let f = clamp_partial in
   let ys = map clamp_relation f xs in
-  let u = () in
   ghost_ (
     let monotone = clamp_monotone in
-    map_sorted clamp_relation monotone xs ys (u));
+    map_sorted clamp_relation monotone xs ys ());
   ys
 
 let[@def] count_until_zero : int @ immutable total ->

@@ -15,12 +15,12 @@ let (close_frame @ total) : (h : node Pref.heap) @ immutable ->
     {u : unit | pool_scoped h pool} ->
     {u : unit | H.mem h p === H.mem (S.close_heap h cut pool) p} @ ghost =
   fun h cut pool p premise -> ghost_ (
-    let refine_ premise = premise in let u = () in
-    S.close_heap_def h cut pool; R.representatives_scoped h pool (refine_ u);
+    let refine_ premise = premise in 
+    S.close_heap_def h cut pool; R.representatives_scoped h pool (refine_ ());
     let filtered = R.representatives h pool in
     let after = S.close_heap h cut pool in
-    Generalize_proofs.closed_observe h cut filtered p (refine_ u);
-    closed_at_def h after cut filtered p; refine_ u)
+    Generalize_proofs.closed_observe h cut filtered p (refine_ ());
+    closed_at_def h after cut filtered p; refine_ ())
 
 let run () =
   let refine_ state = Pref.empty () in
@@ -40,8 +40,8 @@ let run () =
   let refine_ out = Representative_pool.close_and_transfer witness 1 pool empty (refine_ state) in
   let retained = out.#parent in let state = out.#state in
   let middle = ghost_ (Pref.own (borrow_ state)) in
-  ghost_ (let u = () in close_frame h 1 pool p (refine_ u);
-    close_frame h 1 pool q (refine_ u); pool_scoped_def middle empty);
+  ghost_ (close_frame h 1 pool p (refine_ ());
+    close_frame h 1 pool q (refine_ ()); pool_scoped_def middle empty);
   let witness = {Ghost.ghost = ghost_ middle} in
   assert (retained = Entry (q, Empty));
   let state : {t : node Pref.token | Pref.own t === middle && pool_scoped middle retained
@@ -50,8 +50,8 @@ let run () =
   let refine_ out = Representative_pool.close_and_transfer witness 0 retained empty (refine_ state) in
   assert (out.#parent = Empty);
   let state = out.#state in
-  ghost_ (let u = () in close_frame middle 0 retained p (refine_ u);
-    close_frame middle 0 retained q (refine_ u));
+  ghost_ (close_frame middle 0 retained p (refine_ ());
+    close_frame middle 0 retained q (refine_ ()));
   let state : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ state in
   let refine_ pv = Pref.read p (borrow_ state) in let refine_ state = state in
   let state : {t : node Pref.token | H.mem (Pref.own t) q} = refine_ state in

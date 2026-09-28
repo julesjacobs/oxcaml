@@ -57,15 +57,15 @@ let finish : (before : (node Pref.heap) Ghost.t) @ immutable ->
         let target_tree : {t : tree | finite h.Ghost.ghost t && tree_root t === target} @ immutable ghost = ghost_ (
           let refine_ t = trees.Ghost.ghost target in refine_ t) in
         let refine_ source_tree = source_tree in let refine_ target_tree = target_tree in
-        let proof : {u : unit | Structure_spec.linkable h.Ghost.ghost source_tree target_tree} @ ghost = ghost_ (let u = () in
+        let proof : {u : unit | Structure_spec.linkable h.Ghost.ghost source_tree target_tree} @ ghost = ghost_ (
           let equality : {u : unit | readback source_tree === readback target_tree} =
-          if pn >= qn then (Optimized_link_proofs.equal_roots before.Ghost.ghost old_p old_q h.Ghost.ghost d.Ghost.ghost trees.Ghost.ghost p q rp.#path rq.#path source_tree target_tree (refine_ u); refine_ u)
-          else ( Optimized_link_proofs.equal_roots before.Ghost.ghost old_p old_q h.Ghost.ghost d.Ghost.ghost trees.Ghost.ghost p q rp.#path rq.#path target_tree source_tree (refine_ u); refine_ u) in
+          if pn >= qn then (Optimized_link_proofs.equal_roots before.Ghost.ghost old_p old_q h.Ghost.ghost d.Ghost.ghost trees.Ghost.ghost p q rp.#path rq.#path source_tree target_tree (refine_ ()); refine_ ())
+          else ( Optimized_link_proofs.equal_roots before.Ghost.ghost old_p old_q h.Ghost.ghost d.Ghost.ghost trees.Ghost.ghost p q rp.#path rq.#path target_tree source_tree (refine_ ()); refine_ ()) in
           let refine_ equality = equality in
           active_def h.Ghost.ghost p; active_def h.Ghost.ghost q;
           terminal_def h.Ghost.ghost source; observe_def h.Ghost.ghost source; terminal_def h.Ghost.ghost target; observe_def h.Ghost.ghost target;
           at_level_def h.Ghost.ghost source; at_level_def h.Ghost.ghost target; below_def h.Ghost.ghost target pn; below_def h.Ghost.ghost target qn;
-          Structure_spec.linkable_def h.Ghost.ghost source_tree target_tree; refine_ u) in
+          Structure_spec.linkable_def h.Ghost.ghost source_tree target_tree; refine_ ()) in
         let refine_ proof = proof in
         let state : {t : node Pref.token | Pref.own t === h.Ghost.ghost && Structure_spec.linkable h.Ghost.ghost source_tree target_tree
           && tree_root source_tree === source && tree_root target_tree === target} = refine_ state in

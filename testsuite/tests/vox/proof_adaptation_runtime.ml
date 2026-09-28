@@ -42,7 +42,7 @@ let witnessed : (x : int) -> {r : witnessed | r.#witness = x} =
   fun x -> let r = #{ value = x; witness = ghost_ x } in refine_ r
 let () =
   let refine_ r = witnessed 42 in
-  let proof : {u : unit | r.#witness = 42} = let u = () in refine_ u in
+  let proof : {u : unit | r.#witness = 42} = refine_ () in
   let refine_ proof = proof in
   assert (r.#value = 42)
 

@@ -119,12 +119,11 @@ end = struct
     fun xs ->
     let nil = [] in
     append_def xs nil;
-    let u = () in
     match xs with
-    | [] -> u
+    | [] -> ()
     | _ :: rest ->
       append_nil rest;
-      u
+      ()
 
   let[@def] rec equal a b =
     match a with
@@ -141,29 +140,28 @@ end = struct
       {u : unit | equal a b === (a === b)} @ immutable contended =
     fun a b ->
     equal_def a b;
-    let u = () in
     match a with
-    | Empty | Epsilon | Symbol _ -> u
+    | Empty | Epsilon | Symbol _ -> ()
     | Alt (a1, a2) ->
       (match b with
        | Alt (b1, b2) ->
          equal_correct a1 b1;
          equal_correct a2 b2;
-         u
-       | _ -> u)
+         ()
+       | _ -> ())
     | Seq (a1, a2) ->
       (match b with
        | Seq (b1, b2) ->
          equal_correct a1 b1;
          equal_correct a2 b2;
-         u
-       | _ -> u)
+         ()
+       | _ -> ())
     | Star a ->
       (match b with
        | Star b ->
          equal_correct a b;
-         u
-       | _ -> u)
+         ()
+       | _ -> ())
 
   let (rank @ total) r =
     match r with
@@ -228,16 +226,15 @@ end = struct
     contains_def query r;
     contains_def query result;
     equal_correct a r;
-    let u = () in
     match r with
-    | Empty -> u
+    | Empty -> ()
     | Alt (head, tail) ->
       equal_correct a head;
       let next = insert a tail in
       insert_contains a tail query;
       contains_def query next;
-      u
-    | _ -> u
+      ()
+    | _ -> ()
 
   let rec (add_contains @ total) : (a : t) -> (acc : t) -> (query : t) ->
       {u : unit | contains query (add_alternatives a acc) ===
@@ -245,17 +242,16 @@ end = struct
     fun a acc query ->
     add_alternatives_def a acc;
     contains_def query a;
-    let u = () in
     match a with
-    | Empty -> u
+    | Empty -> ()
     | Alt (left, right) ->
       let next = add_alternatives right acc in
       add_contains right acc query;
       add_contains left next query;
-      u
+      ()
     | _ ->
       insert_contains a acc query;
-      u
+      ()
 
   let (alt_contains @ total) (a @ total) (b @ total) query :
       {u : unit | contains query (alt a b) ===
@@ -266,7 +262,7 @@ end = struct
     contains_def query empty;
     add_contains b empty query;
     add_contains a next query;
-    let u = () in u
+    ()
 
   let rec (select_alternative @ total) : (r : t) -> (p : evidence) ->
       {choice : t * evidence |
@@ -580,8 +576,7 @@ end = struct
   let (append_empty @ total) (xs : int list) (ys : int list) :
       {u : unit | (append xs ys === []) === (xs === [] && ys === [])} =
     append_def xs ys;
-    let u = () in
-    match xs with [] -> u | _ :: _ -> u
+    match xs with [] -> () | _ :: _ -> ()
 
   let rec (empty_complete @ total) : (r : t) -> (p : evidence) ->
       {u : unit | if valid r p && word p === [] then nullable r else true}
@@ -590,21 +585,20 @@ end = struct
     valid_def r p;
     word_def p;
     nullable_def r;
-    let u = () in
     match p with
-    | Epsilon_match | Symbol_match _ | Star_empty | Star_step _ -> u
+    | Epsilon_match | Symbol_match _ | Star_empty | Star_step _ -> ()
     | Alt_left inner ->
       (match r with
        | Alt (a, _) ->
          empty_complete a inner;
-         u
-       | _ -> u)
+         ()
+       | _ -> ())
     | Alt_right inner ->
       (match r with
        | Alt (_, b) ->
          empty_complete b inner;
-         u
-       | _ -> u)
+         ()
+       | _ -> ())
     | Seq_match (left, right) ->
       (match r with
        | Seq (a, b) ->
@@ -613,8 +607,8 @@ end = struct
          append_empty lw rw;
          empty_complete a left;
          empty_complete b right;
-         u
-       | _ -> u)
+         ()
+       | _ -> ())
 
   let rec (contract @ total) :
       (r : t) -> (c : int) -> (s : int list) -> (p : evidence) ->
@@ -734,16 +728,15 @@ end = struct
         @ immutable contended =
     fun r s p ->
     matches_def r s;
-    let u = () in
     match s with
     | [] ->
       empty_complete r p;
-      u
+      ()
     | c :: rest ->
       let derivative = derive c r in
       let q = contract r c rest p in
       complete derivative rest q;
-      u
+      ()
 
   let (recognize @ total) (r @ total) (s : int list) :
       {result : evidence option |
@@ -772,12 +765,11 @@ end = struct
       join_def xs ys;
       member_def r xs;
       member_def r joined;
-      let u = () in
       match xs with
-      | [] -> u
+      | [] -> ()
       | _ :: rest ->
         join_member rest ys r;
-        u
+        ()
 
     let[@def] rec suffix (xs : t list) b =
       match xs with [] -> [] | a :: rest -> Seq (a, b) :: suffix rest b
@@ -791,14 +783,13 @@ end = struct
       let result = suffix xs b in
       suffix_def xs b;
       member_def r result;
-      let u = () in
       match xs with
       | [] ->
         (match r with
          | Seq (a, _) ->
            member_def a xs;
-           u
-         | _ -> u)
+           ()
+         | _ -> ())
       | a :: rest ->
         let head = Seq (a, b) in
         equal_correct r head;
@@ -807,8 +798,8 @@ end = struct
          | Seq (left, _) ->
            member_def left xs;
            equal_correct left a;
-           u
-         | _ -> u)
+           ()
+         | _ -> ())
 
     let[@def] rec support r =
       match r with
@@ -826,11 +817,10 @@ end = struct
       let sp = support p in
       support_def r;
       support_def p;
-      let u = () in
       match r with
       | Empty | Epsilon ->
         member_def p sr;
-        u
+        ()
       | Symbol _ ->
         member_def p sr;
         let epsilon = Epsilon in
@@ -838,7 +828,7 @@ end = struct
         let nil = [] in
         member_def p nil;
         member_def q sp;
-        u
+        ()
       | Alt (a, b) ->
         let sa = support a in
         let sb = support b in
@@ -846,7 +836,7 @@ end = struct
         join_member sa sb q;
         support_closed a p q;
         support_closed b p q;
-        u
+        ()
       | Seq (a, b) ->
         let sa = support a in
         let sb = support b in
@@ -866,9 +856,9 @@ end = struct
            (match q with
             | Seq (next, _) ->
               support_closed a inner next;
-              u
-            | _ -> u)
-         | _ -> u)
+              ()
+            | _ -> ())
+         | _ -> ())
       | Star a ->
         let sa = support a in
         suffix_member sa r p;
@@ -883,9 +873,9 @@ end = struct
            (match q with
             | Seq (next, _) ->
               support_closed a inner next;
-              u
-            | _ -> u)
-         | _ -> u)
+              ()
+            | _ -> ())
+         | _ -> ())
 
     let[@def] rec partial c r =
       match r with
@@ -903,12 +893,11 @@ end = struct
       fun r c p ->
       partial_def c r;
       support_def r;
-      let u = () in
       match r with
       | Empty | Epsilon | Symbol _ ->
         let nil = [] in
         member_def p nil;
-        u
+        ()
       | Alt (a, b) ->
         let da = partial c a in
         let db = partial c b in
@@ -918,7 +907,7 @@ end = struct
         join_member sa sb p;
         partial_supported a c p;
         partial_supported b c p;
-        u
+        ()
       | Seq (a, b) ->
         let da = partial c a in
         let db = partial c b in
@@ -934,8 +923,8 @@ end = struct
         (match p with
          | Seq (inner, _) ->
            partial_supported a c inner;
-           u
-         | _ -> u)
+           ()
+         | _ -> ())
       | Star a ->
         let da = partial c a in
         let sa = support a in
@@ -944,8 +933,8 @@ end = struct
         (match p with
          | Seq (inner, _) ->
            partial_supported a c inner;
-           u
-         | _ -> u)
+           ()
+         | _ -> ())
     let rec (partial_contract @ total) :
         (r : t) -> (c : int) -> (s : int list) -> (p : evidence) ->
         {choice : t * evidence |
@@ -1129,13 +1118,12 @@ end = struct
       fun xs r s ->
       member_def r xs;
       accepts_def xs s;
-      let u = () in
       match xs with
-      | [] -> u
+      | [] -> ()
       | head :: rest ->
         equal_correct r head;
         accepts_member rest r s;
-        u
+        ()
 
     let rec (accepts_pick @ total) : (xs : t list) -> (s : int list) ->
         {r : t | if accepts xs s then member r xs && matches r s else true}
@@ -1161,21 +1149,20 @@ end = struct
         {u : unit | accepts (partial c r) s === matches r (c :: s)} =
       let derivative = partial c r in
       let whole = c :: s in
-      let u = () in
       if matches r whole then
         let p = sound r whole in
         let choice = partial_contract r c s p in
         let k, q = choice in
         complete k s q;
         accepts_member derivative k s;
-        u
+        ()
       else if accepts derivative s then
         let k = accepts_pick derivative s in
         let p = sound k s in
         let q = partial_expand r c k p in
         complete r whole q;
-        u
-      else u
+        ()
+      else ()
 
     let[@def] rec same_state (xs : t list) (ys : t list) =
       match xs with
@@ -1187,16 +1174,15 @@ end = struct
         {u : unit | same_state xs ys === (xs === ys)} @ immutable contended =
       fun xs ys ->
       same_state_def xs ys;
-      let u = () in
       match xs with
-      | [] -> u
+      | [] -> ()
       | x :: rest ->
         (match ys with
-         | [] -> u
+         | [] -> ()
          | y :: tail ->
            equal_correct x y;
            same_state_correct rest tail;
-           u)
+           ())
 
     let[@def] rec has_state (xs : t list) (states : t list list) =
       match states with [] -> false | state :: rest -> same_state xs state || has_state xs rest
@@ -1213,12 +1199,11 @@ end = struct
       combine_def xs ys;
       has_state_def state xs;
       has_state_def state joined;
-      let u = () in
       match xs with
-      | [] -> u
+      | [] -> ()
       | _ :: rest ->
         combine_has rest ys state;
-        u
+        ()
 
     let[@def] rec prepend r (states : t list list) =
       match states with [] -> [] | state :: rest -> (r :: state) :: prepend r rest
@@ -1232,24 +1217,23 @@ end = struct
       let result = prepend r states in
       prepend_def r states;
       has_state_def state result;
-      let u = () in
       match states with
       | [] ->
         (match state with
-         | [] -> u
+         | [] -> ()
          | _ :: rest ->
            has_state_def rest states;
-           u)
+           ())
       | first :: tail ->
         let head = r :: first in
         same_state_correct state head;
         prepend_has r tail state;
         (match state with
-         | [] -> u
+         | [] -> ()
          | _ :: rest ->
            has_state_def rest states;
            same_state_correct rest first;
-           u)
+           ())
 
     let[@def] rec powerset (universe : t list) =
       match universe with
@@ -1274,13 +1258,12 @@ end = struct
       restrict_def universe candidates;
       member_def query result;
       member_def query universe;
-      let u = () in
       match universe with
-      | [] -> u
+      | [] -> ()
       | head :: rest ->
         equal_correct query head;
         restrict_member rest candidates query;
-        u
+        ()
 
     let rec (powerset_cover @ total) : (universe : t list) -> (candidates : t list) ->
         {u : unit | has_state (restrict universe candidates) (powerset universe)}
@@ -1290,20 +1273,19 @@ end = struct
       let states = powerset universe in
       restrict_def universe candidates;
       powerset_def universe;
-      let u = () in
       match universe with
       | [] ->
         let nil = [] in
         same_state_correct result nil;
         has_state_def result states;
-        u
+        ()
       | head :: rest ->
         let smaller = powerset rest in
         let extended = prepend head smaller in
         powerset_cover rest candidates;
         combine_has smaller extended result;
         prepend_has head smaller result;
-        u
+        ()
 
     let rec (powerset_member @ total) :
         (universe : t list) -> (state : t list) -> (query : t) ->
@@ -1313,7 +1295,6 @@ end = struct
       let states = powerset universe in
       powerset_def universe;
       member_def query universe;
-      let u = () in
       match universe with
       | [] ->
         let nil = [] in
@@ -1321,7 +1302,7 @@ end = struct
         has_state_def state nil;
         same_state_correct state nil;
         member_def query state;
-        u
+        ()
       | head :: rest ->
         let smaller = powerset rest in
         let extended = prepend head smaller in
@@ -1331,13 +1312,13 @@ end = struct
         (match state with
          | [] ->
            member_def query state;
-           u
+           ()
          | first :: tail ->
            member_def query state;
            equal_correct query first;
            equal_correct query head;
            powerset_member rest tail query;
-           u)
+           ())
 
     let[@def] rec step c (state : t list) =
       match state with [] -> [] | r :: rest -> join (partial c r) (step c rest)
@@ -1381,7 +1362,7 @@ end = struct
       member_def r universe;
       equal_correct r root;
       member_def query universe;
-      let u = () in u
+      ()
 
     let rec (accepts_join @ total) :
         (xs : t list) -> (ys : t list) -> (s : int list) ->
@@ -1392,12 +1373,11 @@ end = struct
       join_def xs ys;
       accepts_def xs s;
       accepts_def joined s;
-      let u = () in
       match xs with
-      | [] -> u
+      | [] -> ()
       | _ :: rest ->
         accepts_join rest ys s;
-        u
+        ()
 
     let rec (step_correct @ total) : (state : t list) -> (c : int) -> (s : int list) ->
         {u : unit | accepts (step c state) s === accepts state (c :: s)}
@@ -1407,18 +1387,17 @@ end = struct
       let whole = c :: s in
       step_def c state;
       accepts_def state whole;
-      let u = () in
       match state with
       | [] ->
         accepts_def next s;
-        u
+        ()
       | head :: rest ->
         let dh = partial c head in
         let dr = step c rest in
         accepts_join dh dr s;
         partial_correct head c s;
         step_correct rest c s;
-        u
+        ()
 
     let (next_correct @ total) (root @ total) (state : t list) c s :
         {u : unit | if has_state state (powerset (root :: support root)) then
@@ -1428,19 +1407,18 @@ end = struct
       let next = step c state in
       let target = restrict universe next in
       step_correct state c s;
-      let u = () in
       if accepts next s then
         let query = accepts_pick next s in
         step_supported root state c query;
         restrict_member universe next query;
         accepts_member target query s;
-        u
+        ()
       else if accepts target s then
         let query = accepts_pick target s in
         restrict_member universe next query;
         accepts_member next query s;
-        u
-      else u
+        ()
+      else ()
 
     let[@def] rec has_letter c (letters : int list) =
       match letters with [] -> false | d :: rest -> c = d || has_letter c rest
@@ -1454,12 +1432,11 @@ end = struct
       append_def xs ys;
       has_letter_def c xs;
       has_letter_def c joined;
-      let u = () in
       match xs with
-      | [] -> u
+      | [] -> ()
       | _ :: rest ->
         append_letter rest ys c;
-        u
+        ()
 
     let[@def] rec letters r =
       match r with
@@ -1476,16 +1453,15 @@ end = struct
       let alphabet = letters r in
       partial_def c r;
       letters_def r;
-      let u = () in
       match r with
       | Empty | Epsilon ->
         member_def q ds;
-        u
+        ()
       | Symbol _ ->
         let nil = [] in
         member_def q nil;
         has_letter_def c alphabet;
-        u
+        ()
       | Alt (a, b) ->
         let da = partial c a in
         let db = partial c b in
@@ -1495,7 +1471,7 @@ end = struct
         join_member da db q;
         partial_letter a c q;
         partial_letter b c q;
-        u
+        ()
       | Seq (a, b) ->
         let da = partial c a in
         let db = partial c b in
@@ -1508,15 +1484,15 @@ end = struct
         partial_letter b c q;
         (match q with
          | Seq (inner, _) ->
-           partial_letter a c inner; u
-         | _ -> u)
+           partial_letter a c inner; ()
+         | _ -> ())
       | Star a ->
         let da = partial c a in
         suffix_member da r q;
         (match q with
          | Seq (inner, _) ->
-           partial_letter a c inner; u
-         | _ -> u)
+           partial_letter a c inner; ()
+         | _ -> ())
 
     let[@def] rec alphabet (universe : t list) =
       match universe with
@@ -1531,16 +1507,15 @@ end = struct
       fun universe r c ->
       member_def r universe;
       alphabet_def universe;
-      let u = () in
       match universe with
-      | [] -> u
+      | [] -> ()
       | head :: rest ->
         let lh = letters head in
         let lr = alphabet rest in
         append_letter lh lr c;
         equal_correct r head;
         alphabet_member rest r c;
-        u
+        ()
 
     let (step_letter @ total) (universe : t list) state c query :
         {u : unit | if has_state state (powerset universe)
@@ -1550,7 +1525,7 @@ end = struct
       powerset_member universe state r;
       partial_letter r c query;
       alphabet_member universe r c;
-      let u = () in u
+      ()
 
     type row = (int * t list) list
 
@@ -1575,12 +1550,11 @@ end = struct
       build_row_def universe state labels;
       transition_def row c;
       has_letter_def c labels;
-      let u = () in
       match labels with
-      | [] -> u
+      | [] -> ()
       | _ :: rest ->
         build_row_correct universe state rest c;
-        u
+        ()
 
     let rec (powerset_empty @ total) : (universe : t list) ->
         {u : unit | has_state [] (powerset universe)} @ immutable contended =
@@ -1588,18 +1562,17 @@ end = struct
       let states = powerset universe in
       let nil = [] in
       powerset_def universe;
-      let u = () in
       match universe with
       | [] ->
         has_state_def nil states;
         same_state_correct nil nil;
-        u
+        ()
       | head :: rest ->
         let smaller = powerset rest in
         let extended = prepend head smaller in
         combine_has smaller extended nil;
         powerset_empty rest;
-        u
+        ()
 
     let (row_closed @ total) (root @ total) (state : t list) c :
         {u : unit | has_state
@@ -1611,11 +1584,10 @@ end = struct
       let next = step c state in
       build_row_correct universe state labels c;
       powerset_cover universe next;
-      let u = () in
-      if has_letter c labels then u
+      if has_letter c labels then ()
       else
         (powerset_empty universe;
-        u)
+        ())
 
     let (row_correct @ total) (root @ total) (state : t list) c s :
         {u : unit | if has_state state (powerset (root :: support root)) then
@@ -1628,14 +1600,13 @@ end = struct
       let nil = [] in
       build_row_correct universe state labels c;
       next_correct root state c s;
-      let u = () in
-      if has_letter c labels then u
+      if has_letter c labels then ()
       else
         (step_correct state c s;
         let query = accepts_pick next s in
         step_letter universe state c query;
         accepts_def nil s;
-        u)
+        ())
 
     type table = (t list * bool * row) list
     type automaton = t list * table
@@ -1659,7 +1630,7 @@ end = struct
       let nil = [] in
       contains_in_def source nil;
       has_state_def source nil;
-      let u = () in u
+      ()
 
     let (contains_in_cons @ total) source head rest :
         {u : unit | contains_in source (head :: rest) ===
@@ -1668,7 +1639,7 @@ end = struct
       contains_in_def source sources;
       contains_in_def source rest;
       has_state_def source sources;
-      let u = () in u
+      ()
 
     let[@def] contains_state (dfa : automaton) state =
       contains_in state (states dfa)
@@ -1677,7 +1648,7 @@ end = struct
         {u : unit | contains_state dfa source ===
           contains_in source (states dfa)} =
       contains_state_def dfa source;
-      let u = () in u
+      ()
 
     let[@def] universe_size root = List.length (root :: support root)
 
@@ -1700,12 +1671,11 @@ end = struct
       let table = build_table universe sources in
       build_table_def universe sources;
       table_states_def table;
-      let u = () in
       match sources with
-      | [] -> u
+      | [] -> ()
       | _ :: rest ->
         table_states_build_table universe rest;
-        u
+        ()
 
     let[@def] rec final (table : table) state =
       match table with
@@ -1730,7 +1700,7 @@ end = struct
     let (default_empty @ total) (dfa : automaton) (source : state) :
         {u : unit | default dfa source === []} =
       default_def dfa source;
-      let u = () in u
+      ()
 
     let[@def] rec edge_labels (edges : row) =
       match edges with
@@ -1754,7 +1724,7 @@ end = struct
       let nil = [] in
       label_member_def letter nil;
       has_letter_def letter nil;
-      let u = () in u
+      ()
 
     let (label_member_cons @ total) (letter : int) (head : int) rest :
         {u : unit | label_member letter (head :: rest) ===
@@ -1763,7 +1733,7 @@ end = struct
       label_member_def letter letters;
       label_member_def letter rest;
       has_letter_def letter letters;
-      let u = () in u
+      ()
 
     let rec (transition_outside @ total) :
         (edges : row) -> (letter : int) ->
@@ -1775,12 +1745,11 @@ end = struct
       edge_labels_def edges;
       has_letter_def letter letters;
       transition_def edges letter;
-      let u = () in
       match edges with
-      | [] -> u
+      | [] -> ()
       | (_, _) :: rest ->
         transition_outside rest letter;
-        u
+        ()
 
     let rec (advance_outside @ total) :
         (table : table) -> (source : state) -> (letter : int) ->
@@ -1792,16 +1761,15 @@ end = struct
       row_labels_def table source;
       has_letter_def letter letters;
       advance_def table source letter;
-      let u = () in
       match table with
-      | [] -> u
+      | [] -> ()
       | (key, _, edges) :: rest ->
         if same_state source key then begin
           transition_outside edges letter;
-          u
+          ()
         end else begin
           advance_outside rest source letter;
-          u
+          ()
         end
 
     let (next_outside_labels @ total) (dfa : automaton)
@@ -1814,7 +1782,7 @@ end = struct
       labels_def dfa source;
       next_def dfa source letter;
       advance_outside table source letter;
-      let u = () in u
+      ()
 
     let rec (table_final @ total) :
         (universe : t list) -> (states : t list list) -> (state : t list) ->
@@ -1826,13 +1794,12 @@ end = struct
       build_table_def universe states;
       final_def table state;
       has_state_def state states;
-      let u = () in
       match states with
-      | [] -> u
+      | [] -> ()
       | head :: rest ->
         same_state_correct state head;
         table_final universe rest state;
-        u
+        ()
 
     let rec (table_advance @ total) :
         (universe : t list) -> (states : t list list) -> (state : t list) -> (c : int) ->
@@ -1845,13 +1812,12 @@ end = struct
       build_table_def universe states;
       advance_def table state c;
       has_state_def state states;
-      let u = () in
       match states with
-      | [] -> u
+      | [] -> ()
       | head :: rest ->
         same_state_correct state head;
         table_advance universe rest state c;
-        u
+        ()
 
     let[@def] rec execute (table : table) state (s : int list) =
       match s with
@@ -1869,18 +1835,17 @@ end = struct
       let states = powerset universe in
       let table = build_table universe states in
       execute_def table state s;
-      let u = () in
       match s with
       | [] ->
         table_final universe states state;
-        u
+        ()
       | c :: rest ->
         let target = advance table state c in
         table_advance universe states state c;
         row_closed root state c;
         row_correct root state c rest;
         execute_correct root rest target;
-        u
+        ()
 
     let[@def] compile (root @ total) : automaton @ total =
       let universe = root :: support root in
@@ -1906,7 +1871,7 @@ end = struct
       next_def dfa source letter;
       table_advance universe sources source letter;
       row_closed root source letter;
-      let u = () in u
+      ()
 
     let (compiled_initial_member @ total) (root : t) :
         {u : unit | contains_state (compile root) (initial (compile root))} =
@@ -1929,7 +1894,7 @@ end = struct
       table_states_build_table universe sources;
       contains_state_def dfa source;
       contains_in_def source enumerated;
-      let u = () in u
+      ()
 
     let (compiled_empty_member @ total) (root : t) :
         {u : unit | contains_state (compile root) []} =
@@ -1944,7 +1909,7 @@ end = struct
       table_states_build_table universe sources;
       contains_state_def dfa nil;
       contains_in_def nil enumerated;
-      let u = () in u
+      ()
 
     let[@def] run (dfa : automaton) s =
       match dfa with (initial, table) -> execute table initial s
@@ -1959,7 +1924,7 @@ end = struct
       run_from_def dfa state nil;
       output_def dfa state;
       execute_def table state nil;
-      let u = () in u
+      ()
 
     let (run_from_letter @ total) (dfa : automaton) (state : state)
         (letter : int) (suffix : int list) :
@@ -1972,7 +1937,7 @@ end = struct
       next_def dfa state letter;
       execute_def table state word;
       run_from_def dfa target suffix;
-      let u = () in u
+      ()
 
     let (run_initial @ total) (dfa : automaton) (word : int list) :
         {u : unit | run dfa word === run_from dfa (initial dfa) word} =
@@ -1980,7 +1945,7 @@ end = struct
       run_def dfa word;
       run_from_def dfa initial_state word;
       initial_def dfa;
-      let u = () in u
+      ()
 
     let (correct @ total) (root @ total) (s : int list) :
         {u : unit | run (compile root) s === matches root s} =
@@ -2000,7 +1965,7 @@ end = struct
       execute_correct root s initial;
       accepts_def initial s;
       accepts_def nil s;
-      let u = () in u
+      ()
 
     let (sound @ total) (root @ total) (s : int list) :
         {p : evidence | if run (compile root) s then valid root p && word p === s
@@ -2014,14 +1979,14 @@ end = struct
           else true} =
       correct root s;
       complete root s p;
-      let u = () in u
+      ()
 
   end
 
   let (membership_word @ total) (p : Membership.evidence) :
     {u : unit | Membership.word p === Regex_semantics.Membership.word p} =
-    let u = () in u
+    ()
   let (membership_valid @ total) (r : t) (p : Membership.evidence) :
     {u : unit | Membership.valid r p === Regex_semantics.Membership.valid r p} =
-    let u = () in u
+    ()
 end;;

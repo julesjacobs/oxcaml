@@ -16,11 +16,11 @@ let (substituted_identity @ total) :
     {d : typing | typed Z Empty_context
       (Let (Lambda (Bound Z), Apply (Bound Z, Bound Z)))
       (Function (embed (rho p), embed (rho p))) d} @ immutable ghost = fun rho p -> ghost_ (
-    let z = Z in let a = Free p in mono_wf_def z a; let u = () in
-    let refine_ original = Hm_declarative_demo.id_id a (refine_ u) in
+    let z = Z in let a = Free p in mono_wf_def z a; 
+    let refine_ original = Hm_declarative_demo.id_id a (refine_ ()) in
     let bound = Bound z in let source = Let (Lambda bound, Apply (bound, bound)) in
     let t = Function (a, a) in let g = Empty_context in
-    substitution_typed rho z g source t original (refine_ u);
+    substitution_typed rho z g source t original (refine_ ());
     substitute_context_def rho g; substitute_type_def rho t; substitute_type_def rho a;
     let d = substitute_typing rho original in refine_ d)
 

@@ -21,11 +21,11 @@ let (lost_origin @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t) @
     let h = H.empty () in let saved = H.put h p (cell var 0) in
     let after = H.put (H.put (H.put h p (cell link 0)) q (cell link 0)) r (cell boolean 0) in
     originates_def saved after 0 q o;
-    let u = () in match o with Origin (root, path) ->
+    match o with Origin (root, path) ->
       below_def saved root 0; reaches_def after root q path;
-      match path with Stop -> refine_ u | Step (next, rest) ->
+      match path with Stop -> refine_ () | Step (next, rest) ->
         edge_def after root next; reaches_def after next q rest;
-        match rest with Stop -> refine_ u | Step (last, _) -> edge_def after next last; refine_ u)
+        match rest with Stop -> refine_ () | Step (last, _) -> edge_def after next last; refine_ ())
 
 let (prior_origin @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
     (r : node Pref.t) @ immutable ->
@@ -40,7 +40,7 @@ let (prior_origin @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t) 
     let stop = Stop in let path = Step (q, stop) in let origin = Origin (p, path) in
     originates_def saved before 0 q origin; below_def saved p 0; at_level_def saved p;
     reaches_def before p q path; edge_def before p q; reaches_def before q q stop;
-    below_def before q 0; at_level_def before q; let u = () in refine_ u)
+    below_def before q 0; at_level_def before q; refine_ ())
 
 let (finite_readback @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
     (r : node Pref.t) @ immutable ->
@@ -57,8 +57,8 @@ let (finite_readback @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.
     let path = Level_unifier_spec.Via (q, tail) in
     Level_unifier_spec.resolves_def h p r path; Level_unifier_spec.resolves_def h q r tail;
     Level_unifier_spec.resolves_def h r r here; Level_unifier_spec.terminal_def h r;
-    let u = () in Compression_finite_proofs.finite_compress h p q r path tree (refine_ u);
-    refine_ u)
+    Compression_finite_proofs.finite_compress h p q r path tree (refine_ ());
+    refine_ ())
 
 let (stranded_low_constant @ total) : (p : node Pref.t) @ immutable ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
@@ -75,8 +75,8 @@ let (stranded_low_constant @ total) : (p : node Pref.t) @ immutable ->
       Leaf_provenance_spec.low_var_def h x 0; Level_unifier_spec.observe_def h x;
       let o = Origin (x, Stop) in refine_ o in
     let order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x}) @ total = fun x ->
-      ordered_def h x; children_below_def h boolean 0; let u = () in refine_ u in
+      ordered_def h x; children_below_def h boolean 0; refine_ () in
     let equal : ((x : node Pref.t) @ immutable -> {u : unit | not (below saved x 0) || rho x === eta x}) @ total = fun x ->
-      below_def saved x 0; let u = () in refine_ u in
+      below_def saved x 0; refine_ () in
     let tree = Tip p in unfolded_def h tree; bound_root_def tree; below_def h p 0; at_level_def h p;
-    let u = () in Leaf_agreement_proofs.low_unfolded_agreement saved h 0 prior order rho (refine_ rho_model) eta (refine_ eta_model) equal tree (refine_ u); refine_ u)
+    Leaf_agreement_proofs.low_unfolded_agreement saved h 0 prior order rho (refine_ rho_model) eta (refine_ eta_model) equal tree (refine_ ()); refine_ ())

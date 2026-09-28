@@ -33,14 +33,14 @@ let (swap_partition @ total) : (values : int iarray) -> (pivot : int) ->
   range_grow swapped pivot low_side zero lower;
   if lower = scan then
     (range_empty swapped pivot high_side next_lower next_scan;
-    let u = () in u)
+    ())
   else
     (range_get values pivot high_side lower scan lower;
     range_shrink values pivot high_side lower scan next_lower scan;
     range_set values pivot high_side next_lower scan lower y;
     range_set intermediate pivot high_side next_lower scan scan x;
     range_grow swapped pivot high_side next_lower scan;
-    let u = () in u)
+    ())
 
 let (glue_partition @ total) : (before : int iarray) ->
     (after : int iarray) -> (pivot : int) -> (index : int) ->
@@ -79,8 +79,8 @@ let (glue_partition @ total) : (before : int iarray) ->
     count_decompose3 after index next target;
     permutation_count old_left left target;
     permutation_count old_right right target;
-    let u = () in u);
+    ());
   element_slice before index next zero;
   element_slice after index next zero;
   sorted_glue after pivot index;
-  let u = () in u
+  ()

@@ -30,8 +30,7 @@ let run mode =
         (if H.mem h1 x then finite h1 t else H.at h1 x === None)}
       @ immutable) @ total ghost = ghost_ (fun x ->
     allocatable_def h0 var;
-    let u = () in
-    let refine_ tree = allocation_finite_at h0 trees0 a var x (refine_ u) in
+    let refine_ tree = allocation_finite_at h0 trees0 a var x (refine_ ()) in
     refine_ tree) in
   let boolean = Bool in
   let refine_ allocated = Pref.alloc boolean t in
@@ -42,8 +41,7 @@ let run mode =
         (if H.mem h2 x then finite h2 t else H.at h2 x === None)}
       @ immutable) @ total ghost = ghost_ (fun x ->
     allocatable_def h1 boolean;
-    let u = () in
-    let refine_ tree = allocation_finite_at h1 trees1 b boolean x (refine_ u) in
+    let refine_ tree = allocation_finite_at h1 trees1 b boolean x (refine_ ()) in
     refine_ tree) in
   let arrow = Arrow (a, a) in
   let refine_ allocated = Pref.alloc arrow t in
@@ -54,8 +52,7 @@ let run mode =
         (if H.mem h3 x then finite h3 t else H.at h3 x === None)}
       @ immutable) @ total ghost = ghost_ (fun x ->
     allocatable_def h2 arrow;
-    let u = () in
-    let refine_ tree = allocation_finite_at h2 trees2 r arrow x (refine_ u) in
+    let refine_ tree = allocation_finite_at h2 trees2 r arrow x (refine_ ()) in
     refine_ tree) in
   let arrow = Arrow (b, b) in
   let refine_ allocated = Pref.alloc arrow t in
@@ -66,8 +63,7 @@ let run mode =
         (if H.mem h4 x then finite h4 t else H.at h4 x === None)}
       @ immutable) @ total ghost = ghost_ (fun x ->
     allocatable_def h3 arrow;
-    let u = () in
-    let refine_ tree = allocation_finite_at h3 trees3 s arrow x (refine_ u) in
+    let refine_ tree = allocation_finite_at h3 trees3 s arrow x (refine_ ()) in
     refine_ tree) in
   let arrow = Arrow (b, r) in
   let refine_ allocated = Pref.alloc arrow t in
@@ -78,8 +74,7 @@ let run mode =
         (if H.mem h5 x then finite h5 t else H.at h5 x === None)}
       @ immutable) @ total ghost = ghost_ (fun x ->
     allocatable_def h4 arrow;
-    let u = () in
-    let refine_ tree = allocation_finite_at h4 trees4 clash arrow x (refine_ u) in
+    let refine_ tree = allocation_finite_at h4 trees4 clash arrow x (refine_ ()) in
     refine_ tree) in
   let link = Link a in
   let refine_ allocated = Pref.alloc link t in
@@ -90,8 +85,7 @@ let run mode =
         (if H.mem h6 x then finite h6 t else H.at h6 x === None)}
       @ immutable) @ total ghost = ghost_ (fun x ->
     allocatable_def h5 link;
-    let u = () in
-    let refine_ tree = allocation_finite_at h5 trees5 alias link x (refine_ u) in
+    let refine_ tree = allocation_finite_at h5 trees5 alias link x (refine_ ()) in
     refine_ tree) in
   let link = Link alias in
   let refine_ allocated = Pref.alloc link t in
@@ -102,8 +96,7 @@ let run mode =
         (if H.mem h7 x then finite h7 t else H.at h7 x === None)}
       @ immutable) @ total ghost = ghost_ (fun x ->
     allocatable_def h6 link;
-    let u = () in
-    let refine_ tree = allocation_finite_at h6 trees6 alias2 link x (refine_ u) in
+    let refine_ tree = allocation_finite_at h6 trees6 alias2 link x (refine_ ()) in
     refine_ tree) in
   let var = Var in
   let refine_ allocated = Pref.alloc var t in
@@ -114,8 +107,7 @@ let run mode =
         (if H.mem h8 x then finite h8 t else H.at h8 x === None)}
       @ immutable) @ total ghost = ghost_ (fun x ->
     allocatable_def h7 var;
-    let u = () in
-    let refine_ tree = allocation_finite_at h7 trees7 other var x (refine_ u) in
+    let refine_ tree = allocation_finite_at h7 trees7 other var x (refine_ ()) in
     refine_ tree) in
   let h = ghost_ (Pref.own (borrow_ t)) in
   let trees : ((x : node Pref.t) @ immutable ->
@@ -125,10 +117,10 @@ let run mode =
   let scope : ((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h x) || scoped h x}) @ total ghost =
     ghost_ (fun x ->
-      let refine_ t = trees x in let u = () in
+      let refine_ t = trees x in 
       if H.mem h x then (
-        finite_scope_at h t (refine_ u); refine_ u)
-      else refine_ u) in
+        finite_scope_at h t (refine_ ()); refine_ ())
+      else refine_ ()) in
   let p, q = match mode with
     | 0 -> r, s
     | 1 -> a, r
@@ -151,17 +143,15 @@ let run mode =
         {t : tree | root t === x &&
           (if H.mem after x then finite after t else H.at after x === None)}
         @ immutable total = fun x ->
-      let u = () in
-      let refine_ t = unified_finite_at h trees p q ok after d x (refine_ u) in
+      let refine_ t = unified_finite_at h trees p q ok after d x (refine_ ()) in
       refine_ t in
     let claim = true in
     let use : ((rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
         (model : ((x : node Pref.t) @ immutable -> {u : unit | equation after rho x}))
         @ total -> {u : unit | claim}) @ total = fun rho model ->
-      let u = () in
       if ok then (
-        success_forward_at h rho p q after d model r (refine_ u); refine_ u)
-      else refine_ u in
+        success_forward_at h rho p q after d model r (refine_ ()); refine_ ())
+      else refine_ () in
     let refine_ u = with_finite_model after after_trees claim use in u) in
   let _mgu_proof = ghost_ (
     if ok then (
@@ -178,25 +168,24 @@ let run mode =
           {u : unit | claim}) @ total = fun sigma solution factor ->
         solution a;
         let model : (x : node Pref.t) @ immutable -> {u : unit | equation h sigma x}
-            @ total = fun x -> solution x; let u = () in refine_ u in
+            @ total = fun x -> solution x; refine_ () in
         let[@def] delta : node Pref.t @ immutable total -> ty @ immutable total =
           fun x -> TArrow (TVar x, TBool) in
         let[@def] rho : node Pref.t @ immutable total -> ty @ immutable total =
           fun x -> substitute delta (sigma x) in
         let instance : (x : node Pref.t) @ immutable ->
             {u : unit | rho x === substitute delta (sigma x)} @ total = fun x ->
-          rho_def x; let u = () in refine_ u in
+          rho_def x; refine_ () in
         let old_model : (x : node Pref.t) @ immutable -> {u : unit | equation h rho x}
             @ total = fun x ->
-          solution x; let u = () in
-          instance_solution_at h sigma model delta rho instance p q x (refine_ u);
-          refine_ u in
-        let u = () in
-        instance_solution_at h sigma model delta rho instance p q a (refine_ u);
-        factor rho old_model a (refine_ u);
-        factor rho old_model r (refine_ u);
-        refine_ u in
-      let u = () in let refine_ u = with_mgu h trees p q after d (refine_ u) claim use in u)
+          solution x; 
+          instance_solution_at h sigma model delta rho instance p q x (refine_ ());
+          refine_ () in
+        instance_solution_at h sigma model delta rho instance p q a (refine_ ());
+        factor rho old_model a (refine_ ());
+        factor rho old_model r (refine_ ());
+        refine_ () in
+      let refine_ u = with_mgu h trees p q after d (refine_ ()) claim use in u)
     else ()) in
   let proof = ghost_ (
     let u = () in

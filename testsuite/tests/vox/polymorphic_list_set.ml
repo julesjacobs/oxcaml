@@ -23,14 +23,13 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         if equivalent x y then equivalent y x else true}
         @ immutable contended =
     fun x y ->
-    let u = () in
     if equivalent x y then
       (equivalent_def x y;
       Element.compare_reverse x y;
       Element.compare_reverse y x;
       equivalent_def y x;
-      u)
-    else u
+      ())
+    else ()
 
   let (equivalent_transitive @ total) :
       (x : elt) ->
@@ -41,7 +40,6 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         then equivalent x z
         else true} @ immutable contended =
     fun x y z ->
-    let u = () in
     if equivalent x y && equivalent y z then
       (equivalent_def x y;
       equivalent_def y z;
@@ -53,8 +51,8 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
       Element.compare_transitive z y x;
       Element.compare_reverse z x;
       equivalent_def x z;
-      u)
-    else u
+      ())
+    else ()
 
   let (equivalent_congruent @ total) :
       (probe : elt) ->
@@ -65,17 +63,16 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         then equivalent probe left === equivalent probe right
         else true} @ immutable contended =
     fun probe left right ->
-    let u = () in
     if equivalent left right then
       (equivalent_symmetric left right;
       if equivalent probe left then
         (equivalent_transitive probe left right;
-        u)
+        ())
       else if equivalent probe right then
         (equivalent_transitive probe right left;
-        u)
-      else u)
-    else u
+        ())
+      else ())
+    else ()
 
   let (less_transitive @ total) :
       (x : elt) ->
@@ -85,7 +82,6 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         if less x y && less y z then less x z else true}
         @ immutable contended =
     fun x y z ->
-    let u = () in
     if less x y && less y z then
       (less_def x y;
       less_def y z;
@@ -93,8 +89,8 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
       Element.compare_reverse z x;
       Element.compare_transitive y z x;
       less_def x z;
-      u)
-    else u
+      ())
+    else ()
 
   let (le_less_transitive @ total) :
       (x : elt) ->
@@ -105,15 +101,14 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         then less x z
         else true} @ immutable contended =
     fun x y z ->
-    let u = () in
     if Element.compare x y <= 0 && less y z then
       (less_def y z;
       Element.compare_reverse z x;
       Element.compare_reverse z y;
       Element.compare_transitive z x y;
       less_def x z;
-      u)
-    else u
+      ())
+    else ()
 
   let (reverse_less @ total) :
       (x : elt) ->
@@ -122,12 +117,11 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         if Element.compare x y > 0 then less y x else true}
         @ immutable contended =
     fun x y ->
-    let u = () in
     if Element.compare x y > 0 then
       (Element.compare_reverse x y;
       less_def y x;
-      u)
-    else u
+      ())
+    else ()
 
   let (not_less_equivalent @ total) :
       (x : elt) ->
@@ -137,14 +131,13 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         then equivalent x y
         else true} @ immutable contended =
     fun x y ->
-    let u = () in
     if less x y = false && less y x = false then
       (less_def x y;
       less_def y x;
       Element.compare_reverse x y;
       equivalent_def x y;
-      u)
-    else u
+      ())
+    else ()
 
   let[@def] rec (all_greater @ total) lower xs =
     match xs with
@@ -196,21 +189,20 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         then lookup_repr element left === lookup_repr element right
         else true} @ immutable contended =
     fun element left right ->
-    let u = () in
     if equal_repr left right then
       (equal_repr_def left right;
       lookup_repr_def element left;
       lookup_repr_def element right;
       match left with
-      | Nil -> u
+      | Nil -> ()
       | Cons (left_head, left_tail) ->
         match right with
-        | Nil -> u
+        | Nil -> ()
         | Cons (right_head, right_tail) ->
           equivalent_congruent element left_head right_head;
           equal_repr_lookup element left_tail right_tail;
-          u)
-    else u
+          ())
+    else ()
 
   let rec (equal_repr_reflexive @ total) :
       (xs : repr) ->
@@ -268,19 +260,18 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         then all_greater lower xs
         else true} @ immutable contended =
     fun lower middle xs ->
-    let u = () in
     if less lower middle && all_greater middle xs then
       match xs with
       | Nil ->
         all_greater_def lower xs;
-        u
+        ()
       | Cons (head, tail) ->
         all_greater_def middle xs;
         less_transitive lower middle head;
         all_greater_def lower xs;
         all_greater_transitive lower middle tail;
-        u
-    else u
+        ()
+    else ()
 
   let rec (add_preserves_lower @ total) :
       (lower : elt) ->
@@ -291,25 +282,24 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         then all_greater lower (add_repr element xs)
         else true} @ immutable contended =
     fun lower element xs ->
-    let u = () in
     if less lower element && all_greater lower xs then
       let result = add_repr element xs in
       add_repr_def element xs;
       match xs with
       | Nil ->
         all_greater_def lower result;
-        u
+        ()
       | Cons (head, tail) ->
         all_greater_def lower xs;
-        if equivalent element head then u
+        if equivalent element head then ()
         else if less element head then
           (all_greater_def lower result;
-          u)
+          ())
         else
           (add_preserves_lower lower element tail;
           all_greater_def lower result;
-          u)
-    else u
+          ())
+    else ()
 
   let rec (add_valid @ total) :
       (element : elt) ->
@@ -318,7 +308,6 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         if valid xs then valid (add_repr element xs) else true}
         @ immutable contended =
     fun element xs ->
-    let u = () in
     if valid xs then
       let result = add_repr element xs in
       add_repr_def element xs;
@@ -326,24 +315,24 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
       | Nil ->
         valid_def result;
         all_greater_def element xs;
-        u
+        ()
       | Cons (head, tail) ->
         valid_def xs;
         equivalent_def element head;
         less_def element head;
-        if equivalent element head then u
+        if equivalent element head then ()
         else if less element head then
           (all_greater_transitive element head tail;
           valid_def result;
           all_greater_def element xs;
-          u)
+          ())
         else
           (reverse_less element head;
           add_preserves_lower head element tail;
           add_valid element tail;
           valid_def result;
-          u)
-    else u
+          ())
+    else ()
 
   let[@def] (add @ total) :
       elt -> t -> t @ immutable contended =
@@ -414,18 +403,17 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         then valid (union_repr left right)
         else true} @ immutable contended =
     fun left right ->
-    let u = () in
     if valid left && valid right then
       (union_repr_def left right;
       match left with
-      | Nil -> u
+      | Nil -> ()
       | Cons (head, tail) ->
         let added = add_repr head right in
         valid_def left;
         add_valid head right;
         union_valid tail added;
-        u)
-    else u
+        ())
+    else ()
 
   let rec (lookup_union_repr @ total) :
       (element : elt) ->
@@ -524,7 +512,6 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         then lookup element left === lookup element right
         else true} @ immutable contended =
     fun left right element ->
-    let u = () in
     if equal left right then
       let xs = left in
       let ys = right in
@@ -532,8 +519,8 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
       equal_repr_lookup element xs ys;
       lookup_def element left;
       lookup_def element right;
-      u
-    else u
+      ()
+    else ()
 
   let rec (lookup_below @ total) :
       (lower : elt) ->
@@ -544,12 +531,11 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         then lookup_repr element xs === false
         else true} @ immutable contended =
     fun lower element xs ->
-    let u = () in
     if Element.compare element lower <= 0 && all_greater lower xs then
       match xs with
       | Nil ->
         lookup_repr_def element xs;
-        u
+        ()
       | Cons (head, tail) ->
         all_greater_def lower xs;
         le_less_transitive element lower head;
@@ -557,8 +543,8 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         equivalent_def element head;
         lookup_repr_def element xs;
         lookup_below lower element tail;
-        u
-    else u
+        ()
+    else ()
 
   let rec (extensional_repr @ total) :
       (left : repr) ->
@@ -572,7 +558,6 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         then equal_repr left right
         else true} @ immutable contended =
     fun left right premise ->
-    let u = () in
     if valid left && valid right then
       (valid_def left;
       valid_def right;
@@ -581,13 +566,13 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
         (match right with
          | Nil ->
            equal_repr_def left right;
-           u
+           ()
          | Cons (right_head, _) ->
            equivalent_reflexive right_head;
            premise right_head;
            lookup_repr_def right_head left;
            lookup_repr_def right_head right;
-           u)
+           ())
       | Cons (left_head, left_tail) ->
         match right with
         | Nil ->
@@ -595,7 +580,7 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
           premise left_head;
           lookup_repr_def left_head left;
           lookup_repr_def left_head right;
-          u
+          ()
         | Cons (right_head, right_tail) ->
           premise left_head;
           premise right_head;
@@ -609,12 +594,12 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
             (less_def left_head right_head;
             equivalent_def left_head right_head;
             lookup_below right_head left_head right_tail;
-            u)
+            ())
           else if less right_head left_head then
             (less_def right_head left_head;
             equivalent_def right_head left_head;
             lookup_below left_head right_head left_tail;
-            u)
+            ())
           else
             (not_less_equivalent left_head right_head;
             let (tail_premise @ total) :
@@ -632,13 +617,13 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
                 lookup_below left_head element left_tail;
                 equivalent_def element right_head;
                 lookup_below right_head element right_tail;
-                u)
-              else u
+                ())
+              else ()
             in
             extensional_repr left_tail right_tail tail_premise;
             equal_repr_def left right;
-            u))
-    else u
+            ()))
+    else ()
 
   let (extensional @ total) :
       (left : t) ->

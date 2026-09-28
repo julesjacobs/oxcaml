@@ -40,7 +40,7 @@ let run mode =
       {u : unit | not (H.mem h x) || scoped h x}) @ total ghost =
     ghost_ (fun x ->
       scoped_def h x;
-      let u = () in refine_ u) in
+      refine_ ()) in
   let p, q = match mode with
     | 0 -> r, s
     | 1 -> a, r

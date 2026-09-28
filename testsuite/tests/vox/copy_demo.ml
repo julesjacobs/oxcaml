@@ -36,7 +36,7 @@ let () =
   let scope : ((x : node Pref.t) @ immutable -> {u : unit |
       if H.mem saved x then source_ok saved x else H.at saved x === None}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; source_ok_def saved x;
-    let u = () in refine_ u) in
+    refine_ ()) in
   let trees : ((x : node Pref.t) @ immutable -> {t : template | not (H.mem saved x) ||
       (Copy_spec.root t === x && template saved t)} @ immutable) @ total ghost = ghost_ (fun x ->
     let ta = Parameter a in let tb = Boundary boundary in let ti = Product (pair, ta, ta) in
@@ -58,8 +58,8 @@ let () =
   let h1 = ghost_ (Pref.own (borrow_ first.#state)) in
   let scope1 : ((x : node Pref.t) @ immutable -> {u : unit |
       if H.mem h1 x then source_ok h1 x else H.at h1 x === None}) @ total ghost = ghost_ (fun x ->
-    let u = () in let refine_ u = history_scope saved scope first.#epoch depth first.#history x (refine_ u) in refine_ u) in
-  ghost_ (let u = () in target_allocated saved first.#epoch depth first.#history link first.#value (refine_ u));
+    let refine_ u = history_scope saved scope first.#epoch depth first.#history x (refine_ ()) in refine_ u) in
+  ghost_ (target_allocated saved first.#epoch depth first.#history link first.#value (refine_ ()));
   let first_root = first.#value in
   let _proof = ghost_ (
     let[@def] rho : node Pref.t @ immutable total -> ty @ immutable total = fun x ->
@@ -68,9 +68,9 @@ let () =
       else Variable x in
     let model : (x : node Pref.t) @ immutable -> {u : unit | equation saved rho x}
         @ total = fun x -> rho_def x; rho_def a; rho_def pair; rho_def root; rho_def link; rho_def boundary;
-      let desc = Var in cell_def desc 0; equation_def saved rho x; let u = () in refine_ u in
+      let desc = Var in cell_def desc 0; equation_def saved rho x; refine_ () in
     let choices : node Pref.t @ immutable total -> ty @ immutable total = fun _ -> Function (Boolean, Boolean) in
-    let refine_ actual = trees link in let u = () in
+    let refine_ actual = trees link in 
     let schema = actual in
     let claim = true in
     let use : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
@@ -80,13 +80,13 @@ let () =
       fun tau next equal fit -> let refine_ fit = fit in equal boundary; next first_root;
         let use_choices : ((eta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
             {u : unit | tau first_root === interpret tau eta schema} -> {u : unit | claim}) @ total =
-          fun _eta fit -> let refine_ fit = fit in let u = () in refine_ u in
-        let u = () in let refine_ u = with_instance_choices saved first.#epoch depth first.#history tau next schema first_root
-          (refine_ u) claim use_choices in refine_ u in
+          fun _eta fit -> let refine_ fit = fit in refine_ () in
+        let refine_ u = with_instance_choices saved first.#epoch depth first.#history tau next schema first_root
+          (refine_ ()) claim use_choices in refine_ u in
     let refine_ u = with_scheme_instance saved scope trees rho model choices first.#epoch depth first.#history schema first_root
-      (refine_ u) claim use in ()) in
+      (refine_ ()) claim use in ()) in
   let link : {p : node Pref.t | H.mem h1 p} =
-    ghost_ (let u = () in history_grows saved first.#epoch depth first.#history link (refine_ u)); refine_ link in
+    ghost_ (history_grows saved first.#epoch depth first.#history link (refine_ ())); refine_ link in
   let depth2 = 5 in
   let depth2 : {depth : int | depth >= 0} = refine_ depth2 in
   let state = first.#state in let state : {t : node Pref.token | Pref.own t === h1} = refine_ state in
@@ -95,9 +95,9 @@ let () =
   let h2 = ghost_ (Pref.own (borrow_ second.#state)) in
   let scope2 : ((x : node Pref.t) @ immutable -> {u : unit |
       if H.mem h2 x then source_ok h2 x else H.at h2 x === None}) @ total ghost = ghost_ (fun x ->
-    let u = () in let refine_ u = history_scope h1 scope1 second.#epoch depth2 second.#history x (refine_ u) in refine_ u) in
-  ghost_ (let u = () in history_grows h1 second.#epoch depth2 second.#history first_root (refine_ u);
-    target_allocated h1 second.#epoch depth2 second.#history link second.#value (refine_ u));
+    let refine_ u = history_scope h1 scope1 second.#epoch depth2 second.#history x (refine_ ()) in refine_ u) in
+  ghost_ (history_grows h1 second.#epoch depth2 second.#history first_root (refine_ ());
+    target_allocated h1 second.#epoch depth2 second.#history link second.#value (refine_ ()));
   let first_root : {p : node Pref.t | H.mem h2 p} = refine_ first_root in
   let second_root = second.#value in
   let second_root : {p : node Pref.t | H.mem h2 p} = refine_ second_root in
@@ -130,7 +130,7 @@ let constant level =
   let saved = ghost_ (Pref.own (borrow_ state)) in
   let scope : ((x : node Pref.t) @ immutable -> {u : unit |
       if H.mem saved x then source_ok saved x else H.at saved x === None}) @ total ghost = ghost_ (fun x ->
-    source_ok_def saved x; let u = () in refine_ u) in
+    source_ok_def saved x; refine_ ()) in
   let p : {p : node Pref.t | H.mem saved p} = refine_ p in
   let depth = 7 in let depth : {depth : int | depth >= 0} = refine_ depth in
   let state : {t : node Pref.token | Pref.own t === saved} = refine_ state in
@@ -139,9 +139,9 @@ let constant level =
   let h = ghost_ (Pref.own (borrow_ out.#state)) in
   let next_scope : ((x : node Pref.t) @ immutable -> {u : unit |
       if H.mem h x then source_ok h x else H.at h x === None}) @ total ghost = ghost_ (fun x ->
-    let u = () in let refine_ u = history_scope saved scope out.#epoch depth out.#history x (refine_ u) in refine_ u) in
-  ghost_ (let u = () in target_allocated saved out.#epoch depth out.#history p out.#value (refine_ u);
-    history_grows saved out.#epoch depth out.#history p (refine_ u));
+    let refine_ u = history_scope saved scope out.#epoch depth out.#history x (refine_ ()) in refine_ u) in
+  ghost_ (target_allocated saved out.#epoch depth out.#history p out.#value (refine_ ());
+    history_grows saved out.#epoch depth out.#history p (refine_ ()));
   let q = out.#value in let q : {q : node Pref.t | H.mem h q} = refine_ q in
   let p : {p : node Pref.t | H.mem h p} = refine_ p in
   let state = out.#state in let state : {t : node Pref.token | Pref.own t === h} = refine_ state in
