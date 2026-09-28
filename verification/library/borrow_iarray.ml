@@ -4,14 +4,14 @@ type ('value, 'state) step =
   { value : 'value @@ global; state : 'state }
 
 type ('a : immutable_data, 'model : any) owned_handle :
-  value mod total contended
+  value mod total contended [@@total_matchable]
 type ('a : immutable_data, 'model : any) loan_handle :
-  value mod total contended
+  value mod total contended [@@total_matchable]
 type ('a : immutable_data, 'model : any) frame_handle :
-  value mod total contended
+  value mod total contended [@@total_matchable]
 
 type ('a : immutable_data, 'model : any) split_frame_handle :
-  value mod total contended
+  value mod total contended [@@total_matchable]
 
 type ('a : immutable_data) split_frame =
   ('a, 'a iarray) split_frame_handle

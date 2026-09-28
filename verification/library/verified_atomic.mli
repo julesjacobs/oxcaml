@@ -11,14 +11,14 @@
     so its postcondition cannot depend on the previous value. *)
 
 module type Invariant = sig
-  type payload : immutable_data
-  type key : void
+  type payload : immutable_data [@@total_matchable]
+  type key : void [@@total_matchable]
   val holds : key @ immutable -> int @ immutable ->
     payload Ghost_pref.heap @ immutable -> bool @ ghost
     @@ total
 end
 module Make (I : Invariant) : sig
-  type t : immutable_data
+  type t : immutable_data [@@total_matchable]
   external key : t @ local immutable -> I.key @ immutable ghost
     @@ total = "caml_vox_atomic_key_bytecode" "caml_vox_atomic_key"
   type ('a : immediate) result = #{

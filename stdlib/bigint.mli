@@ -16,7 +16,7 @@ open! Stdlib
 
 (** Unbounded signed integers. *)
 
-type t : immutable_data
+type t : immutable_data [@@total_matchable]
 
 val zero : t
 val one : t

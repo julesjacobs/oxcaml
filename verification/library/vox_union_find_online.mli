@@ -12,7 +12,7 @@ module Make (C : Vox_big_credits.S) : sig
   type t : (void & void & void & void & void & void) & void & void
   type result = #{value : M.elem @@ aliased; state : t}
 
-  type snapshot : immutable_data
+  type snapshot : immutable_data [@@total_matchable]
   val snapshot : t @ local immutable total ghost forkable unyielding ->
     snapshot @ immutable ghost @@ total
   val contains : snapshot @ immutable -> M.elem @ immutable -> bool @ ghost @@

@@ -70,7 +70,7 @@ module type OrderedType =
 
 module type TotalOrderedType =
   sig
-    type t
+    type t [@@total_matchable]
     val compare : t @ immutable -> t @ immutable -> int @@ total
     val reflexive : (x : t) -> {u : unit | compare x x = 0}
       @ ghost @@ total
@@ -345,8 +345,8 @@ module type S =
 
 module type TotalS =
   sig
-    type elt
-    type t : immutable_data with elt
+    type elt [@@total_matchable]
+    type t : immutable_data with elt [@@total_matchable]
     include S with type elt := elt and type t := t
 
     val empty: t @@ total

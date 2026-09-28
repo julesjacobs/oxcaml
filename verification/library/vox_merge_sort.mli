@@ -1,7 +1,7 @@
 module S = Vox_sequence
 
 module Make (O : sig
-  type elt : immutable_data mod total
+  type elt : immutable_data mod total [@@total_matchable]
   val le : elt @ immutable -> elt @ immutable -> bool @ ghost @@ total
   val reflexive : (x : elt) @ immutable -> {u : unit | le x x}
     @ ghost @@ total

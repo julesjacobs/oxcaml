@@ -1,7 +1,7 @@
 @@ portable
 
 module type S = sig
-  type token : void
+  type token : void [@@total_matchable]
 
   type partition = { left : token @@ ghost; right : token @@ ghost }
 

@@ -395,7 +395,7 @@ let (decompose3 @ total) : ('a : immutable_data).
   ()
 
 module type Predicate = sig
-  type element : immutable_data
+  type element : immutable_data [@@total_matchable]
   val test : element @ immutable total -> bool @@ total
 end
 
@@ -544,8 +544,8 @@ module For_all (P : Predicate) = struct
 end
 
 module type Mapping = sig
-  type input : immutable_data
-  type output : immutable_data
+  type input : immutable_data [@@total_matchable]
+  type output : immutable_data [@@total_matchable]
   val apply : input @ immutable total -> output @ immutable total @@ total
 end
 
@@ -601,8 +601,8 @@ module Map (F : Mapping) = struct
 end
 
 module type Folding = sig
-  type element : immutable_data
-  type accumulator : immutable_data
+  type element : immutable_data [@@total_matchable]
+  type accumulator : immutable_data [@@total_matchable]
   val step : element @ immutable total -> accumulator @ immutable total ->
     accumulator @ immutable total @@ total
 end

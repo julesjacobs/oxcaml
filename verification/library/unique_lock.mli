@@ -4,7 +4,7 @@
     [Verified_atomic]. No fairness, termination, cancellation recovery or
     exception-safe restoration is claimed. All contracts describe normal returns. *)
 module Make (V : Unique_cell.Payload) : sig @@ portable
-  type t : immutable_data
+  type t : immutable_data [@@total_matchable]
   type contents : immutable_data = V.model option
   type 'a step = { value : 'a; state : contents Ghost_pref.token @@ ghost }
   val location : t @ local immutable -> contents Ghost_pref.t @ immutable ghost

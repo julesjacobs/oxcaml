@@ -5,11 +5,11 @@
 module E = Vox_union_find_events
 
 module Make (C : Vox_big_credits.S) : sig
-  type elem : immutable_data
+  type elem : immutable_data [@@total_matchable]
   type t : (void & void & void & void & void & void) & void & void
   type result = #{value : elem @@ aliased; state : t}
 
-  type snapshot : immutable_data
+  type snapshot : immutable_data [@@total_matchable]
   val snapshot : t @ local immutable total ghost forkable unyielding ->
     snapshot @ immutable ghost @@ total
   val contains : snapshot @ immutable -> elem @ immutable ->
