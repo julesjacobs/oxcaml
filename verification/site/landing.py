@@ -6,9 +6,10 @@
 Fills verification/site/index.html with the demo count from the catalogue
 and the `clamp` example from the playground, both read with `git show` at
 REVISION like the catalogue's quotes, with the size of the playground
-already built in SITE_DIR/playground, and with the size of the compiler
-from the source explorer's data in SITE_DIR/source. Writes SITE_DIR/index.html and copies
-the catalogue's style.css next to it.
+already built in SITE_DIR/playground, with the size of the compiler
+from the source explorer's data in SITE_DIR/source, and with the length of
+the talk from its running order in SITE_DIR/talk. Writes SITE_DIR/index.html
+and copies the catalogue's style.css next to it.
 """
 import datetime
 import gzip
@@ -65,6 +66,15 @@ def source_lines(explorer):
     return f'{round(lines / 1000):,}k'
 
 
+def talk_length(talk):
+    """The talk's scenes and parts, and its length in minutes (the sum of
+    the scenes' budgets, to the nearest five), from the deck already copied
+    to SITE_DIR/talk."""
+    order = json.loads((talk / 'scenes' / 'scenes.json').read_text())
+    seconds = sum(scene['budget'] for scene in order['scenes'])
+    return len(order['scenes']), len(order['parts']), 5 * round(seconds / 300)
+
+
 def main():
     revision, site = sys.argv[1], Path(sys.argv[2])
     full = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', revision],
@@ -73,6 +83,7 @@ def main():
     example = between(show(full, 'verification/playground/examples/refinements.ml'),
                       'let (clamp', 'let bounded')
     css = (ROOT / 'verification' / 'catalogue' / 'style.css').read_bytes()
+    talk_scenes, talk_parts, talk_minutes = talk_length(site / 'talk')
     values = {
         'demos': str(len(demos)),
         'revision': full,
@@ -80,6 +91,9 @@ def main():
         'example': highlight(example),
         'playground_mb': str(round(first_visit_bytes(site / 'playground') / 1e6)),
         'source_lines': source_lines(site / 'source'),
+        'talk_scenes': str(talk_scenes),
+        'talk_parts': {3: 'three', 4: 'four', 5: 'five'}.get(talk_parts, str(talk_parts)),
+        'talk_minutes': str(talk_minutes),
         'date': datetime.date.today().strftime('%-d %B %Y'),
         'css': hashlib.sha256(css).hexdigest()[:10],
     }

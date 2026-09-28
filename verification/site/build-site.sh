@@ -5,9 +5,10 @@
 #   catalogue/    the demo catalogue (verification/catalogue/build.py)
 #   source/       the source explorer (verification/explorer/build.py)
 #   playground/   the in-browser checker (verification/playground/build.sh)
+#   talk/         the talk as a steppable deck (verification/talk)
 #
 #   verification/site/build-site.sh [--revision REV] [--prefix PREFIX]
-#                                   [--out DIR]
+#                                   [--talk-revision TALK] [--out DIR]
 #
 # The site describes one commit, REV, which must be on GitHub so that its
 # links resolve: by default the newest commit of HEAD on the `vox` branch of
@@ -21,6 +22,13 @@
 # needs what verification/playground/build.sh needs (the oxcaml-5.4.0+oxcaml
 # opam switch, node and npm).
 #
+# The talk is taken from TALK, a commit of the talk branch in this
+# repository (default: the head of $talk_branch), with `git archive`, so
+# uncommitted work on the deck never reaches the site. Only what the deck
+# loads is published: the pages, lib/, the style sheets, fonts, data/*.json
+# and the scenes in the running order with their tracks and assets. Scene
+# galleries, capture scripts, notes, audio and renders stay out.
+#
 # The build fails on a broken local link anywhere in the site. Deploy with
 # verification/site/deploy.sh.
 set -euo pipefail
@@ -30,10 +38,13 @@ root=$(cd "$here/../.." && pwd)
 revision=
 prefix=$root/_install
 out=$root/_build/site/vox
+talk_branch=jujacobs/vox/talk-20260928
+talk_revision=$talk_branch
 while [[ $# -gt 0 ]]; do
   case $1 in
     --revision) revision=$2; shift 2 ;;
     --prefix) prefix=$2; shift 2 ;;
+    --talk-revision) talk_revision=$2; shift 2 ;;
     --out) out=$2; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
@@ -80,6 +91,46 @@ index['revision'] = revision
 json.dump(index, open(path, 'w'))
 PY
 
+echo "== talk"
+talk_revision=$(git rev-parse --verify "$talk_revision^{commit}")
+talk_tmp=$(mktemp -d)
+trap 'rm -rf "$talk_tmp"' EXIT
+git archive "$talk_revision" verification/talk | tar -x -C "$talk_tmp"
+python3 - "$talk_tmp/verification/talk" "$out/talk" <<'PY'
+# Copy what the deck loads at run time. Scenes: those of the running order
+# (scenes/scenes.json), each with its module, style, speaker track (the
+# narration, and its Q&A and Sources, which practice mode shows) and assets:
+# screen recordings and images at the top of the scene directory, and JSON
+# files anywhere in it (layouts and clip lists the scene fetches).
+import json, shutil, sys
+from pathlib import Path
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+order = json.loads((src / 'scenes/scenes.json').read_text())
+keep = ['index.html', 'presenter.html', 'scenes/scenes.json']
+keep += [p.name for p in src.glob('*.css')]
+keep += [p.relative_to(src).as_posix() for p in (src / 'lib').rglob('*') if p.suffix in ('.js', '.css')]
+keep += [p.relative_to(src).as_posix() for p in (src / 'fonts').iterdir() if p.suffix == '.otf' or p.name.startswith('LICENSE')]
+keep += [p.relative_to(src).as_posix() for p in (src / 'data').glob('*.json')]
+media = {'.mp4', '.webm', '.png', '.jpg', '.svg'}
+for entry in order['scenes']:
+    scene = src / 'scenes' / entry['id']
+    if not (scene / 'scene.js').is_file():
+        continue
+    for p in scene.rglob('*'):
+        top = p.parent == scene
+        if p.is_file() and ((top and (p.name in ('scene.js', 'scene.css', 'track.md') or p.suffix in media)) or p.suffix == '.json'):
+            keep.append(p.relative_to(src).as_posix())
+for rel in sorted(set(keep)):
+    (dst / rel).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src / rel, dst / rel)
+# No narration audio is published: an empty index, so the deck does not ask
+# for one that is not there.
+(dst / 'audio').mkdir(exist_ok=True)
+(dst / 'audio/index.json').write_text('{"scenes": {}}\n')
+print(f'{len(set(keep))} files from', src)
+PY
+echo "talk deck from $talk_revision"
+
 echo "== landing page"
 python3 "$here/landing.py" "$revision" "$out"
 
@@ -119,6 +170,29 @@ for page in sorted(site.rglob('*')):
         checked += 1
         if not target.is_file():
             broken.append(f'{page.relative_to(site)}: {link}')
+# The talk deck is ES modules: every relative import must resolve, every
+# scene of the running order must have its module and track, and every
+# file a scene names with ctx.asset('...') must be there.
+talk = site / 'talk'
+if talk.is_dir():
+    importing = re.compile(r'''(?:\bfrom\s*|\bimport\s*\(\s*|^import\s+)['"](\.{1,2}/[^'"]+)['"]''', re.M)
+    for module in sorted(talk.rglob('*.js')):
+        for match in importing.finditer(module.read_text()):
+            checked += 1
+            if not (module.parent / match.group(1)).resolve().is_file():
+                broken.append(f'{module.relative_to(site)}: import {match.group(1)}')
+    import json
+    for entry in json.loads((talk / 'scenes/scenes.json').read_text())['scenes']:
+        scene = talk / 'scenes' / entry['id']
+        for name in ('scene.js', 'track.md'):
+            checked += 1
+            if not (scene / name).is_file():
+                broken.append(f'talk/scenes/{entry["id"]}/{name} is missing')
+        if (scene / 'scene.js').is_file():
+            for match in re.finditer(r'''asset\(\s*['"]([^'"]+)['"]''', (scene / 'scene.js').read_text()):
+                checked += 1
+                if not (scene / match.group(1)).is_file():
+                    broken.append(f'talk/scenes/{entry["id"]}/scene.js: asset {match.group(1)}')
 if broken:
     sys.exit('broken links:\n  ' + '\n  '.join(broken[:50]))
 print(f'{checked} local links, none broken')
