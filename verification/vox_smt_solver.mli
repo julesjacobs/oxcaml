@@ -16,6 +16,12 @@ val expected_version : string
 (** Whether the output of [-version] names [expected_version]. *)
 val is_expected_version : string -> bool
 
+(** What the solver [executable] reports for [-version], trimmed, or [None]
+    when it cannot be run, fails, or does not answer within five seconds. The
+    browser build has one solver and no processes: it ignores [executable] and
+    reports the Z3 it loaded, as ["Z3 version 4.16.0 - WebAssembly"]. *)
+val version : executable:string -> string option
+
 (** [resources] is the Z3 resource count ([rlimit] units) used by the query,
     when the solver reports it. Unlike the timings, it does not depend on
     machine load. [core] is, for a valid query checked with assumptions, the

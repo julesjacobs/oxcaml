@@ -30,7 +30,11 @@ async function createChecker({ initZ3, loadChecker, fetchBytes, z3Options = {} }
     return context;
   };
   let context = newContext();
-  const version = evaluate(context, '(get-info :version)').trim();
+  const version = evaluate(context, '(get-info :version)').trim()
+    .replace(/^\(:version "(.*)"\)$/, '$1');
+  // The verifier checks it against the version proofs are checked with, as it
+  // checks what `z3 -version` reports natively (vox_smt_solver.ml).
+  globalThis.voxZ3Version = version;
 
   let queries = 0;
   let solverMs = 0;
@@ -88,7 +92,7 @@ async function createChecker({ initZ3, loadChecker, fetchBytes, z3Options = {} }
       totalMs: performance.now() - started,
     };
   }
-  check.z3Version = version.replace(/^\(:version "(.*)"\)$/, '$1');
+  check.z3Version = version;
   check.revision = index.revision;
   return check;
 }
