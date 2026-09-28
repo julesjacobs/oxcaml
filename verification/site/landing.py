@@ -57,8 +57,9 @@ def first_visit_bytes(playground):
 
 def source_lines(explorer):
     """The lines of the compiler proper that the explorer shows, rounded
-    to thousands (its tree.json, already built in SITE_DIR/source)."""
-    tree = json.loads((explorer / 'data' / 'tree.json').read_text())
+    to thousands (its tree.<hash>.json, already built in SITE_DIR/source)."""
+    [path] = (explorer / 'data').glob('tree.*json')
+    tree = json.loads(path.read_text())
     scope = next(s for s in tree['scopes'] if s['id'] == 'proper')
     lines = sum(f[1] for f in tree['files'] if any(f[0].startswith(p) for p in scope['prefixes']))
     return f'{round(lines / 1000):,}k'
