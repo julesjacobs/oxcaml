@@ -386,9 +386,9 @@ function for proving and running (48); termination for stateful code (88).
 **Effects in the mode system (owner, 28 September).**
 - **The principle:** a `total` function is a mathematical function. Unique-in/unique-out code and heap tokens fit it, read as functional threading: path copying, or a threaded map.
 - **What does not fit:** borrowing, read the RustHorn way, is an effect. Creating a borrow chooses its prophecy nondeterministically, and `finish` assumes `final = current`, which kills the other worlds.
-- **Today:** `finish` and borrow creation are typed `total`. Erasing a borrowing call is prevented only because `ghost_` captures real values as aliased.
+- **Before 28 September:** `finish` and borrow creation were typed `total`. Erasing a borrowing call was prevented only because `ghost_` captures real values as aliased.
 - **Future work:** model these effects with finer-grained modes. Then the in-place sort can state what is true, that it terminates, with an argument better than "every operation it uses is total".
-- **The immediate option discussed:** make prophecy creation and `finish` partial. It is not yet decided.
+- **Decided 28 September, implemented on `jujacobs/vox/partial-borrows-20260928`:** prophecy creation (`with_mut`, `Slice.split_at`, `split3`, `with_range`) and `finish` are partial, in `Borrow` and `Borrow_iarray`. The borrowing `Quicksort.sort` and all of `Quicksort_iarray` lose `total`. `Quicksort.sort_array` stays `total` by sorting the owned array without borrowing (new total `Owned_array.get`, `set`, `swap`; `append` became total with a length precondition, proved from an assumed bound on owner lengths). `borrow_partial.ml` checks the verdicts.
 
 ## Decisions waiting for the owner
 
