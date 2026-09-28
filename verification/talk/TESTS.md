@@ -63,6 +63,9 @@ Status:
 | 4f | `unreachable_ ()` for `Unknown` compiles against `solve_complete`, rejected against `solve fuel` | `talk_sat_unknown.ml` | both verdicts | trunk |
 | 4f | "Drop the weight and the proof fails at the line that needs it" | `talk-sat-measure/test.ml` → `test.reference` | a mutant copy of `vox_cdcl_total_proof.ml` with measure `absent * 1 + unassigned` is rejected in `progress_learning` (line 4197); the real module is accepted | trunk |
 | 4g | `add_def`'s printed type via `ocamlc -i` | `talk_add_def_interface.ml` → `talk_add_def_interface.compilers.reference` | the `-i` output verbatim, and the induction `add_zero` accepted | trunk |
+| 4g | `fib_def`'s printed type via `ocamlc -i` (scene 21) | `talk_fib_def_interface.ml` → `talk_fib_def_interface.compilers.reference` | the `-i` output verbatim for a copy of `fib` from `bigint_fibonacci.ml`; the printer writes `0Z` as `Bigint.of_int 0`; `zero_one` accepted | trunk |
+| 4c | No invariant can be opened inside another (scene 26) | `talk_atomic_nested.ml` | a compare-and-set whose transition calls `try_acquire` is rejected: `The value "try_acquire" is "partial"`; `try_acquire` itself accepted | trunk |
+| totality | The "why totality" example (scene 22): `bogus ()` claims `false` | `talk_totality_bogus.ml` | the ordinary call accepted; the `ghost_` call rejected with `The value "bogus" is "partial"`; without the call, `counterexample: x = 0` | trunk |
 
 ### The atomics table (4c): weakened copies
 
