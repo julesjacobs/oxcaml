@@ -16,10 +16,9 @@ let rec fold_right_ih :
   match xs with
   | [] -> initial
   | x :: tail ->
-    let u = () in
-    let acc = fold_right_ih r f tail initial (u) in
+    let acc = fold_right_ih r f tail initial () in
     let model = ghost_ tail in
-    let result = f x model acc (u) in
+    let result = f x model acc () in
     result
 
 let rec map_ih :
@@ -37,11 +36,10 @@ let rec map_ih :
   match xs with
   | [] -> let ys = [] in ys
   | x :: tail ->
-    let u = () in
-    let ys = map_ih r f tail (u) in
+    let ys = map_ih r f tail () in
     let tail_model = ghost_ tail in
     let output_model = ghost_ ys in
-    let y = f x tail_model output_model (u) in
+    let y = f x tail_model output_model () in
     let result = y :: ys in
     result
 
@@ -112,8 +110,7 @@ let rec fold_right :
   match xs with
   | [] -> initial
   | x :: tail ->
-    let u = () in
-    let acc = fold_right r inv f preserve tail initial (u) in
+    let acc = fold_right r inv f preserve tail initial () in
     let result = f x acc in
-    ghost_ (preserve x tail acc result (u));
+    ghost_ (preserve x tail acc result ());
     result

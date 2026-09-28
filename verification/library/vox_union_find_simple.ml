@@ -209,8 +209,8 @@ module Make (C : Vox_big_credits.S) = struct
     U.capacity_def (borrow_ state.#core);
     let cap = capacity (borrow_ state) in let b = U.alpha (borrow_ state.#core) in
     if valid state && 1Z <= a && K.iter cap a 1Z 1Z >= cap && K.below cap a then (
-      let u = () in K.inverse_order cap cap a b (u);
-      let u = () in K.inverse_order cap cap b a (u);
+      K.inverse_order cap cap a b ();
+      K.inverse_order cap cap b a ();
       find_fee_def (borrow_ state); union_fee_def (borrow_ state);
       ())
     else ())

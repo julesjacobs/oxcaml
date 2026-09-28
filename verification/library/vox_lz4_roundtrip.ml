@@ -321,7 +321,7 @@ let rec (literal_heap_substitute @ total) :
     Vox_lz4_spec_decode.literal_heap_def heap block used source first remaining;
     Vox_lz4_spec_bytes.literal_bytes_def wire cursor source first remaining;
     if remaining = 0 || not (Vox_lz4_spec_bytes.literal_bytes wire cursor source first remaining)
-    then let u = () in u
+    then ()
     else
       match Vox_lz4_spec_bytes.source_at wire cursor, Vox_lz4_spec_bytes.source_at source first with
       | Some c, Some s ->
@@ -333,9 +333,9 @@ let rec (literal_heap_substitute @ total) :
                      (Some observed_byte) in
         literal_heap_substitute next block (used + 1) wire (cursor + 1)
           source (first + 1) (remaining - 1);
-        let u = () in u
+        ()
       | _ ->
-        let u = () in u)
+        ())
 [@@decreases remaining]
 
 let[@def] (literal_token_of_source @ total)
@@ -428,9 +428,9 @@ let (literal_layout @ total) :
           source 0 length} = () in
         ()
       end;
-      let u = () in u
+      ()
     end else
-      let u = () in u)
+      ())
 
 let (literal_layout_wire @ total) :
     (source : char iarray) -> (wire : char iarray) -> (block : M.t) ->

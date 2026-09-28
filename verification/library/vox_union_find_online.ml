@@ -447,9 +447,9 @@ module Make (C : Vox_big_credits.S) = struct
     if valid state && 1Z <= population && size state <= population &&
       1Z <= a && K.iter population a 1Z 1Z >= population && K.below population a then (
       if cap <= population then (
-        let u = () in K.inverse_order cap population b a (u))
+        K.inverse_order cap population b a ())
       else (
-        let u = () in K.inverse_doubling population cap a b (u));
+        K.inverse_doubling population cap a b ());
       find_fee_def (borrow_ state); union_fee_def (borrow_ state);
       A.find_fee_def b; A.union_fee_def b;
       ())

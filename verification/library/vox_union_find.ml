@@ -211,10 +211,10 @@ module Make (C : Vox_big_credits.S) = struct
     let input : {n : Bigint.t | n >= 1Z} = capacity in
     let alpha = ghost_ (K.inverse input) in
     ghost_ (
-      let u = () in K.inverse_order old_cap capacity old_a alpha (u);
-      let u = () in K.inverse_doubling old_cap capacity old_a alpha (u);
+      K.inverse_order old_cap capacity old_a alpha ();
+      K.inverse_doubling old_cap capacity old_a alpha ();
       if capacity = old_cap then (
-        let u = () in K.inverse_order capacity old_cap alpha old_a (u));
+        K.inverse_order capacity old_cap alpha old_a ());
       D.population_bounds old_cap before paths);
     let needed = ghost_ (Bigint.mul 4Z (Bigint.mul (Bigint.sub alpha old_a)
       (D.mass before paths))) in

@@ -77,12 +77,11 @@ let rec (append_nil @ total) : (xs : ('a : immutable_data) list) @ immutable ->
     {u : unit | append xs [] === xs} = fun xs ->
   let nil : 'a list = [] in
   append_def xs nil;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | _ :: tail ->
     append_nil tail;
-    u
+    ()
 
 let rec (append_associative @ total) :
     (xs : ('a : immutable_data) list) @ immutable ->
@@ -94,12 +93,11 @@ let rec (append_associative @ total) :
   append_def xs ys;
   append_def xy zs;
   append_def xs yz;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | _ :: tail ->
     append_associative tail ys zs;
-    u
+    ()
 
 let rec (append_length @ total) : ('a : immutable_data).
     (left : 'a t) @ immutable -> (right : 'a t) @ immutable ->
