@@ -1,5 +1,14 @@
 open Vox_smt
 
+let expected_version = "4.16.0"
+
+let is_expected_version output =
+  let prefix = "Z3 version " ^ expected_version in
+  let output = String.trim output in
+  String.starts_with ~prefix output
+  && (String.length output = String.length prefix
+     || output.[String.length prefix] = ' ')
+
 exception Protocol_error of string
 
 let protocol message = raise (Protocol_error message)

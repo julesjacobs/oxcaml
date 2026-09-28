@@ -1,8 +1,9 @@
 (* The browser implementation of [Vox_smt_solver]: the same interface as the
    native one in ../vox_smt_solver.ml, but the solver is Z3 compiled to
    WebAssembly and loaded in the same worker. The page installs
-   [globalThis.voxZ3Eval], which runs SMT-LIB text in one persistent Z3 context
-   with [Z3_eval_smtlib2_string] and returns what Z3 printed. The call is
+   [globalThis.voxZ3Eval], which runs SMT-LIB text with
+   [Z3_eval_smtlib2_string] (in a fresh Z3 context for each query) and returns
+   what Z3 printed. The call is
    synchronous, so the verifier runs unchanged. *)
 
 open Vox_smt
@@ -13,6 +14,24 @@ type config =
   }
 
 let default_config = { executable = "z3"; timeout_ms = 5000 }
+
+let expected_version = Vox_smt_response.expected_version
+
+let is_expected_version = Vox_smt_response.is_expected_version
+
+(* The page installs [globalThis.voxZ3Version], what the loaded Z3 answers to
+   [(get-info :version)]. It is reported as [z3 -version] reports it, with the
+   word size replaced by "WebAssembly", so that the version is checked as
+   natively and the solver's identity differs from that of a native Z3. *)
+let version ~executable:_ =
+  let open Js_of_ocaml in
+  let version = Js.Unsafe.pure_js_expr "globalThis.voxZ3Version" in
+  if Js.Optdef.test version
+  then
+    match String.trim (Js.to_string version) with
+    | "" -> None
+    | version -> Some ("Z3 version " ^ version ^ " - WebAssembly")
+  else None
 
 let monotonic_time () =
   Js_of_ocaml.Js.Unsafe.meth_call

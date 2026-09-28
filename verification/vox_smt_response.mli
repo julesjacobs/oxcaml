@@ -5,6 +5,13 @@
     [followup symbols answer ^ resource_request] and passes everything the
     solver printed after [answer] to [interpret_response]. *)
 
+(** The solver version proofs are checked with, as [z3 -version] reports it
+    after ["Z3 version "]. {!Vox_smt_solver} exports it for both runners. *)
+val expected_version : string
+
+(** Whether the output of [-version] names [expected_version]. *)
+val is_expected_version : string -> bool
+
 (** A malformed or unexpected solver response. *)
 exception Protocol_error of string
 
