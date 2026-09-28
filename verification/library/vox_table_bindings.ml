@@ -87,7 +87,7 @@ module Make (Key : Vox_table_map.Key) = struct
         | (stored, _) :: tail ->
           erase_get tail key query;
           Key.symmetric key query; Key.symmetric stored key;
-          Key.transitive stored key query; Key.transitive key stored query;
+          Key.transitive key stored query;
           Key.transitive stored query key; ())
 
     let (put_get @ total) : ('a : immutable_data).
@@ -278,22 +278,16 @@ module Make (Key : Vox_table_map.Key) = struct
       {u : unit | not (map === empty && other === []) || Assoc.same map other}
       @ ghost =
     fun map other -> ghost_ (
-      count_def map; Assoc.count_def map;
+      Assoc.count_def map;
       Assoc.same_def map other; Assoc.agrees_def map other;
-      Assoc.agrees_def other map;
-      match (map : _ Assoc.t) with
-      | [] -> ()
-      | _ :: tail -> Assoc.count_nonnegative tail)
+      Assoc.agrees_def other map)
 
   let (lookup_empty @ total) : ('a : immutable_data). (map : 'a t) ->
       (key : Key.t) ->
       {u : unit | not (map === empty) || lookup map key === None} @ ghost =
     fun map key -> ghost_ (
-      count_def map; Assoc.count_def map; lookup_def map key;
-      Assoc.lookup_def map key;
-      match (map : _ Assoc.t) with
-      | [] -> ()
-      | _ :: tail -> Assoc.count_nonnegative tail)
+      Assoc.count_def map; lookup_def map key;
+      Assoc.lookup_def map key)
 
   let (put_get @ total) : ('a : immutable_data).
       (map : 'a t) -> (key : Key.t) -> (value : 'a) -> (query : Key.t) ->

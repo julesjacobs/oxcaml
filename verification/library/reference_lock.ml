@@ -69,7 +69,7 @@ let try_increment (a : t) =
     let h = ghost_ (P.own (borrow_ t)) in
     let empty = ghost_ (P.Heap.empty ()) in
     ghost_ (P.Heap.put_law empty p x y);
-    ghost_ (location_def a; owned_def a h);
+    ghost_ (owned_def a h);
     let _ = release a t in
     true
   end else false

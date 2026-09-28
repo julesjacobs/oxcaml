@@ -87,7 +87,7 @@ let rec (refresh_ordered @ total) : (cap : Bigint.t) ->
       refresh_ordered cap h rest selected;
       M.refresh_valid h rest p; M.refresh_valid h rest selected;
       M.compressed_rank h rest x;
-      weight_def h x; weight_def h (M.root selected);
+      weight_def h (M.root selected);
       let middle = M.compressed h rest in
       let witness = M.refresh rest selected in
       redirect_ordered cap middle witness x (M.root rest) (M.refresh rest p);

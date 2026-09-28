@@ -598,8 +598,6 @@ let merge_collision :
         let proof = ghost_ (
           K.exact first_key second_key;
           V.collision_def store left right;
-          N.signature_def parents first;
-          N.signature_def parents second;
           V.collision_evidence store left right ()) in
         let state = {owner; store} in
         let #{merged; state} = merge_nodes state left right proof in
@@ -683,14 +681,11 @@ let rec (scan_pairs @ total) :
     else
       let #{merged; state} = merge_collision state left right in
       let {owner; store} = state in
-      let pair_store = ghost_ store in
       let state = {owner; store} in
       let #{changed; complete; state} =
         scan_pairs state left (right + 1) (fuel - 1) in
       let {owner; store} = state in
-      ghost_ (
-        V.pair_closed_def pair_store left right;
-        V.closed_fuel_def store left right fuel);
+      ghost_ (V.closed_fuel_def store left right fuel);
       let state = {owner; store} in
       #{changed = merged || changed; complete; state}
   [@@decreases if fuel > 0 then fuel else 0]

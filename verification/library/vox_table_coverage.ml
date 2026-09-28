@@ -46,7 +46,6 @@ module Make (Key : Vox_table_map.Key)
       W.scale16_def (rank - 1 + 1);
       P.triangle_range groups (rank - 1);
       W.scale16_def (P.triangle groups (rank - 1));
-      W.scale16_def (P.triangle groups rank);
       W.scale_addmod groups (P.triangle groups (rank - 1)) rank;
       addmod_range capacity (I.wrap capacity (W.lsr7 hash))
         (W.scale16 (P.triangle groups (rank - 1)));

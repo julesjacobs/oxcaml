@@ -190,7 +190,6 @@ let rec (range_get @ total) : (values : int list) -> (bound : int) ->
       let next_index = (Bigint.sub index 1Z) in
       range_get tail bound lower next_first next_past
         next_index;
-      element_at tail next_index;
       element_def tail next_index;
       ()
 
@@ -217,8 +216,7 @@ let rec (range_grow @ total) : (values : int list) -> (bound : int) ->
       range_def tail bound lower zero zero;
       ()
     else
-      (element_at tail next_past;
-      element_def tail next_past;
+      (element_def tail next_past;
       range_grow tail bound lower next_first next_past;
       ())
 

@@ -112,7 +112,6 @@ let rec (compose @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
   else if level <= 0Z then (
     minimum_def cap (Bigint.add start sum);
     minimum_def cap (Bigint.add start first);
-    minimum_def cap (Bigint.add middle second);
     ())
   else (
     let lower = Bigint.sub level 1Z in

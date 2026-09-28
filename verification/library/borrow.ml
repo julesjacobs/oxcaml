@@ -137,13 +137,10 @@ module Slice = struct
       let x = get (borrow_ s) first in
       let y = get (borrow_ s) second in
       let s1 = set s first y in
-      ghost_ (Model.set_length before bi y);
       let second : {i : int | 0 <= i
         && Bigint.compare (Bigint.of_int i) (Model.length (current s1)) < 0} =
         j in
-      let intermediate = ghost_ (current (borrow_ s1)) in
       let s2 = set s1 second x in
-      ghost_ (Model.set_length intermediate bj x);
       ghost_ (Model.swap_def before bi bj);
       s2)
   let (split_at @ stateless) : ('a : immutable_data) ('r : immutable_data).
@@ -185,7 +182,6 @@ module Slice = struct
       let value = body left right in
       let state = Raw.recombine frame in
       ghost_ (Model.append_split left_end right_end);
-      ghost_ (Model.append_length left_end right_end);
       let result = {value; state} in
       result)
   let (finish @ stateless) : ('a : immutable_data).

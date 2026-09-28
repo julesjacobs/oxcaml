@@ -133,14 +133,12 @@ let rec (compression_potential @ total) : (cap : Bigint.t) ->
   release_step cap alpha h selected;
   match selected with
   | M.Stop _ ->
-      F.refresh_valid h selected paths;
       refresh_potential cap alpha h selected paths h;
       ()
   | M.Step (x, rest) ->
       compression_potential cap alpha h rest paths;
       F.refresh_valid h rest paths;
       F.refresh_member h rest paths x;
-      refresh_potential cap alpha h rest paths (M.compressed h rest);
       R.contains_rank cap h rest x; R.bounds cap h rest;
       compressed_value_frame cap alpha h rest x;
       M.compressed_rank h rest x; M.compressed_rank h rest (M.root rest);

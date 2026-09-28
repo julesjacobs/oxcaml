@@ -57,7 +57,6 @@ let rec roots : (state : {s : H.t | H.O.valid s.owner && V.valid s.store &&
        | Changed -> true)} @ unique =
   fun state rules index rule bindings count fuel ->
     ghost_ (let view = borrow_ state in
-      H.O.valid_def view.owner;
       Frame.identity view.store.semantic.origins view.owner.count);
     if count <= 0 then (
       let {H.owner; store} = state in
@@ -85,7 +84,6 @@ let rec roots : (state : {s : H.t | H.O.valid s.owner && V.valid s.store &&
           let #{status; fuel; state} = roots state rules index rule bindings
             ((count - 1)) ((fuel - 1)) in
           let {H.owner; store} = state in
-          ghost_ (C.closed_roots_def (P.view store) rule bindings count);
           #{status; fuel; state = {H.owner; store}}
   [@@decreases count]
 
@@ -132,7 +130,6 @@ let rec cases : (state : {s : H.t | H.O.valid s.owner && V.valid s.store &&
       if fuel <= 0 then #{status = Work_limit; fuel = 0; state}
       else
         let count = (let view = borrow_ state in view.owner.count) in
-        ghost_ (let view = borrow_ state in H.O.valid_def view.owner);
         let result = roots state rules index rule bindings (count) ((fuel - 1)) in
         match result.#status with
         | Changed | Node_limit | Work_limit -> result
@@ -181,7 +178,6 @@ let rule : (state : {s : H.t | H.O.valid s.owner && V.valid s.store &&
        | Changed -> true)} @ unique =
   fun state rules index rule fuel ->
     ghost_ (let view = borrow_ state in
-      H.O.valid_def view.owner;
       Frame.identity view.store.semantic.origins view.owner.count);
     let count = (let view = borrow_ state in view.owner.count) in
     match A.enumerate count rule.vars fuel with

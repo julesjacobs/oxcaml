@@ -185,8 +185,6 @@ let merge_nodes : (state : {s : t | valid s}) @ immutable ->
         M.root r.#state.union.parents b} @ immutable =
   fun state a b proof ->
     ghost_ (
-      valid_def state;
-      U.valid_def state.union;
       EP.sort_sound state.rules proof ();
       EP.well_sorted_def proof);
     let roots = ghost_ (root_proof state a b proof ()) in

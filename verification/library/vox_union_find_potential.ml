@@ -203,9 +203,7 @@ let (compression @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
   let old_index = node_index cap alpha rank old_parent in
   let new_level = node_level cap alpha rank new_parent in
   let new_index = node_index cap alpha rank new_parent in
-  node_level_def cap alpha rank old_parent;
   node_level_def cap alpha rank new_parent;
-  node_index_def cap alpha rank old_parent;
   node_index_def cap alpha rank new_parent;
   node_phi_def cap alpha rank old_parent;
   node_phi_def cap alpha rank new_parent;

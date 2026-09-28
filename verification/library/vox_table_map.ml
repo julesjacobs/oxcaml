@@ -179,16 +179,12 @@ module Make (Key : Key) = struct
        | Some (stored, _) ->
          Key.symmetric key query;
          Key.symmetric stored key;
-         Key.transitive stored key query;
          Key.transitive key stored query;
          Key.transitive stored query key;
-         lookup_congruent tail stored key;
-         absent_lookup tail stored;
          absent_at tail (Bigint.sub index 1Z) stored;
          (match Vox_sequence.at tail (Bigint.sub index 1Z) with
           | Some (Some (other, _)) ->
-            Key.transitive other key stored;
-            Key.symmetric other stored
+            Key.transitive other key stored
           | _ -> ()));
       if index <> 0Z then replace_at tail (Bigint.sub index 1Z)
         key value query;
@@ -221,14 +217,12 @@ module Make (Key : Key) = struct
          Key.transitive stored key query;
          Key.transitive key stored query;
          Key.transitive stored query key;
-         lookup_congruent tail stored key;
          lookup_congruent tail stored query;
          absent_lookup tail stored;
          absent_at tail (Bigint.sub index 1Z) stored;
          (match Vox_sequence.at tail (Bigint.sub index 1Z) with
           | Some (Some (other, _)) ->
-            Key.transitive other key stored;
-            Key.symmetric other stored
+            Key.transitive other key stored
           | _ -> ()));
       if index <> 0Z then remove_at tail (Bigint.sub index 1Z)
         key query;
@@ -307,7 +301,6 @@ module Make (Key : Key) = struct
          | None -> ()
          | Some (stored, _) ->
            Key.symmetric key query; Key.symmetric stored key;
-           Key.transitive stored key query;
            Key.transitive key stored query;
            Key.transitive stored query key);
         ())

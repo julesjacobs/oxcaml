@@ -162,11 +162,7 @@ let append : (owner : {o : t | valid o && Memo.Spec.valid o.view &&
           (Memo.Spec.Map.put view.model.slots key count)
           changed.#view.model.slots (A.contents (borrow_ arena))
           (count + 1) ();
-        I.updated_read before count (Some key) count;
-        Memo.Spec.Map.same_get changed.#view.model.slots
-          (Memo.Spec.Map.put view.model.slots key count) key;
-        Memo.Spec.Map.put_get view.model.slots key count key;
-        K.reflexive key);
+        I.updated_read before count (Some key) count);
       let owner = {arena; count = count + 1; memo;
         view = changed.#view; token = changed.#state} in
       ghost_ (valid_def (borrow_ owner));

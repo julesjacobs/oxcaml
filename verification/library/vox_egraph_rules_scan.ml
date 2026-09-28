@@ -41,7 +41,6 @@ let rec scan : (state : {s : H.t | H.O.valid s.owner && V.valid s.store &&
        | Changed -> true)} @ unique =
   fun state rules index todo fuel ->
     ghost_ (let view = borrow_ state in
-      H.O.valid_def view.owner;
       Frame.identity view.store.semantic.origins view.owner.count);
     ghost_ (R.valid_def todo);
     match todo with

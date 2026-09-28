@@ -33,13 +33,11 @@ let (symmetric @ total) (x : t @ immutable) (y : t @ immutable) :
 let (transitive @ total) (x : t @ immutable) (y : t @ immutable)
     (z : t @ immutable) :
     {u : unit | not (equal x y && equal y z) || equal x z} =
-  equal_def x y; equal_def y z; equal_def x z; ()
+  equal_def y z; ()
 
 let (hash_equal @ total) (x : t @ immutable) (y : t @ immutable) :
     {u : unit | not (equal x y) || hash x = hash y} =
   equal_def x y;
-  hash_def x;
-  hash_def y;
   ()
 
 let (exact @ total) (x : t @ immutable) (y : t @ immutable) :

@@ -170,7 +170,7 @@ let (same_class @ total) : (state : t) @ unique ->
          Snapshot.origin (model state) a === Some (E.left proof) &&
          Snapshot.origin (model state) b === Some (E.right proof))} @ unique =
   fun state a b ->
-    ghost_ (model_def (borrow_ state); rules_def (borrow_ state));
+    ghost_ (model_def (borrow_ state));
     let {engine; rules; model} = state in
     let {H.owner; store} = engine in
     ghost_ (

@@ -179,7 +179,6 @@ let matched : (state : {s : H.t | H.O.valid s.owner && V.valid s.store &&
           else true))} @ unique =
   fun state rules index bindings root ->
     ghost_ (let view = borrow_ state in
-      H.O.valid_def view.owner;
       Frame.identity view.store.semantic.origins view.owner.count);
     match R.lookup_rule rules index with
     | None -> #{status = Invalid_rule; merged = false; left = -1; right = -1; state}

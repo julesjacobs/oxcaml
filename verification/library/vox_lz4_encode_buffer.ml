@@ -102,7 +102,6 @@ let append : (s : {s : t | s.used < M.length s.block}) @ unique ->
     let permission = M.write block used value permission in
     ghost_ (M.write_covers before block 0 (M.length block) used value);
     ghost_ (append_initialized before block used value);
-    ghost_ (M.location_law block block used (-1));
     { block; permission; used = used + 1 }
 
 let get : (s : t) @ unique ->

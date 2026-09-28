@@ -171,8 +171,7 @@ let (extension_heap_first @ total) :
     if Vox_lz4_spec_bytes.extension_count remaining <= 4210768 - used then
       if remaining >= 255 then begin
         let next = H.put heap (M.location block used) (Some 255) in
-        extension_heap_outside next block (used + 1) (remaining - 255) used;
-        heap_put_at heap block used 255
+        extension_heap_outside next block (used + 1) (remaining - 255) used
       end else
         heap_put_at heap block used (remaining);
     ())
@@ -446,7 +445,6 @@ let (literal_layout_wire @ total) :
     literal_layout source wire block;
     E.literal_model_def source block;
     literal_wire_def source wire;
-    literal_token_of_source_def source;
     literal_extra_of_source_def source;
     if Iarray.length source <= 4194304 then
       extra_count_def (Iarray.length source);

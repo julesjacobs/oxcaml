@@ -17,7 +17,7 @@ let[@def] rec (quantify @ total) : (graph : Q.graph) @ immutable ->
     (rule : R.rule) @ immutable -> (vars : L.sort list) @ immutable ->
     (prefix : int list) @ immutable -> (count : int) -> bool =
   fun graph rule vars prefix count ->
-    ghost_ (Measure.length_def vars; Measure.nonnegative vars);
+    ghost_ (Measure.length_def vars);
     match vars with
     | [] -> C.closed_roots graph rule prefix graph.count
     | _ :: rest ->

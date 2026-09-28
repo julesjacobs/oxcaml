@@ -205,7 +205,6 @@ let (end_model_wire @ total) :
         else after_token in
       let final = X.literal_heap after_extensions block
         (used + 1 + extensions) source anchor literals in
-      C.encode_model_size source anchor P.End block used heap;
       R.literal_heap_wire wire after_extensions block
         (used + 1 + extensions) source anchor literals;
       S.prefix_matches_prefix wire final block
@@ -270,7 +269,6 @@ let (encoded_size_positive @ total) :
         let literals : {n : int | 0 <= n && n <= 4194304} =
           (Iarray.length source - anchor) in
         let extensions = Vox_lz4_spec_wire.extra_count literals in
-        Vox_lz4_spec_wire.extra_count_def literals;
         let _ : {u : unit |
           C.encoded_size source anchor P.End =
             1 + extensions + literals} = () in
@@ -289,7 +287,6 @@ let (encoded_size_positive @ total) :
         let literal_extensions = Vox_lz4_spec_wire.extra_count literals in
         let match_extensions = Vox_lz4_spec_wire.extra_count code in
         Vox_lz4_spec_wire.extra_count_def literals;
-        Vox_lz4_spec_wire.extra_count_def code;
         let _ : {u : unit |
           0 <= C.encoded_size source (step.position + step.length)
             rest} = () in

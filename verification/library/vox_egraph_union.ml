@@ -89,8 +89,7 @@ let union : (state : {s : t | valid s}) @ immutable ->
       smaller_def ra rb;
       larger_def ra rb;
       S.link_frame state.parents state.count loser winner ();
-      I.updated_length state.parents loser winner;
-      I.updated_read state.parents loser winner loser);
+      I.updated_length state.parents loser winner);
     let next = {parents; count = state.count} in
     ghost_ (valid_def next);
     #{merged = true; winner; state = next}

@@ -205,8 +205,6 @@ let rec (drain_body @ total) : (request_line : bytes) -> (headers : int list
         let done_ = Complete {request_line; headers; body = next_prefix} in
         terminal_def done_; drain_def done_ bs;
         S.append_def [b] bs; S.append_def [] bs;
-        S.append_associative prefix [b] bs;
-        S.append_nil next_prefix;
         ())
       else (
         drain_body request_line headers (n - 1) next_prefix bs;
@@ -815,12 +813,9 @@ let rec (feed_reachable @ total) : (state : state) -> (prefix : bytes) ->
       S.append_def [] (S.take tail_count bs);
       ()))
 
-let rec (length_nonnegative @ total) : (xs : bytes) ->
+let (length_nonnegative @ total) : (xs : bytes) ->
     {u : unit | 0Z <= S.length xs} @ ghost =
-  fun xs -> ghost_ (S.length_def xs;
-  match xs with
-  | [] -> ()
-  | _ :: rest -> length_nonnegative rest; ())
+  fun xs -> ghost_ (S.length_def xs)
 
 let rec (fits_length @ total) : (budget : int) -> (xs : bytes) ->
     {u : unit | if 0 <= budget && budget <= 16384 then
@@ -1434,7 +1429,7 @@ let (make_initial @ total) (_unit : unit) :
   let state : state = machine in
   ghost_ (
     status_model state; total_consumed_def state; processed_def state;
-    machine_of_def state; Driver.model_def state;
+    machine_of_def state;
     Internal.initial_def ();
     Internal.core_wire_def machine.core;
     S.append_def ([] : bytes) []);
@@ -1516,8 +1511,8 @@ let (feed_machine @ total) (state : state) (input : bytes) :
 let (machine_injective @ total) (left : state) (right : state) :
     {u : unit | if machine_of left === machine_of right then left === right
       else true} @ ghost = ghost_ (
-  machine_of_def left; Driver.model_def left;
-  machine_of_def right; Driver.model_def right;
+  machine_of_def left;
+  machine_of_def right;
   Driver.involution left; Driver.involution right; ())
 
 let (consumed_machine @ total) (left : state) (right : state) :
@@ -1566,7 +1561,7 @@ let (terminal_preservation @ total) (state : state) (input : bytes) :
       feed state input === {state; rest = input} else true} @ ghost = ghost_ (
   let result = feed state input in
   feed_machine state input;
-  machine_of_def state; Driver.model_def state; status_model state;
+  status_model state;
   is_terminal_def (status state);
   Internal.terminal_def (machine_of state).core;
   Internal.feed_def (machine_of state) input;

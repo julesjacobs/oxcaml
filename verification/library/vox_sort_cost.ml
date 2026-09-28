@@ -54,7 +54,6 @@ let rec (height_minimal @ total) : (size : Bigint.t) ->
     height_minimal smaller;
     let depth = height smaller in
     power_def depth;
-    if smaller <= 1Z then height_def smaller;
     ())
   else ()
 [@@decreases let size : Bigint.t = size in

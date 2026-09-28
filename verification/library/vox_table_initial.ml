@@ -110,7 +110,6 @@ module Make (Key : Vox_table_map.Key)
       let model = M.initial capacity entry in
       M.initial_def capacity entry;
       M.repeat_def (capacity - index) entry;
-      index_bounds capacity index;
       L.repeat_at (capacity + 15) 128 (Bigint.of_int index);
       if index < capacity then begin
         index_step capacity index;

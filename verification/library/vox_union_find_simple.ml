@@ -41,7 +41,7 @@ module Make (C : Vox_big_credits.S) = struct
         union_fee state >= 36Z else true} @ ghost = fun state -> ghost_ (
     valid_def (borrow_ state); size_def (borrow_ state); contents_def (borrow_ state);
     U.contents_def (borrow_ state.#core); U.size_bounds (borrow_ state.#core);
-    U.alpha_bounds (borrow_ state.#core); U.alpha_def (borrow_ state.#core);
+    U.alpha_bounds (borrow_ state.#core);
     find_fee_def (borrow_ state); union_fee_def (borrow_ state);
     A.find_fee_def (U.alpha state.#core); A.union_fee_def (U.alpha state.#core);
     ())
@@ -75,21 +75,20 @@ module Make (C : Vox_big_credits.S) = struct
     let state = state in let fee = fee in
     ghost_ (capacity_def (borrow_ state); valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
-      U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
-      U.alpha_def (borrow_ state.#core));
+      U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core));
     let savings = state.#savings in
     let core = state.#core in
     let input : {s : U.t | U.valid s && F.size s.#U.paths < s.#U.capacity} = core in
     let payment : {b : C.token | C.credits b >= 3Z} = fee in
     let r = U.make_set input payment in
     let #{U.value; state = core; refund} = r in
-    ghost_ (C.nonnegative (borrow_ savings); C.nonnegative (borrow_ refund));
+    ghost_ (C.nonnegative (borrow_ savings));
     let right : {t : C.token | 0Z <= C.credits savings && 0Z <= C.credits t} =
       refund in
     let savings = C.merge savings right in
     let state = #{core; savings} in
-    ghost_ (capacity_def (borrow_ state); valid_def (borrow_ state); contents_def (borrow_ state);
-      heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
+    ghost_ (capacity_def (borrow_ state); valid_def (borrow_ state);
+      heap_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core));
     ghost_ (size_def (borrow_ state); contents_def (borrow_ state);
       F.size_def (contents (borrow_ state));
@@ -108,7 +107,7 @@ module Make (C : Vox_big_credits.S) = struct
       fun x state fee ->
     let state = state in let fee = fee in
     ghost_ (capacity_def (borrow_ state); valid_def (borrow_ state); contents_def (borrow_ state);
-      heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
+      size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
       U.alpha_def (borrow_ state.#core));
     ghost_ (member_def x (borrow_ state); U.member_def x (borrow_ state.#core);
@@ -127,7 +126,7 @@ module Make (C : Vox_big_credits.S) = struct
     let savings = C.merge savings right in
     let state = #{core; savings} in
     ghost_ (capacity_def (borrow_ state); valid_def (borrow_ state); contents_def (borrow_ state);
-      heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
+      size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core));
     let result = #{value; state} in result
 
@@ -147,8 +146,7 @@ module Make (C : Vox_big_credits.S) = struct
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
       U.alpha_def (borrow_ state.#core));
     ghost_ (member_def x (borrow_ state); U.member_def x (borrow_ state.#core);
-      union_fee_def (borrow_ state); representative_def x (borrow_ state);
-      U.representative_def x (borrow_ state.#core);
+      union_fee_def (borrow_ state);
       member_def y (borrow_ state); U.member_def y (borrow_ state.#core));
     let savings = state.#savings in
     let core = state.#core in
@@ -163,7 +161,7 @@ module Make (C : Vox_big_credits.S) = struct
     let savings = C.merge savings right in
     let state = #{core; savings} in
     ghost_ (capacity_def (borrow_ state); valid_def (borrow_ state); contents_def (borrow_ state);
-      heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
+      size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core));
     let result = #{value; state} in result
 
