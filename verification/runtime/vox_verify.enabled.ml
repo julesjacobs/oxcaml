@@ -204,6 +204,8 @@ let unit_cache_file ~whole_unit =
         | argument :: rest -> argument :: flags rest
         | [] -> []
       in
+      (* The imports include the unit's own interface, which the unit's
+         inclusion obligations are proved against. *)
       let imports =
         List.map
           (fun import ->
@@ -848,7 +850,7 @@ let install () =
       with Budget_exceeded ->
         Location.raise_errorf "Refinement verification budget exhausted"
     in
-    Verification.install (fun ~whole_unit structure ->
+    Verification.install (fun ~whole_unit ~interface structure ->
         if not !assume_verified
         then
           (* An entry's first line names its key (see [unit_cache_file]). *)
@@ -872,7 +874,8 @@ let install () =
             cacheable := true;
             Buffer.clear reported_steps;
             with_prover (fun poll prove unused_steps ->
-                Vox_vc.generate ~poll ~unused_steps ~prove structure);
+                Vox_vc.generate ~poll ~unused_steps ?interface ~prove
+                  structure);
             if !cacheable
             then
               Option.iter

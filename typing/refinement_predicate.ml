@@ -364,6 +364,12 @@ let iter_scoped_dependencies ~bound ~ident ~type_expr rexp =
 
 (* Alpha-equivalence *)
 
+type type_pair =
+  { left : type_expr;
+    right : type_expr;
+    exposed : bool;
+    binders : (Ident.t * Ident.t) list }
+
 (* [Pconst_string] carries the location of the string contents inside the
    description; it is not part of the syntax and must not be part of type
    identity. *)
@@ -373,9 +379,16 @@ let constant_equal (c1 : Parsetree.constant) (c2 : Parsetree.constant) =
       String.equal s1 s2 && Option.equal String.equal d1 d2
   | desc1, desc2 -> desc1 = desc2
 
-let equal ~pairs rexp1 rexp2 =
+let equal_with_types ~pairs rexp1 rexp2 =
   (* [pairs] pairs the binders of the left predicate with the binders of
-     the right one, innermost first. *)
+     the right one, innermost first.  The types of corresponding nodes are
+     collected; the caller decides how they must be related.  A type is
+     [exposed] when the verifier assumes its refinements while evaluating
+     the predicate. *)
+  let types = ref [] in
+  let pair_types ?(exposed = false) binders ty1 ty2 =
+    types := { left = ty1; right = ty2; exposed; binders } :: !types
+  in
   let var_eq pairs id1 id2 =
     let rec find = function
       | [] -> Ident.same id1 id2
@@ -386,17 +399,40 @@ let equal ~pairs rexp1 rexp2 =
     in
     find pairs
   in
-  let rec eq pairs rexp1 rexp2 =
+  let rec eq ?exposed pairs rexp1 rexp2 =
     match rexp1.rexp_desc, rexp2.rexp_desc with
-    | Rexp_refinement (_, e1), _ -> eq pairs e1 rexp2
-    | _, Rexp_refinement (_, e2) -> eq pairs rexp1 e2
+    | Rexp_refinement (source1, e1), Rexp_refinement (source2, e2) ->
+        (* The source of an elimination is exposed. *)
+        pair_types ~exposed:true pairs source1 source2;
+        pair_types ?exposed pairs rexp1.rexp_type rexp2.rexp_type;
+        eq pairs e1 e2
+    | Rexp_refinement (source1, e1), _ ->
+        (* Whether an elimination is recorded depends on elaboration (a
+           dependent type instantiated with an argument has none).  Its
+           source is the type typing gave to the same subexpression, so the
+           premise it adds holds of the other side's subexpression as well;
+           only the skeletons are compared. *)
+        pair_types pairs source1 rexp2.rexp_type;
+        eq pairs e1 rexp2
+    | _, Rexp_refinement (source2, e2) ->
+        pair_types pairs rexp1.rexp_type source2;
+        eq pairs rexp1 e2
+    | _ ->
+        pair_types ?exposed pairs rexp1.rexp_type rexp2.rexp_type;
+        eq_desc pairs rexp1 rexp2
+  and eq_desc pairs rexp1 rexp2 =
+    match rexp1.rexp_desc, rexp2.rexp_desc with
+    | Rexp_refinement _, _ | _, Rexp_refinement _ -> eq pairs rexp1 rexp2
     | Rexp_var id1, Rexp_var id2 -> var_eq pairs id1 id2
     | Rexp_ident p1, Rexp_ident p2 -> Path.same p1 p2
     | Rexp_var id1, Rexp_ident (Pident id2)
     | Rexp_ident (Pident id1), Rexp_var id2 -> var_eq pairs id1 id2
     | Rexp_constant c1, Rexp_constant c2 -> constant_equal c1 c2
     | Rexp_apply (f1, args1), Rexp_apply (f2, args2) ->
-        eq pairs f1 f2
+        (* The type of an applied function instantiates the lemma of a
+           transparent definition, whose parameter refinements are
+           assumed. *)
+        eq ~exposed:true pairs f1 f2
         && List.compare_lengths args1 args2 = 0
         && List.for_all2
              (fun (l1, a1) (l2, a2) -> l1 = l2 && eq pairs a1 a2)
@@ -438,10 +474,15 @@ let equal ~pairs rexp1 rexp2 =
     | Rexp_sequence (f1, s1), Rexp_sequence (f2, s2) ->
         eq pairs f1 f2 && eq pairs s1 s2
     | Rexp_let (b1, body1), Rexp_let (b2, body2) ->
+        (* [let refine_ x = e] assumes the refinements of [e]'s type. *)
+        let exposed = b1.rb_kind = Rbind_refine in
+        pair_types ~exposed pairs b1.rb_type b2.rb_type;
         b1.rb_kind = b2.rb_kind
-        && eq pairs b1.rb_expr b2.rb_expr
+        && eq ~exposed pairs b1.rb_expr b2.rb_expr
         && eq ((b1.rb_ident, b2.rb_ident) :: pairs) body1 body2
-    | Rexp_fun (p1, _, _, body1), Rexp_fun (p2, _, _, body2) ->
+    | Rexp_fun (p1, ty1, _, body1), Rexp_fun (p2, ty2, _, body2) ->
+        (* A parameter's refinements are assumed in the body. *)
+        pair_types ~exposed:true pairs ty1 ty2;
         eq ((p1, p2) :: pairs) body1 body2
     | Rexp_match (s1, cases1), Rexp_match (s2, cases2) ->
         eq pairs s1 s2
@@ -462,6 +503,17 @@ let equal ~pairs rexp1 rexp2 =
         Option.equal (eq pairs) case1.rc_guard case2.rc_guard
         && eq pairs case1.rc_rhs case2.rc_rhs
   and eq_pat pairs pat1 pat2 =
+    (* A pattern assumes the refinements of its type and of the types it
+       eliminates. *)
+    pair_types ~exposed:true pairs pat1.rpat_type pat2.rpat_type;
+    if List.compare_lengths pat1.rpat_refinements pat2.rpat_refinements <> 0
+    then None
+    else begin
+      List.iter2 (pair_types ~exposed:true pairs)
+        pat1.rpat_refinements pat2.rpat_refinements;
+      eq_pat_desc pairs pat1 pat2
+    end
+  and eq_pat_desc pairs pat1 pat2 =
     match pat1.rpat_desc, pat2.rpat_desc with
     | Rpat_any, Rpat_any -> Some pairs
     | Rpat_var id1, Rpat_var id2 -> Some ((id1, id2) :: pairs)
@@ -503,7 +555,10 @@ let equal ~pairs rexp1 rexp2 =
         | Rpat_construct _ | Rpat_record _ | Rpat_alias _ | Rpat_or _ ), _ ) ->
         None
   in
-  eq pairs rexp1 rexp2
+  if eq pairs rexp1 rexp2 then Some (List.rev !types) else None
+
+let equal ~pairs rexp1 rexp2 =
+  Option.is_some (equal_with_types ~pairs rexp1 rexp2)
 
 (* Back to surface syntax *)
 

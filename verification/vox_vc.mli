@@ -13,6 +13,7 @@ exception Unproved of Location.error
 val generate :
   ?poll:(unit -> unit) ->
   ?unused_steps:Vox_proof_steps.checker ->
+  ?interface:Typedtree.refinement_site ->
   prove:(batch:bool -> Location.t -> Vox_smt.query -> unit) ->
   Typedtree.structure ->
   unit

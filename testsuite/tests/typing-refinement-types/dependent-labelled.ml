@@ -213,27 +213,15 @@ end = struct
   let at_least ~(capacity : int) : {r : int | r >= capacity} = capacity
 end;;
 [%%expect{|
-Lines 3-5, characters 6-3:
-3 | ......struct
+Line 4, characters 6-14:
 4 |   let at_least ~(capacity : int) : {r : int | r >= capacity} = capacity
-5 | end..
-Error: Signature mismatch:
-       Modules do not match:
-         sig
-           val at_least :
-             capacity:(capacity : int) -> {r : int | r >= capacity}
-         end
-       is not included in
-         sig val at_least : capacity:(c : int) -> {r : int | r > c} end
-       Values do not match:
-         val at_least :
-           capacity:(capacity : int) -> {r : int | r >= capacity}
-       is not included in
-         val at_least : capacity:(c : int) -> {r : int | r > c}
-       The type "capacity:(capacity : int) -> {r : int | r >= capacity}"
-       is not compatible with the type
-         "capacity:(c : int) -> {r : int | r > c}"
-       Type "{r : int | r >= c}" is not compatible with type "{r : int | r > c}"
+          ^^^^^^^^
+Error: The value "at_least" does not satisfy its declaration in the signature.
+       Refinement could not be proved (counterexample: r = 0, c = 0)
+Line 2, characters 50-55:
+2 |   val at_least : capacity:(c : int) -> {r : int | r > c}
+                                                      ^^^^^
+  The refinement is stated here.
 |}]
 
 module Wrong_label : sig

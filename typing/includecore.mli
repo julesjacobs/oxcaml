@@ -201,7 +201,12 @@ val check_modes : Env.t -> ?crossing:Mode.Crossing.t ->
   item:Mode.Hint.lock_item ->
   ?typ:type_expr -> mmodes -> (unit, Mode.Value.error) Result.t
 
+(** With [refinements], refinements that the declaration requires beyond
+    those of the implementation are accepted when they can be proved:
+    [refinements ~source ~target] is called with the instantiated pair of
+    types that the verifier must relate. *)
 val value_descriptions:
+  ?refinements:(source:type_expr -> target:type_expr -> unit) ->
   loc:Location.t -> Env.t -> string ->
   mmodes:mmodes ->
   value_description -> value_description -> module_coercion

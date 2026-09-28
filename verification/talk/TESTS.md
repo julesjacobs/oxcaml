@@ -38,7 +38,7 @@ Status:
 | Slide item | Test | What it checks | Status |
 |---|---|---|---|
 | Tombstones: EMPTY fails at "no new EMPTY byte" (`vox_table_update_proofs.ml`, lines 442-443); 254 accepted | `talk_flat_hashtbl.ml` (`Empty_check`, `Tombstone_check`) | the rejection and the stated-here location in the library; the 254 proof accepted | trunk |
-| A commuted `symmetric` law is a type mismatch on trunk | `talk_flat_hashtbl.ml` (`Commuted_table`) | `Values do not match … val symmetric`; `Int_key` with the laws as in `Key` accepted (`Int_table`) | trunk (changes if subsumption is merged) |
+| A commuted `symmetric` law is accepted; a law stating one direction of symmetry is rejected with a counterexample | `talk_flat_hashtbl.ml` (`Commuted_table`, `One_way_table`) | `module Commuted_table : sig end`; `The value "One_way_key.symmetric" does not satisfy the functor's parameter.` with `counterexample: x = 0, y = 1`; `Int_key` with the laws as in `Key` accepted (`Int_table`) | trunk (with subsumption merged) |
 | "Store 84, read 85": 85 rejected with the law calls | `flat_hashtbl_boundary.ml` (existing) | the false claim 85 is rejected | trunk |
 | "Without them even 84 is rejected" | `talk_flat_hashtbl.ml` (`Store_84_without_laws`, `Store_84_with_laws`) | 84 without `Key.reflexive`/`Map.put_get` rejected; with them accepted | trunk |
 | Ownership walk: stale view, reused token, also without the extension | `flat_hashtbl_boundary.ml`, `flat_hashtbl_stale.compilers.reference`, `flat_hashtbl_reused.compilers.reference`, `flat_hashtbl_unowned.compilers.reference` (existing) | refinement error; uniqueness error; both without `-extension refinement_types` | trunk |
