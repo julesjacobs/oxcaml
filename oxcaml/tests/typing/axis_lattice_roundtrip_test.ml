@@ -27,6 +27,7 @@ type sample =
     contention : Mode.Contention.Const.t;
     forkable : Mode.Forkable.Const.t;
     yielding : Mode.Yielding.Const.t;
+    totality : Mode.Totality.Const.t;
     statefulness : Mode.Statefulness.Const.t;
     visibility : Mode.Visibility.Const.t;
     staticity : Mode.Staticity.const;
@@ -41,6 +42,7 @@ let sample_of_lattice x =
     contention = contention x;
     forkable = forkable x;
     yielding = yielding x;
+    totality = totality x;
     statefulness = statefulness x;
     visibility = visibility x;
     staticity = staticity x;
@@ -52,8 +54,8 @@ let lattice_of_sample sample =
     ~uniqueness:sample.uniqueness ~portability:sample.portability
     ~contention:sample.contention ~forkable:sample.forkable
     ~yielding:sample.yielding ~statefulness:sample.statefulness
-    ~visibility:sample.visibility ~staticity:sample.staticity
-    ~externality:sample.externality
+    ~totality:sample.totality ~visibility:sample.visibility
+    ~staticity:sample.staticity ~externality:sample.externality
 
 let base_samples = [sample_of_lattice bot; sample_of_lattice top]
 
@@ -95,9 +97,15 @@ let mod_bounds_of_sample sample =
       ~yielding:
         (Mode.Crossing.Comonadic.Atom.Modality
            (Mode.Modality.Comonadic.Atom.Meet_const sample.yielding))
+      ~totality:
+        (Mode.Crossing.Comonadic.Atom.Modality
+           (Mode.Modality.Comonadic.Atom.Meet_const sample.totality))
       ~statefulness:
         (Mode.Crossing.Comonadic.Atom.Modality
            (Mode.Modality.Comonadic.Atom.Meet_const sample.statefulness))
+      ~ghostliness:
+        (Mode.Crossing.Comonadic.Atom.Modality
+           (Mode.Modality.Comonadic.Atom.Meet_const Mode.Ghostliness.Const.Ghost))
   in
   Btype.Jkind0.Mod_bounds.create { monadic; comonadic }
     ~externality:sample.externality
@@ -130,6 +138,14 @@ let co_sub_reference_impl (type t)
     (fun acc c -> if Axis.le a (Axis.join b c) then Axis.meet acc c else acc)
     Axis.max all_values
 
+let imply_reference_impl (type t)
+    (module Axis : Mode_intf.Lattice with type t = t) (all_values : t list)
+    (a : t) (b : t) =
+  (* imply(a, b) = join { c | meet(a, c) <= b } *)
+  List.fold_left
+    (fun acc c -> if Axis.le (Axis.meet a c) b then Axis.join acc c else acc)
+    Axis.min all_values
+
 let check_operations (type t) (module Axis : Mode_intf.Lattice with type t = t)
     label update extract (all_values : t list) =
   List.iter
@@ -160,6 +176,11 @@ let check_operations (type t) (module Axis : Mode_intf.Lattice with type t = t)
                 (co_sub_reference_impl
                    (module Axis)
                    all_values lhs_value rhs_value);
+              expect_value "imply"
+                (extract (imply lhs rhs))
+                (imply_reference_impl
+                   (module Axis)
+                   all_values lhs_value rhs_value);
               let expected_leq = Axis.le lhs_value rhs_value in
               if leq lhs rhs <> expected_leq
               then failwith "statefulness leq mismatch")
@@ -184,34 +205,37 @@ let mask_of_axis : type a. a Jkind_axis.Axis.t -> t =
   let open Mode.Axis in
   let open Mode.Crossing.Axis in
   let sample = sample_of_lattice bot in
+  let ghost_mask = lattice_of_sample sample in
+  let non_ghost_mask sample = co_sub (lattice_of_sample sample) ghost_mask in
   match axis with
   | Modal (Comonadic Areality) ->
-    lattice_of_sample { sample with areality = Mode.Regionality.Const.Local }
+    non_ghost_mask { sample with areality = Mode.Regionality.Const.Local }
   | Modal (Monadic Uniqueness) ->
-    lattice_of_sample { sample with uniqueness = Mode.Uniqueness.Const.Unique }
+    non_ghost_mask { sample with uniqueness = Mode.Uniqueness.Const.Unique }
   | Modal (Comonadic Linearity) ->
-    lattice_of_sample { sample with linearity = Mode.Linearity.Const.Once }
+    non_ghost_mask { sample with linearity = Mode.Linearity.Const.Once }
   | Modal (Monadic Contention) ->
-    lattice_of_sample
+    non_ghost_mask
       { sample with contention = Mode.Contention.Const.Uncontended }
   | Modal (Comonadic Portability) ->
-    lattice_of_sample
+    non_ghost_mask
       { sample with portability = Mode.Portability.Const.Nonportable }
   | Modal (Comonadic Forkable) ->
-    lattice_of_sample { sample with forkable = Mode.Forkable.Const.Unforkable }
+    non_ghost_mask { sample with forkable = Mode.Forkable.Const.Unforkable }
   | Modal (Comonadic Yielding) ->
-    lattice_of_sample { sample with yielding = Mode.Yielding.Const.Yielding }
+    non_ghost_mask { sample with yielding = Mode.Yielding.Const.Yielding }
+  | Modal (Comonadic Totality) ->
+    non_ghost_mask { sample with totality = Mode.Totality.Const.Partial }
   | Modal (Comonadic Statefulness) ->
-    lattice_of_sample
+    non_ghost_mask
       { sample with statefulness = Mode.Statefulness.Const.Stateful }
   | Modal (Monadic Visibility) ->
-    lattice_of_sample
-      { sample with visibility = Mode.Visibility.Const.Read_write }
+    non_ghost_mask { sample with visibility = Mode.Visibility.Const.Read_write }
   | Modal (Monadic Staticity) ->
-    lattice_of_sample { sample with staticity = Mode.Staticity.Static }
+    non_ghost_mask { sample with staticity = Mode.Staticity.Static }
+  | Modal (Comonadic Ghostliness) -> ghost_mask
   | Nonmodal Externality ->
-    lattice_of_sample
-      { sample with externality = Jkind_axis.Externality.Internal }
+    non_ghost_mask { sample with externality = Jkind_axis.Externality.Internal }
 
 let of_axis_set' (set : Jkind_axis.Axis_set.t) : t =
   Jkind_axis.Axis_set.to_seq set
@@ -284,6 +308,12 @@ let () =
     (fun sample yielding -> { sample with yielding })
     yielding
     [Mode.Yielding.Const.Unyielding; Mode.Yielding.Const.Yielding];
+  check_axis
+    (module Mode.Totality.Const)
+    "totality"
+    (fun sample totality -> { sample with totality })
+    totality
+    [Mode.Totality.Const.Total; Mode.Totality.Const.Partial];
   check_axis
     (module Mode.Statefulness.Const)
     "statefulness"

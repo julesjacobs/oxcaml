@@ -250,6 +250,30 @@ end
 let modes_toplevel =
   Specific ((toplevel_mode, None), toplevel_mode)
 
+(* Refinement subsumption obligations of the inclusion check being run, when
+   its caller can have them verified (see [collect_refinements]). *)
+let refinement_collector :
+  (Typedtree.refinement_obligation -> unit) option ref = ref None
+
+let with_refinement_collector collector f =
+  let saved = !refinement_collector in
+  refinement_collector := collector;
+  Fun.protect ~finally:(fun () -> refinement_collector := saved) f
+
+let collect_refinements f =
+  let collected = ref [] in
+  let result =
+    with_refinement_collector
+      (Some (fun o -> collected := o :: !collected)) f
+  in
+  result, List.rev !collected
+
+let without_refinements f = with_refinement_collector None f
+
+(* The submodules, outermost first, of the module whose inclusion is being
+   checked that contain the current item. *)
+let refinement_modules = ref []
+
 module Core_inclusion = struct
   (* All functions "blah env x1 x2" check that x1 is included in x2,
      i.e. that x1 is the type of an implementation that fulfills the
@@ -261,9 +285,28 @@ module Core_inclusion = struct
     if Directionality.mark_as_used direction then
       Env.mark_value_used vd1.val_uid;
     let vd2 = Subst.value_description subst vd2 in
+    (* Module type equivalence stays syntactic.  In a negative position the
+       compared value is a functor's parameter, not a known value. *)
+    let refinements =
+      match !refinement_collector with
+      | Some collect when not direction.Directionality.in_eq ->
+          let ro_value =
+            match direction.Directionality.pos with
+            | Directionality.Negative -> None
+            | Positive | Strictly_positive -> Some (Path.Pident id)
+          in
+          let ro_modules = List.rev !refinement_modules in
+          Some (fun ~source ~target ->
+              collect
+                { Typedtree.ro_value; ro_modules; ro_name = Ident.name id;
+                  ro_source = source; ro_target = target; ro_env = env;
+                  ro_value_loc = vd1.val_loc;
+                  ro_declaration_loc = vd2.val_loc })
+      | _ -> None
+    in
     try
-      Ok (Includecore.value_descriptions ~loc env (Ident.name id) ~mmodes
-            vd1 vd2)
+      Ok (Includecore.value_descriptions ?refinements ~loc env (Ident.name id)
+            ~mmodes vd1 vd2)
     with Includecore.Dont_match err ->
       Error Error.(Core (Value_descriptions (mdiff vd1 vd2 mmodes err)))
 
@@ -433,7 +476,7 @@ let rec print_coercion ppf c =
       pr "@[<2>struct@ %a@ %a@]"
         (print_list print_coercion2) pos_cc_list
         (print_list print_coercion3) id_pos_list
-  | Tcoerce_functor (inp, out) ->
+  | Tcoerce_functor (inp, out, _) ->
       pr "@[<2>functor@ (%a)@ (%a)@]"
         print_coercion inp
         print_coercion out
@@ -533,7 +576,8 @@ let pair_components subst sig1_comps sig2 =
               Subst.add_modtype id2 (Path.Pident id1) subst
           | Sig_jkind _ ->
               Subst.add_jkind id2 (Path.Pident id1) subst
-          | Sig_value _ | Sig_typext _
+          | Sig_value _ | Sig_typext _ ->
+              Subst.add_value id2 (Path.Pident id1) subst
           | Sig_class _ | Sig_class_type _ ->
               subst
         in
@@ -778,7 +822,25 @@ and try_modtypes ~core ~direction ~loc env subst ~modes
             then orig_shape
             else Shape.abs var final_res_shape
           in
-          Ok (Tcoerce_functor(cc_arg, cc_res), final_shape)
+          let application_yielding =
+            let open Mode in
+            let param_yielding =
+              match (param2 : Subst.Lazy.functor_parameter) with
+              | Named (_, _, mm) ->
+                [Yielding.disallow_right (Alloc.proj_comonadic Yielding mm)]
+              | Unit -> []
+            in
+            let funct_yielding =
+              match modes with
+              | All -> Yielding.disallow_right Yielding.max
+              | Specific ((m, _locks), _) ->
+                Yielding.disallow_right (Value.proj_comonadic Yielding m)
+            in
+            Yielding.join (funct_yielding :: param_yielding)
+          in
+          Ok
+            (Tcoerce_functor(cc_arg, cc_res, application_yielding),
+             final_shape)
       | _, Error {Error.symptom = Error.Functor Error.Params res; _} ->
           let got = Error.cons_arg (force_functor_parameter param1) res.got in
           let expected =
@@ -885,6 +947,10 @@ and equate_one_functor_param subst env arg2' name1 name2  =
 and strengthened_modtypes ~core ~direction ~loc ~aliasable env
     subst mty1 path1 mty2 shape =
   let mty1 = Mtype.strengthen_lazy ~aliasable mty1 path1 in
+  let mty1 =
+    Mtype.prefix_refinement_paths_lazy env Subst.identity mty1 path1
+  in
+  let mty2 = Mtype.prefix_refinement_paths_lazy env subst mty2 path1 in
   modtypes ~core ~direction ~loc env subst mty1 mty2 shape
 
 and strengthened_module_decl ~loc ~aliasable ~core ~direction env
@@ -1149,8 +1215,11 @@ and module_declarations ~core ~direction ~loc env subst id1 ~mmodes md1 md2
     Includecore.child_modes_with_modalities id ~modalities mmodes
     |> map_error (fun e -> Error.(Core (Modalities e)))
   in
-  strengthened_modtypes ~core ~direction ~loc ~aliasable:true env subst ~modes
-    md1.md_type p1 md2.md_type orig_shape
+  let enclosing = !refinement_modules in
+  refinement_modules := id :: enclosing;
+  Fun.protect ~finally:(fun () -> refinement_modules := enclosing) (fun () ->
+    strengthened_modtypes ~core ~direction ~loc ~aliasable:true env subst
+      ~modes md1.md_type p1 md2.md_type orig_shape)
   |> map_error (fun x -> Error.Module_type x)
 
 (* Inclusion between module type specifications *)
@@ -1302,6 +1371,8 @@ let strengthened_modtypes ~direction ~loc ~aliasable env
     path1 mty2 shape
 
 let check_functor_application_raw ~loc env mty1 path1 mty2 =
+  (* Functor applications in type paths have no place for proofs. *)
+  without_refinements @@ fun () ->
   let aliasable = can_alias env path1 in
   let direction = Directionality.unknown ~mark:true in
   strengthened_modtypes ~core:core_inclusion ~direction ~loc ~aliasable env

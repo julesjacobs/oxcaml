@@ -78,6 +78,7 @@ type label_mismatch =
   | Type of Errortrace.equality_error
   | Mutability of position
   | Atomicity of position
+  | Ghostliness of position
   | Modality of Mode.Modality.equate_error
 
 type record_change =
@@ -130,6 +131,8 @@ type unsafe_mode_crossing_mismatch =
 
 type type_mismatch =
   | Arity
+  | Inductiveness
+  | Phantom_parameters
   | Privacy of privacy_mismatch
   | Kind of kind_mismatch
   | Constraint of Errortrace.equality_error
@@ -144,7 +147,7 @@ type type_mismatch =
   | Extensible_representation of position
   | With_null_representation of position
   | Fixed_representation of position
-  | Jkind of Jkind.Violation.t
+  | Jkind of Ikind.subjkind_error
   | Unsafe_mode_crossing of unsafe_mode_crossing_mismatch
 
 type jkind_mismatch =

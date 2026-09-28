@@ -27,6 +27,8 @@ val leq : t -> t -> bool
 
 val co_sub : t -> t -> t
 
+val imply : t -> t -> t
+
 val equal : t -> t -> bool
 
 val hash : t -> int
@@ -49,6 +51,7 @@ val create :
   contention:Mode.Contention.Const.t ->
   forkable:Mode.Forkable.Const.t ->
   yielding:Mode.Yielding.Const.t ->
+  totality:Mode.Totality.Const.t ->
   statefulness:Mode.Statefulness.Const.t ->
   visibility:Mode.Visibility.Const.t ->
   staticity:Mode.Staticity.const ->
@@ -68,6 +71,8 @@ val contention : t -> Mode.Contention.Const.t
 val forkable : t -> Mode.Forkable.Const.t
 
 val yielding : t -> Mode.Yielding.Const.t
+
+val totality : t -> Mode.Totality.Const.t
 
 val statefulness : t -> Mode.Statefulness.Const.t
 
@@ -96,6 +101,6 @@ val immediate : t
 
 val object_legacy : t
 
-(** Map from internal axis number (used in diagnostics) to an axis
-    descriptor. *)
+(** Map from internal axis number (used in diagnostics) to an axis descriptor.
+*)
 val axis_number_to_axis_packed : int -> Jkind_axis.Axis.packed

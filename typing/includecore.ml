@@ -55,6 +55,8 @@ type value_mismatch =
 
 exception Dont_match of value_mismatch
 
+let partial_recursion = Types.Uid.Tbl.create 16
+
 type mmodes =
   | All
   | Specific :
@@ -175,9 +177,9 @@ let value_descriptions_consistency _env vd1 vd2 =
   | (_, Val_prim _) -> raise (Dont_match Not_a_primitive)
   | (_, _) -> Tcoerce_none
 
-let moregeneral_lpoly env pat_lpoly subj_lpoly ty1 ty2 =
+let moregeneral_lpoly ?refinements env pat_lpoly subj_lpoly ty1 ty2 =
   let pat_refs =
-    Ctype.moregeneral env true pat_lpoly subj_lpoly ty1 ty2
+    Ctype.moregeneral ?refinements env true pat_lpoly subj_lpoly ty1 ty2
   in
   (* Map from RHS sort poly var to its 1-indexed position *)
   let subj_index = List.mapi (fun i v -> (v, i + 1)) subj_lpoly in
@@ -211,7 +213,29 @@ let moregeneral_lpoly env pat_lpoly subj_lpoly ty1 ty2 =
     raise (Dont_match (Layout_poly_coercion
       (Extra_rhs { extra = List.length subj_rest })))
 
-let value_descriptions ~loc env name
+let value_descriptions_zero_alloc
+    (vd1 : Types.value_description)
+    (vd2 : Types.value_description) =
+  let vd1_zero_alloc, prim_coercion_zero_alloc_check =
+    match vd1.val_kind, Zero_alloc.get vd2.val_zero_alloc with
+    | Val_prim p, Check check ->
+      ( Zero_alloc.create_const (Check { check with arity = p.prim_arity }),
+        Some check )
+    | ( (Val_reg _ | Val_mut _ | Val_prim _ | Val_ivar _ | Val_self _ |
+         Val_anc _),
+        (Default_zero_alloc | Ignore_assert_all | Check _ | Assume _) ) ->
+      vd1.val_zero_alloc, None
+  in
+  match Zero_alloc.sub vd1_zero_alloc vd2.val_zero_alloc with
+  | Ok () -> prim_coercion_zero_alloc_check
+  | Error e -> raise (Dont_match (Zero_alloc e))
+
+let is_refined env ty =
+  match get_desc (Ctype.expand_head env ty) with
+  | Trefine _ -> true
+  | _ -> false
+
+let value_descriptions ?refinements ~loc env name
     ~mmodes
     (vd1 : Types.value_description)
     (vd2 : Types.value_description) =
@@ -221,10 +245,7 @@ let value_descriptions ~loc env name
     loc
     vd1.val_attributes vd2.val_attributes
     name;
-  begin match Zero_alloc.sub vd1.val_zero_alloc vd2.val_zero_alloc with
-  | Ok () -> ()
-  | Error e -> raise (Dont_match (Zero_alloc e))
-  end;
+  let prim_coercion_zero_alloc_check = value_descriptions_zero_alloc vd1 vd2 in
   let crossing = Ctype.crossing_of_ty env vd2.val_type in
   let modalities = vd1.val_modalities, vd2.val_modalities in
   let modes =
@@ -236,6 +257,42 @@ let value_descriptions ~loc env name
   | Ok () -> ()
   | Error e -> raise (Dont_match (Mode e))
   end;
+  (* Refinements that differ semantically are recorded for the verifier
+     ([refinements]).  [check_modes] crossed with the declared type, which
+     hides the value's own modes when the declaration adds a refinement: a
+     refined type crosses portability, totality and statefulness only because
+     its values have them. *)
+  let request =
+    Option.map
+      (fun _ ->
+        let root_mode =
+          match modes with
+          | All -> None
+          | Specific ((m0, _), _) -> Some (Mode.Value.disallow_right m0)
+        in
+        { Ctype.root_mode; instantiated = None })
+      refinements
+  in
+  let check_root_mode ty1 =
+    match request with
+    | Some { root_mode = Some m0; _ }
+      when is_refined env vd2.val_type && not (is_refined env ty1)
+           && not (Btype.is_Tvar (Ctype.expand_head env ty1)) ->
+        begin match
+          Mode.Value.submode (Ctype.cross_left env ty1 m0)
+            (Ctype.refinement_operand_mode ())
+        with
+        | Ok () -> ()
+        | Error e -> raise (Dont_match (Mode e))
+        end
+    | _ -> ()
+  in
+  let record_refinements () =
+    match refinements, request with
+    | Some record, Some { instantiated = Some (source, target); _ } ->
+        record ~source ~target
+    | _ -> ()
+  in
   let val_lpoly1 = Lpoly.get_exn vd1.val_lpoly in
   let val_lpoly2 = Lpoly.get_exn vd2.val_lpoly in
   match vd1.val_kind with
@@ -273,20 +330,30 @@ let value_descriptions ~loc env name
         let ty1, mode_l1, _, sort1 =
           Ctype.instance_prim env p1 vd1.val_type
         in
-        (try moregeneral_lpoly env val_lpoly1 val_lpoly2 ty1 vd2.val_type
+        check_root_mode ty1;
+        (try
+           moregeneral_lpoly ?refinements:request env val_lpoly1 val_lpoly2
+             ty1 vd2.val_type
          with Ctype.Moregen err -> raise (Dont_match (Type err)));
+        record_refinements ();
         let pc =
           {pc_desc = p1; pc_type = vd2.Types.val_type;
            pc_poly_mode = Option.map Mode.Locality.disallow_right mode_l1;
            pc_poly_sort = sort1;
+           pc_yielding =
+             Ctype.prim_params_yielding env vd2.Types.val_type
+               ~arity:p1.prim_arity;
+           pc_zero_alloc_check = prim_coercion_zero_alloc_check;
            pc_env = env; pc_loc = vd1.Types.val_loc; } in
         Tcoerce_primitive pc
      end
   | _ ->
-     match moregeneral_lpoly env
+     check_root_mode vd1.val_type;
+     match moregeneral_lpoly ?refinements:request env
              val_lpoly1 val_lpoly2 vd1.val_type vd2.val_type with
      | exception Ctype.Moregen err -> raise (Dont_match (Type err))
      | () -> begin
+       record_refinements ();
        match vd2.val_kind with
          | Val_prim _ -> raise (Dont_match Not_a_primitive)
          | _ -> Tcoerce_none
@@ -348,6 +415,7 @@ type label_mismatch =
   | Type of Errortrace.equality_error
   | Mutability of position
   | Atomicity of position
+  | Ghostliness of position
   | Modality of Modality.equate_error
 
 type record_change =
@@ -402,6 +470,8 @@ type unsafe_mode_crossing_mismatch =
 
 type type_mismatch =
   | Arity
+  | Inductiveness
+  | Phantom_parameters
   | Privacy of privacy_mismatch
   | Kind of kind_mismatch
   | Constraint of Errortrace.equality_error
@@ -416,7 +486,7 @@ type type_mismatch =
   | Extensible_representation of position
   | With_null_representation of position
   | Fixed_representation of position
-  | Jkind of Jkind.Violation.t
+  | Jkind of Ikind.subjkind_error
   | Unsafe_mode_crossing of unsafe_mode_crossing_mismatch
 
 type jkind_mismatch =
@@ -564,6 +634,12 @@ let report_label_mismatch first second env ppf err =
         (choose_other ord first second)
   | Atomicity ord ->
       Format_doc.fprintf ppf "%s is atomic and %s is not."
+        (String.capitalize_ascii (choose ord first second))
+        (choose_other ord first second)
+  | Ghostliness ord ->
+      Format_doc.fprintf ppf
+        "%s is ghost and %s is not.@ Ghostliness decides the record's \
+         layout, so both sides must agree."
         (String.capitalize_ascii (choose ord first second))
         (choose_other ord first second)
   | Modality err_ -> report_modality_equate_error first second ppf err_
@@ -792,6 +868,11 @@ let report_type_mismatch first second decl env ppf err =
   match err with
   | Arity ->
       pr "They have different arities."
+  | Phantom_parameters ->
+      pr "Their phantom parameter guarantees do not match."
+  | Inductiveness ->
+      pr "Their inductive guarantees differ;@ the guarantee can only be \
+          hidden@ behind an abstract type."
   | Privacy err ->
       report_privacy_mismatch ppf err
   | Kind err ->
@@ -840,8 +921,13 @@ let report_type_mismatch first second decl env ppf err =
          (choose ord first second) decl
          "has a fixed representation while the other varies"
   | Jkind v ->
-      Jkind.Violation.report_with_name ~name:first
-        env ppf v
+      let report () =
+        Ikind.report_subjkind_error_with_name ~name:first env ppf v
+      in
+      (match Ikind.subjkind_error_printing_env v with
+       | None -> report ()
+       | Some printing_env ->
+         Printtyp.wrap_printing_env ~error:true printing_env report)
   | Unsafe_mode_crossing mismatch ->
     pr "They have different unsafe mode crossing behavior:@,@[<v 2>%a@]"
       (fun ppf (first, second, mismatch) ->
@@ -893,6 +979,17 @@ module Record_diffing = struct
                 equate_exn m2 legacy;
                 None
             end
+        in
+        let err =
+          match err with
+          | Some _ -> err
+          | None ->
+            (* Ghostliness decides the record's layout, so the two sides of a
+               boundary must agree exactly. *)
+            match ld1.ld_ghost, ld2.ld_ghost with
+            | true, false -> Some (Ghostliness First)
+            | false, true -> Some (Ghostliness Second)
+            | true, true | false, false -> None
         in
         begin match err with
         | Some err -> Some err
@@ -1060,9 +1157,9 @@ module Record_diffing = struct
       match record_form with
       | Legacy ->
         begin match rep1, rep2 with
-        | Record_variable, Record_variable -> None
-        | Record_variable, _ -> Some (Fixed_representation Second)
-        | _, Record_variable -> Some (Fixed_representation First)
+        | Record_undetermined, Record_undetermined -> None
+        | Record_undetermined, _ -> Some (Fixed_representation Second)
+        | _, Record_undetermined -> Some (Fixed_representation First)
 
         | Record_unboxed, Record_unboxed -> None
         | Record_unboxed, _ -> Some (Unboxed_representation (First, []))
@@ -1103,16 +1200,25 @@ module Record_diffing = struct
         | Record_dummy _, _ | _, Record_dummy _ ->
           Misc.fatal_error
             "compare_with_representation: dummy record representation"
+        | Record_variable _, _
+        | _, Record_variable _ ->
+          Misc.fatal_error
+            "compare_with_representation: instantiated record representation"
         end
       | Unboxed_product ->
         begin match rep1, rep2 with
-        | Record_unboxed_product_variable, Record_unboxed_product_variable
+        | Record_unboxed_product_undetermined,
+          Record_unboxed_product_undetermined
         | Record_unboxed_product, Record_unboxed_product ->
             None
-        | Record_unboxed_product, Record_unboxed_product_variable ->
+        | Record_unboxed_product, Record_unboxed_product_undetermined ->
             Some (Fixed_representation First)
-        | Record_unboxed_product_variable, Record_unboxed_product ->
+        | Record_unboxed_product_undetermined, Record_unboxed_product ->
             Some (Fixed_representation Second)
+        | Record_unboxed_product_variable _, _
+        | _, Record_unboxed_product_variable _ ->
+            Misc.fatal_error
+              "compare_with_representation: instantiated record representation"
         end
 end
 
@@ -1284,7 +1390,7 @@ module Variant_diffing = struct
     =
     let shape_of_layout = function
       | Cstr_layout_known { shape; _ } -> Some shape
-      | Cstr_layout_variable -> None
+      | Cstr_layout_undetermined -> None
     in
     let shapes1, shapes2 =
       match rep1, rep2 with
@@ -1589,6 +1695,11 @@ let type_manifest env ty1 ty2 priv2 kind2 =
    context E where all type constructors are equal). *)
 let type_declarations_consistency env decl1 decl2 =
   if decl1.type_arity <> decl2.type_arity then Some Arity
+  else if decl1.type_inductive <> decl2.type_inductive
+       && (decl2.type_inductive || not (Btype.type_kind_is_abstract decl2))
+  then Some Inductiveness
+  else if decl2.type_phantom_parameters && not decl1.type_phantom_parameters
+  then Some Phantom_parameters
   else match privacy_mismatch env decl1 decl2 with
     | Some err -> Some (Privacy err)
     | None -> None
@@ -1640,6 +1751,12 @@ let type_declarations ?(equality = false) ~loc env ~mark name
       | () -> None
   in
   if err <> None then err else
+  (* The type variables that occur only in the predicates of the two
+     declarations (the instances of polymorphic constants there) are distinct
+     nodes of each; they are compared up to renaming.  The parameters are now
+     shared. *)
+  Ctype.with_predicate_variable_renaming ~params:decl2.type_params
+  @@ fun () ->
   let err = match (decl1.type_manifest, decl2.type_manifest) with
       (_, None) -> None
     | (Some ty1, Some ty2) ->

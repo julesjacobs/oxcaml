@@ -154,9 +154,12 @@ Error: The value "a" has type "int * lbl:(int * lbl:'a)"
        The type variable "'a" occurs inside "int * lbl:(int * lbl:'a)"
 |}]
 
-let rec l = ~lbl: 5, ~lbl2: 10 :: l
+type 'a recursive_list = Nil | Cons of 'a * 'a recursive_list
+let rec l = Cons ((~lbl: 5, ~lbl2: 10), l)
 [%%expect{|
-val l : (lbl:int * lbl2:int) list = [(~lbl:5, ~lbl2:10); <cycle>]
+type 'a recursive_list = Nil | Cons of 'a * 'a recursive_list
+val l : (lbl:int * lbl2:int) recursive_list =
+  Cons ((~lbl:5, ~lbl2:10), <cycle>)
 |}]
 
 (* Tuple containing labeled tuples *)

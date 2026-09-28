@@ -32,8 +32,10 @@ open! Stdlib
 type (+'a : any mod separable) t = 'a iarray
 (** An alias for the type of immutable arrays. *)
 
-external length : ('a : any mod separable). local_ 'a iarray -> int
-  = "%array_length"
+external length :
+  ('a : any mod separable).
+  ('a iarray[@local_opt]) @ immutable contended -> int
+  @@ total = "%array_length"
 [@@layout_poly]
 (** Return the length (number of elements) of the given immutable array. *)
 
@@ -47,6 +49,17 @@ external get :
 
    @raise Invalid_argument
    if [n] is outside the range 0 to [(length a - 1)]. *)
+
+module Refined : sig
+  (** Bounds-checked operations whose bounds are expressed in their types. *)
+
+  external get :
+    ('a : any mod separable).
+    (a : ('a iarray[@local_opt])) ->
+    {i : int | 0 <= i && i < length a} ->
+    ('a[@local_opt]) @ total @@ total = "%array_safe_get"
+  [@@layout_poly]
+end
 
 val init : ('a : value_or_null mod separable).
   int -> local_ (int -> 'a) -> 'a iarray
@@ -82,7 +95,7 @@ val sub
    designate a valid subarray of [a]; that is, if
    [pos < 0], or [len < 0], or [pos + len > length a]. *)
 
-val to_list : ('a : value_or_null mod separable). 'a iarray -> 'a list
+val to_list : ('a : value_or_null mod separable). 'a iarray -> 'a list @@ total
 (** [to_list a] returns the list of all the elements of [a]. *)
 
 val of_list : ('a : value_or_null mod separable). 'a list -> 'a iarray
@@ -105,13 +118,13 @@ val of_array : ('a : value_or_null mod separable). 'a array -> 'a iarray
 (** {1 Comparison} *)
 
 val equal : ('a : value_or_null mod separable).
-  local_ ('a -> 'a -> bool) -> 'a iarray -> 'a iarray -> bool
+  local_ ('a -> 'a -> bool) -> 'a iarray -> 'a iarray -> bool @@ total
 (** [eq [|a1; ...; an|] [|b1; ..; bm|]] holds when the two input immutable
     arrays have the same length, and for each pair of elements [ai, bi] at the
     same position we have [eq ai bi]. *)
 
 val compare : ('a : value_or_null mod separable).
-  local_ ('a -> 'a -> int) -> 'a iarray -> 'a iarray -> int
+  local_ ('a -> 'a -> int) -> 'a iarray -> 'a iarray -> int @@ total
 (** Provided the function [cmp] defines a preorder on elements,
     [compare cmp a b] compares first [a] and [b] by their length, and then, if
       equal, by their elements according to the lexicographic preorder.
@@ -122,14 +135,14 @@ val compare : ('a : value_or_null mod separable).
 
 val iter
   : ('a : value_or_null mod separable).
-  local_ ('a -> unit) -> 'a iarray -> unit
+  local_ ('a -> unit) -> 'a iarray -> unit @@ total
 (** [iter f a] applies function [f] in turn to all
    the elements of [a].  It is equivalent to
    [f (get a 0); f (get a 1); ...; f (get a (length a - 1)); ()]. *)
 
 val iteri
   : ('a : value_or_null mod separable).
-  local_ (int -> 'a -> unit) -> 'a iarray -> unit
+  local_ (int -> 'a -> unit) -> 'a iarray -> unit @@ total
 (** Same as {!iter}, but the
    function is applied to the index of the element as first argument,
    and the element itself as second argument. *)
@@ -150,7 +163,7 @@ val mapi
 
 val fold_left
   : ('a : value_or_null) ('b : value_or_null mod separable).
-  local_ ('a -> 'b -> 'a) -> 'a -> 'b iarray -> 'a
+  local_ ('a -> 'b -> 'a) -> 'a -> 'b iarray -> 'a @@ total
 (** [fold_left f init a] computes
    [f (... (f (f init (get a 0)) (get a 1)) ...) (get a n-1)],
    where [n] is the length of the immutable array [a]. *)
@@ -164,7 +177,7 @@ val fold_left_map
 
 val fold_right
   : ('a : value_or_null) ('b : value_or_null mod separable).
-  local_ ('b -> 'a -> 'a) -> 'b iarray -> 'a -> 'a
+  local_ ('b -> 'a -> 'a) -> 'b iarray -> 'a -> 'a @@ total
 (** [fold_right f a init] computes
    [f (get a 0) (f (get a 1) ( ... (f (get a (n-1)) init) ...))],
    where [n] is the length of the immutable array [a]. *)
@@ -197,14 +210,14 @@ val map2
 
 val for_all
   : ('a : value_or_null mod separable).
-  local_ ('a -> bool) -> 'a iarray -> bool
+  local_ ('a -> bool) -> 'a iarray -> bool @@ total
 (** [for_all f [|a1; ...; an|]] checks if all elements
    of the immutable array satisfy the predicate [f]. That is, it returns
    [(f a1) && (f a2) && ... && (f an)]. *)
 
 val exists
   : ('a : value_or_null mod separable).
-  local_ ('a -> bool) -> 'a iarray -> bool
+  local_ ('a -> bool) -> 'a iarray -> bool @@ total
 (** [exists f [|a1; ...; an|]] checks if at least one element of
     the immutable array satisfies the predicate [f]. That is, it returns
     [(f a1) || (f a2) || ... || (f an)]. *)
@@ -238,13 +251,13 @@ val memq
 
 val find_opt
   : ('a : value_or_null mod separable).
-  local_ ('a -> bool) -> 'a iarray -> 'a option
+  local_ ('a -> bool) -> 'a iarray -> 'a option @@ total
 (** [find_opt f a] returns the first element of the immutable array [a] that
     satisfies the predicate [f], or [None] if there is no value that satisfies
     [f] in the array [a]. *)
 
 val find_index : ('a : value_or_null mod separable).
-  local_ ('a -> bool) -> 'a iarray -> int option
+  local_ ('a -> bool) -> 'a iarray -> int option @@ total
 (** [find_index f a] returns [Some i], where [i] is the index of the first
     element of the array [a] that satisfies [f x], if there is such an
     element.
@@ -253,12 +266,12 @@ val find_index : ('a : value_or_null mod separable).
 
 val find_map
   : ('a : value_or_null mod separable) ('b : value_or_null).
-  local_ ('a -> 'b option) -> 'a iarray -> 'b option
+  local_ ('a -> 'b option) -> 'a iarray -> 'b option @@ total
 (** [find_map f a] applies [f] to the elements of [a] in order, and returns the
     first result of the form [Some v], or [None] if none exist. *)
 
 val find_mapi : ('a : value_or_null mod separable) ('b : value_or_null).
-  local_ (int -> 'a -> 'b option) -> 'a iarray -> 'b option
+  local_ (int -> 'a -> 'b option) -> 'a iarray -> 'b option @@ total
 (** Same as [find_map], but the predicate is applied to the index of
    the element as first argument (counting from 0), and the element
    itself as second argument. *)
@@ -282,7 +295,7 @@ val combine
 
 val sort
   : ('a : value_or_null mod separable).
-  ('a -> 'a -> int) -> 'a iarray -> 'a iarray
+  ('a -> 'a -> int) -> 'a iarray -> 'a iarray @@ total
 (** Sort an immutable array in increasing order according to a comparison
    function.  The comparison function must return 0 if its arguments
    compare as equal, a positive integer if the first is greater,
@@ -310,7 +323,7 @@ val sort
 
 val stable_sort
   : ('a : value_or_null mod separable).
-  ('a -> 'a -> int) -> 'a iarray -> 'a iarray
+  ('a -> 'a -> int) -> 'a iarray -> 'a iarray @@ total
 (** Same as {!sort}, but the sorting algorithm is stable (i.e.
    elements that compare equal are kept in their original order) and
    not guaranteed to run in constant heap space.
@@ -322,16 +335,17 @@ val stable_sort
 
 val fast_sort
   : ('a : value_or_null mod separable).
-  ('a -> 'a -> int) -> 'a iarray -> 'a iarray
+  ('a -> 'a -> int) -> 'a iarray -> 'a iarray @@ total
 (** Same as {!sort} or {!stable_sort}, whichever is
     faster on typical input. *)
 
 (** {1 Iterators} *)
 
-val to_seq : ('a : value_or_null mod separable). 'a iarray -> 'a Seq.t
+val to_seq : ('a : value_or_null mod separable). 'a iarray -> 'a Seq.t @@ total
 (** Iterate on the immutable array, in increasing order. *)
 
-val to_seqi : ('a : value_or_null mod separable). 'a iarray -> (int * 'a) Seq.t
+val to_seqi : ('a : value_or_null mod separable).
+  'a iarray -> (int * 'a) Seq.t @@ total
 (** Iterate on the immutable array, in increasing order, yielding indices along
     elements. *)
 

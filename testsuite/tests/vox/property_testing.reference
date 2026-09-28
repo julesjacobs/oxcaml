@@ -1,0 +1,3 @@
+prop_insert        OK, 10000 cases
+prop_insert_buggy  FAILED after 2 cases: x = 1, xs = [-3; -2; 1; 3] (property_testing.ml:48)
+insert_sorted: [1; 2]

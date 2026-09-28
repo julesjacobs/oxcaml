@@ -141,6 +141,9 @@ let asmext = make ("asmext",
 let ocamlc_byte = make ("ocamlc_byte",
   "Path of the ocamlc.byte executable")
 
+let ocamlc_opt = make ("ocamlc_opt",
+  "Path of the ocamlc.opt executable")
+
 let ocamlopt_byte = make ("ocamlopt_byte",
   "Path of the ocamlopt.byte executable")
 
@@ -285,6 +288,7 @@ let init () =
     libext;
     asmext;
     ocamlc_byte;
+    ocamlc_opt;
     ocamlopt_byte;
     ocamlrun;
     ocamlc_flags;

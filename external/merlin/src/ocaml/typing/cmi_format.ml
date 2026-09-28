@@ -15,10 +15,51 @@
 
 open Misc
 
+(* Vox: what a unit's verification assumed rather than checked. Compilers
+   with refinement types record it in the .cmi, .cmo and .cmx files of every
+   unit compiled with -extension refinement_types; see typing/vox_trust.mli. *)
+type vox_status =
+  | Vox_interface     (* compiled from an .mli; nothing to verify *)
+  | Vox_verified      (* verified, possibly by another compilation of the
+                         same source (see -smt-assume-verified) *)
+  | Vox_not_verified  (* compiled with -smt-assume-verified *)
+
+type vox_item_kind =
+  | Vox_refined_external  (* an external whose type states a refinement *)
+  | Vox_total_external    (* an external declared total *)
+  | Vox_total_cast        (* a %identity external whose result is total *)
+  | Vox_builtin           (* an external the verifier gives a built-in
+                             meaning *)
+  | Vox_cast_use          (* a definition that applies such a cast *)
+  | Vox_external          (* another external, outside the library *)
+  | Vox_unsafe            (* Obj, Marshal, an unsafe primitive, an external
+                             that returns a value of any type, -unsafe or an
+                             unsafe attribute *)
+
+type vox_item = {
+  vox_kind : vox_item_kind;
+  vox_name : string;
+  vox_location : string;  (* of the first occurrence *)
+  vox_count : int;
+}
+
+type vox_unit = {
+  vox_status : vox_status;
+  vox_library : bool;       (* compiled with -vox-library *)
+  vox_source : string;      (* hex digest of the parsed source, or "" *)
+  vox_config : string;      (* the flags that change what was verified *)
+  vox_solver : string;      (* the solver's version, if it was not the
+                               expected one (-smt-solver-any-version) *)
+  vox_imports : string list;
+      (* the units the implementation imports, which the interface may not *)
+  vox_items : vox_item list;
+}
+
 type pers_flags =
   | Rectypes
   | Alerts of alerts
   | Opaque
+  | Vox of vox_unit
 
 type kind =
   | Normal of {
@@ -57,7 +98,7 @@ type header = {
     header_name : Compilation_unit.Name.t;
     header_kind : kind;
     header_globals : Global_module.With_precision.t array;
-    header_sign : Serialized.persistent_signature;
+    header_sign : Serialized.signature * Mode.Staticity.Const.t;
     header_params : Global_module.Parameter_name.t list;
 }
 
@@ -65,14 +106,14 @@ type 'sg cmi_infos_generic = {
     cmi_name : Compilation_unit.Name.t;
     cmi_kind : kind;
     cmi_globals : Global_module.With_precision.t array;
-    cmi_sign : 'sg;
+    cmi_sign : 'sg * Mode.Staticity.Const.t;
     cmi_params : Global_module.Parameter_name.t list;
     cmi_crcs : crcs;
     cmi_flags : flags;
 }
 
-type cmi_infos_lazy = Subst.Lazy.persistent_signature cmi_infos_generic
-type cmi_infos = Types.persistent_signature cmi_infos_generic
+type cmi_infos_lazy = Subst.Lazy.signature cmi_infos_generic
+type cmi_infos = Types.signature cmi_infos_generic
 
 let force_cmi_infos cmi =
   let sign, staticity = cmi.cmi_sign in

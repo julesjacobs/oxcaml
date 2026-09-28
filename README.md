@@ -1,9 +1,46 @@
-# OxCaml
+# Vox
+
+Vox adds checked refinement contracts, erased proofs, and ownership-aware
+verification to OCaml. This repository includes its OxCaml compiler.
+
+Start with [bounded clamp](testsuite/tests/vox/bounded_clamp.ml): the caller
+establishes ordered bounds, and the function guarantees a result within them.
+The client uses ordinary calls; no explicit proof wrappers are needed.
+
+```ocaml
+let (clamp @ total) (lo : int) (hi : {h : int | lo <= h}) (x : int) :
+    {r : int | lo <= r && r <= hi} =
+  if x < lo then lo else if x > hi then hi else x
+
+let bounded (x : int) : {r : int | 0 <= r && r <= 10} =
+  clamp 0 10 x
+```
+
+Continue with [checked windows](testsuite/tests/vox/checked_windows.ml) for
+runtime validation, then [queue clients](testsuite/tests/vox/queue_client.ml)
+for an abstract verified data structure. The
+[executable tour](testsuite/tests/vox/README.md) covers the larger examples.
+[Verification programming](design-docs/verification-programming.md) explains
+how to implement contracts and reusable proofs.
+
+After configuring with a worktree-local prefix, run `./dev init`, then
+`./dev test vox/bounded_clamp.ml`. Verification requires Z3 on `PATH`; inspect
+the test summary because solver-dependent tests skip when Z3 is absent.
+Use the compiler's `-dvc` option to inspect a failed goal, its encoded
+assumptions, model values, and opaque calls. Models involving opaque calls can
+indicate missing facts rather than a runtime bug.
+
+Integers retain OCaml's wrapping arithmetic. Refinement annotations ask the
+verifier for a proof implicitly; `assume_` validates at runtime. Proof code
+wrapped in `ghost_` is erased. See the [library guide](verification/library/README.md)
+for the ownership and trusted-primitive boundaries.
+
+## Underlying OxCaml compiler
 
 A performance-focused version of OCaml.
 This is also the home of the Flambda 2 optimiser and the Cfg backend.
 
-OxCaml is currently based on OCaml 5.2.0 (plus some patches from later
+OxCaml is currently based on OCaml 5.4 (plus some patches from later
 upstream revisions, mainly in the runtime).
 
 The following gives basic instructions for getting set up.  Please see

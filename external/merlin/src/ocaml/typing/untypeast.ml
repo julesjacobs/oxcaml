@@ -123,7 +123,8 @@ let rec extract_letop_patterns n pat =
 
 let constant = function
   | Const_char c -> Const.char c
-  | Const_untagged_char c -> Const.mk (Pconst_untagged_char c)
+  | Const_untagged_char c ->
+      Const.mk (Pconst_untagged_char (Char.chr (c land 0xff)))
   | Const_string (s,loc,d) -> Const.string ?quotation_delimiter:d ~loc s
   | Const_int i -> Const.integer (Int.to_string i)
   | Const_int8 i -> Const.integer ~suffix:'s' (Int.to_string i)
@@ -306,6 +307,12 @@ let label_declaration sub ld =
   let attrs = sub.attributes sub ld.ld_attributes in
   let mut = mutable_ ld.ld_mutable in
   let modalities = Typemode.untransl_modalities ld.ld_modalities in
+  let modalities =
+    if ld.ld_ghost then
+      { Location.txt = Parsetree.Modality "ghost"; loc = Location.none }
+      :: modalities
+    else modalities
+  in
   Type.field ~loc ~attrs ~mut ~modalities
     (map_loc sub ld.ld_name)
     (sub.typ sub ld.ld_type)
@@ -355,10 +362,12 @@ let pattern : type k . _ -> k T.general_pattern -> _ = fun sub pat ->
         Ppat_unpack { name with txt = Some name.txt }
     | { pat_extra=[Tpat_type (_path, lid), _, _attrs]; _ } ->
         Ppat_type (map_loc sub lid)
+    | { pat_extra = (Tpat_refinement _, _, _) :: rem; _ } ->
+        (sub.pat sub { pat with pat_extra = rem }).ppat_desc
     | { pat_extra= (Tpat_constraint (ct, modes), _, _attrs) :: rem; _ } ->
         let modes = Typemode.untransl_mode modes in
         Ppat_constraint (sub.pat sub { pat with pat_extra=rem },
-                         Some (sub.typ sub ct), modes)
+                         Option.map (sub.typ sub) ct, modes)
     | { pat_extra = (Tpat_open (_path, lid, _env), _, _attrs) :: rem; _ } ->
         Ppat_open (lid, sub.pat sub { pat with pat_extra=rem })
     | _ ->
@@ -423,10 +432,10 @@ let pattern : type k . _ -> k T.general_pattern -> _ = fun sub pat ->
           | _, None -> None)
     | Tpat_variant (label, pato, _) ->
         Ppat_variant (label, Option.map (sub.pat sub) pato)
-    | Tpat_record (list, _, _, closed) ->
+    | Tpat_record (list, _, closed) ->
         Ppat_record (List.map (fun (lid, _, pat) ->
             map_loc sub lid, sub.pat sub pat) list, closed)
-    | Tpat_record_unboxed_product (list, _, _, closed) ->
+    | Tpat_record_unboxed_product (list, _, closed) ->
         Ppat_record_unboxed_product (List.map (fun (lid, _, pat) ->
             map_loc sub lid, sub.pat sub pat) list, closed)
     | Tpat_array (am, _, list) ->
@@ -456,6 +465,7 @@ let exp_extra sub (extra, loc, attrs) sexp =
     | Texp_newtype (_, label_loc, jkind, _) ->
         Pexp_newtype (label_loc, jkind, sexp)
     | Texp_stack -> Pexp_stack sexp
+    | Texp_ghost -> Pexp_ghost sexp
     | Texp_mode modes ->
         Pexp_constraint (sexp, None, Typemode.untransl_mode modes)
     | Texp_inspected_type _ ->
@@ -464,6 +474,16 @@ let exp_extra sub (extra, loc, attrs) sexp =
         sexp.pexp_desc
     | Texp_borrowed -> Pexp_borrow sexp
     | Texp_ghost_region ->sexp.pexp_desc
+    | Texp_refine -> Pexp_refine sexp
+    | Texp_refinement _ | Texp_value_name _ -> sexp.pexp_desc
+    | Texp_let_refine (_, name) -> begin
+        match sexp.pexp_desc with
+        | Pexp_let (Immutable, Nonrecursive,
+            [{ pvb_expr = bound; _ }], body) ->
+            Pexp_let_refine (name, bound, body)
+        | _ ->
+            Misc.fatal_error "Untypeast: malformed Texp_let_refine"
+      end
   in
   Exp.mk ~loc ~attrs desc
 
@@ -583,8 +603,11 @@ let expression sub exp =
                         let modes = Typemode.untransl_mode modes in
                         [], modes
                       | Texp_poly _ | Texp_newtype _ | Texp_stack
+                      | Texp_ghost
                       | Texp_inspected_type _ -> [], []
-                      | Texp_ghost_region | Texp_borrowed -> [], []
+                      | Texp_ghost_region | Texp_borrowed | Texp_refine
+                      | Texp_let_refine _ | Texp_refinement _
+                      | Texp_value_name _ -> [], []
                     in
                     new_type_constraints @ ret_type_constraints,
                     new_mode_annotations @ ret_mode_annotations)
@@ -633,7 +656,7 @@ let expression sub exp =
             params
         in
         Pexp_function (params, constraint_, body)
-    | Texp_apply (exp, list, _, _, _) ->
+    | Texp_apply (exp, list, _, _, _, _) ->
         let list = List.map (fun (arg_label, arg) -> label arg_label, arg) list in
         Pexp_apply (sub.expr sub exp,
           List.fold_right (fun (label, arg) list ->
@@ -703,7 +726,7 @@ let expression sub exp =
         Pexp_record_unboxed_product
           (list,
            Option.map (fun (exp, _) -> sub.expr sub exp) extended_expression)
-    | Texp_atomic_loc (exp, _, lid, _label, _) ->
+    | Texp_atomic_loc { record = exp; lid; _ } ->
         Pexp_extension ({ txt = "ocaml.atomic.loc"; loc },
                         PStr [ Str.eval ~loc
                                  (Exp.field ~loc
@@ -767,6 +790,14 @@ let expression sub exp =
         Pexp_letexception (sub.extension_constructor sub ext,
                            sub.expr sub exp)
     | Texp_assert (exp, _) -> Pexp_assert (sub.expr sub exp)
+    | Texp_assume (binding, _, _) ->
+        Pexp_assume (sub.expr sub binding.vb_expr)
+    | Texp_logical_equal (left, right) ->
+        let left = sub.expr sub left in
+        Pexp_apply
+          ( Exp.ident ~loc:left.pexp_loc
+              (Location.mkloc (Longident.Lident "===") left.pexp_loc),
+            [ Nolabel, left; Nolabel, sub.expr sub right ] )
     | Texp_lazy exp -> Pexp_lazy (sub.expr sub exp)
     | Texp_object (cl, _) ->
         Pexp_object (sub.class_structure sub cl)
@@ -840,8 +871,8 @@ let expression sub exp =
     | Texp_overwrite (exp1, exp2) ->
         Pexp_overwrite(sub.expr sub exp1, sub.expr sub exp2)
     | Texp_hole _ -> Pexp_hole
-    | Texp_quotation exp -> Pexp_quote (sub.expr sub exp)
-    | Texp_antiquotation exp -> Pexp_splice (sub.expr sub exp)
+    | Texp_quote exp -> Pexp_quote (sub.expr sub exp)
+    | Texp_splice exp -> Pexp_splice (sub.expr sub exp)
   in
   List.fold_right (exp_extra sub) exp.exp_extra
     (Exp.mk ~loc ~attrs desc)
@@ -1014,13 +1045,13 @@ let module_expr (sub : mapper) mexpr =
         let desc = match mexpr.mod_desc with
             Tmod_ident (_p, lid) -> Pmod_ident (map_loc sub lid)
           | Tmod_structure st -> Pmod_structure (sub.structure sub st)
-          | Tmod_functor (arg, mexpr) ->
+          | Tmod_functor (arg, mexpr, _) ->
               Pmod_functor
                 (functor_parameter sub arg, sub.module_expr sub mexpr)
-          | Tmod_apply (mexp1, mexp2, _) ->
+          | Tmod_apply (mexp1, mexp2, _, _, _) ->
               Pmod_apply (sub.module_expr sub mexp1,
                           sub.module_expr sub mexp2)
-          | Tmod_apply_unit mexp1 ->
+          | Tmod_apply_unit (mexp1, _) ->
               Pmod_apply_unit (sub.module_expr sub mexp1)
           | Tmod_constraint (mexpr, _, Tmodtype_explicit (mtype, modes), _) ->
               let modes = Typemode.untransl_mode modes in
@@ -1116,11 +1147,14 @@ let core_type sub ct =
   let desc = match ct.ctyp_desc with
       Ttyp_var (None, jkind) -> Ptyp_any jkind
     | Ttyp_var (Some s, jkind) -> Ptyp_var (s, jkind)
-    | Ttyp_arrow (arg_label, ct1, modes1, ct2, modes2) ->
+    | Ttyp_arrow (arg_label, ct1, modes1, ct2, modes2, binder) ->
         let modes1 = Typemode.untransl_mode modes1 in
         let modes2 = Typemode.untransl_mode modes2 in
         Ptyp_arrow
-          (label arg_label, sub.typ sub ct1, sub.typ sub ct2, modes1, modes2)
+          (label arg_label, sub.typ sub ct1, sub.typ sub ct2, modes1, modes2,
+           Option.map snd binder)
+    | Ttyp_refine (_, binder, payload, pred) ->
+        Ptyp_refine (binder, sub.typ sub payload, sub.expr sub pred)
     | Ttyp_tuple list ->
         Ptyp_tuple (List.map (fun (l, typ) -> l, sub.typ sub typ) list)
     | Ttyp_unboxed_tuple list ->

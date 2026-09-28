@@ -1,0 +1,16 @@
+size 3
+a=1 b=2
+field effect
+a=3 b=4
+a=5 b=6
+a=7 b=6
+update effect
+a=1 b=2
+a=1 b=2
+proj operand
+wrap effect
+holder size 2
+id 9
+use 2
+done
+stdlib done

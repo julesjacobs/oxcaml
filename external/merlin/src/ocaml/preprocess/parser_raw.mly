@@ -1101,6 +1101,9 @@ let merloc startpos ?endpos x =
 %token BARRBRACKET [@symbol "|]"]
 %token BEGIN [@symbol "begin"]
 %token BORROW [@symbol "borrow_"]
+%token REFINE [@symbol "refine_"]
+%token ASSUME [@symbol "assume_"]
+%token UNREACHABLE [@symbol "unreachable_"]
 %token <char> CHAR [@cost 2] [@recovery '_']
 %token <char> HASH_CHAR [@cost 2] [@recovery '_']
 %token CLASS [@symbol "class"]
@@ -1124,6 +1127,7 @@ let merloc startpos ?endpos x =
 %token EOF
 %token EQUAL [@symbol "="]
 %token EXCEPTION [@symbol "exception"]
+%token GHOST [@symbol "ghost_"]
 %token EXCLAVE [@symbol "exclave_"]
 %token EXTERNAL [@symbol "external"]
 %token FALSE [@symbol "false"]
@@ -2354,8 +2358,8 @@ module_declaration_body(module_type_with_optional_modal_expr):
   }
 ;
 %inline module_expr_alias:
-  id = mkrhs(mod_longident)
-    { Mty.alias ~loc:(make_loc $sloc) id }
+  id = mkrhs(mod_longident) attrs = attributes
+    { Mty.alias ~loc:(make_loc $loc(id)) ~attrs id }
 ;
 (* A module substitution (in a signature). *)
 module_subst:
@@ -3008,6 +3012,9 @@ fun_:
       { $1 }
   | let_bindings(ext) IN seq_expr
       { expr_of_let_bindings ~loc:$sloc $1 (merloc $endpos($2) $3) }
+  | LET REFINE binder = mkrhs(LIDENT) EQUAL bound = seq_expr
+      IN body = seq_expr
+      { mkexp ~loc:$sloc (Pexp_let_refine (binder, bound, body)) }
   | pbop_op = mkrhs(LETOP) bindings = letop_bindings IN body = seq_expr
       { let (pbop_pat, pbop_exp, rev_ands) = bindings in
         let ands = List.rev rev_ands in
@@ -3085,8 +3092,17 @@ fun_:
   | simple_expr nonempty_llist(labeled_simple_expr)
       { mkexp ~loc:$sloc (Pexp_apply($1, $2)) }
   | stack(simple_expr) %prec below_HASH { $1 }
+  | GHOST simple_expr %prec below_HASH
+      { mkexp ~loc:$sloc (Pexp_ghost $2) }
   | BORROW simple_expr %prec below_HASH
       { Exp.borrow ~loc:(make_loc $sloc) $2 }
+  | REFINE simple_expr %prec below_HASH
+      { Exp.refine ~loc:(make_loc $sloc) $2 }
+  | ASSUME simple_expr %prec below_HASH
+      { Exp.assume ~loc:(make_loc $sloc) $2 }
+  | UNREACHABLE LPAREN RPAREN
+      { Exp.extension ~loc:(make_loc $sloc)
+          (mkloc "vox.unreachable" (make_loc $sloc), PStr []) }
   | labeled_tuple %prec below_COMMA
       { mkexp ~loc:$sloc (Pexp_tuple $1) }
   | maybe_stack (
@@ -3277,8 +3293,9 @@ block_access:
   | DOT ident _p=LPAREN i=seq_expr RPAREN
     {
       match $2 with
-      | "idx_imm" -> Baccess_block (Immutable, i)
-      | "idx_mut" -> Baccess_block (Mutable, i)
+      | "idx_imm" -> Baccess_block (Immutable_access, i)
+      | "idx_mut" -> Baccess_block (Mutable_access, i)
+      | "idx_atomic" -> Baccess_block (Atomic_access, i)
       | _ ->
         raise Syntaxerr.(Error(Block_access_bad_paren(make_loc $loc(_p))))
     }
@@ -4302,8 +4319,13 @@ jkind_desc_gen(self):
       in
       Pjk_mod ($1, modes)
     }
-  | mkrhs(type_longident) mkrhs(LIDENT)* {
-      Pjk_abbreviation ($1, $2)
+  | name = mkrhs(type_longident) axes = mkrhs(LIDENT)* {
+      match axes with
+      | [] -> Pjk_abbreviation name
+      | _ :: _ ->
+        Pjk_operator
+          ({ pjka_loc = make_loc $loc(name);
+             pjka_desc = Pjk_abbreviation name }, axes)
     }
   | KIND_OF ty=core_type %prec below_LBRACKETAT {
       Pjk_kind_of ty
@@ -4314,8 +4336,12 @@ jkind_desc_gen(self):
   | reverse_product_jkind_gen(self) %prec below_AMPERSAND {
       Pjk_product (List.rev $1)
     }
-  | LPAREN self RPAREN {
-      $2
+  | LPAREN inner = self RPAREN axes = mkrhs(LIDENT)* {
+      match axes with
+      | [] -> inner
+      | _ :: _ ->
+        Pjk_operator
+          ({ pjka_loc = make_loc $loc(inner); pjka_desc = inner }, axes)
     }
 ;
 
@@ -4542,6 +4568,11 @@ label_declarations:
     label_declaration                           { [$1] }
   | label_declaration_semi                      { [$1] }
   | label_declaration_semi label_declarations   { $1 :: $2 }
+;
+refinement_type_head:
+    flags = mutable_or_global_flag name = mkrhs(label)
+    COLON ty = poly_type_no_attr
+      { flags, name, ty }
 ;
 label_declaration:
     mutable_or_global_flag mkrhs(label) COLON poly_type_no_attr m1=optional_atat_modalities_expr attrs=attributes
@@ -4824,12 +4855,30 @@ function_type:
 
 strict_function_or_labeled_tuple_type:
   | mktyp(
+      LPAREN binder = mkrhs(LIDENT) COLON domain = dependent_param_type RPAREN
+      arg_modes = optional_at_mode_expr
+      MINUSGREATER codomain = strict_function_or_labeled_tuple_type
+        { Ptyp_arrow (Nolabel, domain, codomain, arg_modes, [], Some binder) }
+    )
+    { $1 }
+  | mktyp(
+      LPAREN binder = mkrhs(LIDENT) COLON domain = dependent_param_type RPAREN
+      arg_modes = optional_at_mode_expr
+      MINUSGREATER codomain_with_modes = with_optional_mode_expr(tuple_type)
+      %prec MINUSGREATER
+        { let (codomain, codomain_loc), ret_modes = codomain_with_modes in
+          Ptyp_arrow
+            (Nolabel, domain, maybe_curry_typ codomain codomain_loc,
+             arg_modes, ret_modes, Some binder) }
+    )
+    { $1 }
+  | mktyp(
       label = arg_label
       domain_with_modes = with_optional_mode_expr(extra_rhs(param_type))
       MINUSGREATER
       codomain = strict_function_or_labeled_tuple_type
         { let (domain, (_ : Lexing.position * Lexing.position)), arg_modes = domain_with_modes in
-          Ptyp_arrow(label, domain , codomain, arg_modes, []) }
+          Ptyp_arrow(label, domain, codomain, arg_modes, [], None) }
     )
     { $1 }
   | mktyp(
@@ -4842,7 +4891,7 @@ strict_function_or_labeled_tuple_type:
           let (codomain, codomain_loc), ret_modes = codomain_with_modes in
           Ptyp_arrow(label,
             domain,
-            maybe_curry_typ codomain codomain_loc, arg_modes, ret_modes) }
+            maybe_curry_typ codomain codomain_loc, arg_modes, ret_modes, None) }
     )
     { $1 }
   (* The next three cases are for labled tuples - see comment on [tuple_type]
@@ -4868,7 +4917,7 @@ strict_function_or_labeled_tuple_type:
            let label = Labelled label in
            let domain = mktyp ~loc:tuple_loc (Ptyp_tuple ((None, ty) :: ltys)) in
            let domain = extra_rhs_core_type domain ~pos:(snd tuple_loc) in
-           Ptyp_arrow(label, domain, codomain, arg_modes, []) }
+           Ptyp_arrow(label, domain, codomain, arg_modes, [], None) }
     )
     { $1 }
   | mktyp(
@@ -4887,7 +4936,8 @@ strict_function_or_labeled_tuple_type:
             domain ,
             maybe_curry_typ codomain codomain_loc,
             arg_modes,
-            ret_modes)
+            ret_modes,
+            None)
          }
     )
     { $1 }
@@ -4996,6 +5046,26 @@ optional_atat_modalities_expr:
     )
     { $1 }
   | ty = tuple_type
+    { ty }
+;
+
+%inline dependent_param_type:
+  | mktyp(
+    LPAREN bound_vars = typevar_list DOT inner_type = core_type RPAREN
+      { Ptyp_poly (bound_vars, inner_type) }
+    )
+    { $1 }
+  | mktyp(
+    LPAREN bound_vars = typevar_repr_list DOT inner_type = core_type RPAREN
+      { Ptyp_repr (bound_vars, inner_type) }
+    )
+    { $1 }
+  | mktyp(
+    LPAREN LAYOUT bound_vars = newlayouts DOT inner_type = core_type RPAREN
+      { Ptyp_newlayout (bound_vars, inner_type) }
+    )
+    { $1 }
+  | ty = atomic_type
     { ty }
 ;
 
@@ -5150,6 +5220,14 @@ spliceable_type:
 atomic_type:
   | type_ = delimited_type
       { type_ }
+  | LBRACE head = refinement_type_head BAR predicate = seq_expr RBRACE
+      { let (mut, modalities), binder, payload = head in
+        match mut, modalities with
+        | Immutable, [] ->
+            mktyp ~loc:$sloc (Ptyp_refine (binder, payload, predicate))
+        | _ -> raise Parsing.Parse_error }
+  | LBRACE refinement_type_head BAR seq_expr error
+      { unclosed "{" $loc($1) "}" $loc($5) }
   | mktyp( /* begin mktyp group */
       tys = actual_type_parameters
       tid = mkrhs(type_longident)
@@ -5623,6 +5701,9 @@ single_attr_id:
   | ASSERT { "assert" }
   | BEGIN { "begin" }
   | BORROW { "borrow_" }
+  | REFINE { "refine_" }
+  | ASSUME { "assume_" }
+  | UNREACHABLE { "unreachable_" }
   | CLASS { "class" }
   | CONSTRAINT { "constraint" }
   | DO { "do" }

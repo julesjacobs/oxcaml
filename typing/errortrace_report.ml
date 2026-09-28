@@ -89,8 +89,16 @@ let prepare_any_trace printing_status tr =
   | [] -> []
   | elt :: rem -> elt :: List.fold_right clean_trace rem []
 
+(* A refinement explanation is about the last pair of types, which is kept. *)
 let prepare_trace f tr =
-  prepare_any_trace printing_status (Errortrace.map f tr)
+  let clean_trace x l = match printing_status x, l with
+    | Keep, _ -> x :: l
+    | Optional_refinement, ([] | [Errortrace.Refinement _]) -> x :: l
+    | (Optional_refinement | Discard), _ -> l
+  in
+  match Errortrace.map f tr with
+  | [] -> []
+  | elt :: rem -> elt :: List.fold_right clean_trace rem []
 
 (** Keep elements that are [Diff _ ] and split the the last element if it is
     optionally elidable, require a prepared trace *)
@@ -121,10 +129,10 @@ let is_unit_arg env ty =
   let ty, vars = Btype.tpoly_get_poly ty in
   if vars <> [] then false
   else begin
-    (* CR metaprogramming jbachurski: Remove [contains_toplevel_splice] and
+    (* CR metaprogramming jbachurski: Remove [contains_initial_stage_splice] and
        track the stage in errors so we don't need this. See ticket 6726. *)
     let env =
-      if Ctype.contains_toplevel_splice (Env.stage env :> int) ty
+      if Ctype.contains_initial_stage_splice (Env.stage env :> int) ty
       then Env.enter_future env
       else env
     in
@@ -407,6 +415,27 @@ let explanation (type variety) intro prev env
     Some (doc_printf "@ because the layouts of their variables are different.\
                       @ @[<v>%t@;%t@]"
             (fmt_history t1 k1) (fmt_history t2 k2))
+  | Errortrace.Refinement (Invariant_refinement (Some p)) ->
+    Some (doc_printf "@,@[<hov>Refinements under the invariant type \
+                      constructor@ %a@ must be equal.@]"
+            pp_path p)
+  | Errortrace.Refinement (Invariant_refinement None) ->
+    Some (doc_printf "@,@[<hov>Refinements in this invariant position \
+                      must be equal.@]")
+  | Errortrace.Refinement Refinement_needs_proof ->
+    Some (doc_printf "@,@[<hov>Refinements differ here, and this check \
+                      cannot generate a proof obligation.@]")
+  | Errortrace.Refinement Package_refinement ->
+    Some (doc_printf "@,@[<hov>Refinements in package type constraints \
+                      must be equal.@]")
+  | Errortrace.Refinement (Refinement_modes (ty, mode)) ->
+    add_type_to_preparation ty;
+    Some (doc_printf "@,@[<hov>The refined type@ %a@ requires values that \
+                      are@ %a,@ %a@ and@ %a,@ \
+                      but at this position they may be@ %a.@]"
+            (Style.as_inline_code prepared_type_expr) ty
+            Style.inline_code "total" Style.inline_code "stateless"
+            Style.inline_code "portable" Style.inline_code mode)
   | Errortrace.Unequal_tof_kind_jkinds (k1, k2) ->
     let fmt_history which k ppf =
       Jkind.(format_history env ~intro:(

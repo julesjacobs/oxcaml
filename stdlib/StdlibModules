@@ -38,11 +38,13 @@ STDLIB_MODULE_BASENAMES = \
   camlinternalAtomic \
   stdlib \
   either \
+  ghost \
   sys \
   obj \
   type \
   atomic \
   camlinternalLazy \
+  dynamic \
   lazy \
   seq \
   option \
@@ -90,6 +92,7 @@ STDLIB_MODULE_BASENAMES = \
   hashtbl \
   weak \
   format \
+  bigint \
   scanf \
   callback \
   camlinternalOO \

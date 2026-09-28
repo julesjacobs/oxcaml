@@ -6,7 +6,7 @@ escape characters in string literals, so we use the revert-newlines script.
   >   file=$1
   >   position=$2
   >   verbosity=$3
-  >   echo -n "With verbosity $verbosity: "
+  >   printf "With verbosity %s: " "$verbosity"
   >   $MERLIN single type-enclosing -position "$position" -verbosity "$verbosity" \
   >     -filename "$file" < "$file" |
   >     revert-newlines |

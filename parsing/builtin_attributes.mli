@@ -80,7 +80,9 @@ val register_attr : current_phase -> string Location.loc -> unit
 val mark_payload_attrs_used : Parsetree.payload -> unit
 
 (** Issue misplaced attribute warnings for all attributes created with
-    [mk_internal] but not yet marked used. Does nothing if compilation
+    [mk_internal] but not yet marked used, and warning 221
+    [Unused_alert_disable] for all alert-disabling attributes that never
+    suppressed an occurrence of their alert. Does nothing if compilation
     is stopped before lambda due to command-line flags. *)
 val warn_unused : unit -> unit
 
@@ -192,6 +194,10 @@ val select_attributes :
     purpose of warning 53, so it is usually preferable to use [has_attribute]
     or [select_attributes]. *)
 val attr_equals_builtin : Parsetree.attribute -> string -> bool
+
+(** [is_transparent_definition attrs] is true if [attrs] contains
+    [[@def transparent]]. It does not mark the attribute used. *)
+val is_transparent_definition : Parsetree.attributes -> bool
 
 val warn_on_literal_pattern: Parsetree.attributes -> bool
 val explicit_arity: Parsetree.attributes -> bool

@@ -312,7 +312,12 @@ Caml_inline value try_promote(value v, volatile value *p, header_t hd,
   }
 
   st->live_bytes += Bhsize_hd(hd);
-  *p = result + infix_offset;
+  /* Publish with a release store: a concurrent major-GC marker may scan
+     `p` (a remembered-set field) and dereference the promoted block's
+     header/infix-prefix relying only on an address dependency, so the
+     copy's header and unscannable-prefix writes above must be ordered
+     before this store. */
+  atomic_store_release((atomic_value *)p, result + infix_offset);
   return result;
 }
 
@@ -652,6 +657,7 @@ caml_empty_minor_heap_promote(caml_domain_state* domain,
     for( curr_idx = 0, c = participating_idx;
          curr_idx < participating_count; curr_idx++) {
       caml_domain_state* foreign_domain = participating[c];
+      c = (c+1) % participating_count;
 
       struct caml_minor_tables* foreign_minor_tables =
                                                  foreign_domain->minor_tables;
@@ -677,6 +683,8 @@ caml_empty_minor_heap_promote(caml_domain_state* domain,
       if( curr_idx == participating_count-1 ) {
         ref_end = foreign_major_ref->ptr;
       }
+      if (ref_start == ref_end)
+        continue;
 
       CAML_GC_MESSAGE(MINOR,
                       "Oldifying foreign refs from domain %d, count %"
@@ -696,8 +704,6 @@ caml_empty_minor_heap_promote(caml_domain_state* domain,
         oldify_one (&st, *pr, pr);
         remembered_roots++;
       }
-
-      c = (c+1) % participating_count;
     }
   }
   else
@@ -760,7 +766,8 @@ caml_empty_minor_heap_promote(caml_domain_state* domain,
   caml_do_local_roots(
     &oldify_one, oldify_scanning_flags, &st,
     domain->local_roots, domain->current_stack, domain->gc_regs,
-    domain->dynamic_bindings);
+    domain->dynamic_bindings,
+    domain->c_stack);
 
   scan_roots_hook = atomic_load(&caml_scan_roots_hook);
   if (scan_roots_hook != NULL)

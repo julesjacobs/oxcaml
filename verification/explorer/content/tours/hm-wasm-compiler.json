@@ -1,0 +1,105 @@
+{
+  "_about": "Demo tour. Sources: verification/catalogue/pages/hm-wasm-compiler.md (its sources: list is the backbone), research/mastery-20260927/demos-algorithms.md §3.3 and §5.3; every claim re-checked against the code at HEAD 8479634adc.",
+  "_note_step_ratio": "The brief and research/mastery-20260927/INDEX.md (and presentation-20260927/STRUCTURE-v3.md) give '16–93 Wasm-model steps per source step'. That range comes from the four lines quoted in demos-algorithms.md §5.3. The full testsuite/tests/vox/hmc_compilation_examples.reference at HEAD has returning runs from 113/7 = 16.1 (identity) to 49891/367 = 135.9 (polymorphism), with design at 133 and accumulate at 116, so the tour says 16 to 136.",
+  "_note_resource_premise": "The 16 in heap_budget is 16 bytes per heap cell (Hmc_resource_numbers.product_fits advances start by 16 per cell); width is frame_room, used as the bound on cells per tail step.",
+  "id": "hm-wasm-compiler",
+  "title": "The HM-to-WebAssembly compiler",
+  "kind": "demo",
+  "demo": "hm-wasm-compiler",
+  "order": 25,
+  "summary": [
+    "`Hmc_compilation.compile` compiles a closed term of the [Hindley–Milner demo](tour:hindley-milner)'s language to the bytes of one WebAssembly module that reads a 64-bit input when it runs. Against a model of WebAssembly that is part of the demo, the module is proved valid and free of traps, to return only the source program's result, and to return it or report heap or stack exhaustion whenever the source program returns.",
+    "The tour reads the interface and its limits, a client and a rejected client, the chain of simulated machines, the resource premise of `normal`, the trusted WebAssembly model, the emitted runtime and the example runs. The [catalogue page](demo:hm-wasm-compiler) states the claim, scope and trusted base in full."
+  ],
+  "stops": [
+    {
+      "title": "The interface: compile, and what a rejection means",
+      "path": "testsuite/tests/vox/hmc_compilation.mli",
+      "from": "(* A rejection of [term] states what is wrong with it.",
+      "to": [
+        "val no_entry_type",
+        "@ ghost @@ total"
+      ],
+      "lines": "22-55",
+      "text": "`compile` takes a closed term, a memory layout, an initial memory image and a page count, and returns a rejection or an artifact whose `bytes` are a WebAssembly module. The source-level reasons have stated meanings, and `untypable` and `no_entry_type` carry the inference's `rejected` theorem through the compiler: `Type_error` and `Entry_type_mismatch` reject only terms with no type, or no type `word → word`. The compiler may still reject valid programs. It accepts only a fragment (top-level `let`s that bind functions, ending in a function, with no polymorphic local `let`), and `Layout_rejected`, `Initialization_exhausted` and `Encoding_rejected` are uncharacterized, because they depend on the compiled program, which is not a function of the source in the logic: a compiler that rejected every program for these reasons would meet this interface."
+    },
+    {
+      "title": "The theorems about every run",
+      "path": "testsuite/tests/vox/hmc_compilation.mli",
+      "from": "(* The theorems below hold for every [input].",
+      "to": [
+        "val exhaustion",
+        "@ immutable ghost @@ total"
+      ],
+      "lines": "57-98",
+      "text": "`Wasm_binary_execution.run k bytes w c` decodes the bytes, sets the exported global `payload` to `w`, calls the exported `run` and takes at most `k` steps; the input is known only at run time, so one module must be right for every input. `static_validity` says the bytes pass the model's validation, and `safe` that at every step count the run is `Running` or `Finished`, so it never reaches `Trap`, `Type_error`, `Host_limit` or `Not_supported`. `reflection`: a returned word is the source program's result on `w`. `preservation`: if the source returns, the module finishes, returning the same word or reporting exhaustion; `normal` drops the exhaustion case under the premise `M.sufficient`, and `exhaustion` says a reported exhaustion happened at an emitted guard that found too little space. Nothing is stated for a source program that does not return."
+    },
+    {
+      "title": "A client proof",
+      "path": "testsuite/tests/vox/hmc_compilation_public_client.ml",
+      "from": "(* The identity passes every source check, so the compiler can reject it only",
+      "to": [
+        "C.no_entry_type rejection typing ()",
+        "    out"
+      ],
+      "lines": "93-119",
+      "text": "The public-only client derives from the interface alone that the identity `λx. x` can be rejected only for one of the three layout reasons. A typing at `Word64 → Word64` (`identity_typed`, above) refutes both type errors through `untypable` and `no_entry_type`, and unfolding `scoped_term` and the shape predicates refutes the others. It cannot conclude that `compile` succeeds. Below, `identity_steps` unfolds the source machine to show that the identity returns its input in 7 steps, and `identity_returns` applies `normal` to a compiled identity whose layout meets `sufficient` for those 7 steps."
+    },
+    {
+      "title": "A rejected client: normal needs its premise",
+      "path": "testsuite/tests/vox/hmc_compilation_rejected.ml",
+      "from": "let (without_resources @ total)",
+      "to": "The refinement is stated here.",
+      "lines": "34-48",
+      "text": "This client claims a normal return from the source run alone. The checker rejects it: `normal` also requires `M.sufficient`, and the error points at that conjunct in `hmc_compilation.mli`. Without the premise, what a client can prove is `preservation`'s conclusion, which allows exhaustion. The same test checks that the evidence inside an artifact cannot be read: `out.evidence` is an unbound field."
+    },
+    {
+      "title": "The chain of simulated machines",
+      "path": "testsuite/tests/vox/hmc_compiler.ml",
+      "from": "Each pass states in its result type how its output relates to its input,",
+      "to": "closure machine to the tail machine directly.",
+      "lines": "21-41",
+      "text": "The compiler infers types with the verified inference, rebuilds a typed derivation, makes one monomorphic copy of a top-level function per use, converts closures, builds a control-flow graph of one-instruction blocks, marks a recursive function's self-calls in tail position and lowers to WebAssembly. Correctness is a chain of machines, each proved against the one above: the monomorphic and closure machines in lockstep, the tail machine within twice the steps, a heap machine with a bounded heap and stack that may stop with exhaustion, then the WebAssembly model with one dispatcher iteration per heap-machine step. Each intermediate program keeps its input, so `origin` rebuilds the source term from the final program. Every stage is proved in the same composition; no intermediate invariant is assumed."
+    },
+    {
+      "title": "The invariant an artifact carries",
+      "path": "testsuite/tests/vox/hmc_compilation.ml",
+      "from": "(* Only [code] exists at run time. The erased fields are the evidence for",
+      "to": "&& Core.correct a.term a.configuration a.memory a.pages a.evidence}",
+      "lines": "40-46",
+      "text": "At run time an artifact is its `code`. The source term, layout, memory, page count and the compiler's evidence (the tail program and the compiled binary) are ghost fields, erased. The refinement is `Hmc_compiler.correct`: the bytes are the binary's, `origin` of the tail program is the source term, and the binary was accepted for that program, layout, memory and page count. Each public theorem unfolds it and applies the matching lemma of `Hmc_compiler`; since `artifact` is abstract in the interface, a client obtains one only from `compile`."
+    },
+    {
+      "title": "The resource premise of normal",
+      "path": "testsuite/tests/vox/hmc_compilation_model.ml",
+      "from": "let[@def] rec (stack_fits @ total)",
+      "span": 28,
+      "lines": "56-83",
+      "text": "A source run of n steps is matched by at most `target_budget n` = 2(n+1) steps of the tail machine, the bound from `Hmc_tail_simulation`. The proof of `normal` in [`hmc_compilation.ml`](src:testsuite/tests/vox/hmc_compilation.ml) bounds each such step by one saved frame and by `frame_room` = `stack_base − frame_base` heap cells of 16 bytes, so `sufficient` asks for 2(n+1) stack frames and 32(n+1)·`frame_room` bytes above the heap pointer. The budget grows linearly with the number of source steps whatever the program allocates; in the example runs it holds only for the identity with a 128-byte frame region. It also reads the heap start from the emitted module's globals, so a compiler that emitted a full heap would make `normal` vacuous, and `exhaustion` would only say that a guard failed."
+    },
+    {
+      "title": "The trusted base: the WebAssembly model",
+      "path": "testsuite/tests/vox/wasm_calls.ml",
+      "from": "let[@def] (step @ total) (module_ : F.module_ @ immutable)",
+      "to": "  | _ -> advance configuration",
+      "lines": "67-92",
+      "text": "The theorems are about the model in the `wasm_*.ml` files, which decode, validate and run the subset of WebAssembly the compiler emits; its agreement with the WebAssembly specification and with engines is assumed. In this call layer, `call_indirect` traps on a missing table entry or a signature mismatch, `enter` (above) returns `Host_limit` when the call-depth capacity is used up, and an ill-typed stack gives `Type_error`: outcomes that `safe` excludes. The model is tested against Node by [`wasm_differential.ml`](src:testsuite/tests/vox/wasm_differential.ml), which generates modules in the subset, single mutations and corrupted bytes with its own encoder and checks that both agree on validity, on trap or return, on every global and on every byte of final memory. The suite runs 40 modules; the catalogue page records a run of 100,000 with no disagreement. `Wasm_u32.divide` and `remainder` are also trusted `external`s, as are the inference's."
+    },
+    {
+      "title": "Emitted code: a prologue and a dispatcher loop",
+      "path": "testsuite/tests/vox/hmc_wasm_program_runtime.ml",
+      "from": "let[@def] (dispatch_body @ total)",
+      "to": "code = prologue (loop_code ())}",
+      "lines": "25-51",
+      "text": "Source frames live in linear memory, and every block of the control-flow graph is a WebAssembly function without parameters. The exported `run` is five prologue instructions, which store the input from global 7 (`payload`) into the entry frame's first environment cell and reset `payload`, followed by a loop that loads the current block's number from the frame, calls that block with `call_indirect` and repeats while the status global is 0. `call_indirect` is the only call emitted, so the engine's call depth is at most two, and running out of stack is a guard failure reported with status 3. The compiler builds the initial memory for the input 0, and `Hmc_wasm_program_input.install` proves that the memory after the prologue is the one it would have built for the run's input."
+    },
+    {
+      "title": "Tests: the example runs",
+      "path": "testsuite/tests/vox/hmc_compilation_examples.reference",
+      "from": "design (input 4)",
+      "to": "sum-list, 2 KiB heap",
+      "lines": "1-18",
+      "text": "[`hmc_compilation_examples.ml`](src:testsuite/tests/vox/hmc_compilation_examples.ml) compiles eight programs with the public `compile`, runs each module in the model on one or more inputs, and compares the status and result with the source machine; these runs show what the theorems leave open, that this compiler accepts the programs and that its modules return. `sufficient` holds only on the identity's second line, so `normal` covers that run alone. The backend does not optimize: returning runs take from 16 (identity) to 136 (`polymorphism`) model steps per source step, and no theorem bounds the ratio. With 8 frames or 2 KiB of heap, `sum-list` reports exhaustion; [`run-examples-node.js`](src:verification/catalogue/compiler-example/run-examples-node.js) repeats the 15 runs in Node and compares the final memory as well, outside the test suite."
+    }
+  ]
+}

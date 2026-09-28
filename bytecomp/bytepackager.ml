@@ -95,7 +95,9 @@ let relocate_debug base subst ev =
 
 (* Read the unit information from a .cmo file. *)
 
-type pack_member_kind = PM_intf | PM_impl of compilation_unit_descr
+type pack_member_kind =
+  | PM_intf
+  | PM_impl of compilation_unit_descr * Cmi_format.vox_unit option
 
 type pack_member =
   { pm_file: string;
@@ -128,7 +130,7 @@ let read_member_info ~packed_compilation_unit file =
         then begin
           raise(Error(Illegal_renaming (packed_name, file, compunit.cu_name)))
         end;
-        PM_impl compunit)
+        PM_impl (compunit, Cmi_format.input_vox_record ic))
     end
   in
   { pm_file = file;
@@ -193,7 +195,7 @@ let process_append_bytecode oc state objfile compunit =
 let process_append_pack_member packagename oc state m =
   match m.pm_kind with
   | PM_intf -> state
-  | PM_impl compunit ->
+  | PM_impl (compunit, _) ->
       let state =
         process_append_bytecode oc state m.pm_file compunit in
       let root = Path.Pident (Ident.create_persistent packagename) in
@@ -256,7 +258,7 @@ let package_object_files ~ppf_dump files target coercion =
         match compunit with
         | { pm_kind = PM_intf } ->
             required_compunits
-        | { pm_kind = PM_impl { cu_required_compunits; cu_reloc } } ->
+        | { pm_kind = PM_impl ({ cu_required_compunits; cu_reloc }, _) } ->
             let cus_to_remove (rel, _pos) =
               match rel with
               | Reloc_setcompunit cu -> [cu]
@@ -302,7 +304,7 @@ let package_object_files ~ppf_dump files target coercion =
     *)
     let force_link =
       List.exists (function
-          | {pm_kind = PM_impl {cu_force_link}} -> cu_force_link
+          | {pm_kind = PM_impl ({cu_force_link}, _)} -> cu_force_link
           | _ -> false) members
     in
     let pos_final = pos_out oc in
@@ -338,6 +340,16 @@ let package_object_files ~ppf_dump files target coercion =
     Emitcode.marshal_to_channel_with_possibly_32bit_compat
       ~filename:targetfile ~kind:"bytecode unit"
       oc compunit;
+    Cmi_format.output_vox_record oc
+      (Vox_trust.pack_record
+         (List.filter_map
+            (fun m ->
+              let name = CU.Name.to_string (CU.name m.pm_packed_name) in
+              match m.pm_kind with
+              | PM_intf ->
+                Some (name, Vox_trust.interface_file_record m.pm_file)
+              | PM_impl (_, record) -> Some (name, record))
+            members));
     seek_out oc pos_depl;
     output_binary_int oc pos_final)
 

@@ -15,7 +15,7 @@ end
 
 let rec flatten_arrow ret_ty =
   match Types.get_desc ret_ty with
-  | Tarrow ((label, _, _), ty1, ty2, _) ->
+  | Tarrow ((label, _, _, _), ty1, ty2, _) ->
     let ty1 =
       match label with
       | Optional _ ->
@@ -52,7 +52,8 @@ let rec create_type_tree ty : Type_tree.t =
     let ty_without_args = Btype.newgenty (Tconstr (path, [], abbrev_memo)) in
     let children = List.map arg_tys ~f:create_type_tree in
     { data = Type_ref { path; ty = ty_without_args }; children }
-  | Tlink ty | Tpoly (ty, _) | Trepr (ty, _) -> create_type_tree ty
+  | Tlink ty | Tpoly (ty, _) | Trepr (ty, _) | Trefine { ref_payload = ty; _ }
+    -> create_type_tree ty
   | Tobject (fields_type, _) ->
     let rec extract_field_types (ty : Types.type_expr) =
       match Types.get_desc ty with
@@ -91,6 +92,15 @@ let rec create_type_tree ty : Type_tree.t =
     (* CR-someday liam923: Wrap this in something to indicate that it's inside a
        Tquote. *)
     create_type_tree ty
+  | Tbox ty ->
+    let ty_without_args =
+      Btype.newgenty (Tconstr (Predef.path_box, [], ref Types.Mnil))
+    in
+    let children = [ create_type_tree ty ] in
+    { data = Type_ref { path = Predef.path_box; ty = ty_without_args };
+      children
+    }
+  | Tmod (ty, _) -> create_type_tree ty
   | Tnil
   | Tvar _
   | Tsubst _

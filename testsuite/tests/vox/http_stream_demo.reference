@@ -1,0 +1,13 @@
+chunk: "POST /submit HTTP/1.1\r"
+incomplete: consumed=22
+chunk: "\nHost: example.test\r\nContent-Len"
+incomplete: consumed=54
+chunk: "gth: 5\r\n\r"
+incomplete: consumed=63
+chunk: "\nhe"
+incomplete: consumed=66
+chunk: "lloGET /health HTTP/1.1\r\nHost: ex"
+complete: POST /submit HTTP/1.1; body="hello"; consumed=69; suffix=30 bytes
+incomplete: consumed=30
+chunk: "ample.test\r\n\r\n"
+complete: GET /health HTTP/1.1; body=""; consumed=44; suffix=0 bytes

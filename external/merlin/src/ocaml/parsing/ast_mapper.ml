@@ -182,8 +182,10 @@ module T = struct
     | Ptyp_var (s, jkind) ->
         let jkind = map_opt (sub.jkind_annotation sub) jkind in
         var ~loc ~attrs s jkind
-    | Ptyp_arrow (lab, t1, t2, m1, m2) ->
-        arrow ~loc ~attrs lab (sub.typ sub t1) (sub.typ sub t2) (sub.modes sub m1) (sub.modes sub m2)
+    | Ptyp_arrow (lab, t1, t2, m1, m2, binder) ->
+        let binder = map_opt (map_loc sub) binder in
+        arrow ~loc ~attrs ?binder lab (sub.typ sub t1) (sub.typ sub t2)
+          (sub.modes sub m1) (sub.modes sub m2)
     | Ptyp_tuple tyl ->
         tuple ~loc ~attrs (List.map (fun (l, t) -> l, sub.typ sub t) tyl)
     | Ptyp_unboxed_tuple tyl ->
@@ -224,6 +226,9 @@ module T = struct
         repr ~loc ~attrs (List.map (map_loc sub) lvars) (sub.typ sub t)
     | Ptyp_newlayout (lvars, t) ->
         newlayout ~loc ~attrs (List.map (map_loc sub) lvars) (sub.typ sub t)
+    | Ptyp_refine (binder, t, predicate) ->
+        refine ~loc ~attrs (map_loc sub binder) (sub.typ sub t)
+          (sub.expr sub predicate)
     | Ptyp_extension x -> extension ~loc ~attrs (sub.extension sub x)
 
   let map_type_declaration sub
@@ -662,12 +667,18 @@ module E = struct
     | Pexp_extension x -> extension ~loc ~attrs (sub.extension sub x)
     | Pexp_unreachable -> unreachable ~loc ~attrs ()
     | Pexp_stack e -> stack ~loc ~attrs (sub.expr sub e)
+    | Pexp_ghost e -> ghost ~loc ~attrs (sub.expr sub e)
     | Pexp_comprehension c -> comprehension ~loc ~attrs (map_cexp sub c)
     | Pexp_overwrite (e1, e2) -> overwrite ~loc ~attrs (sub.expr sub e1) (sub.expr sub e2)
     | Pexp_quote e -> quote ~loc ~attrs (sub.expr sub e)
     | Pexp_splice e -> splice ~loc ~attrs (sub.expr sub e)
     | Pexp_hole -> hole ~loc ~attrs ()
     | Pexp_borrow e -> borrow ~loc ~attrs (sub.expr sub e)
+    | Pexp_refine e -> refine ~loc ~attrs (sub.expr sub e)
+    | Pexp_assume e -> assume ~loc ~attrs (sub.expr sub e)
+    | Pexp_let_refine (name, bound, body) ->
+        let_refine ~loc ~attrs (map_loc sub name) (sub.expr sub bound)
+          (sub.expr sub body)
 
   let map_binding_op sub {pbop_op; pbop_pat; pbop_exp; pbop_loc} =
     let open Exp in
@@ -1009,8 +1020,10 @@ let default_mapper =
       let pjka_desc =
         match pjka_desc with
         | Pjk_default -> Pjk_default
-        | Pjk_abbreviation (lid, sa) ->
-          Pjk_abbreviation (map_loc this lid, List.map (map_loc this) sa)
+        | Pjk_abbreviation lid -> Pjk_abbreviation (map_loc this lid)
+        | Pjk_operator (t, sa) ->
+          Pjk_operator
+            (this.jkind_annotation this t, List.map (map_loc this) sa)
         | Pjk_mod (t, mode_list) ->
           Pjk_mod (this.jkind_annotation this t, this.modes this mode_list)
         | Pjk_with (t, ty, modalities) ->
@@ -1125,6 +1138,11 @@ module PpxContext = struct
     | Some x -> Exp.construct (lid "Some") (Some (f x))
     | None   -> Exp.construct (lid "None") None
 
+  let make_open_arg (arg : Clflags.open_arg) =
+    match arg with
+    | Open s -> Exp.construct (lid "Open") (Some (make_string s))
+    | Open_cmi s -> Exp.construct (lid "Open_cmi") (Some (make_string s))
+
   let get_cookies () =
     lid "cookies",
     make_list (make_pair make_string (fun x -> x))
@@ -1159,7 +1177,8 @@ module PpxContext = struct
             (make_list (make_pair make_string make_bool))
             (make_list make_string)
             (visible_load_dir_pairs visible, hidden);
-        lid "open_modules", make_list make_string !Clflags.open_modules;
+        lid "open_args",
+          make_list make_open_arg !Clflags.open_args;
         lid "for_package",  make_option make_string !Clflags.for_package;
         lid "debug",        make_bool !Clflags.debug;
         lid "use_threads",  make_bool false;
@@ -1225,6 +1244,16 @@ module PpxContext = struct
             None
         | _ -> raise_errorf "Internal error: invalid [@@@ocaml.ppx.context \
                              { %s }] option syntax" name
+      and get_open_arg = function
+        | { pexp_desc =
+              Pexp_construct ({ txt = Longident.Lident "Open" }, Some exp) } ->
+            Clflags.Open (get_string exp)
+        | { pexp_desc =
+              Pexp_construct
+                ({ txt = Longident.Lident "Open_cmi" }, Some exp) } ->
+            Clflags.Open_cmi (get_string exp)
+        | _ -> raise_errorf "Internal error: invalid [@@@ocaml.ppx.context \
+                             { %s }] open_arg syntax" name
       in
       match name with
       | "tool_name" ->
@@ -1259,8 +1288,8 @@ module PpxContext = struct
               visible
           in
           Load_path.(init ~auto_include:no_auto_include ~visible ~hidden)
-      | "open_modules" ->
-          Clflags.open_modules := get_list get_string payload
+      | "open_args" ->
+          Clflags.open_args := get_list get_open_arg payload
       | "for_package" ->
           Clflags.for_package := get_option get_string payload
       | "debug" ->

@@ -162,8 +162,6 @@ type ('a : immutable_data) t = { x : 'a list; }
 let foo (t : _ t @ contended) = use_uncontended t
 [%%expect {|
 val foo : ('a : immutable_data). 'a t @ contended -> unit = <fun>
-|}, Principal{|
-val foo : ('a : immutable_data). 'a t @ contended -> unit = <fun>
 |}]
 
 let foo (t : int t @ contended) = use_uncontended t
@@ -195,6 +193,7 @@ Error: This type "int ref" should be an instance of type "('a : immutable_data)"
          portability: mod portable with int ≰ mod portable
          statefulness: mod stateless with int ≰ mod stateless
          visibility: mod read_write ≰ mod immutable
+         totality: mod total with int ≰ mod total
 |}]
 
 let foo (t : int t @ local) = use_global t [@nontail]
@@ -348,6 +347,7 @@ Error: This type "int ref" should be an instance of type "('a : immutable_data)"
          portability: mod portable with int ≰ mod portable
          statefulness: mod stateless with int ≰ mod stateless
          visibility: mod read_write ≰ mod immutable
+         totality: mod total with int ≰ mod total
 |}]
 
 let foo (t : int t @ aliased) = use_unique t
@@ -371,8 +371,6 @@ val foo : int t @ contended -> unit = <fun>
 
 let foo (t : _ t @ contended) = use_uncontended t
 [%%expect {|
-val foo : ('a : immutable_data). 'a t @ contended -> unit = <fun>
-|}, Principal{|
 val foo : ('a : immutable_data). 'a t @ contended -> unit = <fun>
 |}]
 

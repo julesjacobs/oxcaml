@@ -63,6 +63,7 @@ let all_keywords =
     "effect", EFFECT, v5_3;
     "else", ELSE, always;
     "end", END, always;
+    "ghost_", GHOST, oxcaml;
     "exception", EXCEPTION, always;
     "exclave_", EXCLAVE, oxcaml;
     "external", EXTERNAL, always;
@@ -100,6 +101,9 @@ let all_keywords =
     "private", PRIVATE, v1_0;
     "rec", REC, always;
     "repr_", REPR, oxcaml;
+    "refine_", REFINE, oxcaml;
+    "assume_", ASSUME, oxcaml;
+    "unreachable_", UNREACHABLE, oxcaml;
     "sig", SIG, always;
     "stack_", STACK, oxcaml;
     "struct", STRUCT, always;

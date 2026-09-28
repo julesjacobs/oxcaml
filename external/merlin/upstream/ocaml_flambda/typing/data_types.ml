@@ -27,7 +27,7 @@ type constructor_description =
     cstr_arity: int;                    (* Number of arguments *)
     cstr_tag: tag;                      (* Tag for heap blocks *)
     cstr_repr: variant_representation;  (* Repr of the outer variant *)
-    cstr_shape: constructor_representation option;
+    cstr_shape: constructor_representation;
                                         (* Repr of the constructor itself *)
     cstr_constant: bool;
     (* True if it's the constructor of a non-[@@unboxed] variant with 0 bits of
@@ -66,6 +66,8 @@ type 'a gen_label_description =
     lbl_arg: type_expr;                 (* Type of the argument *)
     lbl_mut: mutability;                (* Is this a mutable field? *)
     lbl_modalities: Mode.Modality.Const.t;(* Modalities on the field *)
+    lbl_ghost: bool;                   (* Ghost field: no slot; reads
+                                           fabricate a placeholder *)
     lbl_sort: Jkind_types.Sort.Const.t option; (* Sort of the argument *)
     lbl_pos: int;                       (* Position in type *)
     lbl_all: 'a gen_label_description array;   (* All the labels in this type *)
@@ -91,6 +93,7 @@ let label_declaration_of_label_description lbl =
     ld_id;
     ld_mutable = lbl.lbl_mut;
     ld_modalities = lbl.lbl_modalities;
+    ld_ghost = lbl.lbl_ghost;
     ld_type = lbl.lbl_arg;
     ld_sort = lbl.lbl_sort;
     ld_loc = lbl.lbl_loc;

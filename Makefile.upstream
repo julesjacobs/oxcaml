@@ -153,8 +153,13 @@ typing_SOURCES = \
   typing/typedecl_immediacy.mli typing/typedecl_immediacy.ml \
   typing/typedecl_separability.mli typing/typedecl_separability.ml \
   typing/typeopt.mli typing/typeopt.ml \
+  typing/vox_trust.mli typing/vox_trust.ml \
   typing/typedecl.mli typing/typedecl.ml \
   typing/value_rec_check.mli typing/value_rec_check.ml \
+  typing/verification.mli typing/verification.ml \
+  typing/vox_type.mli typing/vox_type.ml \
+  typing/recursive_function.mli typing/recursive_function.ml \
+  typing/structural_recursion.mli typing/structural_recursion.ml \
   typing/typecore.mli typing/typecore.ml \
   typing/typeclass.mli typing/typeclass.ml \
   typing/typemod.mli typing/typemod.ml
@@ -191,6 +196,7 @@ comp_SOURCES = \
   driver/main_args.mli driver/main_args.ml \
   driver/compmisc.mli driver/compmisc.ml \
   driver/makedepend.mli driver/makedepend.ml \
+  driver/vox_audit.mli driver/vox_audit.ml \
   driver/compile_common.mli driver/compile_common.ml
 # All file format descriptions (including cmx{,s}) are in the
 # ocamlcommon library so that ocamlobjinfo can depend on them.
@@ -1086,6 +1092,10 @@ runtime_COMMON_C_SOURCES = \
   array \
   backtrace \
   bigarray \
+  bigint \
+  borrow \
+  pref \
+  vox_control \
   blake2 \
   callback \
   codefrag \
@@ -1097,6 +1107,7 @@ runtime_COMMON_C_SOURCES = \
   extern \
   fail \
   fiber \
+  dynamic \
   finalise \
   floats \
   gc_ctrl \

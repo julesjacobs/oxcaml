@@ -1,0 +1,27 @@
+File "y_names.ml", line 1, characters 38-39:
+1 | let f (y : int) : {r : int | r > 0} = y
+                                          ^
+Error: Refinement could not be proved (counterexample: y = 0)
+File "y_names.ml", line 1, characters 29-34:
+1 | let f (y : int) : {r : int | r > 0} = y
+                                 ^^^^^
+  The refinement is stated here.
+y_names.ml: the same with a cold cache, a warm one and after x_names.ml
+File "x_names.ml", line 1, characters 38-39:
+1 | let f (x : int) : {r : int | r > 0} = x
+                                          ^
+Error: Refinement could not be proved (counterexample: x = 0)
+File "x_names.ml", line 1, characters 29-34:
+1 | let f (x : int) : {r : int | r > 0} = x
+                                 ^^^^^
+  The refinement is stated here.
+x_names.ml: the same with a cold cache, a warm one and after y_names.ml
+File "two_groups.ml", line 1, characters 62-63:
+1 | let f (x : int) : {r : int | r > 0} * {s : int | s > 1} = (x, x)
+                                                                  ^
+Error: Refinement could not be proved (counterexample: x = 0)
+File "two_groups.ml", line 1, characters 49-54:
+1 | let f (x : int) : {r : int | r > 0} * {s : int | s > 1} = (x, x)
+                                                     ^^^^^
+  The refinement is stated here.
+two_groups.ml: the same with a cold cache, a warm one and after x_names.ml

@@ -29,11 +29,11 @@ let () =
   register_named_value "Pervasives.array_align_error"
     (Invalid_argument "address was misaligned")
 
-external raise :
-  ('a : value_or_null). exn -> 'a @ portable unique @@ portable
+external[@layout_poly] raise :
+  ('a : any). exn -> 'a @ portable unique @@ portable
   = "%reraise"
-external raise_notrace :
-  ('a : value_or_null). exn -> 'a @ portable unique @@ portable
+external[@layout_poly] raise_notrace :
+  ('a : any). exn -> 'a @ portable unique @@ portable
   = "%raise_notrace"
 
 let failwith s = raise(Failure s)
@@ -91,27 +91,37 @@ external ( != ) : ('a : value_or_null) . ('a[@local_opt]) -> ('a[@local_opt]) ->
 
 (* Boolean operations *)
 
-external not : (bool[@local_opt]) -> bool @@ portable = "%boolnot"
-external ( && ) : (bool[@local_opt]) -> (bool[@local_opt]) -> bool @@ portable = "%sequand"
-external ( || ) : (bool[@local_opt]) -> (bool[@local_opt]) -> bool @@ portable = "%sequor"
+external not : (bool[@local_opt]) -> bool @@ total = "%boolnot"
+external ( && ) : (bool[@local_opt]) -> (bool[@local_opt]) -> bool @@ total
+  = "%sequand"
+external ( || ) : (bool[@local_opt]) -> (bool[@local_opt]) -> bool @@ total
+  = "%sequor"
 
 (* Integer operations *)
 
-external ( ~- ) : (int[@local_opt]) -> int @@ portable = "%negint"
-external ( ~+ ) : (int[@local_opt]) -> int @@ portable = "%identity"
-external succ : (int[@local_opt]) -> int @@ portable = "%succint"
-external pred : (int[@local_opt]) -> int @@ portable = "%predint"
-external ( + ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%addint"
-external ( - ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%subint"
-external ( * ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%mulint"
+external ( ~- ) : (int[@local_opt]) -> int @@ total = "%negint"
+external ( ~+ ) : (int[@local_opt]) -> int @@ total = "%identity"
+external succ : (int[@local_opt]) -> int @@ total = "%succint"
+external pred : (int[@local_opt]) -> int @@ total = "%predint"
+external ( + ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%addint"
+external ( - ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%subint"
+external ( * ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%mulint"
 external ( / ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%divint"
 external ( mod ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%modint"
 
-let abs x = if x >= 0 then x else -x
+external int_greaterequal : (int[@local_opt]) -> (int[@local_opt]) -> bool
+  @@ portable total = "%geint"
+let (abs @ total) x = if int_greaterequal x 0 then x else -x
 
-external ( land ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%andint"
-external ( lor ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%orint"
-external ( lxor ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%xorint"
+external ( land ) : (int[@local_opt]) -> (int[@local_opt]) -> int
+  @@ portable total = "%andint"
+external ( lor ) : (int[@local_opt]) -> (int[@local_opt]) -> int
+  @@ total portable = "%orint"
+external ( lxor ) : (int[@local_opt]) -> (int[@local_opt]) -> int
+  @@ total portable = "%xorint"
 
 let lnot x = x lxor (-1)
 
@@ -237,9 +247,9 @@ let char_of_int n =
 
 (* Unit operations *)
 
-external ignore : ('a : value_or_null). 'a -> unit @@ portable = "%ignore"
+external ignore : ('a : value_or_null). 'a -> unit @@ total = "%ignore"
 external ignore_contended : ('a : value_or_null).
-  'a @ contended local once -> unit @@ portable = "%ignore"
+  'a @ contended local once -> unit @@ total = "%ignore"
 
 (* Pair operations *)
 
@@ -249,7 +259,8 @@ external snd : ('a * 'b[@local_opt]) -> ('b[@local_opt]) @@ portable = "%field1_
 (* References *)
 
 type ('a : value_or_null) ref = { mutable contents : 'a }
-external ref : ('a : value_or_null) . 'a -> ('a ref[@local_opt]) @@ portable = "%makemutable"
+external ref : ('a : value_or_null) . 'a -> ('a ref[@local_opt]) @@ portable
+  = "%makemutable"
 external ( ! ) : ('a : value_or_null) . ('a ref[@local_opt]) -> 'a @@ portable = "%field0"
 external ( := ) : ('a : value_or_null) . ('a ref[@local_opt]) -> 'a -> unit @@ portable = "%setfield0"
 external incr : (int ref[@local_opt]) -> unit @@ portable = "%incr"
@@ -310,7 +321,7 @@ let float_of_string_opt s =
 
 (* List operations -- more in module List *)
 
-let[@tail_mod_cons] rec ( @ ) l1 l2 =
+let[@tail_mod_cons] rec (( @ ) @ total) l1 l2 =
   match l1 with
   | [] -> l2
   | h1 :: [] -> h1 :: l2
@@ -622,6 +633,7 @@ module ArrayLabels    = ArrayLabels
 module Atomic         = Atomic
 module Backoff        = Backoff
 module Bigarray       = Bigarray
+module Bigint         = Bigint
 module Bool           = Bool
 module Buffer         = Buffer
 module Bytes          = Bytes
@@ -632,6 +644,7 @@ module Complex        = Complex
 module Condition      = Condition
 module Digest         = Digest
 module Domain         = Domain
+module Dynamic        = Dynamic
 module Dynarray       = Dynarray
 module Pqueue         = Pqueue
 module Effect         = Effect
@@ -642,6 +655,7 @@ module Float          = Float
 module Format         = Format
 module Fun            = Fun
 module Gc             = Gc
+module Ghost          = Ghost
 module Hashtbl        = Hashtbl
 module Iarray         = Iarray
 module In_channel     = In_channel

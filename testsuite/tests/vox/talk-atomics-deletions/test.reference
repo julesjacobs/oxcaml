@@ -1,0 +1,146 @@
+#### 1. (a : t) @ local contended on the handle
+verified_atomic.mli, weakened copy:
+1 < (a : t) @ local contended ->
+2 < (a : t) @ local contended -> (desired : int) ->
+1 < (a : t) @ local contended -> (expected : int) -> (desired : int) ->
+1 < (a : t) @ local contended -> (n : int) ->
+1 > (a : t) ->
+2 > (a : t) -> (desired : int) ->
+1 > (a : t) -> (expected : int) -> (desired : int) ->
+1 > (a : t) -> (n : int) ->
+verified_atomic.ml, weakened copy:
+1 < (a : t) @ local contended ->
+2 < (a : t) @ local contended -> (desired : int) ->
+1 < (a : t) @ local contended -> (expected : int) -> (desired : int) ->
+1 < (a : t) @ local contended -> (n : int) ->
+1 > (a : t) ->
+2 > (a : t) -> (desired : int) ->
+1 > (a : t) -> (expected : int) -> (desired : int) ->
+1 > (a : t) -> (n : int) ->
+## spawn_client.ml, real interface:
+exit 0
+## spawn_client.ml, weakened copy:
+exit 0
+#### 2. @@ portable on the operations
+verified_atomic.mli, weakened copy:
+1 < @@ portable = "caml_vox_atomic_cas_bytecode" "caml_vox_atomic_cas"
+1 < @@ portable = "caml_vox_atomic_exchange_bytecode" "caml_vox_atomic_exchange"
+1 < @@ portable = "caml_vox_atomic_fetch_add_bytecode"
+1 < @@ portable = "caml_vox_atomic_load_bytecode" "caml_vox_atomic_load"
+1 < @@ portable = "caml_vox_atomic_set_bytecode" "caml_vox_atomic_set"
+1 > = "caml_vox_atomic_cas_bytecode" "caml_vox_atomic_cas"
+1 > = "caml_vox_atomic_exchange_bytecode" "caml_vox_atomic_exchange"
+1 > = "caml_vox_atomic_fetch_add_bytecode"
+1 > = "caml_vox_atomic_load_bytecode" "caml_vox_atomic_load"
+1 > = "caml_vox_atomic_set_bytecode" "caml_vox_atomic_set"
+verified_atomic.ml, weakened copy:
+1 < @@ portable = "caml_vox_atomic_cas_bytecode" "caml_vox_atomic_cas"
+1 < @@ portable = "caml_vox_atomic_exchange_bytecode" "caml_vox_atomic_exchange"
+1 < @@ portable = "caml_vox_atomic_fetch_add_bytecode"
+1 < @@ portable = "caml_vox_atomic_load_bytecode" "caml_vox_atomic_load"
+1 < @@ portable = "caml_vox_atomic_set_bytecode" "caml_vox_atomic_set"
+1 > = "caml_vox_atomic_cas_bytecode" "caml_vox_atomic_cas"
+1 > = "caml_vox_atomic_exchange_bytecode" "caml_vox_atomic_exchange"
+1 > = "caml_vox_atomic_fetch_add_bytecode"
+1 > = "caml_vox_atomic_load_bytecode" "caml_vox_atomic_load"
+1 > = "caml_vox_atomic_set_bytecode" "caml_vox_atomic_set"
+## spawn_client.ml, weakened copy:
+File "spawn_client.ml", line 33, characters 71-75:
+33 |   let d = Domain.Safe.spawn (fun () -> for _ = 1 to 100_000 do ignore (bump a) done) in
+                                                                            ^^^^
+Error: The value bump is nonportable
+         because it closes over the value A.fetch_and_add at file "spawn_client.ml", line 15, characters 10-25
+         which is nonportable.
+       However, the value bump highlighted is expected to be portable
+         because it is used inside the function at file "spawn_client.ml", line 33, characters 28-84
+         which is expected to be portable.
+exit 2
+#### 3. caller token @ unique
+verified_atomic.mli, weakened copy:
+5 < (caller : I.payload Ghost_pref.token) @ unique ghost ->
+5 > (caller : I.payload Ghost_pref.token) @ ghost ->
+verified_atomic.ml, weakened copy:
+5 < (caller : I.payload Ghost_pref.token) @ unique ghost ->
+5 > (caller : I.payload Ghost_pref.token) @ ghost ->
+## stale_read.ml, real interface:
+File "stale_read.ml", line 159, characters 45-46:
+159 |     let v : {v : int | v = value} = P.read p t in
+                                                   ^
+Error: This value is used here, but it has already been used as unique at:
+File "stale_read.ml", line 155, characters 56-57:
+155 |     let _ = A.compare_and_set a.atomic 1 0 release_post t
+                                                              ^
+  
+exit 2
+## stale_read.ml, weakened copy:
+exit 0
+refinement {v | v = 5} violated: read 6
+done
+exit 0
+#### 4. transition results @ unique
+verified_atomic.mli, weakened copy:
+1 < post (Ghost_pref.own r.outgoing)} @ unique)
+1 < post (before = expected) (Ghost_pref.own r.outgoing)} @ unique)
+3 < post before (Ghost_pref.own r.outgoing)} @ unique)
+1 > post (Ghost_pref.own r.outgoing)})
+1 > post (before = expected) (Ghost_pref.own r.outgoing)})
+3 > post before (Ghost_pref.own r.outgoing)})
+verified_atomic.ml, weakened copy:
+1 < post (Ghost_pref.own r.outgoing)} @ unique)
+1 < post (before = expected) (Ghost_pref.own r.outgoing)} @ unique)
+3 < post before (Ghost_pref.own r.outgoing)} @ unique)
+1 > post (Ghost_pref.own r.outgoing)})
+1 > post (before = expected) (Ghost_pref.own r.outgoing)})
+3 > post before (Ghost_pref.own r.outgoing)})
+## dup.ml, real interface:
+File "dup.ml", line 30, characters 40-46:
+30 |       { A.restored = inside; outgoing = inside })) in
+                                             ^^^^^^
+Error: This value is used here, but it is also being used as unique at:
+File "dup.ml", line 30, characters 21-27:
+30 |       { A.restored = inside; outgoing = inside })) in
+                          ^^^^^^
+  
+exit 2
+## dup.ml, weakened copy:
+exit 0
+#### 5. transition @ total
+verified_atomic.mli, weakened copy:
+5 < @ immutable total ghost ->
+5 > @ immutable ghost ->
+verified_atomic.ml, weakened copy:
+5 < @ immutable total ghost ->
+5 > @ immutable ghost ->
+## diverge.ml, real interface:
+File "diverge.ml", line 27, characters 34-38:
+27 |     (fun before inside outside -> loop ()) in
+                                       ^^^^
+Error: The value loop is partial
+       but is expected to be total
+         because it is used inside the function at file "diverge.ml", line 27, characters 4-42
+         which is expected to be total.
+exit 2
+## diverge.ml, weakened copy:
+exit 0
+compare_and_set 0 -> 1 on a held lock returned false; the cell was written anyway: 7
+exit 0
+#### 6. Slot.take's ghost premise
+unique_cell.mli, weakened copy:
+1 < (token : {t : bool Ghost_pref.token |
+1 < Ghost_pref.Heap.at (Ghost_pref.own t) (location cell) === Some true})
+1 > (token : bool Ghost_pref.token)
+unique_cell.ml, weakened copy:
+1 < (token : {t : bool Ghost_pref.token |
+1 < Ghost_pref.Heap.at (Ghost_pref.own t) (location cell) === Some true})
+1 > (token : bool Ghost_pref.token)
+## confuse.ml, real interface:
+File "confuse.ml", line 5, characters 28-35:
+5 |   let s = Slot.take r.value r.state in
+                                ^^^^^^^
+Error: Refinement could not be proved (counterexample)
+File "unique_cell.mli", line 77, characters 6-73:
+  The refinement is stated here.
+exit 2
+## confuse.ml, weakened copy:
+exit 0
+exit 139 (SIGSEGV)

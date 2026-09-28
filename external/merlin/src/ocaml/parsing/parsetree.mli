@@ -115,14 +115,18 @@ and core_type_desc =
   | Ptyp_any of jkind_annotation option (** [_] or [_ : k] *)
   | Ptyp_var of string * jkind_annotation option
     (** A type variable such as ['a] or ['a : k] *)
-  | Ptyp_arrow of arg_label * core_type * core_type * modes * modes
-      (** [Ptyp_arrow(lbl, T1, T2, M1, M2)] represents:
+  | Ptyp_arrow of
+      arg_label * core_type * core_type * modes * modes * string loc option
+      (** [Ptyp_arrow(lbl, T1, T2, M1, M2, binder)] represents:
             - [T1 @ M1 -> T2 @ M2]    when [lbl] is
                                      {{!arg_label.Nolabel}[Nolabel]},
             - [~l:(T1 @ M1) -> (T2 @ M2)] when [lbl] is
                                      {{!arg_label.Labelled}[Labelled]},
             - [?l:(T1 @ M1) -> (T2 @ M2)] when [lbl] is
                                      {{!arg_label.Optional}[Optional]}.
+
+           [binder] is [Some x] only for the dependent arrow
+           [(x : T1) -> T2], where [x] scopes over [T2].
          *)
   | Ptyp_tuple of (string option * core_type) list
       (** [Ptyp_tuple(tl)] represents a product type:
@@ -224,6 +228,9 @@ and core_type_desc =
   | Ptyp_splice of core_type (** [$T] *)
   | Ptyp_of_kind of jkind_annotation (** [(type : k)] *)
   | Ptyp_repr of string loc list * core_type
+  | Ptyp_refine of string loc * core_type * expression
+      (** [{x : T | P}]: the refinement of the payload type [T] by the
+          predicate [P].  [x] scopes over [P], but not [T]. *)
   | Ptyp_extension of extension  (** [[%id]]. *)
 
 and arg_label = Asttypes.arg_label =
@@ -552,6 +559,7 @@ and expression_desc =
   | Pexp_extension of extension  (** [[%id]] *)
   | Pexp_unreachable  (** [.] *)
   | Pexp_stack of expression (** stack_ exp *)
+  | Pexp_ghost of expression (** ghost_ exp *)
   | Pexp_comprehension of comprehension_expression
     (** [[? BODY ...CLAUSES... ?]], where:
           - [?] is either [""] (list), [:] (immutable array), or [|] (array).
@@ -564,6 +572,12 @@ and expression_desc =
   | Pexp_hole (** _ *)
   | Pexp_borrow of expression
     (** borrow_ exp *)
+  | Pexp_refine of expression
+    (** [refine_ exp] *)
+  | Pexp_assume of expression
+    (** [assume_ exp] *)
+  | Pexp_let_refine of string loc * expression * expression
+    (** [let refine_ x = exp1 in exp2] *)
 
 and case =
     {
@@ -673,10 +687,10 @@ and function_constraint =
 and block_access =
   | Baccess_field of Longident.t loc
       (** [.foo] *)
-  | Baccess_block of mutable_flag * expression
-      (** Access using another block index: [.idx_imm(E)], [.idx_mut(E)]
-          (usually followed by unboxed accesses, to deepen the index).
-      *)
+  | Baccess_block of access_flag * expression
+      (** Access using another block index: [.idx_imm(E)], [.idx_mut(E)],
+          [.idx_atomic(E)] (usually followed by unboxed accesses,
+          to deepen the index). *)
 
 and unboxed_access =
   | Uaccess_unboxed_field of Longident.t loc
@@ -1376,15 +1390,12 @@ and module_binding =
 
 and jkind_annotation_desc =
   | Pjk_default
-  (* CR layouts-scannable: Scannable axes annotations only currently parse on
-     abbreviations, not on products/etc. It could be desirable for these
-     annotations to parse in more places with a warning (ex: for generated
-     code). This change should only be made if necessary (and after the
-     ignored-kind-modifier warning is enabled), since it adds confusion. *)
-  | Pjk_abbreviation of Longident.t loc * string loc list
-  (** [Pjk_abbreviation(A, [SA1; ...; SAn])] represents the layout
-      [A SA1 ... SAn] where [A] is some abbreviation (like [value])
-      and each [SAi] is a scannable axis annotation (like [non_pointer]) *)
+  | Pjk_abbreviation of Longident.t loc
+  (** [Pjk_abbreviation A] represents an abbreviation [A] (like [value]) *)
+  | Pjk_operator of jkind_annotation * string loc list
+  (** [Pjk_operator(K, [SA1; ...; SAn])] represents the layout
+      [K SA1 ... SAn] where [K] is an arbitrary kind and each [SAi] is a
+      scannable axis annotation (like [non_pointer]). *)
   (* CR layouts v2.8: [mod] can have only layouts on the left, not
      full kind annotations. We may want to narrow this type some.
      Internal ticket 5085. *)

@@ -6,13 +6,29 @@ description = "compiler-libs support library"
 package "common" (
   requires = "compiler-libs"
   version = "@VERSION@"
-  description = "Common compiler routines"
+  description = "Compiler utilities and parsing"
   archive(byte) = "ocamlcommon.cma"
   archive(native) = "ocamlcommon.cmxa"
 )
 
+package "frontend" (
+  requires = "compiler-libs compiler-libs.common"
+  version = "@VERSION@"
+  description = "Compiler front-end"
+  archive(byte) = "ocamlfrontend.cma"
+  archive(native) = "ocamlfrontend.cmxa"
+)
+
+package "verification" (
+  requires = "compiler-libs.frontend unix"
+  version = "@VERSION@"
+  description = "Refinement verification"
+  archive(byte) = "vox_smt.cma vox_vc.cma vox_smt_solver.cma vox_verify.cma"
+  archive(native) = "vox_smt.cmxa vox_vc.cmxa vox_smt_solver.cmxa vox_verify.cmxa"
+)
+
 package "bytecomp" (
-  requires = "compiler-libs.common"
+  requires = "compiler-libs.verification"
   version = "@VERSION@"
   description = "Bytecode compiler"
   archive(byte) = "ocamlbytecomp.cma"
@@ -20,7 +36,7 @@ package "bytecomp" (
 )
 
 package "optcomp" (
-  requires = "compiler-libs.common"
+  requires = "compiler-libs.verification"
   version = "@VERSION@"
   description = "Native-code compiler"
   archive(byte) = "ocamloptcomp.cma"

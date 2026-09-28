@@ -93,6 +93,13 @@ let fmt_mutable_flag f x =
   | Mutable -> fprintf f "Mutable";
 ;;
 
+let fmt_access_flag f x =
+  match x with
+  | Immutable_access -> fprintf f "Immutable";
+  | Mutable_access -> fprintf f "Mutable";
+  | Atomic_access -> fprintf f "Atomic";
+;;
+
 let fmt_virtual_flag f x =
   match x with
   | Virtual -> fprintf f "Virtual";
@@ -194,13 +201,14 @@ let rec core_type i ppf x =
   | Ptyp_var (s, jkind) ->
       line i ppf "Ptyp_var %s\n" s;
       jkind_annotation_opt (i+1) ppf jkind
-  | Ptyp_arrow (l, ct1, ct2, m1, m2) ->
+  | Ptyp_arrow (l, ct1, ct2, m1, m2, binder) ->
       line i ppf "Ptyp_arrow\n";
       arg_label i ppf l;
       core_type i ppf ct1;
       core_type i ppf ct2;
       modes i ppf m1;
       modes i ppf m2;
+      option i string_loc ppf binder;
   | Ptyp_tuple l ->
       line i ppf "Ptyp_tuple\n";
       list i (labeled_tuple_element core_type) ppf l;
@@ -254,6 +262,11 @@ let rec core_type i ppf x =
   | Ptyp_splice t ->
       line i ppf "Ptyp_splice\n";
       core_type i ppf t
+  | Ptyp_refine (binder, ct, predicate) ->
+      line i ppf "Ptyp_refine\n";
+      line (i + 1) ppf "%a %s\n" fmt_location binder.loc binder.txt;
+      core_type i ppf ct;
+      expression i ppf predicate
   | Ptyp_repr (lv, ct) ->
       line i ppf "Ptyp_repr\n";
       list i reprvar ppf lv;
@@ -516,6 +529,9 @@ and expression i ppf x =
       payload i ppf arg
   | Pexp_unreachable ->
       line i ppf "Pexp_unreachable"
+  | Pexp_ghost e ->
+      line i ppf "Pexp_ghost\n";
+      expression i ppf e
   | Pexp_stack e ->
       line i ppf "Pexp_stack\n";
       expression i ppf e
@@ -537,6 +553,16 @@ and expression i ppf x =
   | Pexp_borrow e ->
       line i ppf "Pexp_borrow\n";
       expression i ppf e
+  | Pexp_refine e ->
+      line i ppf "Pexp_refine\n";
+      expression i ppf e
+  | Pexp_assume e ->
+      line i ppf "Pexp_assume\n";
+      expression i ppf e
+  | Pexp_let_refine (name, bound, body) ->
+      line i ppf "Pexp_let_refine %a %s\n" fmt_location name.loc name.txt;
+      expression i ppf bound;
+      expression i ppf body
   )
 
 and block_access i ppf = function
@@ -544,7 +570,7 @@ and block_access i ppf = function
       line i ppf "Baccess_field %a\n" fmt_longident_loc lid
   | Baccess_block (mut, idx) ->
     line i ppf "Baccess_block %a\n"
-      fmt_mutable_flag mut;
+      fmt_access_flag mut;
       expression i ppf idx
 
 and unboxed_access i ppf = function

@@ -1,0 +1,23 @@
+File "stronger.ml", line 3, characters 0-57:
+3 | external f : (x : int) -> {r : int | r = x} = "%identity"
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+
+File "stronger.ml", line 4, characters 0-72:
+4 | external g : (x : {x : int | x >= 0}) -> {r : int | r = x} = "%identity"
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+
+File "stronger.ml", lines 5-6, characters 0-11:
+5 | external lem : (x : int) -> {u : unit | x + 0 = x && x * 1 = x} @@ total =
+6 |   "%ignore"
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+
+File "stronger.ml", line 7, characters 0-57:
+7 | external h : (x : int) -> {r : int | r = x} = "%identity"
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.

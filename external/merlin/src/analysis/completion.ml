@@ -173,7 +173,7 @@ let make_candidate ~get_doc ~attrs ~exact ~prefix_path name ?loc ?path ty =
       let desc =
         Types.(
           Tarrow
-            ( (Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy),
+            ( (Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy, None),
               label_descr.lbl_res,
               label_descr.lbl_arg,
               commu_ok ))
@@ -183,7 +183,7 @@ let make_candidate ~get_doc ~attrs ~exact ~prefix_path name ?loc ?path ty =
       let desc =
         Types.(
           Tarrow
-            ( (Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy),
+            ( (Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy, None),
               ty,
               label_decl.ld_type,
               commu_ok ))
@@ -807,10 +807,11 @@ let expand_prefix ~global_modules ?(kinds = []) env prefix =
 open Typedtree
 
 let labels_of_application ~prefix = function
-  | { exp_desc = Texp_apply (f, args, _, _, _); exp_env; _ } ->
+  | { exp_desc = Texp_apply (f, args, _, _, _, _); exp_env; _ } ->
     let rec labels t =
       match Types.get_desc t with
-      | Types.Tarrow ((label, _, _), lhs, rhs, _) -> (label, lhs) :: labels rhs
+      | Types.Tarrow ((label, _, _, _), lhs, rhs, _) ->
+        (label, lhs) :: labels rhs
       | _ ->
         let t' = Ctype.full_expand ~may_forget_scope:true exp_env t in
         if
@@ -859,7 +860,9 @@ let application_context ~prefix path =
   let context =
     match path with
     | (_, Expression earg)
-      :: (_, Expression ({ exp_desc = Texp_apply (efun, _, _, _, _); _ } as app))
+      :: ( _,
+           Expression
+             ({ exp_desc = Texp_apply (efun, _, _, _, _, _); _ } as app) )
       :: _
       when earg != efun ->
       (* Type variables shared across arguments should all be

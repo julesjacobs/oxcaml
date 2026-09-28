@@ -1,0 +1,13 @@
+ok: state_size counts rows without constructing state IDs
+ok: compare reaches no certificate-building function
+ok: reduce reaches no certificate-building function
+ok: dfa_equivalence_core.compare_complete makes no call
+ok: dfa_equivalence_core.compare_equal makes no call
+ok: dfa_equivalence_core.comparison_witness makes no call
+ok: dfa_equivalence_core.reduce_complete makes no call
+ok: dfa_equivalence_core.reduce_preserves makes no call
+ok: dfa_equivalence_core.reduce_minimum makes no call
+ok: regex_language.sound makes no call
+ok: regex_language.complete makes no call
+ok: regex_language.lower_matches makes no call
+ok: regex_language.lower_valid makes no call

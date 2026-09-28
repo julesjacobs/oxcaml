@@ -1,0 +1,4 @@
+File "http_private_rejected.ml", line 18, characters 13-30:
+18 | let hidden = Vox_http.Internal.feed
+                  ^^^^^^^^^^^^^^^^^
+Error: Unbound module Vox_http.Internal

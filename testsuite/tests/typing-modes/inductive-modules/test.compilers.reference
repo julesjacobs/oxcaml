@@ -1,0 +1,24 @@
+File "forge.ml", line 1:
+Error: The implementation forge.ml does not match the interface forge.cmi: 
+       Type declarations do not match:
+         type t = Z | S of t
+       is not included in
+         type t = Z | S of t
+       [@@inductive]
+       Their inductive guarantees differ;
+       the guarantee can only be hidden
+       behind an abstract type.
+       File "forge.mli", line 1, characters 0-33: Expected declaration
+       File "forge.ml", line 1, characters 0-19: Actual declaration
+File "drop.ml", line 1:
+Error: The implementation drop.ml does not match the interface drop.cmi: 
+       Type declarations do not match:
+         type t = Z | S of t
+       [@@inductive]
+       is not included in
+         type t = Z | S of t
+       Their inductive guarantees differ;
+       the guarantee can only be hidden
+       behind an abstract type.
+       File "drop.mli", line 1, characters 0-19: Expected declaration
+       File "drop.ml", line 1, characters 0-33: Actual declaration

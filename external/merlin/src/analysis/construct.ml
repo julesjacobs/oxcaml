@@ -124,7 +124,7 @@ module Util = struct
           Some params
         | None ->
           begin match type_expr.desc with
-          | Tarrow ((arg_label, _, _), _, te, _) ->
+          | Tarrow ((arg_label, _, _, _), _, te, _) ->
             check_type te (arg_label :: params)
           | _ -> None
           end
@@ -494,6 +494,22 @@ module Gen = struct
         | Tpoly (texp, _) ->
           (* We are not going "deeper" so we don't call [exp_or_hole] here *)
           expression ~idents_table values_scope ~depth env texp
+        | Trefine { ref_payload; _ } ->
+          exp_or_hole env ref_payload
+          |> List.map ~f:(fun payload ->
+              let open Ast_helper in
+              let name = Location.mknoloc "value" in
+              let variable =
+                Exp.ident (Location.mknoloc (Longident.Lident name.txt))
+              in
+              let pattern =
+                Pat.constraint_ (Pat.var name)
+                  (Some (Ptyp_of_type.core_type ref_payload))
+                  []
+              in
+              Exp.let_ Immutable Nonrecursive
+                [ Vb.mk pattern payload ]
+                (Exp.refine variable))
         | Tunivar _ | Tvar _ | Tof_kind _ -> []
         | Tconstr (path, [ texp ], _) when path = Predef.path_lazy_t ->
           (* Special case for lazy *)
@@ -515,7 +531,7 @@ module Gen = struct
         | Tarrow _ ->
           let rec left_types acc env ty =
             match get_desc ty with
-            | Tarrow ((label, _, _), tyleft, tyright, _) ->
+            | Tarrow ((label, _, _, _), tyleft, tyright, _) ->
               let arg, name = make_arg env label tyleft in
               let value_description =
                 { val_type = tyleft;
@@ -564,7 +580,7 @@ module Gen = struct
           List.map choices ~f:(fun choice ->
               Ast_helper.Exp.unboxed_tuple choice)
         | Tvariant row_desc -> variant env rtyp row_desc
-        | Tquote _ | Tsplice _ | Tquote_eval _ -> []
+        | Tquote _ | Tsplice _ | Tquote_eval _ | Tbox _ | Tmod _ -> []
         | Trepr (ty, _) ->
           (* CR modes: This isn't quite right, but it's probably good enough. *)
           exp_or_hole env ty
@@ -621,7 +637,7 @@ end
 
 let needs_parentheses e =
   match e.Parsetree.pexp_desc with
-  | Pexp_function _ | Pexp_lazy _ | Pexp_apply _
+  | Pexp_function _ | Pexp_lazy _ | Pexp_apply _ | Pexp_let _
   | Pexp_variant (_, Some _)
   | Pexp_construct (_, Some _) -> true
   | _ -> false

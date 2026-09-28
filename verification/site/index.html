@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vox</title>
+<meta name="description" content="Vox: OxCaml with refinement types checked by Z3 at compile time, erased ghost code and affine ghost ownership.">
+<link rel="stylesheet" href="style.css?v={{css}}">
+<style>
+.home{max-width:1040px;padding-top:26px;padding-bottom:30px;font-size:15px;line-height:1.55}
+.home h1{font-size:30px;letter-spacing:-.5px;margin:0}
+.home .lede{font-size:16px;color:var(--muted);margin:2px 0 14px}
+.home>p{margin:0 0 10px}
+.home pre{margin:10px 0 4px}
+.home .excerpt-source{margin:0 0 12px}
+.parts{list-style:none;padding:0;margin:18px 0 0;display:grid;grid-template-columns:1fr 1fr;gap:0 32px}
+.parts li{border-top:1px solid var(--line);padding:10px 0 12px}
+.parts h2{font-size:17px;margin:0 0 3px}
+.parts h2 small{font-size:12px;font-weight:400;color:var(--muted);margin-left:8px}
+.parts p{margin:0;font-size:14px;line-height:1.5}
+.home .page-meta{font-size:12px;margin:14px 0 0}
+@media(max-width:760px){.parts{grid-template-columns:1fr}}
+@media(max-width:640px){.home{padding-top:18px}.home h1{font-size:26px}}
+</style>
+</head>
+<body>
+<main class="spec-page home">
+<h1>Vox</h1>
+<p class="lede">Refinement types, ghost code and ghost ownership for OxCaml</p>
+
+<p>Vox is a fork of the OxCaml compiler that checks specifications at compile time. A type can carry a refinement, <code>{r : int | lo &lt;= r &amp;&amp; r &lt;= hi}</code>, and the compiler turns each function's refinements into verification conditions that Z3 must prove. Proofs are written as ghost code (ghost arguments, ghost blocks and lemmas), which the compiler checks and then erases before code generation. Ghost tokens are affine, enforced by OxCaml's uniqueness modes; a token stands for ownership of mutable state, which is how the demos specify mutable cells, hash tables and communication between domains.</p>
+
+<pre><code>{{example}}</code></pre>
+<p class="excerpt-source">From the playground's first example. The type of <code>hi</code> mentions <code>lo</code>; Z3 proves the result type from the conditional, and nothing is checked at run time.</p>
+
+<p>A proof holds only if the checker, Z3 and a small set of unverified primitives are correct; <a href="catalogue/trust.html">what every demo trusts</a> lists them.</p>
+
+<ul class="parts">
+<li><h2><a href="catalogue/">Demonstrations</a><small>catalogue/</small></h2>
+<p>{{demos}} verified programs, among them a <a href="catalogue/specs/flat-hash-table.html">flat hash table</a>, a <a href="catalogue/specs/sat-solver.html">CDCL SAT solver</a>, <a href="catalogue/specs/hindley-milner.html">Hindley–Milner inference</a> and a <a href="catalogue/specs/hm-wasm-compiler.html">compiler to WebAssembly</a>. Each page states what is proved, what the demo trusts beyond the common base and what it does not claim, with a checked client, a rejected program and the interface, quoted from the repository at commit {{revision_short}}.</p></li>
+<li><h2><a href="playground/">Playground</a><small>playground/</small></h2>
+<p>Edit and check small Vox programs in the browser: counterexamples, termination measures, lemmas, ghost erasure and affine tokens. The compiler's front end and verifier run as JavaScript and Z3 as WebAssembly; nothing is sent to a server. The first visit downloads about {{playground_mb}} MB.</p></li>
+<li><h2><a href="source/">Source explorer</a><small>source/</small></h2>
+<p>The whole compiler as a treemap (the compiler proper is {{source_lines}} lines), with Vox's changes marked: what each part is, what Vox changed there and why, where each demo's files are, and guided tours, starting with <a href="source/#tour/vox-inside-oxcaml">Vox inside OxCaml</a>. Every file is readable in the browser at commit {{revision_short}}, with Vox's lines marked in the margin.</p></li>
+<li><h2><a href="talk/">The talk</a><small>talk/</small></h2>
+<p>A {{talk_minutes}}-minute walk through Vox in {{talk_parts}} parts and {{talk_scenes}} scenes, as a deck that moves one step at a time with the arrow keys. Every step has its narration, written word for word. Practice mode (<a href="talk/?practice">N</a>) shows it beside the slide with timers for the step, the scene and the talk; <a href="talk/?play">autoplay</a> plays the deck at the narration's pace with the words as subtitles.</p></li>
+<li><h2><a href="https://github.com/julesjacobs/oxcaml/tree/vox">Source</a><small>GitHub</small></h2>
+<p>The <code>vox</code> branch of <code>julesjacobs/oxcaml</code>. The verifier is in <a href="https://github.com/julesjacobs/oxcaml/tree/{{revision}}/verification"><code>verification/</code></a>, the verified library in <a href="https://github.com/julesjacobs/oxcaml/tree/{{revision}}/verification/library"><code>verification/library/</code></a> and the tests of the checker in <a href="https://github.com/julesjacobs/oxcaml/tree/{{revision}}/testsuite/tests/vox"><code>testsuite/tests/vox/</code></a>.</p></li>
+</ul>
+
+<p class="page-meta">Built from <a href="https://github.com/julesjacobs/oxcaml/commit/{{revision}}">commit {{revision_short}}</a>, {{date}}.</p>
+</main>
+</body>
+</html>

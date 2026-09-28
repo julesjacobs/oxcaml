@@ -1,0 +1,20 @@
+val fib : Bigint.t -> Bigint.t @@ total
+val fib_def :
+  (n : Bigint.t) ->
+  {u : unit
+    | (fib n) ===
+        (if Bigint.(<=) n (Bigint.of_int 0)
+         then Bigint.of_int 0
+         else
+           if Bigint.(=) n (Bigint.of_int 1)
+           then Bigint.of_int 1
+           else
+             Bigint.(+) (fib (Bigint.(-) n (Bigint.of_int 1)))
+               (fib (Bigint.(-) n (Bigint.of_int 2))))}
+  @@ total
+val zero_one :
+  unit ->
+  {u : unit
+    | (Bigint.(=) (fib (Bigint.of_int 0)) (Bigint.of_int 0)) &&
+        (Bigint.(=) (fib (Bigint.of_int 1)) (Bigint.of_int 1))}
+  @@ total

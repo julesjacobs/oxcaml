@@ -36,20 +36,37 @@ let ocamlrun =
   let ocamlrunfile = Filename.mkexe runtime in
   Filename.make_path [Ocaml_directories.srcdir; "runtime"; ocamlrunfile]
 
-let ocamlc =
-  Filename.make_path [Ocaml_directories.srcdir; Filename.mkexe "ocamlc"]
+let file_with_override variable default =
+  let override = Sys.safe_getenv variable in
+  if override = "" then default, false else override, true
 
-let ocaml =
-  Filename.make_path [Ocaml_directories.srcdir; Filename.mkexe "ocaml"]
+let ocamlc, ocamlc_is_overridden =
+  file_with_override "OCAMLTEST_OCAMLC_BYTE"
+    (Filename.make_path [Ocaml_directories.srcdir; Filename.mkexe "ocamlc"])
 
-let ocamlc_dot_opt =
-  Filename.make_path [Ocaml_directories.srcdir; Filename.mkexe "ocamlc.opt"]
+let ocamlc_uses_runtime = not ocamlc_is_overridden
 
-let ocamlopt =
-  Filename.make_path [Ocaml_directories.srcdir; Filename.mkexe "ocamlopt"]
+let ocaml, ocaml_is_overridden =
+  file_with_override "OCAMLTEST_OCAML"
+    (Filename.make_path [Ocaml_directories.srcdir; Filename.mkexe "ocaml"])
 
-let ocamlopt_dot_opt =
-  Filename.make_path [Ocaml_directories.srcdir; Filename.mkexe "ocamlopt.opt"]
+let ocaml_uses_runtime = not ocaml_is_overridden
+
+let ocamlc_dot_opt, _ =
+  file_with_override "OCAMLTEST_OCAMLC_OPT"
+    (Filename.make_path
+       [Ocaml_directories.srcdir; Filename.mkexe "ocamlc.opt"])
+
+let ocamlopt, ocamlopt_is_overridden =
+  file_with_override "OCAMLTEST_OCAMLOPT_BYTE"
+    (Filename.make_path [Ocaml_directories.srcdir; Filename.mkexe "ocamlopt"])
+
+let ocamlopt_uses_runtime = not ocamlopt_is_overridden
+
+let ocamlopt_dot_opt, _ =
+  file_with_override "OCAMLTEST_OCAMLOPT_OPT"
+    (Filename.make_path
+       [Ocaml_directories.srcdir; Filename.mkexe "ocamlopt.opt"])
 
 let ocamlnat =
   Filename.make_path [Ocaml_directories.srcdir; Filename.mkexe "ocamlnat"]
@@ -58,15 +75,17 @@ let cmpbyt =
   Filename.make_path
     [Ocaml_directories.srcdir; "tools"; Filename.mkexe "cmpbyt"]
 
-let expect =
-  Filename.make_path
-    [Ocaml_directories.srcdir; "testsuite"; "tools";
-     Filename.mkexe "expect"]
+let expect, _ =
+  file_with_override "OCAMLTEST_EXPECT"
+    (Filename.make_path
+       [Ocaml_directories.srcdir; "testsuite"; "tools";
+        Filename.mkexe "expect"])
 
-let expectnat =
-  Filename.make_path
-    [Ocaml_directories.srcdir; "testsuite"; "tools";
-     Filename.mkexe "expectnat"]
+let expectnat, _ =
+  file_with_override "OCAMLTEST_EXPECTNAT"
+    (Filename.make_path
+       [Ocaml_directories.srcdir; "testsuite"; "tools";
+        Filename.mkexe "expectnat"])
 
 let ocamllex =
   Filename.make_path

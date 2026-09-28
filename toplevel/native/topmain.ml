@@ -56,7 +56,7 @@ let input_argument (name : Opttoploop.input) =
     let newargs = Array.sub !argv !Arg.current
                               (Array.length !argv - !Arg.current)
       in
-      Compmisc.read_clflags_from_env ();
+      Location.read_clflags_from_env ();
       if Opttoploop.prepare ppf ~input:name () &&
          Opttoploop.run_script ppf filename newargs
       then raise (Exit_with_status 0)
@@ -94,9 +94,10 @@ let () =
 
 let main () =
   let ppf = Format.err_formatter in
+  Vox_verify.install ();
   Clflags.native_code := true;
   Clflags.Opt_flag_handler.set Oxcaml_flags.opt_flag_handler;
-  let list = ref Options.list in
+  let list = ref (Options.list @ !Clflags.arg_spec) in
   begin
     try
       Arg.parse_and_expand_argv_dynamic current argv list file_argument usage;
@@ -106,7 +107,7 @@ let main () =
     | Arg.Help msg -> Format.fprintf Format.std_formatter "%s%!" msg;
                       raise (Exit_with_status 0)
   end;
-  Compmisc.read_clflags_from_env ();
+  Location.read_clflags_from_env ();
   if not (Opttoploop.prepare ppf ()) then raise (Exit_with_status 2);
   Compmisc.init_path ();
   Opttoploop.loop Format.std_formatter

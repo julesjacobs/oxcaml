@@ -17,11 +17,17 @@
 
 type code = out_channel -> Environments.t -> Result.t * Environments.t
 
+type incremental_requirement =
+  | No_artifact
+  | Requirement of string
+  | Unsupported
+
 type t = {
   name : string;
   action_description : string;
   body : code;
   does_something : bool;
+  incremental_requirement : incremental_requirement;
   mutable hook : code option
 }
 
@@ -31,11 +37,14 @@ let description a = a.action_description
 
 let does_something t = t.does_something
 
+let incremental_requirement t = t.incremental_requirement
+
 let action_name = Variables.make ("action_name", "Name of the current action")
 
-let make ~name ~description ~does_something body =
+let make ?(incremental_requirement=Unsupported)
+    ~name ~description ~does_something body =
   { name; body; action_description = description; hook = None;
-    does_something }
+    does_something; incremental_requirement }
 
 let update action code = { action with body = code }
 

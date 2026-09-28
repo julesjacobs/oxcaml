@@ -1,0 +1,30 @@
+ok: match_subst was dumped
+ok: match_subst calls nothing in Vox_egraph_derivation
+ok: match_subst calls nothing in Vox_egraph_match_evidence
+ok: match_subst calls nothing in Vox_egraph_match_observation
+ok: match_subst calls nothing in Vox_egraph_snapshot_proof
+ok: match_subst calls nothing in Vox_egraph_preservation_proof
+ok: rule_rewrite was dumped
+ok: rule_rewrite calls nothing in Vox_egraph_derivation
+ok: rule_rewrite calls nothing in Vox_egraph_match_evidence
+ok: rule_rewrite calls nothing in Vox_egraph_match_observation
+ok: rule_rewrite calls nothing in Vox_egraph_snapshot_proof
+ok: rule_rewrite calls nothing in Vox_egraph_preservation_proof
+ok: rule_saturate was dumped
+ok: rule_saturate calls nothing in Vox_egraph_derivation
+ok: rule_saturate calls nothing in Vox_egraph_match_evidence
+ok: rule_saturate calls nothing in Vox_egraph_match_observation
+ok: rule_saturate calls nothing in Vox_egraph_snapshot_proof
+ok: rule_saturate calls nothing in Vox_egraph_preservation_proof
+ok: model_evidence was dumped
+ok: model_evidence calls nothing in Vox_egraph_derivation
+ok: model_evidence calls nothing in Vox_egraph_match_evidence
+ok: model_evidence calls nothing in Vox_egraph_match_observation
+ok: model_evidence calls nothing in Vox_egraph_snapshot_proof
+ok: model_evidence calls nothing in Vox_egraph_preservation_proof
+ok: rule_handle was dumped
+ok: rule_handle calls nothing in Vox_egraph_derivation
+ok: rule_handle calls nothing in Vox_egraph_match_evidence
+ok: rule_handle calls nothing in Vox_egraph_match_observation
+ok: rule_handle calls nothing in Vox_egraph_snapshot_proof
+ok: rule_handle calls nothing in Vox_egraph_preservation_proof

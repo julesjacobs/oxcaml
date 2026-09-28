@@ -87,14 +87,16 @@ let compute_variance env visited vari ty =
           with Not_found ->
             List.iter (compute_variance_rec env unknown) tl
         end
+    | Tmod _ ->
+        Misc.fatal_error "compute_variance_rec: unexpected Tmod"
     | Tobject (ty, _) ->
         compute_same ty
     | Tquote ty ->
-        compute_variance_rec (Env.enter_quotation env) vari ty
+        compute_variance_rec (Env.enter_quote env) vari ty
     | Tsplice ty ->
         compute_variance_rec (Env.enter_splice ~loc:Location.none env) vari ty
     | Tquote_eval ty ->
-        compute_variance_rec (Env.enter_quotation env) vari ty
+        compute_variance_rec (Env.enter_quote env) vari ty
     | Tbox ty ->
         compute_same ty
     | Tfield (_, _, ty1, ty2) ->
@@ -116,6 +118,20 @@ let compute_variance env visited vari ty =
         compute_same (row_more row)
     | Tpoly (ty, _) | Trepr (ty, _) ->
         compute_same ty
+    | Trefine { ref_payload; ref_pred; _ } ->
+        (* Refinements are rigid — they only ever equal alpha-equivalent
+           refinements — so occurrences under them are treated like package
+           constraints, i.e. invariantly. *)
+        let v = Variance.(compose vari full) in
+        compute_variance_rec env v ref_payload;
+        (* A parameter that occurs only in the predicate's types must not be
+           phantom: converting [int t] to [bool t] would carry a fact proved
+           at [int] to [bool].  Such occurrences are invariant but not
+           injective, since predicates are compared without their types. *)
+        let v = Variance.(compose vari unknown) in
+        ignore
+          (Refinement_predicate.fold_types
+             (fun () ty -> compute_variance_rec env v ty) () ref_pred)
     | Tvar _ | Tnil | Tlink _ | Tunivar _ | Tof_kind _ -> ()
     | Tpackage pack ->
         let v = Variance.(compose vari full) in
@@ -245,7 +261,14 @@ let compute_variance_type env ~check (required, loc) decl tyl =
                      , Bad_variance ( variance_error
                                     , (c1,n1,false)
                                     , (c2,n2,false))))
-        | None -> Ctype.iter_type_expr_with_stages check env ty
+        | None ->
+            Ctype.iter_type_expr_with_stages check env ty;
+            match get_desc ty with
+            | Trefine { ref_pred; _ } ->
+                ignore
+                  (Refinement_predicate.fold_types
+                     (fun () ty -> check env ty) () ref_pred)
+            | _ -> ()
       end
     in
     List.iter (fun (_,ty) -> check env ty) tyl;

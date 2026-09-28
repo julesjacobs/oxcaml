@@ -11,7 +11,7 @@ let syntax_doc_url (doc_website_base : Doc_website_base.t) endpoint =
   let base_url =
     match doc_website_base with
     | Ocaml -> "https://ocaml.org/manual/5.2/"
-    | Oxcaml -> "https://oxcaml.org/documentation/"
+    | Oxcaml -> "https://beta.oxcaml.org/documentation/"
   in
   Some (base_url ^ endpoint)
 
@@ -174,7 +174,7 @@ let get_mod_bound_doc mod_bound =
     | Everything ->
       Some
         "Synonym for \"global aliased many contended portable unyielding \
-         immutable stateless external_\", convenient for describing \
+         immutable total stateless external_\", convenient for describing \
          immediates."
   in
   (Some
@@ -257,6 +257,19 @@ let get_mode_doc (Atom (axis, mode) : Mode.Alloc.atom) =
       Some "Functions with this mode cannot access mutable data"
     | Comonadic Statefulness, Writing ->
       Some "Functions with this mode can write but not read mutable data"
+    | Comonadic Ghostliness, Real ->
+      Some "Values with this mode may be read by runtime computations"
+    | Comonadic Ghostliness, Ghost ->
+      Some "Values with this mode may only be used in ghost positions"
+    | Comonadic Totality, Total ->
+      Some
+        "Functions with this mode do not themselves diverge, raise exceptions, \
+         or access mutable state; calls through function arguments are \
+         excluded"
+    | Comonadic Totality, Partial ->
+      Some
+        "Functions with this mode may diverge, raise exceptions, or access \
+         mutable state"
     | Comonadic Forkable, Forkable ->
       Some "Functions with this mode may be executed concurrently."
     | Comonadic Forkable, Unforkable ->
@@ -276,6 +289,8 @@ let get_mode_doc (Atom (axis, mode) : Mode.Alloc.atom) =
       | Comonadic Yielding -> "modes/intro/"
       | Monadic Visibility -> "modes/intro/"
       | Comonadic Statefulness -> "modes/intro/"
+      | Comonadic Totality -> "modes/intro/"
+      | Comonadic Ghostliness -> "modes/intro/"
       | Comonadic Forkable -> "modes/intro/"
       | Monadic Staticity -> "modes/intro/"
     in
@@ -679,7 +694,7 @@ let get_oxcaml_syntax_doc cursor_loc nodes : syntax_info =
   | Mod_bound { txt = Mode mod_bound; _ } :: _ -> get_mod_bound_doc mod_bound
   | Scannable_axis_annotation { txt = annot; _ } :: _ ->
     get_scannable_axis_annotation_doc annot
-  | Jkind_annotation { pjka_desc = Pjk_abbreviation (abbrev, _); _ } :: _ ->
+  | Jkind_annotation { pjka_desc = Pjk_abbreviation abbrev; _ } :: _ ->
     (* CR-someday: It isn't ideal that this is based on the parsetree, as this will result
        in an incorrect hint in the presence of shadowing. To properly fix, the compiler
        should introduce a typed jkind into the typedtree. Internal ticket 6600. *)

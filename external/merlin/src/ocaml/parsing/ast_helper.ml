@@ -76,7 +76,8 @@ module Typ = struct
 
   let any ?loc ?attrs a = mk ?loc ?attrs (Ptyp_any a)
   let var ?loc ?attrs a b = mk ?loc ?attrs (Ptyp_var (a, b))
-  let arrow ?loc ?attrs a b c d e = mk ?loc ?attrs (Ptyp_arrow (a, b, c, d, e))
+  let arrow ?loc ?attrs ?binder a b c d e =
+    mk ?loc ?attrs (Ptyp_arrow (a, b, c, d, e, binder))
   let tuple ?loc ?attrs a = mk ?loc ?attrs (Ptyp_tuple a)
   let unboxed_tuple ?loc ?attrs a = mk ?loc ?attrs (Ptyp_unboxed_tuple a)
   let constr ?loc ?attrs a b = mk ?loc ?attrs (Ptyp_constr (a, b))
@@ -91,6 +92,7 @@ module Typ = struct
   let quote ?loc ?attrs t = mk ?loc ?attrs (Ptyp_quote t)
   let splice ?loc ?attrs t = mk ?loc ?attrs (Ptyp_splice t)
   let repr ?loc ?attrs a b = mk ?loc ?attrs (Ptyp_repr (a, b))
+  let refine ?loc ?attrs a b c = mk ?loc ?attrs (Ptyp_refine (a, b, c))
   let newlayout ?loc ?attrs a b = mk ?loc ?attrs (Ptyp_newlayout (a, b))
   let of_kind ?loc ?attrs a = mk ?loc ?attrs (Ptyp_of_kind a)
 
@@ -117,8 +119,9 @@ module Typ = struct
             let jkind = Option.map loop_jkind jkind in
             check_variable var_names t.ptyp_loc x;
             Ptyp_var (x, jkind)
-        | Ptyp_arrow (label,core_type,core_type',modes,modes') ->
-            Ptyp_arrow(label, loop core_type, loop core_type', modes, modes')
+        | Ptyp_arrow (label,core_type,core_type',modes,modes',binder) ->
+            Ptyp_arrow
+              (label, loop core_type, loop core_type', modes, modes', binder)
         | Ptyp_tuple lst ->
             Ptyp_tuple (List.map (fun (l, t) -> l, loop t) lst)
         | Ptyp_unboxed_tuple lst ->
@@ -161,6 +164,8 @@ module Typ = struct
             Ptyp_repr (var_lst, loop core_type)
         | Ptyp_newlayout (var_lst, core_type) ->
             Ptyp_newlayout (var_lst, loop core_type)
+        | Ptyp_refine (binder, core_type, predicate) ->
+            Ptyp_refine (binder, loop core_type, predicate)
         | Ptyp_extension (s, arg) ->
             Ptyp_extension (s, arg)
       in
@@ -170,6 +175,8 @@ module Typ = struct
         match jkind.pjka_desc with
         | Pjk_default as x -> x
         | Pjk_abbreviation _ as x -> x
+        | Pjk_operator (jkind, sa) ->
+          Pjk_operator (loop_jkind jkind, sa)
         | Pjk_mod (jkind, modes) -> Pjk_mod (loop_jkind jkind, modes)
         | Pjk_with (jkind, typ, modalities) ->
           Pjk_with (loop_jkind jkind, loop typ, modalities)
@@ -299,6 +306,7 @@ module Exp = struct
   let extension ?loc ?attrs a = mk ?loc ?attrs (Pexp_extension a)
   let unreachable ?loc ?attrs () = mk ?loc ?attrs Pexp_unreachable
   let stack ?loc ?attrs e = mk ?loc ?attrs (Pexp_stack e)
+  let ghost ?loc ?attrs e = mk ?loc ?attrs (Pexp_ghost e)
   let comprehension ?loc ?attrs e = mk ?loc ?attrs (Pexp_comprehension e)
   let overwrite ?loc ?attrs a b = mk ?loc ?attrs (Pexp_overwrite (a, b))
   let quote ?loc ?attrs a = mk ?loc ?attrs (Pexp_quote a)
@@ -321,6 +329,10 @@ module Exp = struct
     }
 
   let borrow ?loc ?attrs a = mk ?loc ?attrs (Pexp_borrow a)
+  let refine ?loc ?attrs a = mk ?loc ?attrs (Pexp_refine a)
+  let assume ?loc ?attrs a = mk ?loc ?attrs (Pexp_assume a)
+  let let_refine ?loc ?attrs a b c =
+    mk ?loc ?attrs (Pexp_let_refine (a, b, c))
 end
 
 module Mty = struct

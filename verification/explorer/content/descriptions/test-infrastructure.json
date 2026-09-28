@@ -1,0 +1,589 @@
+{
+  "_about": "Test infrastructure: ocamltest/ (23 modified files), testsuite/ outside tests/vox (58 modified and 116 new files), and the axis-lattice unit test in oxcaml/tests. Directory-level entries, plus file-level entries where the change says something about Vox. Sources: git diff f42b1a9726 HEAD, read at 8479634adc; commit ba068ca404 (the cherry-picked upstream #6806, which also re-promoted several upstream expect files); dev and testsuite/vox-*.sh. American spelling.",
+
+  "ocamltest/main.ml": {
+    "what": {
+      "short": "ocamltest's entry point: parses a test file's script, builds the tree of tests and environments, runs the actions and reports results."
+    },
+    "vox": {
+      "short": "Adds two modes: -plan-incremental prints the artifacts a test needs, and -list-sources prints the source files a test compiles or reads.",
+      "long": [
+        "`plan_incremental` walks the test script as `test_file` would, applying environment statements and modifiers, and collects each action's `incremental_requirement` plus the compiler libraries named in `libraries`. It exits with status 2 for anything it cannot plan: an action marked `Unsupported`, an action hook file, generated lexer or parser sources, or `ocamlmiddleend`. `./dev test` builds exactly what it prints.",
+        "`list_sources` prints `test`, kind (`prebuilt` or `source`), path and flags for every file named by `modules`, `all_modules`, `module`, `readonly_files` and `prebuilt_modules`, resolving `source_directories`; `testsuite/vox-affected-tests.sh` and `testsuite/vox-test-library.sh` read it."
+      ]
+    },
+    "notes": [
+      {
+        "title": "Actions to requirements",
+        "from": ["let plan_incremental files =", "let add_action filename action requirements ="],
+        "to": "fail_unsupported filename \"action %S\" (Actions.name action)",
+        "kind": "vox",
+        "text": "A hook file next to the test (`test.ocamlc.byte` and the like) could change what the action does, so its presence makes the test unsupported rather than silently planned. Predicates such as `has-z3` are `No_artifact`; compiler and expect actions name the artifact they need."
+      },
+      {
+        "title": "Listing sources",
+        "from": "(* Prints, for each test file, the source files its environments name:",
+        "to": "let list_sources files =",
+        "kind": "vox",
+        "text": "A missing source is printed once for each directory that could hold it, so that a deleted file still selects the tests that used it."
+      }
+    ]
+  },
+  "ocamltest/actions.ml": {
+    "what": {
+      "short": "The type of ocamltest actions: a named body that runs in an environment and returns a result."
+    },
+    "vox": {
+      "short": "Each action carries an incremental_requirement: No_artifact, Requirement of an artifact name, or Unsupported, the default.",
+      "long": "The default is `Unsupported`, so an action nobody has classified makes `-plan-incremental` refuse the test instead of planning it wrongly."
+    },
+    "notes": [
+      {
+        "title": "What an action needs",
+        "from": "type incremental_requirement =",
+        "span": 4,
+        "kind": "vox",
+        "text": "`Requirement` names are the ones `./dev` understands in `add_requirement`: `ocamlc.byte`, `ocamlc.opt`, `ocamlopt.byte`, `ocamlopt.opt`, `expect`, `expectnat` and `toplevel`."
+      }
+    ]
+  },
+  "ocamltest/actions.mli": {
+    "what": {
+      "short": "The interface of ocamltest actions."
+    },
+    "vox": {
+      "short": "Exports the incremental_requirement type, the optional argument of make, and the accessor incremental_requirement."
+    }
+  },
+  "ocamltest/actions_helpers.ml": {
+    "what": {
+      "short": "Helpers shared by actions: reading test variables, setting up the build directory, running programs and comparing outputs."
+    },
+    "vox": {
+      "short": "Test files can come from source_directories, and prebuilt_modules are linked from a shared prebuilt library into a per-test view directory.",
+      "long": [
+        "`setup_symlinks` looks for each file first in the test's own directory and then in `source_directories`, and links or copies it under its own name. Vox tests use this to compile `verification/library` sources directly instead of copies.",
+        "Compiling and verifying the same library modules in every test that uses them repeats the same work. With `prebuilt_modules`, the library is built once per run (`testsuite/vox-test-library.sh`, into `OCAMLTEST_VOX_TEST_LIBRARY`, by default `_build/vox-test-library`) and each test sees only the artifacts it lists."
+      ]
+    },
+    "notes": [
+      {
+        "title": "The per-test view",
+        "from": "let setup_prebuilt_view ~native env =",
+        "to": "List.find_map link_module modules",
+        "kind": "vox",
+        "text": "For each listed `.mli` the view gets the `.cmi`; for each `.ml`, the `.cmi` and the `.cmo`, or the `.cmi`, `.cmx` and object file for a native compiler, which uses the library's separate `native` tree. A missing artifact fails the test with a pointer to the library build's output."
+      },
+      {
+        "title": "Waiting for the library",
+        "from": "let wait_for_prebuilt_library root =",
+        "to": "while building () do",
+        "kind": "vox",
+        "text": "`./dev` builds the library in the background while other tests start; the `.building` marker holds the build's process id, and a test that needs the library polls until that process is gone."
+      }
+    ]
+  },
+  "ocamltest/actions_helpers.mli": {
+    "what": {
+      "short": "The interface of the action helpers."
+    },
+    "vox": {
+      "short": "Exports prebuilt_modules, prebuilt_view_directory and prebuilt_implementations, and the ?source_directories and ?native arguments of the build-setup functions."
+    }
+  },
+  "ocamltest/builtin_actions.ml": {
+    "what": {
+      "short": "The actions every test can use: pass, skip, fail, run, script, file checks, copy, and the configuration predicates."
+    },
+    "vox": {
+      "short": "Adds the predicates has-z3 and has-node (an executable on PATH) and the action file-not-exists; built-in actions default to No_artifact.",
+      "long": "`file-not-exists` is how tests such as `typing-refinement-types/no_unverified_cmi.ml` check that a failed verification leaves no `.cmi` behind. `script` stays `Unsupported` for incremental planning, since a script can run anything."
+    },
+    "notes": [
+      {
+        "title": "has-z3",
+        "from": "let has_z3 = make",
+        "span": 7,
+        "kind": "vox",
+        "text": "A test that begins with `has-z3;` is skipped, with a reason, when no `z3` is on `PATH`. Summaries count such skips, so a run without Z3 shows up as skipped tests rather than passes."
+      }
+    ]
+  },
+  "ocamltest/builtin_variables.ml": {
+    "what": {
+      "short": "The built-in test-script variables such as readonly_files, output and reference."
+    },
+    "vox": {
+      "short": "Adds source_directories and prebuilt_modules."
+    }
+  },
+  "ocamltest/builtin_variables.mli": {
+    "what": {
+      "short": "The interface of the built-in test-script variables."
+    },
+    "vox": {
+      "short": "Exports source_directories and prebuilt_modules."
+    }
+  },
+  "ocamltest/ocaml_actions.ml": {
+    "what": {
+      "short": "The OCaml-specific actions: setting up build environments, compiling with each compiler, running expect tests and the toplevel, and configuration predicates."
+    },
+    "vox": {
+      "short": "Classifies every action for incremental planning, puts the prebuilt view on the include path, and links a test's prebuilt implementations into its program.",
+      "long": "The compile actions require their compiler (`ocamlc.byte`, `ocamlopt.opt`, ...), `run-expect` and `run-expectnat` require `expect` and `expectnat`, `ocaml` requires `toplevel`; configuration predicates and environment setup need nothing."
+    },
+    "notes": [
+      {
+        "title": "Linking prebuilt modules",
+        "from": "let prebuilt_objects =",
+        "to": "(Actions_helpers.prebuilt_implementations env)",
+        "kind": "vox",
+        "text": "Unless the test only compiles (`compile_only`), the `.cmo` or `.cmx` of each prebuilt implementation is put first on the link line, in the order the test lists them."
+      }
+    ]
+  },
+  "ocamltest/ocaml_files.ml": {
+    "what": {
+      "short": "Paths of the compiler executables and tools that ocamltest runs, relative to the source or install tree."
+    },
+    "vox": {
+      "short": "Each compiler, the toplevel and the expect tools can be overridden by an OCAMLTEST_* environment variable, which ./dev sets to Dune build outputs."
+    },
+    "notes": [
+      {
+        "title": "Overrides",
+        "from": "let file_with_override variable default =",
+        "span": 3,
+        "kind": "vox",
+        "text": "An overridden `ocamlc`, `ocamlopt` or `ocaml` is a Dune-built executable, so `ocaml_commands.ml` no longer prefixes it with `ocamlrun`."
+      }
+    ]
+  },
+  "ocamltest/ocaml_files.mli": {
+    "what": {
+      "short": "The interface of the tool paths."
+    },
+    "vox": {
+      "short": "Exports ocamlc_uses_runtime, ocaml_uses_runtime and ocamlopt_uses_runtime, false when the tool is overridden."
+    }
+  },
+  "ocamltest/ocaml_commands.ml": {
+    "what": {
+      "short": "The command lines that run the bytecode compilers and toplevel."
+    },
+    "vox": {
+      "short": "Runs a compiler through ocamlrun only when it is the default bytecode executable; an overridden one runs directly."
+    }
+  },
+  "ocamltest/ocaml_modifiers.ml": {
+    "what": {
+      "short": "Named environment modifiers such as ocamlcommon or unix that add libraries and include directories to a test."
+    },
+    "vox": {
+      "short": "The ocamlbytecomp and ocamloptcomp modifiers also link unix and the four verifier archives; OCAMLTEST_COMPILERLIBS_DIR can replace the compiler-libs directories.",
+      "long": "The compilers link the verifier, so any test built against `ocamlbytecomp` or `ocamloptcomp` needs it too. `./dev` points `OCAMLTEST_COMPILERLIBS_DIR` at the Dune-installed compiler libraries."
+    },
+    "notes": [
+      {
+        "title": "Compiler libraries include the verifier",
+        "from": "\"ocamlbytecomp\", [\"unix\"; \"vox_smt\"; \"vox_vc\"; \"vox_smt_solver\";",
+        "span": 4,
+        "kind": "vox",
+        "text": "The same archives, in the same order, as `tools/ocamlmktop.ml` and the `compiler-libs.verification` package in `compilerlibs/META.in`."
+      }
+    ]
+  },
+  "ocamltest/ocaml_variables.ml": {
+    "what": {
+      "short": "The OCaml-specific test-script variables: flags, modules, libraries, compiler paths and so on."
+    },
+    "vox": {
+      "short": "Adds ocamlc_opt, the path of ocamlc.opt, set with the other configuration variables."
+    }
+  },
+  "ocamltest/ocaml_variables.mli": {
+    "what": {
+      "short": "The interface of the OCaml-specific test-script variables."
+    },
+    "vox": {
+      "short": "Exports ocamlc_opt."
+    }
+  },
+  "ocamltest/options.ml": {
+    "what": {
+      "short": "ocamltest's command-line options."
+    },
+    "vox": {
+      "short": "Adds -plan-incremental and -list-sources."
+    }
+  },
+  "ocamltest/options.mli": {
+    "what": {
+      "short": "The interface of ocamltest's command-line options."
+    },
+    "vox": {
+      "short": "Exports plan_incremental and list_sources."
+    }
+  },
+  "ocamltest/tsl_semantics.ml": {
+    "what": {
+      "short": "The semantics of the test-script language: environment statements, and the tests and actions a script tree uses."
+    },
+    "vox": {
+      "short": "Adds tests_in_tree_strict, which fails on an unknown test or action name, for the incremental planner.",
+      "long": "The ordinary `tests_in_tree` ignores unknown names; a planner that did so could omit an artifact the test needs."
+    }
+  },
+  "ocamltest/tsl_semantics.mli": {
+    "what": {
+      "short": "The interface of the test-script semantics."
+    },
+    "vox": {
+      "short": "Exports tests_in_tree_strict."
+    }
+  },
+  "ocamltest/ocamltest_unix_real.ml": {
+    "what": {
+      "short": "ocamltest's Unix-dependent helpers, used when ocamltest is built with unix."
+    },
+    "vox": {
+      "short": "Adds is_executable (access with X_OK, F_OK on Windows), which has-z3 and has-node use to search PATH."
+    }
+  },
+  "ocamltest/ocamltest_unix_dummy.ml": {
+    "what": {
+      "short": "The stand-ins for ocamltest's Unix helpers when it is built without unix."
+    },
+    "vox": {
+      "short": "Adds an is_executable stand-in."
+    }
+  },
+  "ocamltest/ocamltest_unix.mli": {
+    "what": {
+      "short": "The interface shared by the real and dummy Unix helpers."
+    },
+    "vox": {
+      "short": "Exports is_executable."
+    }
+  },
+  "ocamltest/OCAMLTEST.org": {
+    "what": {
+      "short": "The ocamltest manual."
+    },
+    "vox": {
+      "short": "Documents source_directories, with an example that compiles verification/library sources alongside a test."
+    }
+  },
+
+  "testsuite/vox-test-library.sh": {
+    "what": {
+      "short": "A Vox-added script that builds, once per test run, the library modules that the selected tests list in prebuilt_modules."
+    },
+    "vox": {
+      "short": "New: builds and verifies each listed module with both test compilers, in parallel and incrementally, into the directory that ocamltest links from.",
+      "long": [
+        "The modules and their flags come from `ocamltest -list-sources`. A module's flags are the union of `-principal` and `-g` over the tests in the same directories that list it, so they do not depend on which tests were selected; any compiler output fails the build, as it would have failed the tests that compiled the module themselves.",
+        "Each compiler builds and verifies its own tree without `-smt-assume-verified`, which would record in the compiled units that verification was skipped; modules of `verification/library` get `-vox-library`, as in the library's own build. Objects depend on the compilers, the standard library and the script by content. Without `z3` on `PATH` it does nothing, and the tests that use the library skip."
+      ]
+    }
+  },
+  "testsuite/vox-affected-tests.sh": {
+    "what": {
+      "short": "A Vox-added script that prints the tests in vox/ and typing-refinement-types/ that a change since a base revision can affect."
+    },
+    "vox": {
+      "short": "New, used by ./dev test --affected BASE: a test is affected if it compiles or reads a changed file, directly or through ocamldep dependencies.",
+      "long": "Changed files include uncommitted ones and untracked files below `testsuite/tests` and `verification/library`. A change anywhere else, except under `research/` or `verification/catalogue/` or to a Markdown file, affects every test, because the compiler itself may have changed. A change to the header of another test that lists the same prebuilt module also counts, since it can change that module's flags."
+    }
+  },
+
+  "testsuite/tests/typing-refinement-types/": {
+    "what": {
+      "short": "Type-checker tests for refinement types: syntax and printing, dependent arrows, scope escape, assume_, [@def], cross-module round trips and failure modes."
+    },
+    "vox": {
+      "short": "New in Vox (81 files): the typer's side of refinements, mostly as expect tests; those that need proofs start with has-z3.",
+      "long": [
+        "`type-formers.ml` covers `{x : t | p}` in every type position; `dependent-*.ml` the dependent arrow `(x : t) -> u`, including labels and functor application; `scope-extrusion.ml`, `scope_backtracking.ml` and `include_refinement_scope.ml` the escape check for term variables that predicates mention; `assume*.ml` `assume_`, including its run-time check under `-noassert`; `definition-*.ml` `let[@def]` and its generated `f_def`.",
+        "The `*-roundtrip/` directories compile an interface and use it from a second unit, to check that refinements, dependent binders, `Bigint` and `===` survive `.cmi` serialization and substitution. `no_unverified_cmi.ml`, `numerical_no_cmi.ml` and `numerical_solver_failure.ml` check that a failed or impossible proof leaves no `.cmi`, using `file-not-exists`. `rectypes-incompatible*.ml` check that `-rectypes` and `#rectypes` are refused with the extension."
+      ]
+    }
+  },
+  "testsuite/tests/typing-refinement-types/no_unverified_cmi.ml": {
+    "what": {
+      "short": "Checks that a unit whose refinement cannot be proved produces no .cmi, with both ocamlc and ocamlopt."
+    },
+    "vox": {
+      "short": "New: verification runs before any artifact is written, so a failed proof leaves no interface for a client to compile against."
+    }
+  },
+  "testsuite/tests/typing-refinement-types/extension-disabled-scope/": {
+    "what": {
+      "short": "A producer interface compiled with refinement_types and a consumer compiled without it."
+    },
+    "vox": {
+      "short": "New: a client that does not enable the extension still sees refinements from an interface, and the scope-escape check still applies to it."
+    }
+  },
+  "testsuite/tests/typing-refinement-types/total_printing.ml": {
+    "what": {
+      "short": "Checks the interface that ocamlc -i prints for total, ghost and partial values."
+    },
+    "vox": {
+      "short": "New: a printed interface must keep @@ total, or a client compiled against it would see the values as partial."
+    }
+  },
+  "testsuite/tests/typing-refinement-types/vc_dumps.ml": {
+    "what": {
+      "short": "Compiles a trivial refinement with -dvc -dsmtlib and compares the dumped verification condition and SMT-LIB query."
+    },
+    "vox": {
+      "short": "A new test that pins the format of the verifier's debugging dumps."
+    }
+  },
+
+  "testsuite/tests/typing-modes/": {
+    "what": {
+      "short": "Tests of OxCaml's mode system: modes on values, closures, modules, functors and modalities, and mode crossing."
+    },
+    "vox": {
+      "short": "Vox adds the totality tests (totality*.ml, structural_recursion.ml, recursive_module_*.ml, inductive_functors.ml) and updates outputs that now print total and partial.",
+      "long": [
+        "Totality is inferred for every structure, so many upstream expected outputs change: a module or functor that was printed `@@ stateless` is now `@@ total`, since `total` implies `stateless` and `portable` unless statefulness is stated, and the printer leaves implied modalities out, and a structure that was `@ stateful` is now `@ partial`.",
+        "`inductive-modules/` and `phantom-parameters-modules/` are separate-compilation tests: an `[@@inductive]` guarantee must agree between interface and implementation (it can only be hidden behind an abstract type), and `[@@phantom_parameters]` lets a field of type `node Handle.t` be projected in total code."
+      ]
+    }
+  },
+  "testsuite/tests/typing-modes/totality.ml": {
+    "what": {
+      "short": "Expect tests of the totality axis on expressions, closures and modules."
+    },
+    "vox": {
+      "short": "New: which constructs make a closure partial (assert, loops, lazy, objects, fresh exception constructors, including in local modules) and which values can be used at total."
+    }
+  },
+  "testsuite/tests/typing-modes/totality_inductive.ml": {
+    "what": {
+      "short": "Expect tests of pattern matching in total code on recursive types."
+    },
+    "vox": {
+      "short": "New: an ordinary recursive type cannot be destructured in total code; an [@@inductive] one can, and its values cannot be built cyclically with let rec.",
+      "long": "It also rejects invalid `[@@inductive]` declarations (a recursive occurrence under an arrow) and checks that the guarantee is compared by signature inclusion. `let rec cyclic_nat = S cyclic_nat` fails with the ordinary \"not allowed as right-hand side of let rec\" error."
+    }
+  },
+  "testsuite/tests/typing-modes/totality_abstract_parameters.ml": {
+    "what": {
+      "short": "Expect tests of totality for records whose fields mention the record type through an abstract type constructor."
+    },
+    "vox": {
+      "short": "New: projecting run from { run : callback heap -> bool } is partial, because an abstract heap may contain its argument and close a knot.",
+      "long": "This covers abstract type applications whose arguments lead back to the type. An abstract type or GADT existential that hides a knot without such an argument is covered by the hidden-types fix (`09dfd7e2fa`) in `Ctype.can_pattern_match_total`, tested in [totality_hidden_types.ml](src:testsuite/tests/vox/totality_hidden_types.ml)."
+    }
+  },
+  "testsuite/tests/typing-modes/structural_recursion.ml": {
+    "what": {
+      "short": "Expect tests of total let rec by structural recursion on [@@inductive] types."
+    },
+    "vox": {
+      "short": "New: which recursive calls Structural_recursion.check accepts as structurally smaller, and inference of totality for recursive functions."
+    }
+  },
+  "testsuite/tests/typing-modes/recursive_module_totality.ml": {
+    "what": {
+      "short": "Expect tests of totality through recursive modules, run with and without -principal."
+    },
+    "vox": {
+      "short": "New: a container whose instantiation depends on the recursive module group cannot carry a total field or a total arrow result, except through arrow domains."
+    }
+  },
+  "testsuite/tests/typing-modes/recursive_module_inductive.ml": {
+    "what": {
+      "short": "Expect tests of [@@inductive] declarations inside recursive modules."
+    },
+    "vox": {
+      "short": "New: a recursive module signature cannot introduce an inductive guarantee or a group-dependent alias to one; an existing inductive type may appear in value types."
+    }
+  },
+  "testsuite/tests/typing-modes/inductive_functors.ml": {
+    "what": {
+      "short": "Expect tests of [@@inductive] types declared inside functors and in functor parameters."
+    },
+    "vox": {
+      "short": "New: a functor can define an inductive container over its parameter's element type and match on it in total code."
+    }
+  },
+  "testsuite/tests/typing-modes/val_modalities.ml": {
+    "what": {
+      "short": "Upstream expect tests of modalities on values in signatures and their inclusion checks."
+    },
+    "vox": {
+      "short": "Outputs updated: @@ stateless becomes @@ total, and one inclusion error now blames partiality: the structure closes over (!), a mutable read."
+    }
+  },
+  "testsuite/tests/typing-modes/functor.ml": {
+    "what": {
+      "short": "Upstream expect tests of modes on functors and their parameters."
+    },
+    "vox": {
+      "short": "Outputs updated only: functors and modules printed @@ stateless are now @@ total, since a body without partial constructs is inferred total."
+    }
+  },
+
+  "testsuite/tests/typing-jkind-bounds/": {
+    "what": {
+      "short": "Tests of kinds with bounds (with-kinds): mode crossing of types, subsumption, printing, and the ikinds implementation."
+    },
+    "vox": {
+      "short": "Expected outputs updated for the totality axis: kinds list total, and crossing errors gain a totality line; several files were also re-promoted by the #6806 cherry-pick.",
+      "long": "In kind annotations `mod ... stateless` becomes `mod ... total`, since `total` in a `mod` bound implies `stateless` unless statefulness is stated. `subsumption/fuel.ml` re-exports `list` and must now repeat `[@@inductive]`, because the guarantee is part of the declaration."
+    }
+  },
+  "testsuite/tests/typing-jkind-bounds/verbosity/verbosity2.ml": {
+    "what": {
+      "short": "Upstream tests of kind printing at the highest verbosity, which lists every axis."
+    },
+    "vox": {
+      "short": "The full kind lists gain total (or partial) and ghost; total takes stateless's place among the stated bounds, and stateless moves to the bounds it implies."
+    }
+  },
+  "testsuite/tests/typing-jkind-bounds/subsumption/fuel.ml": {
+    "what": {
+      "short": "Upstream tests that kind subsumption on recursive types runs out of fuel gracefully."
+    },
+    "vox": {
+      "short": "The re-export type 'a my_list = 'a list = ... now needs [@@inductive], because list is inductive and a re-export must keep the guarantee."
+    }
+  },
+
+  "testsuite/tests/letrec-check/": {
+    "what": {
+      "short": "Upstream tests of the static check on let rec right-hand sides (Value_rec_check)."
+    },
+    "vox": {
+      "short": "Tests that built cyclic lists now build a local 'a recursive_list instead, because list is [@@inductive] and its values cannot be cyclic.",
+      "long": "The check itself is unchanged for other types; the tests keep exercising it with a non-inductive copy of the list type. Expected outputs change accordingly (`Cons ((), Nil)` instead of `[()]`)."
+    }
+  },
+  "testsuite/tests/letrec-compilation/": {
+    "what": {
+      "short": "Upstream tests of how recursive value definitions are compiled and in which order their effects run."
+    },
+    "vox": {
+      "short": "Cyclic values are built from a local non-inductive 'a recursive_list instead of list, for the same reason as in letrec-check/."
+    }
+  },
+  "testsuite/tests/basic/recvalues.ml": {
+    "what": {
+      "short": "Upstream run-time test of recursive value definitions."
+    },
+    "vox": {
+      "short": "Its cyclic lists use a local recursive_list type, since let rec x = 1 :: x is rejected now that list is [@@inductive]."
+    }
+  },
+  "testsuite/tests/asmcomp/is_static_flambda.ml": {
+    "what": {
+      "short": "Upstream test that Flambda allocates constant values, including recursive ones, statically."
+    },
+    "vox": {
+      "short": "The recursive constants a and b are built from a local non-inductive list type, since cyclic lists are rejected."
+    }
+  },
+  "testsuite/tests/typing-labeled-tuples/labeled_tuples.ml": {
+    "what": {
+      "short": "Upstream expect tests of labeled tuples."
+    },
+    "vox": {
+      "short": "The cyclic list of labeled tuples is now a recursive_list, since list values cannot be cyclic."
+    }
+  },
+  "testsuite/tests/typing-local/regions.ml": {
+    "what": {
+      "short": "Upstream run-time tests that local allocations are freed at region boundaries."
+    },
+    "vox": {
+      "short": "The top-level recursive binding test builds a recursive_list instead of a cyclic list."
+    }
+  },
+  "testsuite/tests/formatting/": {
+    "what": {
+      "short": "Upstream tests of location printing in -dparsetree and -dtypedtree dumps."
+    },
+    "vox": {
+      "short": "The typed-tree references print modes with the two new axes: partial or total, and real, appear in every value_mode and alloc_mode."
+    }
+  },
+  "testsuite/tests/tool-ocamlc-stop-after/stop_after_typing_impl.compilers.reference": {
+    "what": {
+      "short": "The typed-tree dump of an external after -stop-after typing."
+    },
+    "vox": {
+      "short": "Modes gain partial and real, the arrow gains its binder (None), and the per-axis list grows from ten entries to twelve."
+    }
+  },
+  "testsuite/tests/typedtree/module_presence.ml": {
+    "what": {
+      "short": "Upstream expect test that prints the typed tree of module aliases."
+    },
+    "vox": {
+      "short": "The printed modality constant gains partial and ghost."
+    }
+  },
+  "testsuite/tests/typing-layouts-or-null/non_float_array.ml": {
+    "what": {
+      "short": "Upstream expect test of arrays of or_null values, with a -dlambda dump."
+    },
+    "vox": {
+      "short": "Only identifier stamps in the Lambda dump change (X/419 becomes X/421), because the typer creates more identifiers before this point."
+    }
+  },
+  "testsuite/tests/typing-layouts/allow_any.ml": {
+    "what": {
+      "short": "Upstream tests of [@@unsafe_allow_any_mode_crossing]."
+    },
+    "vox": {
+      "short": "The printed bounds in two mismatch errors gain total."
+    }
+  },
+  "testsuite/tests/tool-expect-test/": {
+    "what": {
+      "short": "Tests of the expect-test tool itself."
+    },
+    "vox": {
+      "short": "principal.ml and principal_trailing_code.ml come with the cherry-picked upstream fix #6806 for split default and -principal outputs."
+    }
+  },
+  "testsuite/tests/tool-ocamltest/": {
+    "what": {
+      "short": "Tests of ocamltest itself."
+    },
+    "vox": {
+      "short": "incremental-plan runs ocamltest -plan-incremental on a script with splits and compiler-library modifiers and compares the requirements it prints."
+    }
+  },
+  "testsuite/tests/parsing/ghost_scope.ml": {
+    "what": {
+      "short": "A parser test for the scope of ghost_."
+    },
+    "vox": {
+      "short": "New: ghost_ binds like an application argument (ghost_ x + y is (ghost_ x) + y), ghost_ f x is a syntax error, and Pprintast round-trips each case."
+    }
+  },
+  "testsuite/tests/lib-bigint/": {
+    "what": {
+      "short": "Run-time tests of the Bigint standard-library module."
+    },
+    "vox": {
+      "short": "New: checks Bigint arithmetic and decimal conversion against expected strings, and that its operations can be used in total functions."
+    }
+  },
+
+  "oxcaml/tests/typing/axis_lattice_roundtrip_test.ml": {
+    "what": {
+      "short": "A unit test that round-trips the bit-packed encoding of mode-crossing bounds (Axis_lattice) through every axis."
+    },
+    "vox": {
+      "short": "Adds the totality axis to the samples, and masks ghostliness out of every other axis's mask, since mode bounds are built with ghostliness fixed at ghost."
+    }
+  }
+}

@@ -36,3 +36,7 @@ val show_timings : bool
 val translate : bool
 val style : Translate.style
 val compact : bool
+
+val plan_incremental : bool
+
+val list_sources : bool

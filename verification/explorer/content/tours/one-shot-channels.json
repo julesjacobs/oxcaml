@@ -1,0 +1,95 @@
+{
+  "_about": "Demo tour of One_shot. Sources: verification/catalogue/pages/one-shot-channels.md (its sources: list is the backbone), research/mastery-20260927/concurrency.md (sections 2.2-2.9, 4.1-4.4, 8), verification/library/concurrency-boundary.md, and the code at HEAD (8479634adc). The owner's question (what keeps Verified_atomic sound) is answered at stop 6.",
+  "_sources_stop6": "The restriction table is concurrency.md 4.1 and 4.2; the test testsuite/tests/vox/talk-atomics-deletions/ (test.ml, run.sh, test.reference) reproduces its six rows, and stop 6 links it (at HEAD since the trunk merge c7ec2f92a8).",
+  "id": "one-shot-channels",
+  "title": "One-shot channels",
+  "kind": "demo",
+  "demo": "one-shot-channels",
+  "order": 7,
+  "summary": [
+    "`One_shot` is a single-use channel between domains, written and verified in Vox on two trusted primitives: an integer atomic whose operations open a ghost invariant at the atomic event, and a cell that moves its payload. The tour goes from the client's view down to the C compare-and-set, and on the way answers which restrictions in the atomic's contract keep it sound: unique tokens and a total transition.",
+    "The [catalogue page](demo:one-shot-channels) states the claim, the trusted base and the scope."
+  ],
+  "stops": [
+    {
+      "title": "Two affine endpoints and a payload kind",
+      "path": "verification/library/one_shot.mli",
+      "from": "(** Affine endpoints for one ownership transfer",
+      "to": "'a recv @ unique -> 'a @ unique",
+      "lines": "3-23",
+      "text": "The interface has no refinements at all. The payload kind `value mod portable contended` admits only values that any domain may read without synchronisation, so `int ref` is excluded; mutable state travels as a `Pref` cell or a `Raw_memory` buffer together with its erased ownership token. Endpoints have kind `value mod contended total`, and in Vox `total` implies `stateless` and `portable`, so an endpoint can itself be a payload. `create` returns the pair `@ unique`, and `send` and `recv` consume their endpoint, so OxCaml's uniqueness analysis makes each endpoint single-use. The comment fixes the scope: normal return only, no progress guarantee, and `recv` may wait forever."
+    },
+    {
+      "title": "A refinement travels through a polymorphic channel",
+      "path": "testsuite/tests/vox/one_shot_public_client.ml",
+      "from": "let roundtrip",
+      "to": "One_shot.recv rx",
+      "lines": "9-13",
+      "text": "The client instantiates `'a` with the singleton type `{v : int | v = n}`. The checker proves that `n` has that type at `send`, and assumes it of the value `recv` returns, which proves the result type of `roundtrip`. This relies on refinement types being rigid in the typer: `{v : int | v = n}` does not unify with `int`, and the abstract endpoint types are invariant, so the channel cannot change what its payload type claims. For a payload of plain `int`, the interface does not say which value arrives. The test runs in bytecode and native code, and `concurrency_boundary.ml` compiles it again with only the libraries' `.cmi` and `.cmx` files present."
+    },
+    {
+      "title": "Rejected clients",
+      "path": "testsuite/tests/vox/one_shot_rejected.ml",
+      "from": "let bad_value () =",
+      "to": ["let forged_result", "|}]"],
+      "lines": "56-82",
+      "text": "Sending `-1` on a channel of `{n : int | n >= 0}` fails at the argument of `send`, and the error points at the payload refinement. `forged_result` claims `n = 42` for a receive at plain `int` and fails the same way. The other phrases in the file are rejected by OxCaml's own checks: sending or receiving twice on one endpoint and reusing an endpoint after sending it as a payload are uniqueness errors, `wrong_end` is a type error, an `int ref` payload fails the payload kind, and the field `cell` is unbound outside the module. The last two phrases take from an empty `Unique_cell.Slot` and fill one twice; both fail against that module's trusted contract."
+    },
+    {
+      "title": "The flag invariant",
+      "path": "verification/library/one_shot.ml",
+      "from": "module Invariant = struct",
+      "to": "module A = Verified_atomic.Make (Invariant)",
+      "lines": "4-14",
+      "text": "Both endpoints share a `Slot` and an instance of `Verified_atomic.Make` whose invariant is this `holds`. At flag 0 the atomic owns nothing, because an endpoint holds the slot; at flag 1 it owns the full slot, the singleton heap that maps the slot's location to `true`. The key is a record whose one field, the slot's location, is ghost, so it has the void layout that `Verified_atomic.Invariant` requires. Further down, the endpoint types `send` and `recv` refine plain records: both say that the slot's location is the atomic's key, and `send` also carries a ghost token that owns the slot while it is empty. The types are abstract in the interface, so every endpoint a client holds was built by `create`, which proves these refinements once."
+    },
+    {
+      "title": "The trusted contract of compare_and_set",
+      "path": "verification/library/verified_atomic.mli",
+      "from": "external compare_and_set :",
+      "to": "[@@noalloc]",
+      "lines": "53-72",
+      "text": "This is an `external`: the checker assumes its type, and nothing checks it against the C code. In separation-logic terms, the caller gives up the token `caller`; at the atomic event the value `before` is observed, and the transition receives the invariant's resource `inside`, which satisfies `holds` at `before` and is disjoint from the caller's, and the caller's resource `outside`. The transition must split their union into `restored`, which satisfies `holds` at the new value, and `outgoing`, which satisfies `post` for the outcome; the call returns the Boolean with `outgoing` as `r.#state`. `post` and the transition are `@ immutable total ghost`, so they are erased, and natively the result is one scalar. `load`, `exchange`, `set` and `fetch_and_add` have the same shape and differ only in the new value and in what `post` observes."
+    },
+    {
+      "title": "What keeps Verified_atomic sound",
+      "path": "verification/library/verified_atomic.mli",
+      "from": "(** Strong sequentially consistent integer atomics with unique ghost ownership.",
+      "to": ["module type Invariant = sig", "end"],
+      "lines": "1-19",
+      "text": "Two restrictions carry the soundness of these contracts: unique tokens and a total transition. `@ unique` on `caller` and on the transition's result makes ownership affine; without the first, a client keeps reading through a token it has handed to the invariant, and without the second, a transition returns the invariant's token as both `restored` and `outgoing`, so two domains own one cell. The transition is never run, so `total` is what makes it a proof: a diverging transition could claim any result, and because every atomic operation is partial, no transition can open another invariant. `contended` on the handle `(a : t)` protects nothing: `t` is `immutable_data`, which crosses contention already, and the handle is safe because the C code touches its word only with sequentially consistent atomics. The test [`talk-atomics-deletions/`](src:testsuite/tests/vox/talk-atomics-deletions/) deletes each restriction in turn from a copy of this file: without `unique` on `caller`, a verified read prints `refinement {v | v = 5} violated: read 6`; without `total`, a lock writes its cell after the acquiring compare-and-set failed; without `@ local contended`, the two-domain client compiles as before."
+    },
+    {
+      "title": "send: a compare-and-set proved to succeed",
+      "path": "verification/library/one_shot.ml",
+      "from": "let[@def] (publication_post @ total)",
+      "to": "{ A.restored = outside; outgoing = inside }",
+      "lines": "16-40",
+      "text": "`send` first fills the slot with `Slot.put`, which turns its token for the empty slot into one for the full slot, and then runs a compare-and-set from 0 to 1 with `publication_transfer` as the transition. The transition gives the caller's full slot to the atomic as `restored`, which is what `holds` requires at flag 1, and returns the invariant's resource as `outgoing`. `publication_post` requires success and an empty `outgoing`. Both follow from disjointness: `holds` is false at flags other than 0 and 1, and at flag 1 the invariant would own the location the caller owns, so `before` is 0 and `inside` is empty. The checker therefore proves that the compare-and-set in `send` always succeeds, which is why `send` discards its result."
+    },
+    {
+      "title": "recv: wait until the flag hands over the slot",
+      "path": "verification/library/one_shot.ml",
+      "from": "let rec await",
+      "to": "await cell atomic",
+      "lines": "103-122",
+      "text": "`recv` calls `await`, which loops on a compare-and-set from 1 to 0 with an empty caller token. On success, `reception_transfer` returns the invariant's full slot as `outgoing` and leaves the atomic the empty heap that `holds` requires at 0, so the token records the slot as full and `Slot.take` may run. On failure, `reception_post` says the returned token is empty, and `await` calls `Domain.cpu_relax` and retries. `await` is partial, so nothing is claimed about termination: if no one sends, `recv` spins forever. The payload comes back at type `'a`, which is how its refinement reaches the client."
+    },
+    {
+      "title": "Trusted base: the C compare-and-set",
+      "path": "runtime/pref.c",
+      "from": "CAMLprim value caml_vox_atomic_cas(value cell",
+      "span": 5,
+      "lines": "182-186",
+      "text": "The atomic's operations are C primitives, and this is the whole native compare-and-set: the runtime's `caml_atomic_cas_field` on field 0. It ignores `post` and `transition`, whose erased code never runs, and the void token is not passed at all. The payload moves through `caml_unique_cell_put` and `caml_unique_cell_take` further down this file, which are ordinary stores and loads, and an empty slot holds `()` at type `'a`; the Boolean model in [`unique_cell.mli`](src:verification/library/unique_cell.mli) is what keeps `take` away from an empty slot. That the flag's compare-and-set orders these accesses for the other domain is an assumption about the runtime's atomics: [`concurrency-boundary.md`](src:verification/library/concurrency-boundary.md) states it, and no memory-model proof backs it."
+    },
+    {
+      "title": "Tests: public-only clients and erased ghost code",
+      "path": "testsuite/tests/vox/concurrency_boundary_check.ml",
+      "from": "(* Checks that the channel and lock libraries' emitted code",
+      "to": "finish ()",
+      "lines": "1-22",
+      "text": "[`concurrency_boundary.ml`](src:testsuite/tests/vox/concurrency_boundary.ml) compiles the channel and lock libraries with both compilers, compiles eight public clients against their `.cmi` files alone (and `.cmx` files natively), runs the five that do not spawn domains, and requires 15 rejected programs to fail with their exact errors, four of them about channels. This program then reads the Lambda and Cmm dumps of the five library units and fails if any mentions a ghost primitive: heap observations, token splitting and joining, the atomic's key or the cell's location. [`one_shot_parallel.ml`](src:testsuite/tests/vox/one_shot_parallel.ml) runs 200 round trips between two domains with forced collections, sends endpoints inside payloads, and checks the values at run time; it runs in bytecode, on compilers configured with `--enable-poll-insertion --enable-multidomain`. These runs test the trusted runtime and prove nothing about progress."
+    }
+  ]
+}
