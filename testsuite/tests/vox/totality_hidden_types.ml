@@ -167,12 +167,13 @@ module Extensible_immediate = struct
   let (use @ total) (x : t) = match x with Pack (_, _) -> 0
 end;;
 [%%expect{|
-module Extensible_immediate :
-  sig
-    type _ key = ..
-    type t = Pack : ('a : immediate). 'a * 'a key -> t
-    val use : t -> int
-  end
+Line 4, characters 43-54:
+4 |   let (use @ total) (x : t) = match x with Pack (_, _) -> 0
+                                               ^^^^^^^^^^^
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 4, characters 20-59
+         which is expected to be "total".
 |}]
 
 (* Matching an open type itself is always rejected. *)
