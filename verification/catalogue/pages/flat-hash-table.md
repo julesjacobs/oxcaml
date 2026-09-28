@@ -32,46 +32,49 @@ The test requires 13 such programs to be rejected, each with its exact error. Si
 
 ## Native code
 
-`ocamlopt -O3 -dcmm` output on x86-64 for the same example written at top level (`find_after_replace_int` in the same client). The library's table modules are also compiled at `-O3`, so the table's functor instance is specialized in the client: `create` becomes the storage allocation primitive, `replace` is a direct call, and `find_opt` is inlined. A table of 16 slots is a single group, probed in place with SSE2: one byte comparison of the 16 control bytes gives a mask of candidate slots, whose keys are compared in turn. A larger table goes to a direct call of `Vox_table_search.groups`. Tokens and views are gone, and the proof leaves only the trivial `catch` at the top. The key module compares integers and hashes every key to 0, which the key laws allow: `(* 0 72340172838076673)` is the control byte of that hash copied into each byte of a word, and 33 is the capacity 16 as a tagged integer. `...` marks omitted lines, and `{...}` shortens debug locations that list five inlined calls:
+`ocamlopt -O3 -dcmm` output on x86-64 for the same example written at top level (`find_after_replace_int` in the same client). The library's table modules are also compiled at `-O3`, so the table's functor instance is specialized in the client: `create` becomes the storage allocation primitive, `replace` is a direct call, and `find_opt` is inlined. A table of 16 slots is a single group, probed in place with SSE2: one byte comparison of the 16 control bytes gives a mask of candidate slots, whose keys are compared in turn. A larger table goes to a direct call of `Vox_table_search.groups`. Tokens and views are gone, and the proof leaves only the trivial `catch` at the top. The key module compares integers and hashes a key with an exclusive or of its upper half and a multiplication (`int_mul`, computed on tagged integers). The fingerprint is the hash's low seven bits (`byte`, untagged by `(>>s byte/9517 1)`), which the multiplication by 72340172838076673 copies into each byte of a word; the group index is the hash shifted right by 7; and 33 is the capacity 16 as a tagged integer. `...` marks omitted lines, and `{...}` shortens debug locations that list five inlined calls:
 
 ```
-(function{flat_hashtbl_public.ml:145,27-339}
+(function{flat_hashtbl_public.ml:146,27-339}
  camlFlat_hashtbl_public__find_after_replace_int_18_128_code
-     (key/9393: int value/9394: int) : val
+     (key/9478: int value/9479: int) : val
  (catch (exit 191 (seq 1 [])) with(191)
    (let
-     (allocated/9397
-        (extcall "caml_vox_table_create"{flat_hashtbl_public.ml:147,26-47;vox_verified_flat_hashtbl.ml:125,12-29;vox_table_mutation.ml:55,20-37}
+     (allocated/9482
+        (extcall "caml_vox_table_create"{flat_hashtbl_public.ml:148,26-47;vox_verified_flat_hashtbl.ml:125,12-29;vox_table_mutation.ml:55,20-37}
           33 int->val)
-      Pmixedfield/9398 (load val allocated/9397))
+      Pmixedfield/9486 (load val allocated/9482))
      (catch
        (exit 192
-         (app{flat_hashtbl_public.ml:148,10-55;vox_verified_flat_hashtbl.ml:174,12-63}
-           G:"camlFlat_hashtbl_public__replace_416_92_code" Pmixedfield/9398
-           key/9393 value/9394 unit))
+         (app{flat_hashtbl_public.ml:149,10-55;vox_verified_flat_hashtbl.ml:174,12-63}
+           G:"camlFlat_hashtbl_public__replace_428_92_code" Pmixedfield/9486
+           key/9478 value/9479 unit))
      with(192)
+       (catch
+         (let
+           (int_mul/9507
+              (+
+                (* (or (xor key/9478 (>>u key/9478 32)) 1)
+                  712544676207699905)
+                -712544676207699904)
  ...
-           (if (== capacity/9423 33)
+            group/9514 (and (or (>>u int_mul/9507 7) 1) int_sub/9512))
+           (if (== capacity/9511 33)
              (let
-               mask/9429
+               mask/9521
                  (let
-                   group/9426
-                     (load_mut unaligned vec128
-                       (+a (load_mut val (+a Pmixedfield/9398 24)) 0))
-                   (+
-                     (<<
-                       (extcall "caml_sse2_vec128_movemask_8"{...}
-                         (extcall "caml_sse2_int8x16_cmpeq"{...}
-                           group/9426
-                           (let
-                             low/9427
-                               (scalar->int64x2 (* 0 72340172838076673))
+                   (byte/9517 (and int_mul/9507 255)
  ...
-                       (if (== stored/9444 key/9393) (exit 194 index/9441)
+                           (let
+                             low/9519
+                               (scalar->int64x2
+                                 (* (>>s byte/9517 1) 72340172838076673))
+ ...
+                       (if (== stored/9537 key/9478) (exit 194 index/9534)
  ...
              (exit 193
                (app{...}
-                 G:"camlVox_table_search__groups_346_693_code"
+                 G:"camlVox_table_search__groups_358_717_code"
  ...
 ```
 

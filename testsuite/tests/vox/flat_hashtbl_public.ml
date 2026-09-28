@@ -124,7 +124,8 @@ end
 module Key = struct
   type t = int
   let[@def] (equal @ total) (x : int) (y : int) = x = y
-  let[@def] (hash @ total) (x : int) = 0
+  let[@def] (hash @ total) (x : int) =
+    (x lxor Int.Refined.shift_right_logical x 32) * 0x9e3779b97f4a7c1
   let (reflexive @ total) (x : int) : {u : unit | equal x x} =
     equal_def x x; ()
   let (symmetric @ total) (x : int) (y : int) :
@@ -135,7 +136,7 @@ module Key = struct
     equal_def x y; equal_def y z; equal_def x z; ()
   let (hash_equal @ total) (x : int) (y : int) :
       {u : unit | not (equal x y) || hash x = hash y} =
-    hash_def x; hash_def y; ()
+    equal_def x y; ()
 end
 module E = Exercise (Key)
 module V = E.V
