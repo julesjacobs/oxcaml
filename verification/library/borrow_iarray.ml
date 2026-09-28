@@ -41,7 +41,7 @@ module Raw = struct
         current left === Vox_iarray.slice (current s) 0 k
         && current right === Vox_iarray.slice (current s) k
           (Iarray.length (current s))} @ unique
-    @@ portable total = "caml_borrow_split"
+    @@ stateless = "caml_borrow_split"
   external recombine : ('a : immutable_data).
     (frame : 'a split_frame) @ unique ->
     {s : 'a loan |
@@ -52,7 +52,7 @@ module Raw = struct
     @ unique @@ portable total = "caml_borrow_recombine"
   external open_ : ('a : immutable_data).
     'a owned @ unique -> ('a frame * 'a loan) @ unique
-    @@ portable total = "caml_borrow_open"
+    @@ stateless = "caml_borrow_open"
   external restore : ('a : immutable_data).
     'a frame @ unique -> 'a owned @ unique
     @@ portable total = "caml_borrow_restore"
@@ -60,7 +60,7 @@ module Raw = struct
     'a loan @ local unique -> 'a loan @ unique
     @@ portable total = "caml_borrow_transfer"
   external finish : ('a : immutable_data).
-    'a loan @ local unique -> unit @@ portable total = "caml_borrow_finish"
+    'a loan @ local unique -> unit @@ stateless = "caml_borrow_finish"
 end
 
 let (await_both @ portable) left (right : (unit -> 'b) @ local once) =
@@ -123,7 +123,7 @@ module Slice = struct
       let result = set middle second x in
       ghost_ (Vox_iarray.swap_def before i j);
       result)
-  let (split_at @ total) : ('a : immutable_data) ('r : immutable_data).
+  let (split_at @ stateless) : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
       (index : {k : int | 0 <= k && k <= Iarray.length (current s)}) ->
       (post : ('r @ immutable total -> 'a iarray @ total immutable ->
@@ -159,12 +159,12 @@ module Slice = struct
       let state = Raw.recombine frame in
       let result = {value; state} in
       result)
-  let (finish @ total) : ('a : immutable_data).
+  let (finish @ stateless) : ('a : immutable_data).
       (s : 'a t) @ local unique -> {u : unit | final s === current s} =
     fun s ->
       let u = Raw.finish s in
       u
-  let (split3 @ total) : ('a : immutable_data) ('r : immutable_data).
+  let (split3 @ stateless) : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
       (first : {i : int | 0 <= i && i <= Iarray.length (current s)}) ->
       (past : {j : int | let i = first in
@@ -310,7 +310,7 @@ module Owned_array = struct
     {r : int t | let i = index in
       contents r === Vox_iarray.updated (contents a) i value}
     @ unique @@ portable total = "caml_borrow_int_set" [@@noalloc] [@@builtin]
-  let (with_mut @ total) : ('a : immutable_data) ('r : immutable_data).
+  let (with_mut @ stateless) : ('a : immutable_data) ('r : immutable_data).
       (a : 'a t) @ unique ->
       (post : ('r @ immutable total -> 'a iarray @ total immutable -> bool @
         ghost))

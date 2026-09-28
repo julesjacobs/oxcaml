@@ -322,7 +322,9 @@ this file.
 - [x] **`_trust.md` line 13** (fixed with the owner's approval; page back
       to owner-review) conflates totality and
       statelessness: total functions may write through uniquely owned
-      storage (`Quicksort.sort`). Wording proposed to the owner.
+      storage (`Borrow.Slice.set`; `Quicksort.sort` was the example until
+      borrowing became partial on 28 September). Wording proposed to the
+      owner.
       Also: it says ghost fields are removed before code generation, but
       bytecode keeps an empty slot for them (native removes them).
 - [ ] **`assert false` lint**: it ends a path with nothing to prove, which
@@ -386,9 +388,9 @@ function for proving and running (48); termination for stateful code (88).
 **Effects in the mode system (owner, 28 September).**
 - **The principle:** a `total` function is a mathematical function. Unique-in/unique-out code and heap tokens fit it, read as functional threading: path copying, or a threaded map.
 - **What does not fit:** borrowing, read the RustHorn way, is an effect. Creating a borrow chooses its prophecy nondeterministically, and `finish` assumes `final = current`, which kills the other worlds.
-- **Today:** `finish` and borrow creation are typed `total`. Erasing a borrowing call is prevented only because `ghost_` captures real values as aliased.
+- **Before 28 September:** `finish` and borrow creation were typed `total`. Erasing a borrowing call was prevented only because `ghost_` captures real values as aliased.
 - **Future work:** model these effects with finer-grained modes. Then the in-place sort can state what is true, that it terminates, with an argument better than "every operation it uses is total".
-- **The immediate option discussed:** make prophecy creation and `finish` partial. It is not yet decided.
+- **Decided 28 September, implemented on `jujacobs/vox/partial-borrows-20260928`:** prophecy creation (`with_mut`, `Slice.split_at`, `split3`, `with_range`) and `finish` are partial, in `Borrow` and `Borrow_iarray`. All the quicksorts (`Quicksort`, `Quicksort_iarray`) borrow and lose `total`; the owner does not need a total quicksort, since the demo exists to show borrowing. A borrow-free total `sort_array` was tried on the branch and reverted. `borrow_partial.ml` checks the verdicts.
 
 ## Decisions waiting for the owner
 

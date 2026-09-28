@@ -77,6 +77,10 @@ All indices have checked bounds. Empty/full splits and empty ranges are
 allowed. Loan length is invariant; resizing and arbitrary joining are absent.
 `swap`, `split3`, and `with_range` are verified library implementations.
 
+`with_mut`, `Slice.split_at`, `split3`, `with_range`, `finish`, `parallel` and
+`Owned_array.append` are not `total`; every other operation in the table is.
+See "Totality of borrowing" below.
+
 Scoped operations returning a callback result and a restored handle use:
 
 ```ocaml
@@ -204,6 +208,7 @@ mutable reads in ghost code, and partial proof computations.
 | `borrow_parallel.ml` | Separate domains, sequential fallback, and joining before exception propagation |
 | `quicksort_client.ml` | Sequential and parallel sorting, with sortedness and preservation of every multiplicity |
 | `borrow_rejected.ml` | Ownership, bounds, ghost/runtime separation, stale models, and split consistency |
+| `borrow_partial.ml` | Loan creation and `finish` rejected in erased code, lemmas and total functions, with total owned-array controls |
 | `borrow_runtime.ml` | Storage primitives, snapshots, empty slices, float arrays, and owned splits and appends |
 
 Quicksort uses a middle-position pivot and distributes equal values using
@@ -225,10 +230,50 @@ The public API accepts `?max_domains` and `?cutoff`. Tests exercise duplicates, 
 ordered/reverse-ordered inputs, and deterministic random inputs.
 
 Pure model functions and lemmas are total. Partition also has a checked
-numeric decreases measure. Sequential sorting also checks its size decrease through scoped callbacks
-and exposes a total contract. Parallel sorting exposes normal-return
-correctness: domain joining remains partial. Element borrows, shared read loans,
+numeric decreases measure, and is total: it only reads and swaps. Sequential
+sorting also checks its size decrease through scoped callbacks, but it lends
+and ends loans, so it is not `total` and its contract holds on normal return.
+Parallel sorting exposes normal-return correctness as well. Element borrows, shared read loans,
 and a reusable parallel worker pool remain separate extensions.
+
+## Totality of borrowing
+
+Decided by the owner on 28 September 2026. A `total` function is a function
+of its arguments: the verifier encodes a call to it as an application of an
+uninterpreted function, lemmas are total functions, and `ghost_` erases only
+total code.
+
+Operations that take a handle uniquely and return its successor fit this
+reading. `Slice.set` can be read as a pure function that returns an updated
+copy of the slice, with the same `final`; `Slice.swap`, `Owned_array.split_at`
+and the reads are the same.
+
+Creating a loan does not fit it. In the prophecy reading (RustHorn),
+`with_mut`, `Slice.split_at`, `split3` and `with_range` choose the new loans'
+`final` contents nondeterministically, and `finish` assumes `final s ===
+current s`, which removes every other choice. As a function of its argument,
+`finish` would state that every slice's final contents are its current
+contents. These operations are therefore not `total`, and neither is any
+function that uses them. Their callbacks were already partial function types.
+Before this decision they were declared `total`; erasing a borrowing call was
+prevented only because `ghost_` captures values as aliased and the loan
+operations need unique ones.
+
+In `verification/library/borrow.ml` and `borrow_iarray.ml` the internal
+`Raw.open_`, `Raw.split` and `Raw.finish` are not `total` either. `Raw.restore`,
+`Raw.recombine` and `Raw.transfer` stay `total`: they read the `final`
+contents recorded in a frame or loan and choose nothing.
+
+All the quicksorts borrow, so none of them is `total`: `Quicksort.sort`,
+`sort_array` and `parallel_sort_array`, and `Quicksort_iarray.sort` and
+`sort_array`. The quicksort demo exists to show borrowing. Its partitions
+stay `total`, and the recursion of `sort` keeps its checked decreasing
+measure. A termination guarantee for borrowing code would need effects in the
+mode system, which is future work.
+
+`borrow_partial.ml` checks that `ghost_`, lemmas and total functions reject
+the loan operations, and that call congruence does not apply to a function
+that lends; its accepted controls use owned-array operations that stay total.
 
 ## Building
 
@@ -513,6 +558,8 @@ experiment.
 
 Branch: `jujacobs/vox/scoped-termination-20260908`, baseline `13c52c9fe7`.
 **Verdict: adopt direct callback recursion and sequential totality.**
+The totality of the borrow primitives was revised on 28 September 2026; see
+"Totality of borrowing".
 The recursion-use checker now traverses directly supplied callback bodies with
 its current permission to call the recursive function. Numeric recursion still
 proves the existing nonnegative, strictly decreasing measure at each recursive
@@ -639,7 +686,8 @@ a checked lemma proves sortedness and permutation of the actual current parent
 array. The permutation proof adds counts from three subranges. The sortedness
 proof checks adjacent pairs within each child and across the pivot. Sequential
 sorting remains total; domain joining and parallel sorting retain their existing
-normal-return contracts.
+normal-return contracts. (Since 28 September 2026 no sort that borrows is
+total; see "Totality of borrowing".)
 
 The SMT representation remains an opaque iarray sort with bounded ground
 observations. Constructor identities and raw length/read applications preserve

@@ -38,7 +38,7 @@ module Raw = struct
     'a split_frame @ local immutable -> 'a Model.t @ immutable total ghost
     @@ total = "caml_borrow_frame_right"
   external open_ : ('a : immutable_data).
-    'a owned @ unique -> ('a root_frame * 'a loan) @ unique @@ portable total =
+    'a owned @ unique -> ('a root_frame * 'a loan) @ unique @@ stateless =
       "caml_borrow_open"
   external restore : ('a : immutable_data).
     'a root_frame @ unique -> 'a owned @ unique @@ portable total =
@@ -53,7 +53,7 @@ module Raw = struct
     'a owned @ local immutable -> int @@ portable total =
       "caml_borrow_length"
   external finish : ('a : immutable_data).
-    'a loan @ local unique -> unit @@ portable total = "caml_borrow_finish"
+    'a loan @ local unique -> unit @@ stateless = "caml_borrow_finish"
   external split : ('a : immutable_data).
     (s : 'a loan) @ local unique ->
     (index : {k : int |
@@ -64,7 +64,7 @@ module Raw = struct
       match r with _, left, right ->
         current left === Model.take (Bigint.of_int index) (current s)
         && current right === Model.drop (Bigint.of_int index) (current s)}
-    @ unique @@ portable total = "caml_borrow_split"
+    @ unique @@ stateless = "caml_borrow_split"
   external recombine : ('a : immutable_data).
     (frame : 'a split_frame) @ unique ->
     {s : 'a loan |
@@ -146,7 +146,7 @@ module Slice = struct
       ghost_ (Model.set_length intermediate bj x);
       ghost_ (Model.swap_def before bi bj);
       s2)
-  let (split_at @ total) : ('a : immutable_data) ('r : immutable_data).
+  let (split_at @ stateless) : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
       (index : {k : int | 0 <= k
         && Bigint.compare (Bigint.of_int k) (Model.length (current s)) <= 0}) ->
@@ -188,12 +188,12 @@ module Slice = struct
       ghost_ (Model.append_length left_end right_end);
       let result = {value; state} in
       result)
-  let (finish @ total) : ('a : immutable_data).
+  let (finish @ stateless) : ('a : immutable_data).
       (s : 'a t) @ local unique ->
       {u : unit | final s === current s} = fun s ->
     let u = Raw.finish s in
     u
-  let (split3 @ total) : ('a : immutable_data) ('r : immutable_data).
+  let (split3 @ stateless) : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
       (first : {i : int | 0 <= i
         && Bigint.compare (Bigint.of_int i) (Model.length (current s)) <= 0}) ->
@@ -276,7 +276,7 @@ module Slice = struct
       let result = {value; state} in
       result)
 
-  let (with_range @ total) : ('a : immutable_data) ('r : immutable_data).
+  let (with_range @ stateless) : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
       (first : {i : int | 0 <= i
         && Bigint.compare (Bigint.of_int i) (Model.length (current s)) <= 0}) ->
@@ -401,7 +401,7 @@ module Owned_array = struct
     (left : 'a t) @ unique -> (right : 'a t) @ unique ->
     {r : 'a t | contents r === Model.append (contents left) (contents right)}
     @ unique @@ portable = "caml_borrow_owned_append"
-  let (with_mut @ total) : ('a : immutable_data) ('r : immutable_data).
+  let (with_mut @ stateless) : ('a : immutable_data) ('r : immutable_data).
       (a : 'a t) @ unique ->
       (post : ('r @ immutable total -> 'a Model.t @ immutable -> bool @ ghost))
         @ ghost ->

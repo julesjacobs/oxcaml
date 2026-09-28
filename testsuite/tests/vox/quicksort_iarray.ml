@@ -118,7 +118,7 @@ let rec (partition @ total) : (pivot : int) -> (size : int) ->
   let scan : int = scan in
   size - scan]
 
-let rec (sort_sized @ portable total) : (run : runner) @ portable ->
+let rec (sort_sized @ portable) : (run : runner) @ portable ->
     (domains : int) -> (cutoff : int) -> (size : int) ->
     (loan : {s : int Slice.t | 0 <= size
       && Iarray.length (Slice.current s) = size}) @ local unique ->
@@ -224,7 +224,7 @@ let rec (sort_sized @ portable total) : (run : runner) @ portable ->
     u)
 [@@decreases size]
 
-let (sort_with_budget @ portable total) : (run : runner) @ portable ->
+let (sort_with_budget @ portable) : (run : runner) @ portable ->
     (domains : int) -> (cutoff : int) -> (s : int Slice.t) @ local unique ->
     {u : unit | Spec.sorted (Slice.final s)
       && Spec.permutation (Slice.current s) (Slice.final s)} = fun run domains cutoff s ->
@@ -235,7 +235,7 @@ let (sort_with_budget @ portable total) : (run : runner) @ portable ->
   let u = sort_sized run domains cutoff size sized in
   u
 
-let (sort_array_with_budget @ portable total) : (run : runner) @ portable ->
+let (sort_array_with_budget @ portable) : (run : runner) @ portable ->
     (domains : int) -> (cutoff : int) ->
     (a : int Owned_array.t) @ unique ->
     {r : int Owned_array.t | Spec.sorted (Owned_array.contents r)
@@ -251,13 +251,13 @@ let (sort_array_with_budget @ portable total) : (run : runner) @ portable ->
   let {value = u; state} = result in
   state
 
-let (sort @ portable total) : (s : int Slice.t) @ local unique ->
+let (sort @ portable) : (s : int Slice.t) @ local unique ->
     {u : unit | Spec.sorted (Slice.final s)
       && Spec.permutation (Slice.current s) (Slice.final s)} = fun s ->
   let u = sort_with_budget sequential_runner 1 512 s in
   u
 
-let (sort_array @ portable total) : (a : int Owned_array.t) @ unique ->
+let (sort_array @ portable) : (a : int Owned_array.t) @ unique ->
     {r : int Owned_array.t | Spec.sorted (Owned_array.contents r)
       && Spec.permutation (Owned_array.contents a) (Owned_array.contents r)} @ unique = fun a ->
   let result = sort_array_with_budget sequential_runner 1 512 a in

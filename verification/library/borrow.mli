@@ -6,6 +6,14 @@ type ('value, 'state) step =
   { value : 'value @@ global;
     state : 'state }
 
+(* Slices and owned arrays are updated by consuming a handle and returning
+   its successor, so the operations on them can be functions of their
+   arguments and be [total]. The operations that lend a slice
+   ([Slice.split_at], [Slice.split3], [Slice.with_range],
+   [Owned_array.with_mut]) and the one that ends a loan ([Slice.finish]) are
+   not [total]. A new loan's [final] contents are chosen when it is created,
+   and [finish] assumes that they equal its [current] contents; neither step
+   is a function of the arguments. *)
 module Slice : sig @@ portable
   type ('a : immutable_data) t : value mod total contended
 
@@ -74,11 +82,11 @@ module Slice : sig @@ portable
           (Model.drop (Bigint.of_int k) (current r.state))
         && final r.state === final s
         && Model.length (current r.state) === Model.length (current s)}
-      @ local unique @@ total
+      @ local unique @@ stateless
 
   val finish : ('a : immutable_data).
       (s : 'a t) @ local unique ->
-      {u : unit | final s === current s} @@ total
+      {u : unit | final s === current s} @@ stateless
 
 
   val split3 : ('a : immutable_data) ('r : immutable_data).
@@ -111,7 +119,7 @@ module Slice : sig @@ portable
           (Model.drop (Bigint.of_int j) (current r.state))
         && final r.state === final s
         && Model.length (current r.state) === Model.length (current s)}
-      @ local unique @@ total
+      @ local unique @@ stateless
 
 
   val with_range : ('a : immutable_data) ('r : immutable_data).
@@ -139,7 +147,7 @@ module Slice : sig @@ portable
             (Model.drop (Bigint.of_int j) (current s)))
         && final r.state === final s
         && Model.length (current r.state) === Model.length (current s)}
-      @ local unique @@ total
+      @ local unique @@ stateless
 
   val parallel : ('a : immutable_data).
       (spawn : bool) ->
@@ -205,5 +213,5 @@ module Owned_array : sig @@ portable
         {r : 'r | let s = s in post r (Slice.final s)}) @ local once ->
       {r : ('r, 'a t) step | post r.value (contents r.state)
         && Model.length (contents r.state) === Model.length (contents a)}
-      @ unique @@ total
+      @ unique @@ stateless
 end

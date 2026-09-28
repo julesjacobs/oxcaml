@@ -106,7 +106,7 @@ let (partition_middle @ total) : (size : int) ->
   let result = {value; state} in
   result)
 
-let rec (sort_sized @ total) : (size : int) ->
+let rec sort_sized : (size : int) ->
     (loan : {s : int Slice.t | 0 <= size
       && Model.length (Slice.current s) === Bigint.of_int size}) @ local unique ->
     {u : unit | let s = loan in
@@ -153,13 +153,13 @@ let rec (sort_sized @ total) : (size : int) ->
     u)
 [@@decreases size]
 
-let (sort @ total) : (s : int Slice.t) @ local unique ->
+let sort : (s : int Slice.t) @ local unique ->
     {u : unit | Spec.sorted (Slice.final s)
       && Spec.permutation (Slice.current s) (Slice.final s)} = fun s ->
   let size = Slice.length (borrow_ s) in
   sort_sized size s
 
-let (sort_array @ total) : (a : int Owned_array.t) @ unique ->
+let sort_array : (a : int Owned_array.t) @ unique ->
     {r : int Owned_array.t | Spec.sorted (Owned_array.contents r)
       && Spec.permutation (Owned_array.contents a) (Owned_array.contents r)} @ unique =
     fun a ->

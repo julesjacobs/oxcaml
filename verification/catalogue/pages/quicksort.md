@@ -1,7 +1,7 @@
 title: Quicksort
 blurb: An in-place quicksort on mutable `int` arrays, sequential and parallel, proved to leave the array sorted and a permutation of its input.
 status: owner-review
-date: 27 September 2026
+date: 28 September 2026
 sources:
   - testsuite/tests/vox/quicksort.mli — Public interface
   - testsuite/tests/vox/quicksort.ml — Implementation: partition, the sequential recursion on slices and the parallel recursion on owned arrays
@@ -15,8 +15,9 @@ sources:
   - testsuite/tests/vox/quicksort_client.ml — Client: sorts immutable arrays sequentially and in parallel
   - testsuite/tests/vox/quicksort_frame_client.ml — Client: sorts a subrange and leaves the rest unchanged
   - testsuite/tests/vox/quicksort_rejected.ml — Rejected programs
+  - testsuite/tests/vox/borrow_partial.ml — Rejected programs: loans in total and erased code
 ---
-`Quicksort` sorts a mutable array of `int` in place. Each of its three operations is proved to leave the array sorted by `<=` and a permutation of its contents at the call, where `permutation` means that every integer occurs the same number of times. `sort` and `sort_array` run on one domain and are declared `total`, so the checker also proves that they terminate without raising. They do write to the array. `total` does not exclude that: `Slice.set` is declared `total`, a slice is uniquely borrowed, and the checker tracks its contents as values (`Slice.current`, `Slice.final`). `parallel_sort_array` sorts the two sides of a partition in separate OCaml domains; its contract holds on normal return only. Partitioning is Lomuto's scheme with the middle element as pivot; an element equal to the pivot goes left or right depending on the parity of its position.
+`Quicksort` sorts a mutable array of `int` in place. Each of its three operations is proved to leave the array sorted by `<=` and a permutation of its contents at the call, where `permutation` means that every integer occurs the same number of times. `sort` and `sort_array` run on one domain; `parallel_sort_array` sorts the two sides of a partition in separate OCaml domains. None of the three is declared `total`, and their contracts hold on normal return only. They lend the array (`Owned_array.with_mut`, `Slice.split3`) and end those loans (`Slice.finish`). In the checker's model creating a loan chooses its final contents (`Slice.final`) and ending it assumes that they equal its current contents; these are effects, not functions of the arguments, so they are not `total`. The recursion of `sort` still has a checked decreasing measure, and the partition, which only reads and swaps, is `total`. Partitioning is Lomuto's scheme with the middle element as pivot; an element equal to the pivot goes left or right depending on the parity of its position.
 
 The array is reached through `Borrow`, a library of exclusively borrowed array slices. Its storage primitives and the equations the checker uses for them are assumed, not proved. Nothing is proved about running time or recursion depth. The parallel operation may raise (for example if a domain cannot be started), and then the array is lost to the caller.
 
@@ -50,7 +51,7 @@ The parallel operation is not declared `total`, so a function declared `total` (
 
 @text testsuite/tests/vox/quicksort_rejected.ml "Line 2, characters 16-45:" "which is expected to be"
 
-The same test rejects a non-terminating callback passed to `Owned_array.with_mut` inside a `total` function, and a write to a slice inside `ghost_ (...)`, which is erased code (inside `ghost_` the slice is not unique, so the uniqueness check rejects the write). It also rejects two false contracts: a function that leaves its slice unchanged and claims that the result is sorted (it can prove the permutation half), and one that overwrites the first element before calling `sort` and claims that the result is a permutation of the original contents (it can prove the sorted half).
+The same test rejects `sort` and `sort_array` inside a `total` function, and accepts `Owned_array.split_at` there. It rejects a write to a slice inside `ghost_ (...)`, which is erased code (inside `ghost_` the slice is not unique, so the uniqueness check rejects the write). `borrow_partial.ml` rejects `Slice.finish`, `Owned_array.with_mut` and `sort` in erased code, and `finish` in a lemma and in a `total` function. It also rejects two false contracts: a function that leaves its slice unchanged and claims that the result is sorted (it can prove the permutation half), and one that overwrites the first element before calling `sort` and claims that the result is a permutation of the original contents (it can prove the sorted half).
 
 ## Interface
 
@@ -70,7 +71,7 @@ The same test rejects a non-terminating callback passed to `Owned_array.with_mut
 
 ## Trusted base
 
-- Beyond the `borrow.mli` operations on the shared page, the slice library relies on internal primitives declared `external` in the `Raw` module of `verification/library/borrow.ml` (`open_`, `restore`, `split`, `recombine`, `transfer`, `finish`, `length`), implemented in `runtime/borrow.c`. Their meaning comes partly from refinements on the `external` declarations (splitting at `k` gives slices whose contents are the first `k` and the remaining elements of the parent; recombining gives a slice whose current contents are the children's final contents, concatenated) and partly from fixed equations in `verification/vox_vc.ml` (`normal_borrow_transition`): splitting a slice of length `n` at `k` gives slices of lengths `k` and `n - k`, final contents are carried across opening, splitting, recombining and restoring, and finishing a slice makes its final contents equal its current contents.
+- Beyond the `borrow.mli` operations on the shared page, the slice library relies on internal primitives declared `external` in the `Raw` module of `verification/library/borrow.ml` (`open_`, `restore`, `split`, `recombine`, `transfer`, `finish`, `length`), implemented in `runtime/borrow.c`. `open_`, `split` and `finish` are not declared `total`. Their meaning comes partly from refinements on the `external` declarations (splitting at `k` gives slices whose contents are the first `k` and the remaining elements of the parent; recombining gives a slice whose current contents are the children's final contents, concatenated) and partly from fixed equations in `verification/vox_vc.ml` (`normal_borrow_transition`): splitting a slice of length `n` at `k` gives slices of lengths `k` and `n - k`, final contents are carried across opening, splitting, recombining and restoring, and finishing a slice makes its final contents equal its current contents.
 - `quicksort.ml` redeclares integer division as `external divide : int -> {d : int | d <> 0} -> int @@ total = "%divint"`. The nonzero-divisor refinement on the primitive is written by hand.
 - `Vox_parallel.fork_join` is trusted OCaml: it starts a domain with `Domain.Safe.spawn` under `[@alert "-do_not_spawn_domains"]`, runs the right thunk on the calling domain, and joins the domain before it returns or raises. `Domain.Safe.spawn` itself is OxCaml's mode-checked API (the thunk must be `portable once`). The one unchecked step is `Obj.magic_unique` on the joined result: `Domain.join` returns its result `aliased`, but the domain handle is private to `fork_join`, is joined once, and the domain has finished.
 - `Owned_array.split_at` and `Owned_array.append` are `external` declarations in `verification/library/borrow.ml`, implemented in `runtime/borrow.c` (`caml_borrow_owned_split`, `caml_borrow_owned_append`); their refinements (the pieces' contents are `Model.take` and `Model.drop` of the whole; an append's contents are `Model.append` of the two) are assumed. Splitting gives two owners of disjoint ranges of one backing array. Appending two adjacent pieces of one array joins them without copying; any other pair is copied into a new array. `Owned_array.into_iarray` freezes an owner that covers its whole backing array without copying and copies a piece out. This is sound only because owners are unique: the live owners of one backing array cover disjoint ranges, so an owner covering the whole array is the only one.
@@ -78,7 +79,7 @@ The same test rejects a non-terminating callback passed to `Owned_array.with_mut
 ## Scope
 
 - Operations: `sort` on a borrowed slice, `sort_array` and `parallel_sort_array` on an owned array. Elements are `int`, ordered by `<=`.
-- `sort` and `sort_array` are `total`. `parallel_sort_array` is not; if it raises, the caller's array is consumed.
+- None of the operations is `total`; their contracts hold on normal return. If `parallel_sort_array` raises, the caller's array is consumed.
 - Parallel scheduling: `max_domains` defaults to `Domain.recommended_domain_count ()` and is clamped to between 1 and that count; `cutoff` defaults to 512 and is at least 2. A partition step starts a new domain only when more than one domain is left and both sides have at least `cutoff` elements. These parameters affect only scheduling, not the contract.
 - No bound on running time, recursion depth or stack use is stated. The recursion is not tail-recursive.
 - Every `Slice.get` and `Slice.set` is a call to C (`caml_borrow_get`, `caml_borrow_set`) that checks the index again at run time. The tests check results only and report no running times.
@@ -89,7 +90,7 @@ The same test rejects a non-terminating callback passed to `Owned_array.with_mut
 After `./configure --prefix=$PWD/_install`, `make install` and `./dev init`:
 
 ```
-./dev test vox/quicksort_client.ml vox/quicksort_frame_client.ml vox/quicksort_rejected.ml
+./dev test vox/quicksort_client.ml vox/quicksort_frame_client.ml vox/quicksort_rejected.ml vox/borrow_partial.ml
 ```
 
 The two client tests check `Vox_sequence`, `Borrow`, `Vox_parallel`, `Vox_int_sequence`, `Quicksort_model` and `Quicksort` while compiling them, then run the clients as bytecode and native code. With this configuration the runtime has a single domain: `Domain.recommended_domain_count ()` is 1, so `parallel_sort_array` never starts a domain and runs sequentially. To run the parallel path, configure with `--enable-poll-insertion --enable-multidomain` as well.

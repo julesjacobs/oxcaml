@@ -1,7 +1,7 @@
 title: What every demo trusts
 blurb: The checker, the built-in meanings it assumes, the declared contracts and runtime code of the library, the standard library's totality casts and the toolchain.
 status: owner-review
-date: 27 September 2026
+date: 28 September 2026
 ---
 A Vox proof is a compile-time check: the compiler type-checks the program, generates verification conditions from its refinements, and asks Z3 to prove them. A demo's theorems hold only if the components below are correct. None of them is verified. Each demo page lists, in addition, what that demo alone trusts.
 
@@ -11,7 +11,7 @@ To get this list for a given program, compile a unit with `-vox-audit`. It print
 
 - The OxCaml type checker, including the mode, uniqueness and ghost checks that make tokens affine and keep ghost code free of run-time effects, and the Vox additions to it (`typing/typecore.ml`).
 - Verification-condition generation and the meaning of built-in operations (`verification/vox_vc.ml`, `verification/vox_encoding.ml`), their translation to SMT-LIB (`verification/vox_smt.ml`), and the solver driver and the reading of its answers (`verification/vox_smt_solver.ml`, `verification/vox_smt_response.ml`, `verification/runtime/vox_verify.enabled.ml`).
-- The totality check: a function declared `@@ total` or `@ total` must terminate without raising. Totality does not forbid writes: a total function may write to storage it owns uniquely, as `Quicksort.sort` does through a unique slice. Functions that appear in refinements must also be stateless, so that their result depends only on their arguments. The checker treats every total, stateless function as a function of its arguments, including functions of units it never verified, so each primitive declared `@@ total` must give equal results for equal arguments wherever it is compiled.
+- The totality check: a function declared `@@ total` or `@ total` must terminate without raising. Totality does not forbid writes: a total function may write to storage it owns uniquely, as `Slice.set` does to a unique slice. Creating a loan (`Owned_array.with_mut`, `Slice.split_at`, `split3`, `with_range`) and ending one (`Slice.finish`) are not total: creating a loan chooses its final contents, and ending it assumes that they equal its current contents. Code that borrows, such as `Quicksort`, is therefore not total. Functions that appear in refinements must also be stateless, so that their result depends only on their arguments. The checker treats every total, stateless function as a function of its arguments, including functions of units it never verified, so each primitive declared `@@ total` must give equal results for equal arguments wherever it is compiled.
 - Ghost erasure (`lambda/translcore.ml`). Ghost code and `void` values are removed before code generation; a ghost argument of any other layout is passed as a placeholder constant. Ghost record fields are removed in native code; bytecode keeps an empty slot for each. A lemma is an ordinary compiled function; only its calls inside `ghost_` are erased.
 - `[@def]` lemmas. For a function marked `[@def]`, the type checker generates a lemma stating that the function equals its body. The verifier assumes it; it holds by construction.
 - The rest of the OxCaml compiler, runtime and standard library, which compile and run the erased program.
