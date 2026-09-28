@@ -242,7 +242,6 @@ let run () =
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (
     U.joined_law before after x1 x2 merged x0;
-    U.joined_law before after x1 x2 merged x2;
     U.joined_law before after x1 x2 merged x3;
     U.joined_law before after x1 x2 merged x4;
     ());

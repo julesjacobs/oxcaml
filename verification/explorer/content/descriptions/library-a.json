@@ -1815,7 +1815,7 @@
         "title": "scan: contract against the scanner model",
         "from": "let rec scan :",
         "to": "encoded.E.state} @ unique",
-        "lines": "98-115",
+        "lines": "97-114",
         "kind": "what",
         "text": "The precondition ties the owned table to the ghost `entries` (`T.agrees`) and requires capacity for the rest of the model's plan; the postcondition says the buffer ends exactly as `encode_model` of `Vox_lz4_spec_scan.scan` from this state. This is where the implementation is bound to the compressor model's positions, hashes and match choices."
       }
@@ -2067,7 +2067,7 @@
         "title": "decode_plan: the induction",
         "from": "let rec (decode_plan @ total) :",
         "to": "&& S.matches_bytes source result.S.count result.S.reversed} @ ghost",
-        "lines": "264-280",
+        "lines": "263-279",
         "kind": "what",
         "text": "The invariant pairs a position in the plan with a position in the wire and a decoded prefix of the source. The theorem is stated for every plan satisfying `wire_matches_plan`, so it does not depend on how the compressor chose its matches."
       },
@@ -2075,7 +2075,7 @@
         "title": "roundtrip: the public theorem",
         "from": "let (roundtrip @ total) :",
         "to": "capacity decoded;",
-        "lines": "388-404",
+        "lines": "387-403",
         "kind": "what",
         "text": "This is the statement exported as `Vox_lz4.roundtrip`. Unfolding `compresses` gives `wire_matches_plan` for the plan `Vox_lz4_spec_scan.from_source`, and `wire_roundtrip` does the rest."
       }

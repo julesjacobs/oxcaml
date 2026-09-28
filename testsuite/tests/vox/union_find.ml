@@ -102,7 +102,7 @@ let () =
   let added = U.make_set input payment in
   let #{U.value = x1; state; refund} = added in
   let account1 = ghost_ (U.account (borrow_ state)) in
-  ghost_ (U.contents_def (borrow_ state); M.head_def (M.Stop x1);
+  ghost_ (M.head_def (M.Stop x1);
     F.size_def (M.Stop x1 :: old_paths);
     F.member_def x0 (M.Stop x1 :: old_paths); U.member_def x0 (borrow_ state);
     F.member_def x1 (M.Stop x1 :: old_paths); U.member_def x1 (borrow_ state);
@@ -252,9 +252,7 @@ let () =
     F.member_same old_paths new_paths x3;
     ());
   let old_paths = ghost_ (U.contents (borrow_ state)) in
-  let alpha = ghost_ (U.alpha (borrow_ state)) in
-  ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
-    A.find_fee_def alpha);
+  ghost_ (U.contents_def (borrow_ state));
   let input : {s : U.t | U.valid s && U.member x2 s} = state in
   let payment : {b : C.token | let input = input in
     C.credits b >= A.find_fee input.#U.alpha} = refund in

@@ -66,7 +66,7 @@
       "path": "verification/library/vox_cdcl_total_proof.ml",
       "from": "let learned = analyze (ghost_ n) formula database state stop entry in",
       "to": "let database = database_cons formula learned database in",
-      "lines": "4387-4414",
+      "lines": "4387-4413",
       "text": "This is the conflict branch of `search`. `analyze` resolves the conflicting clause with the reason of its latest-assigned current-level literal until at most one current-level literal remains, extending the ghost derivation through `resolve_result` at each step. It needs no fuel: it is `total` with `[@@decreases clause_rank state.trail current.clause]`, because the invariant `reason_order` says each reason's other literals were assigned earlier, so every step lowers the latest trail position among the clause's literals. At level 0 the result is the empty clause and the answer is `Unsat learned`. Otherwise `asserting_clause` picks the literal to assert and the backjump level, `backtrack` unbinds everything above that level, and the ghost lemma `prepare_learning` proves that the new state and the extended database satisfy the invariants `search` requires."
     },
     {

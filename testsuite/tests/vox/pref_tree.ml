@@ -384,7 +384,7 @@ let (node_observations @ total) (n : node @ immutable)
     n.right (root rm) n.right;
   Vox_pref_semantics.union nh children n.left;
   Vox_pref_semantics.union nh children n.right;
-  Vox_pref_semantics.union (H.union nh children) frame n.right; ())
+  ())
 
 let rec observe_framed :
     (pointer : node option) @ immutable -> (model : tree) @ immutable ghost ->

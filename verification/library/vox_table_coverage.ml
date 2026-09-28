@@ -38,7 +38,7 @@ module Make (Key : Vox_table_map.Key)
     W.wrap_range capacity (W.lsr7 hash);
     W.scale16_def groups; W.scale16_def rank; W.scale16_def (rank + 1);
     if rank = 0 then begin
-      W.scale16_def 0; W.scale16_def 1;
+      W.scale16_def 1;
       P.addmod_def capacity (I.wrap capacity (W.lsr7 hash)) 0;
       ()
     end else begin

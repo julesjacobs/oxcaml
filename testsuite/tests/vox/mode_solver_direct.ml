@@ -101,8 +101,7 @@ let (raw_add_exact @ total) :
    | Upper_x c ->
      ghost_ (le_def v.x c)
    | Lower_y c ->
-     ghost_ (le_def c v.y);
-     ghost_ (le_def (s.lower_y || c) v.y)
+     ghost_ (le_def c v.y)
    | Upper_y c ->
      ghost_ (le_def v.y c);
      ghost_ (le_def v.y (s.upper_y && c))
@@ -298,9 +297,7 @@ let (project_complete @ total) :
   ghost_ (lift_def s y);
   ghost_ (represents_def s (lift s y));
   ghost_ (le_def s.lower_x s.lower_x);
-  ghost_ (le_def s.lower_y y);
   ghost_ (le_def y s.upper_y);
-  ghost_ (le_def s.lower_x s.lower_y);
   ghost_ (le_def s.lower_x y);
   ()
 

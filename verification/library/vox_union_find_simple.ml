@@ -155,7 +155,7 @@ module Make (C : Vox_big_credits.S) = struct
       C.credits b >= A.union_fee input.#U.alpha} = fee in
     let r = U.union x y input payment in
     let #{U.value; state = core; refund} = r in
-    ghost_ (C.nonnegative (borrow_ savings); C.nonnegative (borrow_ refund));
+    ghost_ (C.nonnegative (borrow_ savings));
     let right : {t : C.token | 0Z <= C.credits savings && 0Z <= C.credits t} =
       refund in
     let savings = C.merge savings right in

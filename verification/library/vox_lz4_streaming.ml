@@ -45,7 +45,6 @@ let (emit_head_capacity @ total) :
   fun model anchor step rest remaining -> ghost_ (
     Vox_lz4_spec_plan.valid_plan_def model anchor (P.Sequence (step, rest));
     C.encoded_size_def model anchor (P.Sequence (step, rest));
-    Vox_lz4_spec_wire.extra_count_def (step.position - anchor);
     C.encoded_size_loose_bound model (step.position + step.length) rest;
     ())
 

@@ -68,7 +68,6 @@ let (contents @ total) (s : node @ immutable) (a : node @ immutable)
     let ns = [s; a; b; c] in
     let suffix = [s; a; b; c] in
     let _unfolded = flipped_all_def before suffix in
-    let _unfolded = flipped_def before s in
     let p = s.prev in
     let q = s.next in
     let _unfolded = value_def before p in

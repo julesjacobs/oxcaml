@@ -108,9 +108,9 @@ let run mode =
   let order : (((x : node Pref.t) @ immutable -> {u : unit | E.effective_ordered h heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x ->
       cell_def d_a 0; cell_def d_w 4; cell_def d_b 4; cell_def d_la 4; cell_def d_lw 4; cell_def d_nested 4;
-      here_def a; here_def w; here_def b; here_def la; here_def nested;
+      here_def a; here_def w; here_def b; here_def la;
       E.level_def h heads.Ghost.ghost a; E.level_def h heads.Ghost.ghost w; E.level_def h heads.Ghost.ghost b;
-      E.level_def h heads.Ghost.ghost la; E.level_def h heads.Ghost.ghost nested;
+      E.level_def h heads.Ghost.ghost la;
       at_level_def h a; at_level_def h w; at_level_def h b; at_level_def h la; at_level_def h lw; at_level_def h nested;
       E.effective_below_def h heads.Ghost.ghost a 4; E.effective_below_def h heads.Ghost.ghost w 4; E.effective_below_def h heads.Ghost.ghost b 4;
       E.effective_below_def h heads.Ghost.ghost la 4; E.effective_below_def h heads.Ghost.ghost lw 4; E.effective_below_def h heads.Ghost.ghost nested 4;

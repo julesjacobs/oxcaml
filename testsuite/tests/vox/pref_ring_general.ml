@@ -511,7 +511,6 @@ let (inserted_view @ total) (h : node option Pref.heap @ immutable)
   connected_def (connected h left n) n right;
   Pref_ring_proofs.put_observations h left.next (Some n) m;
   let h = H.put h left.next (Some n) in
-  Pref_ring_proofs.put_observations h n.prev (Some left) m;
   let h = H.put h n.prev (Some left) in
   let h = H.put h n.next (Some right) in
   Pref_ring_proofs.put_observations h right.prev (Some n) m; ())

@@ -4388,7 +4388,6 @@ let rec (search @ total) :
       ghost_ (result_clause_valid n formula learned);
       if state.level = 0 then (
         ghost_ (
-          result_clause_valid n formula learned;
           let _ = partial_of_bindings state.bindings in
           root_conflict_empty n state.bindings learned.clause);
         {answer = Unsat learned; statistics = statistics state})

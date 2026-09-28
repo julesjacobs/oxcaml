@@ -117,7 +117,7 @@ let (decrypt_crt_correct @ total)
       && r mod p = power ciphertext d mod p
       && r mod q = power ciphertext d mod q then
       r = power ciphertext d mod (p * q) else true} @ ghost = ghost_ (
-  prime_def p; prime_def q; lambda_def p q;
+  prime_def p; prime_def q;
   let a = power ciphertext d in
   reduce_divisor a p q;
   reduce_divisor a q p;

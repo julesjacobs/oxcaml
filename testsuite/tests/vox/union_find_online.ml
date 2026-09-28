@@ -74,11 +74,9 @@ module Fixed_client = struct
     let found = U.find x0 input payment in
     let #{U.value; state} = found in
     assert (Pref.equal value root);
-    ghost_ (F.member_same before (U.contents (borrow_ state)) x0;
-      U.member_def x0 (borrow_ state));
+    ghost_ (F.member_same before (U.contents (borrow_ state)) x0);
     let account3 = ghost_ (U.account (borrow_ state)) in
     let old_paths = ghost_ (U.contents (borrow_ state)) in
-    ghost_ (U.member_def x0 (borrow_ state));
     let input : {s : U.t | U.valid s && U.size s < U.capacity s} = state in
     let amount = 3Z in
     let issuance : {n : Bigint.t | n >= 0Z} = amount in
@@ -114,11 +112,9 @@ module Fixed_client = struct
     let found = U.find x0 input payment in
     let #{U.value; state} = found in
     assert (Pref.equal value root);
-    ghost_ (F.member_same before (U.contents (borrow_ state)) x0;
-      U.member_def x0 (borrow_ state));
+    ghost_ (F.member_same before (U.contents (borrow_ state)) x0);
     let account6 = ghost_ (U.account (borrow_ state)) in
     let old_paths = ghost_ (U.contents (borrow_ state)) in
-    ghost_ (U.member_def x0 (borrow_ state));
     let input : {s : U.t | U.valid s && U.size s < U.capacity s} = state in
     let amount = 3Z in
     let issuance : {n : Bigint.t | n >= 0Z} = amount in
