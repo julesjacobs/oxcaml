@@ -142,7 +142,6 @@ let (glue_partition @ total) : (before : int list) -> (index : Bigint.t) ->
   let old_right = drop next before in
   let old_rest = append old_middle old_right in
   let new_rest = append middle right in
-  let new_values = append left new_rest in
   let nil = [] in
   let low_side = true in
   let high_side = false in
@@ -152,7 +151,6 @@ let (glue_partition @ total) : (before : int list) -> (index : Bigint.t) ->
   permutation_refl old_middle;
   permutation_append old_middle old_right middle right;
   permutation_append old_left old_rest left new_rest;
-  permutation_def before new_values;
   all_permutation old_left left pivot low_side;
   all_permutation old_right right pivot high_side;
   append_def middle right;

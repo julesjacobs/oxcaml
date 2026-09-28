@@ -58,7 +58,6 @@ let (with_alloc @ total) : (h : node Pref.heap) @ immutable -> (depth : int) -> 
       (next : ((x : node Pref.t) @ immutable -> {u : unit | equation (H.put h p v) tau x})) @ total ->
       (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
       {u : unit | tau p === value} -> {u : unit | claim}) @ total = fun tau next equal fit ->
-      
       let converted : ((x : node Pref.t) @ immutable -> {u : unit | node_equation after tau x}) @ total = fun x ->
         next x; equation_def after tau x; observe_def after x; node_equation_def after tau x; let u = () in refine_ u in
       let refine_ u = use tau converted equal fit in refine_ u in
@@ -268,7 +267,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (depth : 
       let consume4 : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total -> (model4 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h4 tau x})) @ total ->
         (equal4 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h3 x) || tau x === rho3 x})) @ total -> {u : unit | tau arrow === function_type} -> {u : unit | claim}) @ total = fun tau model4 equal4 fit ->
         let refine_ fit = fit in let u = () in
-        equal4 f; equal4 p; Copy_heap_proofs.put_frame h2 p v p;
+        equal4 f; equal4 p;
         unify_complete h4 tau model4 f arrow ok after derivation arrow (refine_ u);
         let next : ((x : node Pref.t) @ immutable -> {u : unit | node_equation after tau x}) @ total = fun x ->
           let u = () in let refine_ u = unify_complete h4 tau model4 f arrow ok after derivation x (refine_ u) in refine_ u in
@@ -309,7 +308,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (depth : 
       let consume3 : ((rho3 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total -> (model3 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h3 rho3 x})) @ total ->
         (equal3 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h2 x) || rho3 x === rho2 x})) @ total -> {u : unit | rho3 self === target} -> {u : unit | claim}) @ total = fun rho3 model3 equal3 fit ->
         let refine_ fit = fit in let u = () in
-        Copy_heap_proofs.put_frame h1 res v arg; Copy_heap_proofs.put_frame h1 res v res;
+        Copy_heap_proofs.put_frame h1 res v arg;
         equal3 arg; equal3 res;
         let old_equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || rho3 x === rho x}) @ total = fun x ->
           Copy_heap_proofs.put_frame h arg v x; Copy_heap_proofs.put_frame h1 res v x;
@@ -321,7 +320,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (depth : 
         let refine_ fit = fit in let u = () in
         matches_def tau body b;
         (match result body with None -> refine_ u | Some root -> match finish with Aborted -> refine_ u | Unified (ok, derivation) ->
-        Copy_heap_proofs.put_frame h2 self w res; Copy_heap_proofs.put_frame h2 self w self;
+        Copy_heap_proofs.put_frame h2 self w res;
         equal4 res; equal4 self;
         unify_complete middle tau body_model root res ok after derivation root (refine_ u);
         let next : ((x : node Pref.t) @ immutable -> {u : unit | node_equation after tau x}) @ total = fun x ->

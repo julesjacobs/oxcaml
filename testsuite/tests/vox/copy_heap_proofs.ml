@@ -24,7 +24,7 @@ let rec (history_at @ total) : (saved : node Pref.heap) @ immutable ->
     history_at saved epoch depth rest x ();
     let h = heap saved epoch depth rest in let v = cell desc depth in
     let h1 = H.put h q v in let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
-    put_frame h1 p w x; mark_def old epoch q; cell_def desc depth; ()
+    put_frame h1 p w x; mark_def old epoch q; ()
   | Alias (rest, p, q, old) ->
     history_at saved epoch depth rest x ();
     let h = heap saved epoch depth rest in let w = session_mark rest old epoch q in session_mark_def rest old epoch q; put_frame h p w x;
@@ -49,13 +49,13 @@ let rec (target_allocated @ total) : (saved : node Pref.heap) @ immutable ->
     match d with Start | Clean -> ()
     | Fresh (rest, x, y, old, desc) ->
       let h = heap saved epoch depth rest in let v = cell desc depth in
-      let h1 = H.put h y v in let w = session_mark rest old epoch y in session_mark_def rest old epoch y;
+      let h1 = H.put h y v in let w = session_mark rest old epoch y in
       put_frame h1 x w q;
       if p === x then () else (
         target_for_def saved rest p q;
         target_allocated saved epoch depth rest p q (); ())
     | Alias (rest, x, y, old) ->
-      let h = heap saved epoch depth rest in let w = session_mark rest old epoch y in session_mark_def rest old epoch y; put_frame h x w q;
+      let h = heap saved epoch depth rest in let w = session_mark rest old epoch y in put_frame h x w q;
       if p === x then (
         match old.desc with Link child ->
           target_allocated saved epoch depth rest child y (); ()
@@ -131,9 +131,9 @@ let rec (fresh_frame @ total) : (saved : node Pref.heap) @ immutable ->
     | Start | Clean -> ()
     | Fresh (rest, p, q, old, desc) ->
       fresh_frame saved epoch depth before rest x ();
-      let h = heap saved epoch depth rest in let v = cell desc depth in let h1 = H.put h q v in let w = session_mark rest old epoch q in session_mark_def rest old epoch q; put_frame h1 p w x; ()
+      let h = heap saved epoch depth rest in let v = cell desc depth in let h1 = H.put h q v in let w = session_mark rest old epoch q in put_frame h1 p w x; ()
     | Alias (rest, p, q, old) -> fresh_frame saved epoch depth before rest x ();
-      let h = heap saved epoch depth rest in let w = session_mark rest old epoch q in session_mark_def rest old epoch q; put_frame h p w x; ())
+      let h = heap saved epoch depth rest in let w = session_mark rest old epoch q in put_frame h p w x; ())
 
 let (template_head @ total) : (saved : node Pref.heap) @ immutable -> (t : template) @ immutable -> (p : node Pref.t) @ immutable ->
     {u : unit | template saved t && root t === p} ->
@@ -162,7 +162,7 @@ let rec (copied_fresh @ total) : (saved : node Pref.heap) @ immutable ->
         history_at saved epoch depth rest p (); history_grows saved epoch depth rest q ();
         heap_def saved epoch depth d;
         let h = heap saved epoch depth rest in let v = cell desc depth in cell_def desc depth;
-        let h1 = H.put h q v in let w = session_mark rest old epoch q in session_mark_def rest old epoch q; put_frame h1 p w q;
+        let h1 = H.put h q v in let w = session_mark rest old epoch q in put_frame h1 p w q;
         fresh_frame saved epoch depth d final q (); ())
       else (extends_def rest d; extends_def rest rest; extension_trans rest d final ();
         let () = copied_fresh saved epoch depth rest final p q () in ())

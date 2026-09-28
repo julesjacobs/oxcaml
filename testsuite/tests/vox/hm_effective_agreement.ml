@@ -55,7 +55,7 @@ let rec (relative_interpret @ total) : (saved : node Pref.heap) @ immutable ->
   fun saved h heads cut prior order rho rho_model eta eta_model equal tree premise -> ghost_ (
     finite_def h tree; tree_root_def tree;
     let p = tree_root tree in let schema = Effective_template.scheme h heads cut tree in
-    Effective_template.scheme_def h heads cut tree; interpret_def rho eta schema; E.level_def h heads p;
+    Effective_template.scheme_def h heads cut tree; interpret_def rho eta schema;
     let level = E.level h heads p in close_level_def cut level; if not (close_level cut level === Generic) then (
       order p; E.effective_ordered_def h heads p; E.effective_below_def h heads p cut;
       low_unfolded_agreement saved h heads cut prior order rho rho_model eta eta_model equal tree (); ())

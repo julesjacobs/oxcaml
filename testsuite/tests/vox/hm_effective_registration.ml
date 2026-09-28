@@ -24,7 +24,7 @@ let rec (history_at @ total) : (saved : node Pref.heap) @ immutable ->
     history_at saved certificate epoch depth rest x ();
     let h = heap saved epoch depth rest in let v = cell desc depth in
     let h1 = H.put h q v in let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
-    put_frame h1 p w x; mark_def old epoch q; cell_def desc depth; ()
+    put_frame h1 p w x; mark_def old epoch q; ()
   | Alias (rest, p, q, old) ->
     history_at saved certificate epoch depth rest x ();
     let h = heap saved epoch depth rest in let w = session_mark rest old epoch q in session_mark_def rest old epoch q; put_frame h p w x;
@@ -74,11 +74,11 @@ let rec (copy_new_member @ total) : (h : node Pref.heap) @ immutable -> (pool : 
     | Start -> let desc : desc = Bool in let v = cell desc depth in Copy_heap_proofs.put_frame h epoch v x; ()
     | Fresh (rest, p, q, old, desc) ->
       copy_new_member h pool certificate epoch depth rest x ();
-      let mid = heap h epoch depth rest in let v = cell desc depth in let h1 = H.put mid q v in let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
+      let mid = heap h epoch depth rest in let v = cell desc depth in let h1 = H.put mid q v in let w = session_mark rest old epoch q in
       Copy_heap_proofs.put_frame h1 p w x; ()
     | Alias (rest, p, q, old) ->
       copy_new_member h pool certificate epoch depth rest x ();
-      let mid = heap h epoch depth rest in let w = session_mark rest old epoch q in session_mark_def rest old epoch q; Copy_heap_proofs.put_frame mid p w x; ())
+      let mid = heap h epoch depth rest in let w = session_mark rest old epoch q in Copy_heap_proofs.put_frame mid p w x; ())
 
 let (copy_unlisted @ total) : (h : node Pref.heap) @ immutable -> (pool : pool) @ immutable ->
     (certificate : Representative_certificate.certificate) @ immutable ->
@@ -87,7 +87,7 @@ let (copy_unlisted @ total) : (h : node Pref.heap) @ immutable -> (pool : pool) 
       && Level_unifier_spec.terminal (copy_heap h epoch depth d) x && finite_node (copy_heap h epoch depth d) x && not (listed (Pooled_spec.registered pool epoch d) x)} ->
     {u : unit | H.mem h x && Level_unifier_spec.terminal h x && finite_node h x && not (listed pool x)} @ ghost = fun h pool certificate epoch depth d x premise -> ghost_ (
       let raw = heap h epoch depth d in let after = copy_heap h epoch depth d in
-      let trail = Pooled_spec.touched d in copy_heap_def h epoch depth d;
+      let trail = Pooled_spec.touched d in
       result_at h certificate epoch depth d x ();
       Copy_cleanup_spec.swept_at_def raw after trail x; copy_new_member h pool certificate epoch depth d x ();
       Pooled_proofs.registered_keeps pool epoch d x; history_at h certificate epoch depth d x ();
@@ -208,8 +208,8 @@ let rec (registered_member @ total) : (saved : node Pref.heap) @ immutable ->
   | Clean -> ()
   | Start -> let v = cell Bool depth in put_frame saved epoch v x; ()
   | Fresh (rest, p, q, old, desc) ->
-    let mid = heap saved epoch depth rest in let v = cell desc depth in let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
+    let mid = heap saved epoch depth rest in let v = cell desc depth in let w = session_mark rest old epoch q in
     let h1 = H.put mid q v in put_frame h1 p w x;
     if x === q then () else (registered_member saved certificate base epoch depth rest x (); ())
-  | Alias (rest, p, q, old) -> let mid = heap saved epoch depth rest in let v = session_mark rest old epoch q in session_mark_def rest old epoch q;
+  | Alias (rest, p, q, old) -> let mid = heap saved epoch depth rest in let v = session_mark rest old epoch q in
     put_frame mid p v x; registered_member saved certificate base epoch depth rest x (); ())

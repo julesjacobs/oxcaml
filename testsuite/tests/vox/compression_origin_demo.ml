@@ -17,7 +17,7 @@ let (lost_origin @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t) @
       let after = H.put (H.put (H.put (H.empty ()) p (cell (Link r) 0)) q (cell (Link r) 0)) r (cell Bool 0) in
       not (originates saved after 0 q o)} @ ghost = fun p q r o premise -> ghost_ (
     let refine_ premise = premise in let var : desc = Var in let link = Link r in let boolean : desc = Bool in
-    cell_def var 0; cell_def link 0; cell_def boolean 0;
+    cell_def link 0; cell_def boolean 0;
     let h = H.empty () in let saved = H.put h p (cell var 0) in
     let after = H.put (H.put (H.put h p (cell link 0)) q (cell link 0)) r (cell boolean 0) in
     originates_def saved after 0 q o;
@@ -34,7 +34,7 @@ let (prior_origin @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t) 
       let before = H.put (H.put (H.put (H.empty ()) p (cell (Link q) 0)) q (cell (Link r) 0)) r (cell Bool 0) in
       originates saved before 0 q (Origin (p, Step (q, Stop))) && below before q 0} @ ghost = fun p q r premise -> ghost_ (
     let refine_ premise = premise in let var : desc = Var in let first = Link q in let second = Link r in let boolean : desc = Bool in
-    cell_def var 0; cell_def first 0; cell_def second 0; cell_def boolean 0;
+    cell_def var 0; cell_def first 0; cell_def second 0;
     let h = H.empty () in let saved = H.put h p (cell var 0) in
     let before = H.put (H.put (H.put h p (cell first 0)) q (cell second 0)) r (cell boolean 0) in
     let stop = Stop in let path = Step (q, stop) in let origin = Origin (p, path) in
@@ -58,7 +58,7 @@ let (finite_readback @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.
     Level_unifier_spec.resolves_def h p r path; Level_unifier_spec.resolves_def h q r tail;
     Level_unifier_spec.resolves_def h r r here; Level_unifier_spec.terminal_def h r;
     let u = () in Compression_finite_proofs.finite_compress h p q r path tree (refine_ u);
-    Compression_finite_proofs.compress_readback p tree; refine_ u)
+    refine_ u)
 
 let (stranded_low_constant @ total) : (p : node Pref.t) @ immutable ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->

@@ -91,7 +91,7 @@ let rec run_lower : (goal : lower_goal) @ immutable -> (h : node Pref.heap Ghost
       let r = #{state = t; edits; tree} in use (refine_ r)
     ) else match old.desc with
     | Var | Bool | Word ->
-      ghost_ (effective_children_below_def h.Ghost.ghost heads.Ghost.ghost old.desc bound; witness.Ghost.ghost p; U.terminal_def h.Ghost.ghost p; U.observe_def h.Ghost.ghost p);
+      ghost_ (effective_children_below_def h.Ghost.ghost heads.Ghost.ghost old.desc bound; U.terminal_def h.Ghost.ghost p; U.observe_def h.Ghost.ghost p);
       let t : {t : node Pref.token | Pref.own t === h.Ghost.ghost && bound >= 0 && E.effective_active h.Ghost.ghost heads.Ghost.ghost p
         && match H.at h.Ghost.ghost p with None -> false | Some v -> effective_children_below h.Ghost.ghost heads.Ghost.ghost v.desc bound} = refine_ t in
       let write_heap : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
@@ -213,7 +213,7 @@ let rec run_lower : (goal : lower_goal) @ immutable -> (h : node Pref.heap Ghost
         lowering_at h1 heads.Ghost.ghost bound d2 a (); lower_below h1 heads.Ghost.ghost bound d2 a bound ();
         lower_bounded_at h2 heads.Ghost.ghost bound tb b ();
         lower_frame_def h.Ghost.ghost h1 p; lower_frame_def h1 h2 p; effective_children_below_def h2 heads.Ghost.ghost old.desc bound);
-      ghost_ (witness.Ghost.ghost p;
+      ghost_ (
         lower_head h.Ghost.ghost heads.Ghost.ghost bound d1 p ();
         lower_head h1 heads.Ghost.ghost bound d2 p ();
         U.terminal_def h2 p; U.observe_def h2 p);

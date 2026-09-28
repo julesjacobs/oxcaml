@@ -160,7 +160,6 @@ let refine_ result = result in
           let scope_middle : ((x : node Pref.t) @ immutable ->
               {u : unit | not (H.mem middle x) || finite_scope middle x}) @ total ghost =
             ghost_ (fun x ->
-              scope.Ghost.ghost x;
               let u = () in
               unified_scope h.Ghost.ghost scope.Ghost.ghost a c left_ok middle ld x (refine_ u);
               refine_ u) in
@@ -289,7 +288,7 @@ and unify_work : (goal : unify_goal) @ immutable -> (h : (node Pref.heap) Ghost.
         let refine_ path1 = Compression_proofs.resolution h.Ghost.ghost h1 edits1 p r first.#path (refine_ u) in
         let refine_ path2 = Compression_proofs.resolution h1 h2 edits2 p r path1 (refine_ u) in refine_ path2) in
       let refine_ path = path in
-      ghost_ (let u = () in Compression_proofs.frame h.Ghost.ghost h1 edits1 r (refine_ u);
+      ghost_ (let u = () in
         Compression_proofs.frame h1 h2 edits2 r (refine_ u);
         active_def h.Ghost.ghost r; active_def h1 r; active_def h2 r;
         Compression_path_proofs.resolution_terminal h2 p r path (refine_ u); ());

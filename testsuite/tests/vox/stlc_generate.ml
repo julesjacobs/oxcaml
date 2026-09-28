@@ -38,7 +38,6 @@ let rec generate : (h : node Pref.heap) @ immutable ghost ->
       let v = Var in let refine_ step = Pref.alloc v t in
       let arg = step.value in let t = step.state in
       let h1 = ghost_ (Pref.own (borrow_ t)) in
-      ghost_ (allocation_mem h arg v);
       let env1 = Bind (arg, env) in
       ghost_ (
         let keep : (x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || H.mem h1 x}
@@ -65,15 +64,13 @@ let rec generate : (h : node Pref.heap) @ immutable ghost ->
       let v = Var in let refine_ step = Pref.alloc v t in
       let arg = step.value in let t = step.state in
       let h1 = ghost_ (Pref.own (borrow_ t)) in
-      ghost_ (allocation_mem h arg v);
       let refine_ step = Pref.alloc v t in
       let result = step.value in let t = step.state in
       let h2 = ghost_ (Pref.own (borrow_ t)) in
-      ghost_ (allocation_mem h1 result v);
       let arrow = Arrow (arg, result) in let refine_ step = Pref.alloc arrow t in
       let value = step.value in let t = step.state in
       let h3 = ghost_ (Pref.own (borrow_ t)) in
-      ghost_ (allocation_mem h2 value arrow;
+      ghost_ (
         allocation_keeps_mem h1 result v arg; allocation_keeps_mem h2 value arrow arg);
       let rest = Bind (value, env) in let env1 = Bind (arg, rest) in
       ghost_ (

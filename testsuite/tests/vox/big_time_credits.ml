@@ -42,7 +42,6 @@ let (observe @ total) :
   let token = token in
   let first = ghost_ (C.credits (borrow_ token)) in
   let second = ghost_ (C.credits (borrow_ token)) in
-  ghost_ (C.nonnegative (borrow_ token));
   let available : {t : C.token | C.credits t > 0Z} = token in
   let result = C.tick available in
   ghost_ (let u = () in

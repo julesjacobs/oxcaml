@@ -118,7 +118,6 @@ let fixture : (program : Program.program) @ immutable -> (globals : Machine.glob
               let result = initialized.Entry.entry.Dynamic.frame in
               if Machine.invoke program heap (V.Closure_pointer address) argument <> Some initialized.Entry.entry.Dynamic.entered then failwith "callee source invocation";
 
-              ghost_ (Hmc_frame_call_decode.correct entry function_.Hmc_cfg_program.start pc address argument captures ());
               let callee_cells = Hmc_frame_call_decode.cells entry address argument captures in
               if Codec.decode (Hmc_frame_call_entry.signature entry) function_.Hmc_cfg_program.start callee_cells <>
                 Some (Hmc_frame_call_entry.activation entry function_.Hmc_cfg_program.start (V.Closure_pointer address) argument captures, Heap.Empty)

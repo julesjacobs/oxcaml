@@ -52,7 +52,7 @@ let run (depth : {n : int | n >= 0}) =
       {u : unit | not (H.mem h x) || not (finite_node h x) || below h x depth}) @ total ghost = ghost_ (fun x ->
     let u = () in let refine_ u = copy_bounds saved depth bounds epoch history x (refine_ u) in refine_ u) in
   ghost_ (next_bounds result; next_bounds boundary; next_order result; next_order boundary; below_def h result depth);
-  ghost_ (let u = () in touched_distinct saved epoch depth history (refine_ u);
+  ghost_ (let u = () in
     history_grows saved epoch depth history a (refine_ u);
     history_grows saved epoch depth history link (refine_ u);
     Clean_copy.memo_released saved epoch depth history link (refine_ u));

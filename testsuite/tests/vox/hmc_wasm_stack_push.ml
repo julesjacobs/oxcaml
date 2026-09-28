@@ -27,7 +27,7 @@ let (correct @ total) : (blocks : G.table) @ immutable -> (width : B.u32) -> (ba
       && L.same_types state.X.machine.E.locals locals} @ immutable =
   fun blocks width base top stop limit frames saved body state memory top_local premise ->
     let locals = Advance.correct width top_local top limit {X.memory = memory; machine = state.X.machine} () in
-    ghost_ (S.add32_def top width;
+    ghost_ (
       Stack.preserve blocks width state.X.memory memory base top frames top ();
       Stack.previous_def width stop; Stack.related_def blocks width memory base stop (Q.Frame (saved, frames));
       emit_def body width top_local; X.append_correct body (Advance.emit width top_local) state);

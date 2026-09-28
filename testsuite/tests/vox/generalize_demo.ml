@@ -40,7 +40,7 @@ let run shared =
   let empty = Empty in let rest = Entry (a, empty) in let pool = Entry (root, rest) in
   ghost_ (scope a; scope root; pool_scoped_def h empty; pool_scoped_def h rest; pool_scoped_def h pool);
   let coverage : ((x : node Pref.t) @ immutable -> {u : unit | covered h 0 pool x}) @ total ghost = ghost_ (fun x ->
-    let d = Bool in cell_def d 0; let d = Var in cell_def d 2; cell_def desc 2;
+    let d = Bool in cell_def d 0;
     at_level_def h x; listed_def pool x; listed_def rest x; listed_def empty x; covered_def h 0 pool x;
     let u = () in refine_ u) in
   let state : {t : node Pref.token | Pref.own t === h && pool_scoped h pool} = refine_ state in
@@ -75,7 +75,7 @@ let run shared =
     let[@def] rho : node Pref.t @ immutable total -> ty @ immutable total = fun x ->
       if x === root then Function (Boolean, Boolean) else Boolean in
     let model : ((x : node Pref.t) @ immutable -> {u : unit | equation h rho x}) @ total = fun x ->
-      rho_def x; rho_def a; rho_def b; rho_def boundary;
+      rho_def x; rho_def a; rho_def boundary;
       let d = Bool in cell_def d 0; let d = Var in cell_def d 2; cell_def desc 2;
       equation_def h rho x; let u = () in refine_ u in
     let choices : node Pref.t @ immutable total -> ty @ immutable total = fun _ -> Function (Boolean, Boolean) in
@@ -84,7 +84,7 @@ let run shared =
         (next : ((x : node Pref.t) @ immutable -> {u : unit | equation (heap (closed_heap h 0 pool) epoch depth d) tau x})) @ total ->
         (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
         {u : unit | tau result === interpret rho choices (scheme h 0 tree)} -> {u : unit | claim}) @ total =
-      fun tau next equal fit -> let refine_ fit = fit in equal boundary; next result;
+      fun tau next equal fit -> let refine_ fit = fit in
         let accept : ((eta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
           {u : unit | tau result === interpret tau eta (scheme h 0 tree)} -> {u : unit | claim}) @ total =
           fun _eta fit -> let refine_ fit = fit in let u = () in refine_ u in

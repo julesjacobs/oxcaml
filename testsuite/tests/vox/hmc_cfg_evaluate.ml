@@ -23,7 +23,7 @@ let (step @ total) : (program : C.program) @ immutable -> (term : K.term) @ immu
     let state = W.Running (control, k, accumulator) in
     let a = ghost_ (W.activation control k accumulator) in
     ghost_ (Height.continuation_def k; Height.grow (Height.continuation k);
-      Height.reflexive (D.S (Height.continuation k)); Height.reflexive (Height.continuation k);
+      Height.reflexive (D.S (Height.continuation k));
       Height.state_def W.Stuck; Height.le_def D.Z (D.S (Height.continuation k));
       W.valid_def program.C.blocks state; W.source_def state; W.target_def state;
       W.activation_def control k accumulator; O.entry_def trace;
@@ -50,8 +50,8 @@ let (step @ total) : (program : C.program) @ immutable -> (term : K.term) @ immu
       let out = W.Running (next_control, next_k, accumulator) in
       ghost_ (E.save_environment program a (W.frames k) (O.entry l) ();
         W.operation_def W.Apply (W.resume k); O.binary_operation_def term (W.resume k);
-        Height.continuation_def next_k; Height.grow (Height.continuation next_k);
-        Height.reflexive (Height.continuation next_k); W.continuation_valid_def program.C.blocks next_k; W.resume_def next_k;
+        Height.continuation_def next_k;
+        W.continuation_valid_def program.C.blocks next_k; W.resume_def next_k;
         W.environment_def next_k; W.current_def next_k; W.temporaries_def next_k; W.frames_def next_k;
         W.source_continuation_def next_k;
         Height.state_def out; W.valid_def program.C.blocks out; W.source_def out; W.target_def out;
@@ -63,8 +63,8 @@ let (step @ total) : (program : C.program) @ immutable -> (term : K.term) @ immu
       let out = W.Running (next_control, next_k, accumulator) in
       ghost_ (E.save_environment program a (W.frames k) (O.entry l) ();
         W.operation_def W.Cons (W.resume k); O.binary_operation_def term (W.resume k);
-        Height.continuation_def next_k; Height.grow (Height.continuation next_k);
-        Height.reflexive (Height.continuation next_k); W.continuation_valid_def program.C.blocks next_k; W.resume_def next_k;
+        Height.continuation_def next_k;
+        W.continuation_valid_def program.C.blocks next_k; W.resume_def next_k;
         W.environment_def next_k; W.current_def next_k; W.temporaries_def next_k; W.frames_def next_k;
         W.source_continuation_def next_k;
         Height.state_def out; W.valid_def program.C.blocks out; W.source_def out; W.target_def out;
@@ -76,8 +76,8 @@ let (step @ total) : (program : C.program) @ immutable -> (term : K.term) @ immu
       let out = W.Running (next_control, next_k, accumulator) in
       ghost_ (E.save_environment program a (W.frames k) (O.entry l) ();
         W.operation_def (W.Primitive op) (W.resume k); O.binary_operation_def term (W.resume k);
-        Height.continuation_def next_k; Height.grow (Height.continuation next_k);
-        Height.reflexive (Height.continuation next_k); W.continuation_valid_def program.C.blocks next_k; W.resume_def next_k;
+        Height.continuation_def next_k;
+        W.continuation_valid_def program.C.blocks next_k; W.resume_def next_k;
         W.environment_def next_k; W.current_def next_k; W.temporaries_def next_k; W.frames_def next_k;
         W.source_continuation_def next_k;
         Height.state_def out; W.valid_def program.C.blocks out; W.source_def out; W.target_def out;
@@ -89,8 +89,8 @@ let (step @ total) : (program : C.program) @ immutable -> (term : K.term) @ immu
       let out = W.Running (next_control, next_k, accumulator) in
       ghost_ (E.save_environment program a (W.frames k) (O.entry l) ();
 
-        Height.continuation_def next_k; Height.grow (Height.continuation next_k);
-        Height.reflexive (Height.continuation next_k); W.continuation_valid_def program.C.blocks next_k; W.resume_def next_k;
+        Height.continuation_def next_k;
+        W.continuation_valid_def program.C.blocks next_k; W.resume_def next_k;
         W.environment_def next_k; W.current_def next_k; W.temporaries_def next_k; W.frames_def next_k;
         W.source_continuation_def next_k;
         Height.state_def out; W.valid_def program.C.blocks out; W.source_def out; W.target_def out;
@@ -102,8 +102,8 @@ let (step @ total) : (program : C.program) @ immutable -> (term : K.term) @ immu
       let out = W.Running (next_control, next_k, accumulator) in
       ghost_ (E.jump program a (W.frames k) (O.entry c) ();
 
-        Height.continuation_def next_k; Height.grow (Height.continuation next_k);
-        Height.reflexive (Height.continuation next_k); W.continuation_valid_def program.C.blocks next_k; W.resume_def next_k;
+        Height.continuation_def next_k;
+        W.continuation_valid_def program.C.blocks next_k; W.resume_def next_k;
         W.environment_def next_k; W.current_def next_k; W.temporaries_def next_k; W.frames_def next_k;
         W.source_continuation_def next_k;
         Height.state_def out; W.valid_def program.C.blocks out; W.source_def out; W.target_def out;
@@ -115,8 +115,8 @@ let (step @ total) : (program : C.program) @ immutable -> (term : K.term) @ immu
       let out = W.Running (next_control, next_k, accumulator) in
       ghost_ (E.jump program a (W.frames k) (O.entry st) ();
 
-        Height.continuation_def next_k; Height.grow (Height.continuation next_k);
-        Height.reflexive (Height.continuation next_k); W.continuation_valid_def program.C.blocks next_k; W.resume_def next_k;
+        Height.continuation_def next_k;
+        W.continuation_valid_def program.C.blocks next_k; W.resume_def next_k;
         W.environment_def next_k; W.current_def next_k; W.temporaries_def next_k; W.frames_def next_k;
         W.source_continuation_def next_k;
         Height.state_def out; W.valid_def program.C.blocks out; W.source_def out; W.target_def out;

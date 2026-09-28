@@ -66,7 +66,7 @@ let fixture (base : B.u32) kind =
   let exact_capacity = if kind = 0 then 9 else 7 in
   if Lower.build signature instruction exact_capacity 11 = None then failwith "exact-fit relayout rejected";
   let fragment = match Lower.build signature instruction 12 11 with Some out -> out | None -> failwith "relayout rejected" in
-  ghost_ (Wasm_locals.get_def locals 0; Wasm_sequence_update.zero_def (); Hmc_wasm_pc_update.offset_def ());
+  ghost_ (Wasm_locals.get_def locals 0);
   (match Wasm_parallel_copy.apply fragment.Lower.copies memory base with
   | None -> failwith "copy model"
   | Some copied ->

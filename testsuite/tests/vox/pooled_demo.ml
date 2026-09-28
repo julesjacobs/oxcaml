@@ -126,7 +126,7 @@ let run reject =
             (x : node Pref.t) @ immutable -> {u : unit | rho a === rho target} ->
             {u : unit | rho x === substitute rho (sigma x)})) @ total ->
           {u : unit | claim}) @ total = fun sigma solution factor ->
-        solution a; solution root; solution b;
+        solution a;
         let model : (x : node Pref.t) @ immutable -> {u : unit | node_equation h3 sigma x}
             @ total = fun x -> solution x; let u = () in refine_ u in
         let[@def] delta : node Pref.t @ immutable total -> ty @ immutable total =
@@ -174,7 +174,7 @@ let run reject =
     covered_def h4 0 pool3 x; covered_def h5 0 pool3 x; at_level_def h4 x; at_level_def h5 x;
     (match H.at h4 x with None -> () | Some v -> close_level_def 0 v.level; ()); refine_ u) in
   ghost_ (let refine_ t = trees4 root in let u = () in unified_frame h3 a target ok h4 ud root (refine_ u);
-    unfolding_valid h4 t (refine_ u); unfolding_root t;
+    unfolding_valid h4 t (refine_ u);
     let t = unfolding t in Generalize_scheme_proofs.scheme_valid h4 0 pool3 coverage4 t (refine_ u);
     closed_observe h4 0 pool3 root (refine_ u); closed_at_def h4 h5 0 pool3 root);
   ghost_ (let scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h5 x) || source_ok h5 x}) @ total = fun x -> scope5 x; let u = () in refine_ u in
@@ -213,7 +213,7 @@ let run reject =
   ghost_ (let claim = true in
     let use : ((rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h7 rho x})) @ total ->
-      {u : unit | claim}) @ total = fun _rho model -> model result; let u = () in refine_ u in
+      {u : unit | claim}) @ total = fun _rho model -> let u = () in refine_ u in
     with_finite_model h7 trees7 claim use; ());
   let scope7 : ((x : node Pref.t) @ immutable -> {u : unit | if H.mem h7 x then source_ok h7 x else H.at h7 x === None}) @ total ghost = ghost_ (fun x ->
     let u = () in let refine_ u = Generalize_scheme_proofs.closed_scope h6 scope6 0 pool6 x (refine_ u) in refine_ u) in

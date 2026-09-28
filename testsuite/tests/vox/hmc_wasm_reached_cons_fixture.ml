@@ -86,7 +86,6 @@ let fixture : (program : Program.program) @ immutable -> (globals : Machine.glob
             | Some (Block.Cons fragment as lowered), Some next_signature, Some next_activation ->
               ghost_ (Block.corresponds_def globals signature (G.Cons next) capacity 1000 lowered;
                 Hmc_wasm_value_pop.matches_def signature next capacity 1000 fragment;
-                Hmc_wasm_relayout_geometry.size_represents (Codec.locals_size signature.G.locals) env_count ();
                 Bounds.covers_def memory limit;
                 Hmc_heap_step.request_def program configuration.Machine.state;
                 Hmc_heap_allocating.request_def (G.Cons next) activation;

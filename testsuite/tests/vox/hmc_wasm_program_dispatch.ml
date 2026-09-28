@@ -159,7 +159,7 @@ let (prologue @ total) : (module_ : F.module_) @ immutable -> (set : G.t) @ immu
       === M.Running (point (Runtime.loop_code ()) T.No_labels globals stored S.Empty capacity)} @ ghost =
   fun module_ set globals memory stored capacity base input premise -> ghost_ (
     frame_global_def (); payload_global_def (); cleared_def (); Runtime.dispatcher_def (); Runtime.input_offset_def ();
-    Runtime.prologue_def (Runtime.loop_code ()); Runtime.prologue_code_def ();
+    Runtime.prologue_def (Runtime.loop_code ());
     let zero : Hmc_word64.t = {Hmc_word64.lo = 0; hi = 0} in
     let k5 : C.t = C.Empty in
     let k4 = C.Next (I.Global_set 7, k5) in
@@ -246,7 +246,7 @@ let (generated_iteration @ total) : (program : Lower.program) @ immutable -> (fr
         {GE.globals = exported.GE.globals; execution = {X.memory = exported.GE.execution.X.memory;
           machine = {E.locals = S.Empty; stack = S.Push (S.I32 status, S.Empty)}}})} @ ghost =
   fun program fragment config module_ before memory capacity base pc index imported after exported body_fuel status premise -> ghost_ (
-    void_signature_def (); frame_global_def (); call_def before memory pc (C.Succ capacity);
+    void_signature_def (); call_def before memory pc (C.Succ capacity);
     point_def (T.Instruction (I.Call_indirect 0, tail ())) (labels ()) before memory (S.Push (S.I32 pc, S.Empty)) (C.Succ capacity);
     returned_def exported.GE.globals exported.GE.execution.X.memory (C.Succ capacity);
     point_def (tail ()) (labels ()) exported.GE.globals exported.GE.execution.X.memory S.Empty (C.Succ capacity);

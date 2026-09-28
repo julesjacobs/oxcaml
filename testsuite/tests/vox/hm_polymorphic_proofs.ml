@@ -561,7 +561,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (depth : 
       allocation_environment h depth pool facts env ts arg var (refine_ u);
       allocation_environment h1 depth pool1 (refine_ facts1) env ts res var (refine_ u);
       allocation_environment h2 depth pool2 (refine_ facts2) env ts self desc (refine_ u);
-      allocated_def h depth arg var; allocated_def h1 depth res var; allocated_def h2 depth self desc;
+      allocated_def h1 depth res var; allocated_def h2 depth self desc;
       cell_def var depth; cell_def desc depth;
       below_def h3 arg depth; at_level_def h3 arg; below_def h3 self depth; at_level_def h3 self;
       bind_environment h3 depth env ts g self target (refine_ u);

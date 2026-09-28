@@ -132,7 +132,7 @@ let () =
     active h3 p1 && active h3 p2} = refine_ state in
   let unmarked : ((x : node Pref.t) @ immutable ->
     {u : unit | match H.at h3 x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
-    cell_def desc1 1; cell_def desc2 2; cell_def desc3 2;
+    cell_def desc1 1; cell_def desc3 2;
     let u = () in refine_ u) in
   let refine_ solved = Level_unifier.unify h3 finite_scope3 unmarked p1 p2 state in
   assert solved.#ok;

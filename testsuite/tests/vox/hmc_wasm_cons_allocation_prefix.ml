@@ -70,7 +70,6 @@ let (correct @ total) : (table : K.table) @ immutable -> (heap : Heap.heap) @ im
     Prefix.run_append fuel write advance state middle ();
     (match Prefix.remaining fuel write with
     | None ->
-      S.add32_def base (Four.width ());
       Closure.correct table heap head tail state base (base + 32) limit base_local head_tag head_payload tail_tag tail_payload fuel ()
     | Some rest ->
       Image.preserve table state.X.memory middle.X.memory heap base ();

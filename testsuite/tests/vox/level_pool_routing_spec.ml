@@ -121,7 +121,6 @@ let (closed_routable @ total) : (h : node Pref.heap) @ immutable ->
         Generalize_proofs.closed_observe h cut filtered p ();
         closed_at_def h after cut filtered p;
         Representative_pool_proofs.transferred_level h cut child p ();
-        Representative_pool_spec.retained_rep_def after p;
         Nested_pool_spec.retained_def after p;
         Level_spec.at_level_def after p;
         destination_def after p; ())

@@ -168,7 +168,7 @@ let fixture : (program : Program.program) @ immutable -> (globals : Machine.glob
                 Wasm_locals.get_def locals 2; Wasm_locals.get_def locals 3; Wasm_locals.get_def rest 1; Wasm_locals.get_def rest 2;
                 Wasm_locals.get_def l2 0; Wasm_locals.get_def l2 1; Wasm_locals.get_def l3 0;
                 Hmc_wasm_call_header_layout.width_def fragment.Copy.recursive;
-                Copy.matches_def entry 80 fragment; Copy.position_def entry.Hmc_closure_ir.recursive;
+                Copy.matches_def entry 80 fragment;
                 Hmc_wasm_relayout_geometry.size_represents (Heap.length captures) count ();
                 Words.size prefix_cells prefix_count offset ());
               let _read = Hmc_wasm_closure_read.correct table heap memory address id captures count () in
@@ -188,7 +188,6 @@ let fixture : (program : Program.program) @ immutable -> (globals : Machine.glob
               let result = initialized.Entry.entry.Dispatch.call.Plan_entry.entry.Dynamic.frame in
               if Machine.invoke program heap (V.Closure_pointer address) argument <> Some initialized.Entry.entry.Dispatch.call.Plan_entry.entry.Dynamic.entered then failwith "callee source invocation";
 
-              ghost_ (Hmc_frame_call_decode.correct entry function_.Hmc_cfg_program.start pc address argument captures ());
               let callee_cells = Hmc_frame_call_decode.cells entry address argument captures in
               if Codec.decode (Hmc_frame_call_entry.signature entry) function_.Hmc_cfg_program.start callee_cells <>
                 Some (Hmc_frame_call_entry.activation entry function_.Hmc_cfg_program.start (V.Closure_pointer address) argument captures, Heap.Empty)

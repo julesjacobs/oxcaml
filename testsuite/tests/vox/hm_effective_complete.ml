@@ -147,7 +147,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
           let refine_ t = Forest_transport.closed_forest_at middle middle_forest depth filtered x () in refine_ t in
         Hm_effective_driver_proofs.run_result h forest child_depth empty env rhs middle child_pool original ();
         let refine_ finite_tree = middle_forest original in let tree = finite_tree in
-        Forest_transport.unfolding_valid middle finite_tree (); Forest_transport.unfolding_root finite_tree;
+        Forest_transport.unfolding_valid middle finite_tree ();
         let schema = Effective_template.scheme middle middle_heads depth tree in
         let coverage : ((x : node Pref.t) @ immutable -> {u : unit | Representative_level.representative_covered middle depth child_pool x}) @ total = fun x ->
           middle_facts x; runtime_at_def middle middle_heads child_depth child_pool x; () in

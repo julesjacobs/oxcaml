@@ -100,7 +100,7 @@ let check : D.term @ immutable -> Hmc_word64.limb -> int option -> unit = fun so
   let definitions : {d : M.definitions | M.origins d} = refine_ p.I.origin.C.origin.P.origin.M.definitions in
   let fuel = index 5000 in
   ghost_ (B.safe p definitions input fuel ());
-  if Hmc_tail_stack.no_calls p.I.code then ghost_ (Hmc_tail_stack.constant_stack p input fuel ());
+  if Hmc_tail_stack.no_calls p.I.code then
   let source_result = F.advance fuel (Q.source_start p.I.origin.C.origin.P.origin input) in
   let target_result = U.advance p fuel (U.initial p input) in
   let previous_result = S.advance p.I.origin fuel (S.initial p.I.origin input) in

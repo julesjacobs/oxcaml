@@ -61,7 +61,7 @@ let (step @ total) : (program : I.program) @ immutable -> (globals : Machine.glo
         (Structured.Straight (Straight.Relayout plan));
       Straight.corresponds_def globals before.State.block.G.signature (instruction) lowered.Lower.capacity context.State.max_pc (Straight.Relayout plan);
       ());
-    ghost_ (Hmc_heap_invariant.valid_def program globals before.State.registers.Registers.heap_limit (State.configuration before) before.State.abstract;
+    ghost_ (
       Facts.extent before.State.cells lowered.Lower.capacity before.State.cell_count before.State.registers.Registers.frame before.State.frame_end ());
     let old_signature = before.State.block.G.signature in
     ghost_ (Hmc_pointer_frame_codec.shape_def old_signature before.State.activation;

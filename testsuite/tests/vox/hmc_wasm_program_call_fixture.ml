@@ -339,9 +339,9 @@ let fixture : bool -> (program : Program.program) @ immutable -> (globals : Mach
                   Slots.distinct_def canonical_slots 7; Slots.writable_def canonical_slots (Hmc_wasm_program_registers.locals registers);
                   Slots.limb_slot_def (Hmc_wasm_program_registers.locals registers) 8; Slots.limb_slot_def (Hmc_wasm_program_registers.locals registers) 9;
                   Slots.limb_slot_def (Hmc_wasm_program_registers.locals registers) 10;
-                  Capture.separate_def canonical_capture 0; Hmc_wasm_loaded_call.separate_def canonical_capture 3 6 0;
-                  Capture.separate_def canonical_capture 3; Hmc_wasm_loaded_call.separate_def canonical_capture 3 6 3;
-                  Capture.separate_def canonical_capture 6; Hmc_wasm_loaded_call.separate_def canonical_capture 3 6 6;
+                  Capture.separate_def canonical_capture 0;
+                  Capture.separate_def canonical_capture 3;
+                  Capture.separate_def canonical_capture 6;
                   Capture.separate_def canonical_capture 4; Hmc_wasm_loaded_call.separate_def canonical_capture 3 6 4;
                   Capture.separate_def canonical_capture 7; Hmc_wasm_loaded_call.separate_def canonical_capture 3 6 7;
                   Capture.separate_def canonical_capture 8; Hmc_wasm_loaded_call.separate_def canonical_capture 3 6 8;

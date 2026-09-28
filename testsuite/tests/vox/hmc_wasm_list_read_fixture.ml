@@ -43,7 +43,6 @@ let fixture : (table : Hmc_closure_ir.table) @ immutable -> (heap : Heap.heap) @
       ghost_ (Wasm_locals.get_def locals 0);
       let captured = Capture.object_fields table heap address head tail state 0 1 2 slots () in
       let code = Capture.emit 0 8 slots 0 in
-      ghost_ (Hmc_wasm_list_memory.zero_def (); Hmc_wasm_list_memory.eight_def ());
       (match X.run code state with
       | X.Done actual -> if actual <> {X.memory; machine = {E.locals = captured; stack = S.Empty}} then failwith "list read captured state"
       | _ -> failwith "list read execution");

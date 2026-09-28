@@ -216,10 +216,8 @@ let rec observe_framed : (pointer : node option) @ immutable ->
     let rest_heap = ghost_ (heap rest) in
     let next_frame = ghost_ (H.union cell frame) in
     ghost_ (link_def n (root rest);
-      H.union_law cell rest_heap frame;
       H.union_law rest_heap cell frame;
       Vox_pref_semantics.put (H.empty ()) n.next (root rest) n.next;
-      Vox_pref_semantics.union cell rest_heap n.next;
       Vox_pref_semantics.union (heap xs) frame n.next);
     let p = n.next in
     let next : {v : node option | v === root rest} = Pref.read p t in

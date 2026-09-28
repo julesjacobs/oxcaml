@@ -87,7 +87,7 @@ let compile ~pages ~frame_base ~frames ~heap_base name source =
   match Hmc_linear_bytes.drop memory layout.M.heap_limit with
   | None -> failwith "memory bounds"
   | Some _ ->
-    ghost_ (Hmc_linear_bounds.covers_def memory layout.M.heap_limit; M.valid_layout_def layout memory);
+    ghost_ (M.valid_layout_def layout memory);
     match C.compile source layout memory pages () with
     | C.Rejected _ -> failwith (name ^ ": rejected")
     | C.Compiled artifact -> layout, C.bytes artifact

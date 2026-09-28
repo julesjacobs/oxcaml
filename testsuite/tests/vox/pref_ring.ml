@@ -311,8 +311,6 @@ let connected_mem (h : node option Pref.heap @ immutable) (left : node @ immutab
       @ ghost =
   ghost_ (
     connected_def h left right;
-    mem_put h left.next (Some right) p;
-    mem_put (H.put h left.next (Some right)) right.prev (Some left) p;
     ())
 
 let splice_range (left : node @ immutable) (first : node @ immutable)

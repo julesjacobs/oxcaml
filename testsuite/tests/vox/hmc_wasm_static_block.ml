@@ -17,7 +17,7 @@ let (value @ total) : (context : V.context) @ immutable -> (operation : D.word_o
     {u : unit | Q.check context (Value.emit operation) (V.push V.I64 (V.push V.I64 state)) === Some (V.push V.I64 state)} @ ghost =
   fun context operation state -> ghost_ (
     let input = V.push V.I64 (V.push V.I64 state) in
-    Step.take_push V.I64 (V.push V.I64 state); Step.take_push V.I64 state;
+    Step.take_push V.I64 (V.push V.I64 state);
     Step.unary_push V.I64 V.I64 state; Step.unary_push V.I64 V.I32 state;
     Value.emit_def operation; Value.opcode_def operation; Value.extension_def operation;
     V.instruction_def context (I.Plain (Value.opcode operation)) input;

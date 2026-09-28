@@ -50,7 +50,7 @@ let rec (copy_finite_scope @ total) : (saved : node Pref.heap) @ immutable ->
     source_ok_def after x; finite_scope_def after x; active_def after x; at_level_def after x;
     scope x;
     if H.mem saved x then (
-      scope x; source_ok_def saved x; history_at saved epoch depth d x (refine_ u); order x; ordered_def saved x;
+      source_ok_def saved x; history_at saved epoch depth d x (refine_ u); order x; ordered_def saved x;
       match H.at saved x with None -> refine_ u | Some v -> match v.level with Generic -> refine_ u | Finite n ->
         children_below_def saved v.desc n;
         let available : ((y : node Pref.t) @ immutable -> {u : unit | not (below saved y n) || active after y}) @ total = fun y ->
@@ -64,7 +64,7 @@ let rec (copy_finite_scope @ total) : (saved : node Pref.heap) @ immutable ->
       let mid = heap saved epoch depth rest in
       copy_finite_scope saved scope order epoch depth rest x (refine_ u);
       if x === q then (
-        let v = cell desc depth in cell_def desc depth; let w = session_mark rest old epoch q in session_mark_def rest old epoch q; mark_def old epoch q;
+        let v = cell desc depth in cell_def desc depth; let w = session_mark rest old epoch q in
         put_frame mid q v x; let h1 = H.put mid q v in put_frame h1 p w x;
         ready_def saved rest old.desc desc; extends_def rest d; extends_def rest rest;
         (match old.desc, desc with
@@ -74,18 +74,18 @@ let rec (copy_finite_scope @ total) : (saved : node Pref.heap) @ immutable ->
           target_active_at saved order epoch depth rest d b e (refine_ u); () | _ -> ()); refine_ u)
       else (
         finite_scope_def mid x; active_def mid x; at_level_def mid x;
-        let v = cell desc depth in let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
-        put_frame mid q v x; let h1 = H.put mid q v in put_frame h1 p w x;
+        let v = cell desc depth in let w = session_mark rest old epoch q in
+        put_frame mid q v x; let h1 = H.put mid q v in
         (* Earlier copied children remain finite after later memo writes. *)
         let preserve : ((y : node Pref.t) @ immutable -> {u : unit | not (active mid y) || active after y}) @ total = fun y ->
           active_def mid y; active_def after y; at_level_def mid y; at_level_def after y;
-          let u = () in history_at saved epoch depth rest p (refine_ u); mark_def old epoch q; cell_def desc depth;
+          let u = () in history_at saved epoch depth rest p (refine_ u);
           put_frame mid q v y; put_frame h1 p w y; refine_ u in
         (match H.at mid x with None -> () | Some v -> match v.desc with Var | Bool | Word -> ()
           | Link a | List a -> preserve a; () | Arrow (a, b) -> preserve a; preserve b; ()); refine_ u)
     | Alias (rest, p, q, old) ->
       let mid = heap saved epoch depth rest in copy_finite_scope saved scope order epoch depth rest x (refine_ u);
-      let w = session_mark rest old epoch q in session_mark_def rest old epoch q; mark_def old epoch q; put_frame mid p w x;
+      let w = session_mark rest old epoch q in put_frame mid p w x;
       finite_scope_def mid x; active_def mid x; at_level_def mid x;
       let preserve : ((y : node Pref.t) @ immutable -> {u : unit | not (active mid y) || active after y}) @ total = fun y ->
         active_def mid y; active_def after y; at_level_def mid y; at_level_def after y;

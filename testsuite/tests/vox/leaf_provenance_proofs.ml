@@ -83,13 +83,13 @@ let rec (unified_leaf_origin @ total) : (saved : node Pref.heap) @ immutable ->
     | Bind_left _ -> link_below h p q cut x ();
       low_var_def h x cut; low_var_def after x cut;
       let v = Level_unifier_spec.redirect h p q in
-      Level_unifier_proofs.observe_write h p v x; Level_unifier_proofs.redirect_desc h p q;
+      Level_unifier_proofs.observe_write h p v x;
       let o = prior x in
       link_origin saved h cut p q x o (); o
     | Bind_right _ -> link_below h q p cut x ();
       low_var_def h x cut; low_var_def after x cut;
       let v = Level_unifier_spec.redirect h q p in
-      Level_unifier_proofs.observe_write h q v x; Level_unifier_proofs.redirect_desc h q p;
+      Level_unifier_proofs.observe_write h q v x;
       let o = prior x in
       link_origin saved h cut q p x o (); o
     | Swap rest ->
@@ -222,7 +222,7 @@ let (closed_leaf_origin @ total) : (saved : node Pref.heap) @ immutable ->
     low_var_def h x origin_cut; low_var_def after x origin_cut;
     Level_unifier_spec.observe_def h x; Level_unifier_spec.observe_def after x;
     at_level_def h x; at_level_def after x;
-    low_var_def h x cut; low_var_def after x cut;
+    low_var_def h x cut;
     Level_unifier_spec.observe_def h x; Level_unifier_spec.observe_def after x;
     (match H.at h x with None -> () | Some v -> close_level_def cut v.level; ());
     if low_var after x origin_cut then (

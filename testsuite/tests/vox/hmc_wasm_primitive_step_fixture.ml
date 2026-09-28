@@ -60,8 +60,6 @@ let fixture (base : B.u32) operation left right =
       | _ -> failwith "primitive dispatcher stopped");
       if not (Codec.shape next_signature next_activation) then failwith "primitive successor shape" else
       let expected_cells = Codec.encode next_signature next_activation result.Hmc_wasm_primitive_invariant.padding () in
-      ghost_ (Hmc_frame_decode_unique.frame next_signature next_activation.Frame.pc result.Hmc_wasm_primitive_invariant.cells expected_cells
-        next_activation result.Hmc_wasm_primitive_invariant.padding ());
       ghost_ (Block.emit_def lowered 0);
       let code : {code : Wasm_code.t | X.run code state === X.Done {X.memory = result.Hmc_wasm_primitive_invariant.memory; machine = state.X.machine}} @ immutable =
         Block.emit lowered 0 in

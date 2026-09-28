@@ -21,7 +21,6 @@ let (correct @ total) : (base : B.u32) -> (code : Table.count) -> (source : B.u3
     ghost_ (L.can_set_def state0.X.machine.E.locals destination (S.I32 (S.add32 (code) (code)));
       (match L.get state0.X.machine.E.locals destination with Some old -> S.same_type_def old (S.I32 (S.add32 (code) (code))) | _ -> ()));
     let locals1 = Double.correct source destination (code) state0 () in
-    ghost_ (S.add32_def (code) (code));
     let state1 = {X.memory = state.X.memory; machine = {E.locals = locals1; stack = state.X.machine.E.stack}} in
     ghost_ (L.can_set_def state1.X.machine.E.locals destination (S.I32 (S.add32 (2 * code) (2 * code)));
       (match L.get state1.X.machine.E.locals destination with Some old -> S.same_type_def old (S.I32 (S.add32 (2 * code) (2 * code))) | _ -> ()));
@@ -38,13 +37,11 @@ let (correct @ total) : (base : B.u32) -> (code : Table.count) -> (source : B.u3
     ghost_ (L.can_set_def state3.X.machine.E.locals destination (S.I32 (S.add32 (8 * code) (8 * code)));
       (match L.get state3.X.machine.E.locals destination with Some old -> S.same_type_def old (S.I32 (S.add32 (8 * code) (8 * code))) | _ -> ()));
     let locals4 = Double.correct destination destination (8 * code) state3 () in
-    ghost_ (S.add32_def (8 * code) (8 * code));
     let state4 = {X.memory = state.X.memory; machine = {E.locals = locals4; stack = state.X.machine.E.stack}} in
     ghost_ (Replace.compose state.X.machine.E.locals locals3 locals4 destination (S.I32 (8 * code)) (S.I32 (16 * code)) ());
     ghost_ (L.can_set_def state4.X.machine.E.locals destination (S.I32 (S.add32 (16 * code) (16 * code)));
       (match L.get state4.X.machine.E.locals destination with Some old -> S.same_type_def old (S.I32 (S.add32 (16 * code) (16 * code))) | _ -> ()));
     let locals5 = Double.correct destination destination (16 * code) state4 () in
-    ghost_ (S.add32_def (16 * code) (16 * code));
     let state5 = {X.memory = state.X.memory; machine = {E.locals = locals5; stack = state.X.machine.E.stack}} in
     ghost_ (Replace.compose state.X.machine.E.locals locals4 locals5 destination (S.I32 (16 * code)) (S.I32 (32 * code)) ());
     let out = Advance.correct base destination (32 * code) 4294967295 state5 () in

@@ -119,7 +119,7 @@ let (exhausted @ total) : (local : B.u32) -> (failure : B.u32) -> (body : T.code
         === T.Running {T.code = T.Empty; labels = outer; state = T.stack after_body S.Empty}
       && L.get (T.stack after_body S.Empty).X.machine.E.locals local === Some (S.I32 failure)} @ ghost =
   fun local failure body outer before prepared after_body guard body_fuel premise -> ghost_ (
-    scope_def local outer; exit_depth_def (); zero_def ();
+    scope_def local outer; exit_depth_def ();
     let outside = Continue.labels T.Empty outer in
     Continue.labels_def (Emit.status local (zero ()) T.Empty) outside;
     Continue.labels_def T.Empty outer;

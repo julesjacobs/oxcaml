@@ -45,7 +45,7 @@ let (run @ total) : (program : I.program) @ immutable -> (layout : Init.layout) 
     | Init.Initialized (start, prepared) ->
       ghost_ (Init.installed_def program layout input memory start prepared);
       let run = E.run budget program start.Heap.globals prepared.Init.lowered prepared.Init.context prepared.Init.state () in
-      ghost_ (Entry.start program start.Heap.globals prepared.Init.lowered prepared.Init.context prepared.Init.state ();
+      ghost_ (
         Entry.execution program start.Heap.globals prepared.Init.lowered prepared.Init.context prepared.Init.state run.E.fuel ());
       let out = Execution {start; prepared; run} in ghost_ (correct_def program layout input memory out); out
 let (preservation @ total) : (program : I.program) @ immutable -> (layout : Init.layout) @ immutable ->
@@ -68,7 +68,7 @@ let (preservation @ total) : (program : I.program) @ immutable -> (layout : Init
       ghost_ (Init.installed_def program layout input memory start prepared; M.ready_def source);
       let definitions : {d : M.definitions | M.origins d} = refine_ source.M.definitions in
       let run = Source.preservation program definitions start.Heap.globals prepared.Init.lowered prepared.Init.context prepared.Init.state word source_fuel () in
-      ghost_ (Entry.start program start.Heap.globals prepared.Init.lowered prepared.Init.context prepared.Init.state ();
+      ghost_ (
         Entry.execution program start.Heap.globals prepared.Init.lowered prepared.Init.context prepared.Init.state run.E.fuel ());
       let out = Execution {start; prepared; run} in ghost_ (correct_def program layout input memory out); out
 let (safe @ total) : (program : I.program) @ immutable -> (layout : Init.layout) @ immutable ->

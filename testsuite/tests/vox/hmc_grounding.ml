@@ -134,6 +134,6 @@ let (ground @ total) : (checked : C.t) @ immutable ->
       let proof = S.substitute_typing rho proof in
       ghost_ (Hm_substitution_proofs.substitution_typed rho D.Z D.Empty_context term root (C.derivation checked) ();
         S.substitute_context_def rho D.Empty_context;
-        entry_def (); G.mono_def target; G.mono_def G.Word64);
+        G.mono_def target; G.mono_def G.Word64);
       let out : grounded = {term; proof; assignments} in Grounded out)
     else Entry_type_mismatch

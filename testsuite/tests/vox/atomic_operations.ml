@@ -72,10 +72,7 @@ let (add_zero_transfer @ total) :
     {r : A.transfer | Invariant.holds k (before + 0) (P.own r.restored)
       && empty_after before (P.own r.outgoing)} @ unique =
   fun k before inside outside ->
-  let hi = ghost_ (P.own (borrow_ inside)) in
   let ho = ghost_ (P.own (borrow_ outside)) in
-  ghost_ (Invariant.holds_def k before hi);
-  ghost_ (Invariant.holds_def k (before + 0) hi);
   ghost_ (empty_after_def before ho);
   { A.restored = inside; outgoing = outside }
 

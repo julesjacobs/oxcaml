@@ -85,7 +85,6 @@ let (clean_copy_origin @ total) : (saved : node Pref.heap) @ immutable ->
     {o : origin | not (low_var (copy_heap h epoch depth d) x cut) ||
       originates saved (copy_heap h epoch depth d) cut x o} @ immutable ghost =
   fun saved h certificate cut scope prior epoch depth d x premise -> ghost_ (
-    copy_heap_def h epoch depth d;
     let raw = heap h epoch depth d in let after = copy_heap h epoch depth d in
     let trail = Pooled_spec.touched d in
     let frame : ((y : node Pref.t) @ immutable ->
@@ -111,7 +110,7 @@ let (allocated_origin @ total) : (saved : node Pref.heap) @ immutable ->
       {o : origin | not (low_var (H.put h p (cell desc depth)) x cut) ||
         originates saved (H.put h p (cell desc depth)) cut x o} @ immutable) @ total ghost =
   fun saved h cut prior depth p desc premise -> ghost_ (
-    allocated_def h depth p desc; cell_def desc depth;
+    cell_def desc depth;
     let v = cell desc depth in
     let out : ((x : node Pref.t) @ immutable ->
       {o : origin | not (low_var (H.put h p (cell desc depth)) x cut) || originates saved (H.put h p (cell desc depth)) cut x o} @ immutable) @ total = fun x ->

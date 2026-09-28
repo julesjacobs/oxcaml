@@ -93,7 +93,7 @@ let rec collect (program : Program.program) globals configuration (base : B.u32)
           match WL.get state.X.machine.E.locals 0, WL.get state.X.machine.E.locals 1 with
           | Some (S.I32 actual_base), Some (S.I32 old_status) ->
           if actual_base <> base then failwith "imported frame base" else
-          let _ = ghost_ (New.failure_def (); WL.can_set_def state.X.machine.E.locals 1 (S.I32 (New.failure ()));
+          let _ = ghost_ (WL.can_set_def state.X.machine.E.locals 1 (S.I32 (New.failure ()));
             S.same_type_def (S.I32 old_status) (S.I32 (New.failure ())); Assembly.function__def lowered_program fragment_ config) in
           let module_ = {Func.functions = Func.Function (target, Func.No_functions);
             signatures = Func.Signature (Func.Void, Func.No_signatures); table = Func.Element (Some 0, Func.No_elements)} in

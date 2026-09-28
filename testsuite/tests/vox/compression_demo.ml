@@ -25,7 +25,7 @@ let run () =
     active_def h x; at_level_def h x; let u = () in refine_ u) in
   let scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || finite_scope h x}) @ total ghost = ghost_ (fun x ->
     let boolean = Bool in cell_def boolean 0; cell_def qd 1; cell_def pd 2;
-    active_all root; active_all q; active_all p;
+    active_all root; active_all q;
     active_def h x; at_level_def h x;
     finite_scope_def h x; source_ok_def h x; let u = () in refine_ u) in
   ghost_ (active_all p);

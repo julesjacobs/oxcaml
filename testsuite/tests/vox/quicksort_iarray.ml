@@ -81,7 +81,6 @@ let rec (partition @ total) : (pivot : int) -> (size : int) ->
       else (
         ghost_ (Spec.accepts_def value pivot high_side);
         ghost_ (Spec.range_grow before pivot high_side lower scan);
-        ghost_ (Spec.permutation_refl before);
         lower, s) in
     let intermediate = ghost_ (Slice.current (borrow_ s2)) in
     let next : {s : int Slice.t |

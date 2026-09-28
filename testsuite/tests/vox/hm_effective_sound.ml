@@ -70,7 +70,7 @@ let closed = Representative_pool_spec.close_heap middle depth child_pool in let 
       Hm_effective_driver_proofs.run_result h trees child_depth empty env rhs middle child_pool original ();
       middle_facts original; Hm_effective_result.result_below h trees child_depth empty env rhs middle child_pool middle_heads original ();
       let refine_ finite_tree = middle_forest original in
-      Forest_transport.unfolding_valid middle finite_tree (); Forest_transport.unfolding_root finite_tree;
+      Forest_transport.unfolding_valid middle finite_tree ();
       let schema = Effective_template.scheme middle middle_heads depth finite_tree in
       let coverage : ((x : node Pref.t) @ immutable -> {u : unit | Representative_level.representative_covered middle depth child_pool x}) @ total = fun x ->
         middle_facts x; runtime_at_def middle middle_heads child_depth child_pool x; () in

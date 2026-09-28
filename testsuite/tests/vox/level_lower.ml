@@ -68,7 +68,7 @@ let rec lower : (h : node Pref.heap) @ immutable ghost ->
         let () = lowering_at mid bound w x () in ()) in
       let edits = ghost_ (Sequence (d, w)) in let tree = ghost_ (Through (p, tree_child)) in
       ghost_ (bounded_frame mid after frame bound tree_child ();
-        lowering_at h bound d p (); frame p; lower_frame_def h mid p; lower_frame_def mid after p;
+        frame p; lower_frame_def h mid p; lower_frame_def mid after p;
         lower_valid_def h bound edits; lower_heap_def h bound edits;
         bound_root_def tree; bounded_def after bound tree;
         confined_through d p tree_child ();
@@ -106,7 +106,7 @@ let rec lower : (h : node Pref.heap) @ immutable ghost ->
         let () = frame_trans h1 h2 after x () in ()) in
       let tree = ghost_ (Fork (p, ta, tb)) in
       ghost_ (bounded_frame h1 after frame1 bound ta (); bounded_frame h2 after frame2 bound tb ();
-        lowering_at h bound d1 p (); frame1 p; lower_frame_def h h1 p; lower_frame_def h1 after p;
+        frame1 p; lower_frame_def h h1 p; lower_frame_def h1 after p;
         lower_heap_def h1 bound suffix; lower_valid_def h1 bound suffix;
         lower_heap_def h bound edits; lower_valid_def h bound edits;
         bound_root_def tree; bounded_def after bound tree;

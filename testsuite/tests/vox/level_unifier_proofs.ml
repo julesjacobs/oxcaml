@@ -328,7 +328,6 @@ let rec (search_bound @ total) :
     | Left (a, b, left) ->
       search_bound h rho model needle a left ();
       let ta = rho a in let tb = rho b in
-      let _ = weight_positive ta in
       let _ = weight_positive tb in
       let arrow = Function (ta, tb) in weight_def arrow;
       ()
@@ -336,7 +335,6 @@ let rec (search_bound @ total) :
       search_bound h rho model needle b right ();
       let ta = rho a in let tb = rho b in
       let _ = weight_positive ta in
-      let _ = weight_positive tb in
       let arrow = Function (ta, tb) in weight_def arrow;
       ())
 
@@ -387,7 +385,6 @@ let rec (failure_refutes @ total) :
       if left_ok then (
         let middle_model : (x : node Pref.t) @ immutable ->
             {u : unit | node_equation middle rho x} @ total = fun x ->
-          model x;
           let _ =
             success_backward_at h rho model a c middle left x () in
           () in

@@ -84,7 +84,7 @@ let (step @ total) : (program : I.program) @ immutable -> (globals : Machine.glo
         (Structured.Cons plan);
       Plan.matches_def before.State.block.G.signature next lowered.Lower.capacity context.State.max_pc plan;
       Lower.corresponds_def program globals context.State.max_pc lowered);
-    ghost_ (Hmc_heap_invariant.valid_def program globals before.State.registers.Registers.heap_limit (State.configuration before) before.State.abstract;
+    ghost_ (
       Facts.extent before.State.cells lowered.Lower.capacity before.State.cell_count before.State.registers.Registers.frame before.State.frame_end ());
     ghost_ (Hmc_memory_stack_capacity.ordered lowered.Lower.width context.State.stack_capacity context.State.stack_base before.State.registers.Registers.stack_limit ());
     let old_signature = before.State.block.G.signature in
@@ -114,7 +114,7 @@ let (step @ total) : (program : I.program) @ immutable -> (globals : Machine.glo
         (match allocated.Guarded.allocation with
         | Allocate.Exhausted ->
           let after = {before with State.registers = result.Case.registers} in
-          ghost_ (State.valid_def program globals lowered context after; State.configuration_def after; State.loop_def context after);
+          ghost_ (State.valid_def program globals lowered context after; State.configuration_def after);
           {Resource.failed_guard = ghost_ result.Case.failed_guard; state = after; fuel = result.Case.fuel; exhausted = Some Machine.Heap}
         | Allocate.Allocated allocation ->
           (match allocated.Guarded.frame with

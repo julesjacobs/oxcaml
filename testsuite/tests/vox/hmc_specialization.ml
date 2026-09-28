@@ -41,5 +41,4 @@ let compile : (source : D.term) @ immutable ->
     let expansion = Hmc_expansion.build (refine_ ready) in
     let manifest = Hmc_manifest.build expansion in
     let program = C.build manifest in
-    ghost_ (Hmc_monomorphic_typing.program_typed program);
     Compiled program

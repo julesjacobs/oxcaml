@@ -1375,8 +1375,6 @@ end = struct
       let second = ghost_ (append wq separating) in
       ghost_ (reached_def candidate wp);
       ghost_ (reached_def candidate wq);
-      ghost_ (run_from_def candidate p separating);
-      ghost_ (run_from_def candidate q separating);
       ghost_ (execute_after candidate candidate_initial wp separating);
       ghost_ (execute_after candidate candidate_initial wq separating);
       ghost_ (execute_after other other_initial wp separating);
@@ -1429,8 +1427,6 @@ end = struct
       let second = append wq separating in
       ghost_ (reached_def candidate wp);
       ghost_ (reached_def candidate wq);
-      ghost_ (run_from_def candidate p separating);
-      ghost_ (run_from_def candidate q separating);
       ghost_ (execute_after candidate candidate_initial wp separating);
       ghost_ (execute_after candidate candidate_initial wq separating);
       ghost_ (execute_after other other_initial wp separating);
@@ -1957,13 +1953,11 @@ end = struct
     fun pair other pairs ->
     ghost_ (related_def other pairs);
     ghost_ (remove_pair_def pair pairs);
-    ghost_ (same_pair_correct pair other);
     match pairs with
     | [] -> ()
     | head :: rest ->
       let filtered = ghost_ (remove_pair pair pairs) in
       ghost_ (related_def other filtered);
-      ghost_ (same_pair_correct pair head);
       ghost_ (same_pair_correct other head);
       ghost_ (remove_pair_preserves_other pair other rest);
       ()
@@ -2422,12 +2416,10 @@ end = struct
     let pending = ghost_ ([left_initial, right_initial, nil]) in
     ghost_ (reached_empty_equal left);
     ghost_ (reached_empty_equal right);
-    ghost_ (pending_singleton left right left_initial right_initial nil);
     ghost_ (reached_def left nil);
     ghost_ (reached_def right nil);
     ghost_ (drive_def left left_initial nil);
     ghost_ (drive_def right right_initial nil);
-    ghost_ (pending_singleton left right left_initial right_initial nil);
     ghost_ (reached_def left nil);
     ghost_ (reached_def right nil);
     ghost_ (drive_def left left_initial nil);
@@ -4154,7 +4146,6 @@ end = struct
       match pushed with
       | None -> let result = None in result
       | Some updated ->
-        ghost_ (pair_search_view_def updated);
         let result = expand_search_pairs left right p q word rest
           updated limit in
         result
@@ -4323,7 +4314,6 @@ end = struct
                 packet
               | Some next ->
                 let next_seen = next.seen_pairs in
-                ghost_ (pair_search_valid_def next);
                 ghost_ (pair_search_view_def next);
                 ghost_ (relation_included_trans seen updated_seen next_seen);
                 ghost_ (all_closed_weaken left right seen next_seen processed);
@@ -4404,7 +4394,6 @@ end = struct
       | Some before ->
         let pending = ghost_ (Pair_trace.entries before.pending_trace.ghost) in
         let seen = before.seen_pairs in
-        ghost_ (pair_search_valid_def before);
         ghost_ (pair_search_view_def before);
         ghost_ (big_length_def pending);
         ghost_ (big_length_def seen);
@@ -4556,7 +4545,6 @@ end = struct
       match pushed with
       | None -> let result = None in result
       | Some updated ->
-        ghost_ (state_search_view_def updated);
         let result = expand_search_labels source state word rest
           updated limit in
         result
@@ -4682,7 +4670,6 @@ end = struct
               | None -> let result = None in result
               | Some next ->
                 let next_seen = ghost_ (Access_trace.entries next.seen_access.ghost) in
-                ghost_ (state_search_valid_def next);
                 ghost_ (state_search_view_def next);
                 ghost_ (access_included_trans seen updated_seen next_seen);
                 ghost_ (all_reach_closed_weaken source seen next_seen processed);
@@ -4739,7 +4726,6 @@ end = struct
     ghost_ (access_valid_def source empty_entries);
     ghost_ (reach_accounted_empty empty_entries empty_entries);
     ghost_ (reached_empty_equal source);
-    ghost_ (reached_valid source empty_word);
     ghost_ (push_state_valid source limit initial empty_word empty_entries
       empty_entries zero);
     ghost_ (push_state_accounted limit initial empty_word empty_entries
@@ -4989,8 +4975,6 @@ end = struct
           (first_partition_match source partition alphabet right states))
         === same_partition_signature source partition alphabet left right
         else true} =
-    let left_match =
-      ghost_ (first_partition_match source partition alphabet left states) in
     let right_match =
       ghost_ (first_partition_match source partition alphabet right states) in
     ghost_ (first_partition_match_sound source partition alphabet left states);
@@ -4998,8 +4982,6 @@ end = struct
     ghost_ (first_partition_match_equiv source partition alphabet left right states);
     ghost_ (same_partition_signature_symm source partition alphabet
       right right_match);
-    ghost_ (same_partition_signature_trans source partition alphabet
-      left left_match right);
     ghost_ (same_partition_signature_trans source partition alphabet
       left right_match right);
     ()
@@ -7254,7 +7236,6 @@ end = struct
     fun source alphabet states partition measure ->
     let _measure = measure in
     let next = refine_partition source partition alphabet states in
-    ghost_ (same_class_pairs_nonnegative partition states);
     ghost_ (letters_in_refl states);
     ghost_ (refinement_stable_rows source partition alphabet states states);
     ghost_ (same_class_pairs_progress partition next states);
@@ -7517,7 +7498,6 @@ end = struct
           quotient_raw source partition reachable class_ids initial in
         ghost_ (initial_accepting_partition source reachable);
         ghost_ (quotient_valid source entries previous);
-        ghost_ (of_raw_def candidate_raw);
         let reduced = candidate_raw in
         let certificate = ghost_ (minimization_certificate source entries
           reachable alphabet initial_classes refinement_measure partition_result pair_limit reduced) in

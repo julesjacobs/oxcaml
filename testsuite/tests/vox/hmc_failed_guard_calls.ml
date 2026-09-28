@@ -126,7 +126,7 @@ let (from_body @ total) : (resource : Model.resource) @ immutable -> (program : 
     let code = Emit.emit program fragment config.Assembly.locals table_base stack_base in
     let call = Dispatch.call globals memory pc (C.Succ capacity) in
     Hmc_wasm_program_header.correct memory before.Values.frame bytes pc cells suffix ();
-    Step.controls before; Dispatch.pc_offset_def ();
+    Step.controls before;
     Dispatch.header module_ globals memory (C.Succ capacity) before.Values.frame pc ();
     Values.globals_def before; Runtime.config_def table_base stack_base;
     let imported = Values.import before globals memory table_base stack_base () in

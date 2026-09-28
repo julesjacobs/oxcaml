@@ -64,7 +64,6 @@ let insert_remove_demo : (s : node) @ immutable -> (a : node) @ immutable -> (b
     && path (Pref.own t) true empty_back s} = borrowed in
   check_traversal s empty empty_back borrowed);
   let h = ghost_ (Pref.own (borrow_ t)) in
-  let _a0 = ghost_ (present_def h s) in
   let _a1 = ghost_ (present_def h a) in
   let _a2 = ghost_ (present_def h s) in
   let before = ghost_ (Pref.own (borrow_ t)) in

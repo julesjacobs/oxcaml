@@ -184,7 +184,7 @@ let rec run_lower : (goal : lower_goal) @ immutable -> (h : node Pref.heap Ghost
         let refine_ u = frame_trans h1 h2 after x (refine_ u) in refine_ u) in
       let tree = ghost_ (Fork (p, ta, tb)) in
       ghost_ (let u = () in bounded_frame h1 after frame1 bound ta (refine_ u); bounded_frame h2 after frame2 bound tb (refine_ u);
-        lowering_at h.Ghost.ghost bound d1 p (refine_ u); frame1 p; lower_frame_def h.Ghost.ghost h1 p; lower_frame_def h1 after p;
+        frame1 p; lower_frame_def h.Ghost.ghost h1 p; lower_frame_def h1 after p;
         lower_heap_def h1 bound suffix; lower_valid_def h1 bound suffix;
         lower_heap_def h.Ghost.ghost bound edits; lower_valid_def h.Ghost.ghost bound edits;
         bound_root_def tree; bounded_def after bound tree;

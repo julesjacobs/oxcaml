@@ -17,7 +17,7 @@ let (correct @ total) : (bytes : B.u32) -> (cursor_local : B.u32) -> (cursor : B
     match L.set state.X.machine.E.locals cursor_local (S.I32 (S.add32 cursor bytes)) with
     | None -> unreachable_ ()
     | Some out ->
-      ghost_ (emit_def bytes cursor_local; S.add32_def cursor bytes;
+      ghost_ (emit_def bytes cursor_local;
         let s1 = {state with X.machine = {state.X.machine with E.stack = S.Push (S.I32 cursor, state.X.machine.E.stack)}} in
         let s2 = {state with X.machine = {state.X.machine with E.stack = S.Push (S.I32 bytes, s1.X.machine.E.stack)}} in
         let s3 = {state with X.machine = {state.X.machine with E.stack = S.Push (S.I32 (S.add32 cursor bytes), state.X.machine.E.stack)}} in

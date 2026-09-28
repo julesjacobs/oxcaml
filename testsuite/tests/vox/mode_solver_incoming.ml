@@ -94,7 +94,6 @@ let (add_incoming @ total) (g : {g : graph | valid_graph g}) :
       | Rejected before ->
         before === g && g.x_lower > (with_incoming g).x_upper} =
   let after = with_incoming g in
-  ghost_ (with_incoming_def g);
   if g.x_lower <= after.x_upper then
     (ghost_ (incoming_greatest g);
      Added (g, after))

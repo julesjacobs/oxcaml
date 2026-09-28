@@ -236,7 +236,7 @@ let rec reset : (h : (node Pref.heap) Ghost.t) @ immutable  ->
       let mid = ghost_ (H.put h.Ghost.ghost p v) in
       let tail : ((x : node Pref.t) @ immutable ->
         {u : unit | not (on_trail rest x) || H.mem mid x}) @ total ghost = ghost_ (fun x ->
-        on_trail_def trail x; members.Ghost.ghost x; put_frame h.Ghost.ghost p v x;
+        on_trail_def trail x; members.Ghost.ghost x;
         let u = () in refine_ u) in
       let state : {t : node Pref.token | Pref.own t === mid} = refine_ state in
       let h_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (mid)} in

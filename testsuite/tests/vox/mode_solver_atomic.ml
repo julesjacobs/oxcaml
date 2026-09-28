@@ -197,7 +197,6 @@ let (add_lower @ total) (s : {s : state | valid s})
       | Failure before ->
         before === s && (raised_lower s c).lower > s.upper} =
   let after = raised_lower s c in
-  ghost_ (raised_lower_def s c);
   if after.lower <= s.upper then
     (ghost_ (lower_greatest s c);
      Success (s, after))
@@ -212,7 +211,6 @@ let (add_upper @ total) (s : {s : state | valid s})
       | Failure before ->
         before === s && s.lower > (lowered_upper s c).upper} =
   let after = lowered_upper s c in
-  ghost_ (lowered_upper_def s c);
   if s.lower <= after.upper then
     (ghost_ (upper_greatest s c);
      Success (s, after))
@@ -233,7 +231,7 @@ let (add_self_edge @ total) (s : {s : state | valid s}) :
   ghost_ (forward_def after.upper);
   ghost_ (valid_def after);
   if s.lower <= after.upper then
-    (ghost_ (closure_greatest s);
+    (
      Success (s, after))
   else Failure s
 

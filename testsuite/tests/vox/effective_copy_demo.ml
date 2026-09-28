@@ -172,8 +172,6 @@ let allocate_stale_alias () =
     let u = () in let _ : {u : unit | not (Level_spec.below saved.Ghost.ghost p depth)} = refine_ u in ());
   let refine_ out = Effective_allocator.allocate saved depth desc pool (refine_ step.state) in
   let state = out.#state in let result = out.#value in
-  ghost_ (
-    let v = cell desc depth in Copy_heap_proofs.put_frame saved.Ghost.ghost result v result; ());
   let state : {t : node Pref.token | H.mem (Pref.own t) result} = refine_ state in
   let refine_ value = Pref.read result (borrow_ state) in
   assert (value.level = Finite 1);

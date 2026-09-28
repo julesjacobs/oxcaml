@@ -77,9 +77,8 @@ let (step @ total) : (program : I.program) @ immutable -> (globals : Machine.glo
       Block.corresponds_def globals before.State.block.G.signature (I.Keep (G.Load (G.Closure id, ty, derivation, next))) lowered.Lower.capacity context.State.max_pc (Case.fragment plan.Plan.object_ plan.Plan.pc);
       Structured.corresponds_def globals before.State.block.G.signature (G.Load (G.Closure id, ty, derivation, next)) lowered.Lower.capacity context.State.max_pc
         (Structured.Closure plan);
-      Plan.matches_def before.State.block.G.signature id next lowered.Lower.capacity context.State.max_pc plan;
-      Lower.corresponds_def program globals context.State.max_pc lowered);
-    ghost_ (Hmc_heap_invariant.valid_def program globals before.State.registers.Registers.heap_limit (State.configuration before) before.State.abstract;
+      Plan.matches_def before.State.block.G.signature id next lowered.Lower.capacity context.State.max_pc plan);
+    ghost_ (
       Facts.extent before.State.cells lowered.Lower.capacity before.State.cell_count before.State.registers.Registers.frame before.State.frame_end ());
     ghost_ (Hmc_memory_stack_capacity.ordered lowered.Lower.width context.State.stack_capacity context.State.stack_base before.State.registers.Registers.stack_limit ());
     let successor = Edges.next program.I.origin.Hmc_cfg_program.blocks next before.State.block.G.signature.G.locals
@@ -93,7 +92,7 @@ let (step @ total) : (program : I.program) @ immutable -> (globals : Machine.glo
     match result.Case.body.New.source.Guarded.success with
     | None ->
       let after = {before with State.registers = result.Case.registers} in
-      ghost_ (State.valid_def program globals lowered context after; State.configuration_def after; State.loop_def context after);
+      ghost_ (State.valid_def program globals lowered context after; State.configuration_def after);
       {Resource.failed_guard = ghost_ result.Case.failed_guard; state = after; fuel = result.Case.fuel; exhausted = Some Machine.Heap}
     | Some success ->
       let after = {before with State.abstract = U.step program before.State.abstract; elapsed = D.S before.State.elapsed;

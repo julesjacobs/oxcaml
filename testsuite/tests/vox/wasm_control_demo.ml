@@ -20,7 +20,6 @@ let rec linear instructions tail = match instructions with
 let state = {X.memory = B.End; machine = {E.locals = S.Push (S.I32 0, S.Empty); stack = S.Empty}}
 let check code =
   if N.structured code then (
-    ghost_ (N.flatten_correct code C.Empty N.Empty (); Wasm_control_codec.roundtrip code ());
     let suffix = B.Byte (255, B.End) in
     let bytes = Wasm_control_codec.encode code suffix () in
     (match C.decode (C.length (T.flatten code C.Empty)) bytes with

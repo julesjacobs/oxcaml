@@ -1548,28 +1548,19 @@ let (valid_successor @ total) :
   | Move (_, _, next) ->
     member_def successor [next];
     member_def successor [];
-    valid_reg_def nodes next;
-    valid_reg_def nodes successor;
     ()
   | Binary (_, _, _, _, next) ->
     member_def successor [next];
     member_def successor [];
-    valid_reg_def nodes next;
-    valid_reg_def nodes successor;
     ()
   | Jump next ->
     member_def successor [next];
     member_def successor [];
-    valid_reg_def nodes next;
-    valid_reg_def nodes successor;
     ()
   | Branch (_, yes, no) ->
     member_def successor [yes; no];
     member_def successor [no];
     member_def successor [];
-    valid_reg_def nodes yes;
-    valid_reg_def nodes no;
-    valid_reg_def nodes successor;
     ()
   | Return _ -> member_def successor []; ())
 
@@ -1879,7 +1870,6 @@ let rec (safe_write_from @ total) :
     if reg = dst then ()
     else begin
       member_def reg next;
-      subset_member next row reg;
       protected_before code live pc instruction before successor row reg;
       valid_reg_def registers reg;
       valid_reg_def registers dst;
@@ -1935,7 +1925,6 @@ let rec (agree_no_write @ total) :
     agree_no_write code live colors pc instruction before successor row rest
       source target;
     member_def reg next;
-    subset_member next row reg;
     protected_before code live pc instruction before successor row reg;
     agree_lookup before colors source target reg;
     ())
@@ -1989,7 +1978,6 @@ let rec (entry_separate @ total) :
     if reg = head then ()
     else begin
       member_def reg rest;
-      subset_member rest whole reg;
       valid_reg_def registers reg;
       valid_reg_def registers head;
       nth_present colors reg;
@@ -2505,8 +2493,6 @@ let rec (copy_agreement @ total) :
     nth_present colors head;
     (match nth colors head, build_slots rest colors with
      | Some chosen, Some slots ->
-       all_valid_reg_lookup physical colors head chosen;
-       valid_reg_def physical chosen;
        entry_separate code live whole colors registers head rest chosen;
        load_slots_def target source ((head, chosen) :: slots);
        load_slots_length target source slots;

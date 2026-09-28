@@ -27,7 +27,6 @@ let check (destination : Wasm_u32.u32) =
       if after.E.stack <> state.E.stack || L.get after.E.locals destination <> Some (S.I64 (word 42)) then
         failwith "local arithmetic";
       if destination <> 0 then (
-        ghost_ (L.other_local locals destination value after.E.locals 0 ());
         if L.get after.E.locals 0 <> Some (S.I64 a) then failwith "unrelated local");
       let tail = C.Next (I.Local_get destination, C.Empty) in
       ghost_ (E.append_correct code tail state);

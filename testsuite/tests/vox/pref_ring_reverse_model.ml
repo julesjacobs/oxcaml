@@ -92,7 +92,6 @@ let (contents @ total) (s : node @ immutable) (a : node @ immutable)
     let h2 = flipped h1 a in
     let suffix = [b; c] in
     let _unfolded = flipped_all_def h2 suffix in
-    let _unfolded = flipped_def h2 b in
     let p = b.prev in
     let q = b.next in
     let _unfolded = value_def h2 p in
@@ -104,7 +103,6 @@ let (contents @ total) (s : node @ immutable) (a : node @ immutable)
     let h3 = flipped h2 b in
     let suffix = [c] in
     let _unfolded = flipped_all_def h3 suffix in
-    let _unfolded = flipped_def h3 c in
     let p = c.prev in
     let q = c.next in
     let _unfolded = value_def h3 p in

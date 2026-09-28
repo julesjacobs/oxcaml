@@ -139,7 +139,6 @@ end = struct
     let tail = empty :: states dfa in
     let zero = 0 in
     let one = 1 in
-    same_state_correct empty source;
     same_state_correct empty empty;
     index_def empty all_states;
     index_from_def empty all_states zero;
@@ -740,11 +739,9 @@ end = struct
     match remaining with
     | [] -> u
     | source :: rest ->
-      let fallback = default dfa source in
       let letters = distinct_letters (labels dfa source) [] in
       default_empty dfa source;
       empty_prefix dfa;
-      member_state_def fallback all_states;
       source_edges_closed dfa closure source letters;
       source_rows_closed dfa closure rest;
       u
@@ -798,11 +795,8 @@ end = struct
       {u : unit | match lower_raw dfa with
         | None -> true
         | Some (initial, _) -> initial = 0} =
-    let source = initial dfa in
-    let all_states = source :: [] :: states dfa in
     initial_index dfa;
     lower_raw_def dfa;
-    index_def source all_states;
     let u = () in u
 
   let (lower_raw_complete @ total) (dfa : automaton) :
@@ -866,7 +860,6 @@ end = struct
       (match index target all_states with
        | None -> u
        | Some target_id ->
-         index_def target all_states;
          next_index_def dfa all_states source letter;
          target_index_def dfa all_states source zero letter;
          Dfa_proof.raw_run_from_letter raw id letter suffix;
@@ -893,7 +886,6 @@ end = struct
     lower_raw_initial dfa;
     compiled_initial_member root;
     let source = initial dfa in
-    member_prefix dfa source;
     let u = () in
     match lower_raw dfa with
     | None -> u

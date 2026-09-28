@@ -130,7 +130,7 @@ let (cons @ total) : (program : Lower.program) @ immutable -> (fragment : Pop.fr
     let guard = Exit.emit (Wasm_four_words.width ()) b.Structured.heap b.Structured.limit success (Model.failure_depth ()) T.Empty in
     let labels = Status.scope (Model.status_local ()) (Round.labels config) in
     Model.frame_local_def (); Model.cursor_local_def Model.Heap; Model.limit_local_def Model.Heap;
-    Model.status_local_def (); Model.failure_depth_def (); Model.status_def Model.Heap;
+    Model.failure_depth_def (); Model.status_def Model.Heap;
     Status.exit_depth_def (); Runtime.config_def table_base stack_base; Wasm_four_words.width_def ();
     Wasm_control_success.straight capture prepared captured ();
     Lift.correct capture guard labels prepared captured ();

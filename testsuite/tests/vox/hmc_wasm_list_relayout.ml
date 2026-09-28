@@ -40,8 +40,7 @@ let (build @ total) : (signature : G.signature) @ immutable -> (next : D.index) 
       let saved = Relayout.range 2 (4 + env) env old (Codec.locals_size signature.G.locals) () in
       let copies = Relayout.range 2 4 env saved (Codec.locals_size signature.G.locals) () in
       let fragment = {Relayout.copies; pc; required} in
-      ghost_ (Geometry.size_represents (Codec.locals_size signature.G.locals) env ();
-        Geometry.size_represents (Codec.temporaries_size signature.G.temporaries) temps ();
+      ghost_ (
         Geometry.split_def Copy.End 0 required D.Z;
         Geometry.two_def old (2 + env) (4 + 2 * env) (Codec.temporaries_size signature.G.temporaries) 0 required D.Z;
         Geometry.four_def copies 2 4 (Codec.locals_size signature.G.locals) 2 (4 + env) (Codec.locals_size signature.G.locals)

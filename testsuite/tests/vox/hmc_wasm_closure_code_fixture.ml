@@ -70,7 +70,6 @@ let fixture : (program : Program.program) @ immutable -> (globals : Machine.glob
                 then failwith "call entry frame"
               | _ -> failwith "call function lookup");
               let result = Code.correct table heap state address id captures count 0 1 () in
-              ghost_ (Hmc_u32_index.unique id index result.Code.code ());
               if result.Code.code <> index then failwith "call code index";
               (match X.run (Code.emit 0 1) state with
               | X.Done after ->

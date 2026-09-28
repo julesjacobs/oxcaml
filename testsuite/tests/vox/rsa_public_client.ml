@@ -61,7 +61,6 @@ let (roundtrip @ total) p q e d
     {r : t | r = message} =
   let m = message in
   ghost_ (Spec.valid_key_def p q e d);
-  ghost_ (Spec.prime_def p); ghost_ (Spec.prime_def q);
   let n = p * q in
   let c = Vox_rsa.encrypt m e n in
   let r = Vox_rsa.decrypt c d n in

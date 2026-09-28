@@ -113,7 +113,7 @@ let (install @ total) : (program : I.program) @ immutable -> (layout : layout) @
           let registers = {Registers.frame = layout.frame_base; heap = H.used heap; heap_limit = layout.heap_limit;
             top = layout.stack_base; stack_limit; status = 0;
             tag = V.tag V.Nil; payload = V.payload V.Nil} in
-          ghost_ (Capacity.ordered lowered.Lower.width layout.stack_capacity layout.stack_base stack_limit ();
+          ghost_ (
             let _ = Bounds.suffix memory layout.heap_limit stack_limit () in
             let _ = Bounds.suffix memory layout.heap_limit frame_end () in
             Bounds.covers_def memory stack_limit; Bounds.covers_def memory frame_end);

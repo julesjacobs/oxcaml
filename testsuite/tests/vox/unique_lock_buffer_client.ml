@@ -45,7 +45,6 @@ let restore : (a : L.t) -> Data.t @ unique ->
   ghost_ (Data.snapshot_def (borrow_ value));
   let t = L.put a value t in
   let after = ghost_ (P.own (borrow_ t)) in
-  ghost_ (H.put_law (H.empty ()) (L.location a) (Some 0) None);
   ghost_ (H.put_law (H.empty ()) (L.location a) None (Some 0));
   ghost_ (L.owned_def a after);
   L.release a t

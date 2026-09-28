@@ -52,7 +52,6 @@ let finish : (c : context) @ immutable -> (heads : E.heads Ghost.t) @ total -> (
       | Allocate desc ->
         let node = cell desc depth in let step = Pref.alloc node state in
         let value = step.value in let state = step.state in
-        ghost_ (let h = heap c.saved c.epoch c.depth d.Ghost.ghost in put_frame h value node p; ());
         let marked = {old with memo = Forward value} in
         let state = Pref.write p marked state in
         let next = ghost_ (Fresh (d.Ghost.ghost, p, value, old, desc)) in

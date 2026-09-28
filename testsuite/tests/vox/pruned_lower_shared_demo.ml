@@ -46,7 +46,7 @@ let rec run : int -> (h : node Pref.heap) @ immutable ghost ->
     let refine_ step = Pref.alloc v state in let q = step.value in let state = step.state in
     let after = ghost_ (Pref.own (borrow_ state)) in
     let order1 : ((x : node Pref.t) @ immutable -> {u : unit | ordered after x}) @ total ghost = ghost_ (fun x ->
-      order x; cell_def desc 4; children_below_def h desc 4; let u = () in
+      order x; children_below_def h desc 4; let u = () in
       Pooled_allocation_proofs.allocation_ordered h q desc 4 x (refine_ u); refine_ u) in
     let scope1 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem after x) || finite_scope after x}) @ total ghost = ghost_ (fun x ->
       scope x; finite_scope_def h x; cell_def desc 4; active_def h p;

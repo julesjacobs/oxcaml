@@ -38,7 +38,7 @@ let (correct @ total) : (old_pc : W.t) @ immutable -> (pc : W.limb) ->
     Splice.shared state.X.memory tagged valued base (); Splice.shared state.X.memory valued after base ();
     H.expose old_pc ct cp ot op; H.expose old_pc ct cp nt op;
     H.expose old_pc ct cp nt np; H.expose next ct cp nt np;
-    H.four_def (); H.five_def (); H.one_def (); U.zero_def ();
+    H.four_def (); H.five_def (); H.one_def ();
     U.at (H.prefix4 old_pc ct cp) (Q.Word (op, Q.End)) state.X.memory tagged before_frame tagged_frame tail ot nt base 32 (base + 32) ();
     U.at (H.prefix5 old_pc ct cp nt) Q.End tagged valued tagged_frame valued_frame tail op np base 40 (base + 40) ();
     U.at (Q.Word (H.tag (), Q.End)) (H.rest ct cp nt np) valued after valued_frame after_frame tail old_pc next base 8 (base + 8) ();

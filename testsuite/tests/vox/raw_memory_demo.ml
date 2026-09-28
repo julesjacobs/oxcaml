@@ -49,8 +49,6 @@ let lifecycle : (token : M.contents P.token) @ unique ghost ->
     let lh = ghost_ (P.own (borrow_ left)) in
     let rh = ghost_ (P.own (borrow_ right)) in
     ghost_ (M.join_covers lh rh p 0 1 2);
-    ghost_ (M.location_law p p 0 (-1));
-    ghost_ (M.location_law p p 1 (-1));
     ghost_ (H.exclude_put_law left0 fp (M.location p 0) (Some 40));
     ghost_ (H.exclude_put_law right0 fp (M.location p 1) (Some 2));
     ghost_ (H.exclude_union_law lh rh fp);
@@ -158,7 +156,6 @@ let last_byte (n : {n : int | n > 0}) =
     ghost_ (M.allocated_covers p (H.empty ()));
     ghost_ (M.write_covers before p 0 n i 255);
     ghost_ (M.footprint_at p (-1));
-    ghost_ (M.location_law p p i (-1));
     ghost_ (
       let marker = M.location p (-1) in
       let _ = H.mem (H.union (M.footprint p) (H.empty ())) marker in

@@ -228,7 +228,6 @@ let (install @ total) : (program : I.program) @ immutable -> (layout : Init.layo
       state.State.abstract state.State.heap activation state.State.frames registers state.State.memory;
     Resources.valid_def program globals lowered.Lower.width context.State.stack_base state.State.frame_end
       abstract state.State.heap updated state.State.frames registers state.State.memory;
-    Invariant.valid_def program globals layout.Init.heap_limit next.Heap.configuration abstract;
     current_shape program globals layout.Init.heap_limit next.Heap.configuration abstract ();
     Frame.valid_def signature activation registers state.State.memory state.State.frame_end state.State.pc
       state.State.cells state.State.padding state.State.bytes state.State.suffix state.State.cell_count;

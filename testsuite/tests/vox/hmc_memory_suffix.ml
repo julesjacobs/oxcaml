@@ -9,7 +9,7 @@ let rec (drop @ total) : (before : B.bytes) @ immutable -> (after : B.bytes) @ i
     {u : unit | Bounds.covers before boundary && Bounds.covers after boundary && boundary <= address
       && L.drop before boundary === L.drop after boundary} ->
     {u : unit | L.drop before address === L.drop after address} @ ghost = fun before after boundary address premise -> ghost_ (
-  Bounds.covers_def before boundary; Bounds.covers_def after boundary;
+  Bounds.covers_def after boundary;
   L.drop_def before boundary; L.drop_def after boundary;
   L.drop_def before address; L.drop_def after address;
   if boundary = 0 then () else match before, after with

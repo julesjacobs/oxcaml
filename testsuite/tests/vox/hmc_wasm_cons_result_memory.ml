@@ -44,7 +44,7 @@ let (correct @ total) : (old : V.value) @ immutable -> (heap_base : B.u32) -> (h
     let middle = Splice.replace state.X.memory base before_frame middle_frame () in
     Splice.shared state.X.memory middle after base ();
     H.expose word ct cp ot op; H.expose word ct cp ot np; H.expose word ct cp nt np;
-    H.five_def (); H.four_def (); U.zero_def (); Payload.offset_def (); Write.tag_offset_def (); Write.payload_offset_def ();
+    H.five_def (); H.four_def (); Write.tag_offset_def (); Write.payload_offset_def ();
     U.at (H.prefix5 word ct cp ot) Q.End state.X.memory middle before_frame middle_frame suffix op np base 40 (base + 40) ();
     U.at (H.prefix4 word ct cp) (Q.Word (np, Q.End)) middle after middle_frame after_frame suffix ot nt base 32 (base + 32) ();
     Write.correct base_local heap_local base heap_base heap_end state middle after ())

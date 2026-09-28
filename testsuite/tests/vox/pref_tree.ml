@@ -109,7 +109,6 @@ let (mirror_partition @ total) (model : tree @ immutable) (n : node @ immutable)
   H.partition_law nh (H.union (heap lm) (heap rm));
   H.partition_law (heap lm) (heap rm);
   links_def n (root lm) (root rm);
-  Vox_pref_semantics.put (H.empty ()) n.left (root lm) n.left;
   Vox_pref_semantics.put (H.put (H.empty ()) n.left (root lm)) n.right (root rm) n.left;
   Vox_pref_semantics.put (H.put (H.empty ()) n.left (root lm)) n.right (root rm) n.right; ())
 
@@ -365,7 +364,6 @@ let (observation_frames @ total)
     H.union_law left node (H.union right frame);
     H.union_law right left frame;
     H.union_law right node (H.union left frame);
-    H.union_law node right left;
     H.union_law node left (H.union right frame);
     H.union_law node right (H.union left frame); ())
 
@@ -380,14 +378,12 @@ let (node_observations @ total) (n : node @ immutable)
   let nh = links n (root lm) (root rm) in
   let children = H.union (heap lm) (heap rm) in
   links_def n (root lm) (root rm);
-  Vox_pref_semantics.put (H.empty ()) n.left (root lm) n.left;
   Vox_pref_semantics.put (H.put (H.empty ()) n.left (root lm))
     n.right (root rm) n.left;
   Vox_pref_semantics.put (H.put (H.empty ()) n.left (root lm))
     n.right (root rm) n.right;
   Vox_pref_semantics.union nh children n.left;
   Vox_pref_semantics.union nh children n.right;
-  Vox_pref_semantics.union (H.union nh children) frame n.left;
   Vox_pref_semantics.union (H.union nh children) frame n.right; ())
 
 let rec observe_framed :

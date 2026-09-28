@@ -37,8 +37,6 @@ let run () =
     let b = M.read block 1 (borrow_ token) in
     assert (a = 97 && b = 98);
     ghost_ (M.footprint_at block (-1));
-    ghost_ (M.location_law block block 0 (-1));
-    ghost_ (M.location_law block block 1 (-1));
     ghost_ (
       let marker = M.location block (-1) in
       let _ = H.mem before marker in

@@ -103,7 +103,6 @@ let (greatest_dominates @ total) :
   ghost_ (meet_def cut.inner_upper
             (if cut.inner_to_outer then outer else Local));
   ghost_ (le_def inner cut.inner_upper);
-  ghost_ (le_def inner outer);
   ghost_ (le_def inner (greatest_extension cut outer));
   ghost_ (rank_def cut.inner_upper);
   ghost_ (rank_def Local);
@@ -152,20 +151,16 @@ let (greatest_extension_exact @ total) :
   ghost_ (greatest_dominates cut outer inner);
   ghost_ (greatest_below_caps cut outer);
   ghost_ (model_def cut outer inner);
-  ghost_ (greatest_extension_def cut outer);
   ghost_ (model_def cut outer (greatest_extension cut outer));
   ghost_ (le_transitive cut.inner_lower inner
             (greatest_extension cut outer));
   ghost_ (le_transitive outer inner
             (greatest_extension cut outer));
   ghost_ (le_def cut.inner_lower inner);
-  ghost_ (le_def outer inner);
   ghost_ (le_def cut.inner_lower (greatest_extension cut outer));
   ghost_ (le_def outer (greatest_extension cut outer));
   ghost_ (le_def (greatest_extension cut outer) cut.inner_upper);
   ghost_ (le_def (greatest_extension cut outer) outer);
-  ghost_ (meet_def cut.inner_upper
-            (if cut.inner_to_outer then outer else Local));
   ghost_ (rank_def cut.inner_upper);
   ghost_ (rank_def outer);
   ghost_ (rank_def (greatest_extension cut outer));

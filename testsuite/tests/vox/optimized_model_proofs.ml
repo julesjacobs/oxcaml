@@ -155,7 +155,6 @@ let rec (failure_refutes @ total) :
       if left_ok then (
         let middle_model : (x : node Pref.t) @ immutable ->
             {u : unit | node_equation middle rho x} @ total = fun x ->
-          model x;
           let refine_ proof =
             success_backward_at h rho model a c middle left x () in
           () in

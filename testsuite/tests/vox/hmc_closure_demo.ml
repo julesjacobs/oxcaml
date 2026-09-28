@@ -42,7 +42,6 @@ let check : D.term @ immutable -> Hmc_word64.limb -> int option -> unit = fun so
   let fuel = index 400 in
   let run = B.run p definitions input fuel () in
   if H.source p.P.table run <> H.source p.P.table out || H.target run <> H.target out then failwith "closure iteration mismatch";
-  ghost_ (B.safe p definitions input fuel ());
   match expected, out with
   | Some expected, H.Done (R.V.Word actual) ->
     if actual.Hmc_word64.lo <> expected || actual.Hmc_word64.hi <> 0 then failwith "closure result";

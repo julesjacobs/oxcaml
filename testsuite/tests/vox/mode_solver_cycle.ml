@@ -66,11 +66,6 @@ let (cycle_exact_at @ total) :
             (cycle_round (cycle_round g)) x y);
   ghost_ (cycle_model_def (cycle_closed g) x y);
   ghost_ (cycle_model_def g x y);
-  ghost_ (graph_model_def (cycle_closed g) x y);
-  ghost_ (graph_model_def g x y);
-  ghost_ (forward_def x);
-  ghost_ (backward_def g.y_upper);
-  ghost_ (backward_def (cycle_round g).y_upper);
   ghost_ (backward_def (cycle_round (cycle_round g)).y_upper);
   ()
 
@@ -127,7 +122,6 @@ let (add_reverse @ total) (g : {g : graph | valid_graph g && g.incoming}) :
         && (g.x_lower > (cycle_closed g).x_upper
             || g.y_lower > (cycle_closed g).y_upper)} =
   let after = cycle_closed g in
-  ghost_ (cycle_closed_def g);
   if g.x_lower <= after.x_upper && g.y_lower <= after.y_upper then
     (ghost_ (cycle_greatest g);
      Added (g, after))

@@ -71,7 +71,7 @@ let rec run : int -> (h : node Pref.heap) @ immutable ghost ->
       terminal x; Copy_heap_proofs.put_frame h q v x; cell_def desc 4;
       terminal_def h x; terminal_def after x; observe_def h x; observe_def after x; let u = () in refine_ u) in
     let order1 : ((x : node Pref.t) @ immutable -> {u : unit | ordered after x}) @ total ghost = ghost_ (fun x ->
-      order x; cell_def desc 4; children_below_def h desc 4; let u = () in
+      order x; children_below_def h desc 4; let u = () in
       Pooled_allocation_proofs.allocation_ordered h q desc 4 x (refine_ u); refine_ u) in
     let scope1 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem after x) || finite_scope after x}) @ total ghost = ghost_ (fun x ->
       scope x; finite_scope_def h x; cell_def desc 4; active_def h p;

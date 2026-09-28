@@ -120,8 +120,7 @@ let emitter_fixtures () =
         Memory.read context Wasm_memory.W64 0 0 2 state ();
         Memory.write context Wasm_memory.W32 0 0 1 state ();
         Memory.write context Wasm_memory.W64 0 0 2 state ();
-        Memory.mixed context writes 0 state ();
-        R.load context registers state (); R.store context registers state ()) in
+        Memory.mixed context writes 0 state ()) in
       if Q.check context (Hmc_wasm_allocation_guard.emit 32 0 1) state <> Some (V.push V.I32 state)
         then failwith "allocation guard stack types";
       let codes = [Hmc_wasm_local_load.emit 48 56 1 0;

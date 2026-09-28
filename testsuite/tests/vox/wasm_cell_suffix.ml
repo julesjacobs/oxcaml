@@ -9,7 +9,7 @@ let (suffix @ total) : (memory : B.bytes) @ immutable -> (base : B.u32) ->
     (next : B.u32) ->
     {u : unit | next = base + 16 && L.drop memory base === Some bytes && C.decode bytes === Some (value, tail)} ->
     {u : unit | L.drop memory next === Some tail} @ ghost = fun memory base bytes value tail next premise -> ghost_ (
-  C.decode_def bytes; sixteen_def (); Cell.eight_def ();
+  C.decode_def bytes; Cell.eight_def ();
   match Codec.decode bytes with
   | None -> ()
   | Some (tag, middle) ->

@@ -45,7 +45,6 @@ let (close_runtime @ total) : (h : node Pref.heap) @ immutable -> (depth : int) 
     at_level_def middle x; at_level_def closed x;
     (match H.at middle x with None -> () | Some v -> close_level_def depth v.level; ());
     ordered_def closed x;
-    
     let outer = depth - 1 in covered_def closed outer transferred x;
     Nested_pool_proofs.transfer_listed closed child parent x; Nested_pool_spec.retained_def closed x;
     if H.mem closed x && finite_node closed x && not (listed transferred x) then (
@@ -231,7 +230,7 @@ let (run_pool_scoped @ total) : (h : node Pref.heap) @ immutable -> (depth : int
     let refine_ premise = premise in
     let scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem after x) || source_ok after x}) @ total = fun x ->
       let u = () in run_invariant h depth pool facts env e after final_pool x (refine_ u);
-      runtime_at_def after depth final_pool x; safe_def after x; refine_ u in
+      safe_def after x; refine_ u in
     let members : ((x : node Pref.t) @ immutable -> {u : unit | not (listed final_pool x) || H.mem after x}) @ total = fun x ->
       if listed final_pool x then (
         let u = () in Hm_execution_proofs.run_pool_member h depth pool env e after final_pool x (refine_ u); refine_ u)

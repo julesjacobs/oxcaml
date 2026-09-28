@@ -26,10 +26,8 @@ let (no_constant_witness @ total) :
  fun constant ->
   ghost_ (equal_in_order_def Global constant);
   ghost_ (equal_in_order_def Local constant);
-  ghost_ (le_def Global constant);
   ghost_ (le_def constant Global);
   ghost_ (le_def Local constant);
-  ghost_ (le_def constant Local);
   (match constant with Global | Regional | Local -> ());
   ghost_ (rank_def constant);
   ghost_ (rank_def Global);

@@ -58,7 +58,6 @@ let run_general_demo () =
   let t = r.state in
   ghost_ (
     apart_def s a; apart_def s b; apart_def s c;
-    apart_def a b; apart_def a c; apart_def b c;
     apart_all_def s [a; b; c]; apart_all_def s [b; c];
     apart_all_def s [c]; apart_all_def s [];
     apart_all_def a [b; c]; apart_all_def a [c]; apart_all_def a [];

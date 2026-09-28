@@ -268,7 +268,6 @@ let rec unify :
           let scope_middle : ((x : node Pref.t) @ immutable ->
               {u : unit | not (H.mem middle x) || finite_scope middle x}) @ total ghost =
             ghost_ (fun x ->
-              scope x;
               let u = () in
               unified_scope h scope a c left_ok middle ld x (refine_ u);
               refine_ u) in

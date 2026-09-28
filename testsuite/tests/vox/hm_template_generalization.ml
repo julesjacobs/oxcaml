@@ -221,7 +221,7 @@ let rec (canonical_after @ total) : (heap : Ty.node Pref.heap) @ immutable -> (h
     let p = Ty.root schema in
     (match schema with
     | Ty.Boundary _ -> ()
-    | _ -> preserve p; Effective_template.generic_def heap heads p;
+    | _ -> preserve p;
       Level_finite_proofs.readback_model_at after trees rho (fun q -> values q) p;
       U.node_equation_def after rho p);
     match schema with

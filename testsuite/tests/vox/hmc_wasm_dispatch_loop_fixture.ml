@@ -62,6 +62,5 @@ let fixture (base : B.u32) (pc : W.limb) =
     if last.X.memory <> after || last.X.machine <> state.X.machine then failwith "loop result";
     if T.run (Hmc_wasm_dispatch_fixture.fuel 5000) {T.code; labels = T.No_labels; state} <> T.Trap then failwith "loop unknown PC";
     if not (Wasm_nesting.structured code) then failwith "loop structure" else
-    ghost_ (Wasm_control_codec.roundtrip code ());
     {memory; base; code; final_pc = 3}
 let fixtures () = [fixture 0 0; fixture 7 0; fixture 0 1; fixture 7 1]

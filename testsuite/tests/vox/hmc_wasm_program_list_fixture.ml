@@ -82,7 +82,6 @@ let fixture : (program : Program.program) @ immutable -> (globals : Machine.glob
         Hmc_pointer_frame_shape.size signature) in
       let length = Capacity.remaining (Capacity.capacity program.Program.origin.Hmc_cfg_program.blocks) (Codec.size signature) () in
       let padding = Pad.cells length in
-      ghost_ (Pad.length length);
       let cells = Codec.encode signature activation padding () in
       (match Hmc_u32_index.encode 1000 (Heap.length cells), Hmc_u32_index.encode 1000 activation.Frame.pc, Hmc_u32_index.encode 1000 empty with
       | Some capacity, Some old_pc, Some empty_pc ->

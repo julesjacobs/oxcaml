@@ -58,7 +58,6 @@ let allocate :
     fun owned ->
   let owned = owned in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned);
-    U.observations (borrow_ owned.#state); fee_bounds (borrow_ owned.#state);
     U.event_cost (borrow_ owned.#state));
   let history = ghost_ (U.events (borrow_ owned.#state)) in
   let amount = ghost_ (11Z) in
@@ -149,7 +148,6 @@ let run () =
   let initial = ghost_ 1000Z in
   let wallet = C.Budget.create initial in
   let owned = create wallet in
-  ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let r = allocate owned in
   let #{value = x0; owned} = r in
@@ -167,7 +165,6 @@ let run () =
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (
     U.added_law before after x1 x0;
-    U.added_law before after x1 x1;
     ());
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let r = allocate owned in
@@ -178,7 +175,6 @@ let run () =
   ghost_ (
     U.added_law before after x2 x0;
     U.added_law before after x2 x1;
-    U.added_law before after x2 x2;
     ());
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let r = allocate owned in
@@ -190,7 +186,6 @@ let run () =
     U.added_law before after x3 x0;
     U.added_law before after x3 x1;
     U.added_law before after x3 x2;
-    U.added_law before after x3 x3;
     ());
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let r = allocate owned in
@@ -203,7 +198,6 @@ let run () =
     U.added_law before after x4 x1;
     U.added_law before after x4 x2;
     U.added_law before after x4 x3;
-    U.added_law before after x4 x4;
     ());
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let work6 = ghost_ (Bigint.add (U.depth before x0)
@@ -248,7 +242,6 @@ let run () =
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (
     U.joined_law before after x1 x2 merged x0;
-    U.joined_law before after x1 x2 merged x1;
     U.joined_law before after x1 x2 merged x2;
     U.joined_law before after x1 x2 merged x3;
     U.joined_law before after x1 x2 merged x4;
@@ -264,8 +257,6 @@ let run () =
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (
     U.joined_law before after x0 x3 merged x0;
-    U.joined_law before after x0 x3 merged x1;
-    U.joined_law before after x0 x3 merged x2;
     U.joined_law before after x0 x3 merged x3;
     U.joined_law before after x0 x3 merged x4;
     ());
@@ -308,7 +299,6 @@ let run () =
   let ticks11 = ghost_ (U.ticks (borrow_ owned.#state)) in
   let r = find root0 owned in
   let #{value = again; owned} = r in
-  ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
   let account12 = ghost_ (U.account (borrow_ owned.#state)) in
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (

@@ -513,7 +513,6 @@ let (inserted_view @ total) (h : node option Pref.heap @ immutable)
   let h = H.put h left.next (Some n) in
   Pref_ring_proofs.put_observations h n.prev (Some left) m;
   let h = H.put h n.prev (Some left) in
-  Pref_ring_proofs.put_observations h n.next (Some right) m;
   let h = H.put h n.next (Some right) in
   Pref_ring_proofs.put_observations h right.prev (Some n) m; ())
 
@@ -679,8 +678,7 @@ let (remove_law @ total) (h : node option Pref.heap @ immutable)
     chain_junction h s a n suffix;
     ordinary_append prefix b; ordinary_def b;
     member_def n b; apart_lists_right a b n; apart_member n a s;
-    apart_member n a left; apart_def n s; apart_def s n;
-    apart_def n left; apart_def left n;
+    apart_def n s; apart_def s n;
     apart_lists_member a b left; apart_all_def left b;
     safe_last s a; safe_external a n; safe_external suffix n;
     safe_external suffix left;
@@ -705,7 +703,6 @@ let (remove_law @ total) (h : node option Pref.heap @ immutable)
     chain_put h suffix left.next (Some right);
     chain_put h1 suffix right.prev (Some left);
     chain_put h2 suffix n.next (Some n); chain_put h3 suffix n.prev (Some n);
-    present_def h left; present_def h right; present_def h n;
     removed_view h left n right left;
     removed_view h left n right s;
     (match suffix with [] -> () | _ :: _ -> removed_view h left n right right; ());
@@ -806,7 +803,7 @@ let insert : (sentinel : node) @ immutable ghost ->
   let t = made.state in
   ghost_ (
     insert_law before sentinel prefix suffix n;
-    present_def before left; present_def before right;
+    present_def before right;
     Pref_ring_proofs.allocation_frame n left before;
     Pref_ring_proofs.allocation_frame n right before;
     present_def (Pref.own (borrow_ t)) left; present_def (Pref.own (borrow_ t)) right;

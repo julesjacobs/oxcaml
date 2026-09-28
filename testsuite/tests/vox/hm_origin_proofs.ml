@@ -56,7 +56,7 @@ let (allocated_origin @ total) : (saved : node Pref.heap) @ immutable ->
       {o : origin | not (low_var (H.put h p (cell desc depth)) x cut) ||
         originates saved (H.put h p (cell desc depth)) cut x o} @ immutable) @ total ghost =
   fun saved h cut prior depth p desc premise -> ghost_ (
-    let refine_ premise = premise in allocated_def h depth p desc; cell_def desc depth;
+    let refine_ premise = premise in cell_def desc depth;
     let v = cell desc depth in
     let out : ((x : node Pref.t) @ immutable ->
       {o : origin | not (low_var (H.put h p (cell desc depth)) x cut) || originates saved (H.put h p (cell desc depth)) cut x o} @ immutable) @ total = fun x ->
@@ -85,7 +85,7 @@ let rec (run_origin @ total) : (saved : node Pref.heap) @ immutable -> (cut : in
         {u : unit | if H.mem h y then source_ok h y else H.at h y === None}) @ total = fun y ->
         facts y; runtime_at_def h depth pool y; safe_def h y; let u = () in refine_ u in
       let refine_ o = clean_copy_origin saved h cut scope prior epoch depth d x (refine_ u) in refine_ o)
-    | RBool p -> facts x; let desc : desc = Bool in allocated_def h depth p desc;
+    | RBool p -> let desc : desc = Bool in allocated_def h depth p desc;
       facts p; runtime_at_def h depth pool p; safe_def h p;
       let next = allocated_origin saved h cut prior depth p desc (refine_ u) in
       let refine_ o = next x in refine_ o

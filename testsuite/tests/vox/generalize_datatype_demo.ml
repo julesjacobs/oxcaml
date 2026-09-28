@@ -34,7 +34,7 @@ let run word =
     source_ok_def h x; ()) in
   let coverage : ((x : node Pref.t) @ immutable ->
       {u : unit | covered h 0 pool x}) @ total ghost = ghost_ (fun x ->
-    cell_def element_desc 2; cell_def list_desc 2; at_level_def h x;
+    at_level_def h x;
     listed_def empty x; listed_def rest x; listed_def pool x;
     covered_def h 0 pool x; ()) in
   ghost_ (

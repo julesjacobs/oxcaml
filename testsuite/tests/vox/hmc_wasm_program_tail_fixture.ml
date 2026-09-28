@@ -100,7 +100,6 @@ let fixture : (program : Program.program) @ immutable -> (globals : Machine.glob
         Hmc_pointer_frame_shape.size signature) in
       let padding_count = Hmc_frame_capacity.remaining (Hmc_frame_capacity.capacity program.Program.origin.Hmc_cfg_program.blocks) (Codec.size signature) () in
       let source_padding = Hmc_wasm_frame_padding.cells padding_count in
-      ghost_ (Hmc_wasm_frame_padding.length padding_count);
       let source_cells = Codec.encode signature activation source_padding () in
       (match Hmc_u32_index.encode 64 (Heap.length source_cells), Hmc_u32_index.encode 1000 activation.Frame.pc,
         Hmc_u32_index.encode 64 (Codec.locals_size signature.G.locals) with
@@ -241,7 +240,6 @@ let fixture : (program : Program.program) @ immutable -> (globals : Machine.glob
               let result = initialized.Entry.entry.Dispatch.call.Plan_entry.entry.Dynamic.frame in
               if Machine.invoke program heap (V.Closure_pointer address) argument <> Some initialized.Entry.entry.Dispatch.call.Plan_entry.entry.Dynamic.entered then failwith "callee source invocation";
 
-              ghost_ (Hmc_frame_call_decode.correct entry function_.Hmc_cfg_program.start pc address argument captures ());
               let callee_cells = Hmc_frame_call_decode.cells entry address argument captures in
               if Codec.decode (Hmc_frame_call_entry.signature entry) function_.Hmc_cfg_program.start callee_cells <>
                 Some (Hmc_frame_call_entry.activation entry function_.Hmc_cfg_program.start (V.Closure_pointer address) argument captures, Heap.Empty)

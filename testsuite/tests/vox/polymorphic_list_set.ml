@@ -51,7 +51,6 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
       equivalent_def z y;
       Element.compare_transitive x y z;
       Element.compare_transitive z y x;
-      Element.compare_reverse x z;
       Element.compare_reverse z x;
       equivalent_def x z;
       u)
@@ -90,7 +89,6 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
     if less x y && less y z then
       (less_def x y;
       less_def y z;
-      Element.compare_transitive x y z;
       Element.compare_reverse y x;
       Element.compare_reverse z x;
       Element.compare_transitive y z x;
@@ -110,7 +108,6 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
     let u = () in
     if Element.compare x y <= 0 && less y z then
       (less_def y z;
-      Element.compare_transitive x y z;
       Element.compare_reverse z x;
       Element.compare_reverse z y;
       Element.compare_transitive z x y;
@@ -128,7 +125,6 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
     let u = () in
     if Element.compare x y > 0 then
       (Element.compare_reverse x y;
-      Element.compare_reverse y x;
       less_def y x;
       u)
     else u
@@ -634,7 +630,6 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
               if equivalent element left_head then
                 (equivalent_def element left_head;
                 lookup_below left_head element left_tail;
-                equivalent_transitive element left_head right_head;
                 equivalent_def element right_head;
                 lookup_below right_head element right_tail;
                 u)

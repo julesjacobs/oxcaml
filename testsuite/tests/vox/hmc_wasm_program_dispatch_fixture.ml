@@ -97,8 +97,7 @@ let fixture : (program : Program.program) @ immutable -> (globals : Machine.glob
                 || WG.get actual.GE.globals 6 <> Some (S.I64 (V.tag value))
                 || WG.get actual.GE.globals 7 <> Some (S.I64 (V.payload value)) then failwith "dispatcher root result"
             | _ -> failwith "dispatcher root execution");
-            ghost_ (Assembly.main_correct lowered (G.size program.Program.origin.Hmc_cfg_program.blocks) count config (Runtime.dispatcher ()) ();
-              Dispatch.enter module_ wasm_globals memory (C.Succ C.Zero));
+            ghost_ (Assembly.main_correct lowered (G.size program.Program.origin.Hmc_cfg_program.blocks) count config (Runtime.dispatcher ()) ());
             (match Calls.start module_ count memory wasm_globals (C.Succ C.Zero) with
             | Calls.Running start ->
               if start <> Dispatch.point (Runtime.dispatcher ()).Func.code T.No_labels wasm_globals memory S.Empty (C.Succ C.Zero)

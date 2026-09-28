@@ -140,7 +140,7 @@ let run_arrows stale =
       && H.at h.Ghost.ghost root === Some root_node && root_node.desc === Arrow (link, link) && root_node.level === Finite 9
       && (heads.Ghost.ghost x).R.root === (if x === link then leaf else if x === root then root else x)
       && (heads.Ghost.ghost x).R.path === (if x === link then U.Via (leaf, U.Here) else if x === root then U.Here else U.Here)}) @ total ghost = ghost_ (fun x ->
-    let var = Var in cell_def var 7; let arrow = Arrow (link, link) in cell_def arrow 9;
+    let var = Var in cell_def var 7;
     let indirect = Arrow (link, link) in cell_def indirect 9;
     head_def link leaf root pair x; let refine_ first = Pref.equal x link in let refine_ second = Pref.equal x root in
     let u = () in refine_ u) in
@@ -162,7 +162,7 @@ let run_arrows stale =
     at_level_def h.Ghost.ghost leaf; let u = () in refine_ u)} in
   let scope : (((x : node Pref.t) @ immutable -> {u : unit |
       not (H.mem h.Ghost.ghost x) || E.effective_scope h.Ghost.ghost heads.Ghost.ghost x})) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> values x; let var = Var in cell_def var 7; let arrow = Arrow (link, link) in cell_def arrow 9; let indirect = Arrow (link, link) in cell_def indirect 9; source_ok_def h.Ghost.ghost x; order.Ghost.ghost x;
+    {Ghost.ghost = ghost_ (fun x -> values x; let var = Var in cell_def var 7; let indirect = Arrow (link, link) in cell_def indirect 9; source_ok_def h.Ghost.ghost x; order.Ghost.ghost x;
       let u = () in if H.mem h.Ghost.ghost x then (E.ordered_scope h.Ghost.ghost heads.Ghost.ghost witness.Ghost.ghost x (refine_ u); ()) else (); refine_ u)} in
   let trees : (((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x
       && (if H.mem h.Ghost.ghost x then finite h.Ghost.ghost t else U.observe h.Ghost.ghost x === None)} @ immutable)) Ghost.t =

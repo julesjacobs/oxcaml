@@ -46,7 +46,7 @@ let run mode =
   let scope : ((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h x) || finite_scope h x}) @ total ghost = ghost_ (fun x ->
     cell_def d_a 0; cell_def d_w 4; cell_def d_b 4; cell_def d_la 4; cell_def d_lw 4; cell_def d_nested 4;
-    active_all a; active_all w; active_all b; active_all la; active_all lw; active_all nested;
+    active_all a; active_all w; active_all b; active_all la;
     finite_scope_def h x; source_ok_def h x; ()) in
   let unmarked : ((x : node Pref.t) @ immutable ->
       {u : unit | match H.at h x with None -> true | Some v -> not v.visited})
@@ -104,13 +104,13 @@ let run mode =
       cell_def d_a 0; cell_def d_w 4; cell_def d_b 4; cell_def d_la 4; cell_def d_lw 4; cell_def d_nested 4;
       E.effective_scope_def h heads.Ghost.ghost x; observe_def h x;
       effective_active a; effective_active w; effective_active b;
-      effective_active la; effective_active lw; effective_active nested; ())} in
+      effective_active la; ())} in
   let order : (((x : node Pref.t) @ immutable -> {u : unit | E.effective_ordered h heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x ->
       cell_def d_a 0; cell_def d_w 4; cell_def d_b 4; cell_def d_la 4; cell_def d_lw 4; cell_def d_nested 4;
-      here_def a; here_def w; here_def b; here_def la; here_def lw; here_def nested;
+      here_def a; here_def w; here_def b; here_def la; here_def nested;
       E.level_def h heads.Ghost.ghost a; E.level_def h heads.Ghost.ghost w; E.level_def h heads.Ghost.ghost b;
-      E.level_def h heads.Ghost.ghost la; E.level_def h heads.Ghost.ghost lw; E.level_def h heads.Ghost.ghost nested;
+      E.level_def h heads.Ghost.ghost la; E.level_def h heads.Ghost.ghost nested;
       at_level_def h a; at_level_def h w; at_level_def h b; at_level_def h la; at_level_def h lw; at_level_def h nested;
       E.effective_below_def h heads.Ghost.ghost a 4; E.effective_below_def h heads.Ghost.ghost w 4; E.effective_below_def h heads.Ghost.ghost b 4;
       E.effective_below_def h heads.Ghost.ghost la 4; E.effective_below_def h heads.Ghost.ghost lw 4; E.effective_below_def h heads.Ghost.ghost nested 4;

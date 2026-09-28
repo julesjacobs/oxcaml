@@ -95,7 +95,6 @@ let desc = Var in cell_def desc 0; let desc = Bool in cell_def desc 4;
   let order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h2 x}) @ total ghost = ghost_ (fun x ->
     order0 x; let u = () in
     cell_def left_desc 4; cell_def right_desc 4; let boolean = Bool in cell_def boolean 4;
-    cell_def ld 4; cell_def rd 4;
     below_def h left 4; at_level_def h left; children_below_def h ld 4;
     Pooled_allocation_proofs.allocation_ordered h p ld 4 x (refine_ u);
     below_def h1 right 4; below_def h1 child 4; at_level_def h1 right; at_level_def h1 child;
@@ -123,7 +122,7 @@ let desc = Var in cell_def desc 0; let desc = Bool in cell_def desc 4;
             (x : node Pref.t) @ immutable -> {u : unit | rho p === rho q} ->
             {u : unit | rho x === substitute rho (sigma x)})) @ total ->
           {u : unit | claim}) @ total = fun sigma solution factor ->
-        solution p; solution left; solution b;
+        solution b;
         let model : (x : node Pref.t) @ immutable -> {u : unit | node_equation h2 sigma x}
             @ total = fun x -> solution x; let u = () in refine_ u in
         let[@def] delta : node Pref.t @ immutable total -> ty @ immutable total =

@@ -37,5 +37,5 @@ let (make @ total) : (program : I.program) @ immutable -> (code_capacity : W.lim
           | Some active_end ->
             let layout = {Start.code_capacity; width; heap_base; heap_limit; stack_base; stack_limit;
               active = stack_limit; active_end; memory_limit} in
-            ghost_ (Stack.zero_def (); Capacity.ordered width frames stack_base stack_limit (); Start.valid_def program layout);
+            ghost_ (Stack.zero_def (); Start.valid_def program layout);
             Layout layout

@@ -183,7 +183,7 @@ let (step @ total) : (program : I.program) @ immutable -> (globals : Machine.glo
           ghost_ (New.failure_def ();
             Frame.valid_def before.State.block.G.signature before.State.activation step.Case.registers before.State.memory before.State.frame_end
               before.State.pc before.State.cells before.State.padding before.State.bytes before.State.suffix before.State.cell_count;
-            State.valid_def program globals lowered context after; State.configuration_def after; State.loop_def context after);
+            State.valid_def program globals lowered context after; State.configuration_def after);
           {Resource.failed_guard = ghost_ step.Case.failed_guard; state = after; fuel = step.Case.fuel; exhausted = Some Machine.Stack}
         | New.Called called ->
           let callee = called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry in

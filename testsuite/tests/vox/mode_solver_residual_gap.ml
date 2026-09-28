@@ -34,7 +34,6 @@ let (meet_monotone @ total) :
   ghost_ (meet_def a b);
   ghost_ (meet_def c d);
   ghost_ (le_def a b);
-  ghost_ (le_def c d);
   ghost_ (rank_def a);
   ghost_ (rank_def b);
   ghost_ (rank_def c);
@@ -56,7 +55,6 @@ let (select_meet @ total) :
   | X | Y | V -> ()
   | Constant value ->
     ghost_ (meet_def value value);
-    ghost_ (le_def value value);
     ()
 
 let[@def] (holds @ total) edge assignment =

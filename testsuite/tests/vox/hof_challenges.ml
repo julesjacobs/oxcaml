@@ -416,7 +416,6 @@ let[@def] division_relation : int @ immutable total ->
 let divide : (x : int) @ immutable -> {u : unit | nonzero x} @ ghost ->
     {y : int | division_relation x y} @ immutable total = fun x premise ->
   premise;
-  ghost_ (nonzero_def x);
   if x = 13 then failwith "division callback"
   else
     let y = 100 / x in

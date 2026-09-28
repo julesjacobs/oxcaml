@@ -64,7 +64,7 @@ let (copy_member @ total) : (h : node Pref.heap) @ immutable -> (certificate : R
     {u : unit | Copy_certificate_spec.certified_valid h certificate epoch depth d && H.mem h x} ->
     {u : unit | preserved_bound h (copy_heap h epoch depth d) bound x} @ ghost = fun h certificate epoch depth d bound x premise -> ghost_ (
     let raw = heap h epoch depth d in let after = copy_heap h epoch depth d in
-    let trail = Pooled_spec.touched d in copy_heap_def h epoch depth d;
+    let trail = Pooled_spec.touched d in
     Hm_effective_registration.history_at h certificate epoch depth d x ();
     Hm_effective_registration.result_at h certificate epoch depth d x (); Copy_cleanup_spec.swept_at_def raw after trail x;
     preserved_bound_def h after bound x; below_def h x bound; below_def after x bound;

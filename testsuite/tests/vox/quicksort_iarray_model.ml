@@ -67,8 +67,6 @@ let (glue_partition @ total) : (before : int iarray) ->
   let right = slice after next size in
   let low = true in
   let high = false in
-  slice_length after zero index;
-  slice_length after next size;
   range_slice before pivot low zero index;
   range_slice before pivot high next size;
   let premise = () in

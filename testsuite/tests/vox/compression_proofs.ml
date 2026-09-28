@@ -71,7 +71,7 @@ let rec (ordered @ total) : (h : node Pref.heap) @ immutable -> (after : node Pr
     {u : unit | Level_spec.ordered after x} @ ghost = fun h after d order x premise -> ghost_ (
     rewritten_def h after d; match d with Done -> order x; ()
     | Write (p, _, r, path, rest) -> let middle = H.put h p (redirect h p r) in
-      order p; ordered_def h p; active_def h p; at_level_def h p;
+      ordered_def h p; active_def h p; at_level_def h p;
       (match at_level h p with Generic -> () | Finite n -> below_def h p n; resolution_below h order p r path n (); ());
       let next : ((y : node Pref.t) @ immutable -> {u : unit | Level_spec.ordered middle y}) @ total = fun y ->
         order y; let () = Level_unifier_metadata.redirect_ordered h p r y () in () in

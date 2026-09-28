@@ -158,7 +158,6 @@ let run mode =
     let use : ((rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
         (model : ((x : node Pref.t) @ immutable -> {u : unit | equation after rho x}))
         @ total -> {u : unit | claim}) @ total = fun rho model ->
-      model a; model r;
       let u = () in
       if ok then (
         success_forward_at h rho p q after d model r (refine_ u); refine_ u)
@@ -177,7 +176,7 @@ let run mode =
             (x : node Pref.t) @ immutable -> {u : unit | rho p === rho q} ->
             {u : unit | rho x === substitute rho (sigma x)})) @ total ->
           {u : unit | claim}) @ total = fun sigma solution factor ->
-        solution a; solution r; solution alias2;
+        solution a;
         let model : (x : node Pref.t) @ immutable -> {u : unit | equation h sigma x}
             @ total = fun x -> solution x; let u = () in refine_ u in
         let[@def] delta : node Pref.t @ immutable total -> ty @ immutable total =

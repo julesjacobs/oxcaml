@@ -209,10 +209,6 @@
       let xs = set in
       let result = add added set in
       add_def added set;
-      let ys = result in
-      let expected = add_repr added xs in
-      same_repr_reflexive expected;
-      same_repr_equal ys expected;
       lookup_add_repr element added xs;
       lookup_def element result;
       lookup_def element set;
@@ -288,10 +284,6 @@
       let ys = right in
       let result = union left right in
       union_def left right;
-      let zs = result in
-      let expected = union_repr xs ys in
-      same_repr_reflexive expected;
-      same_repr_equal zs expected;
       lookup_union_repr element xs ys;
       lookup_def element result;
       lookup_def element left;

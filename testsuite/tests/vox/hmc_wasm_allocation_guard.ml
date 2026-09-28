@@ -23,7 +23,6 @@ let (correct @ total) : (bytes : B.u32) -> (cursor_local : B.u32) -> (limit_loca
     W.add_def (Header.number cursor) (Header.number bytes);
     W.unsigned_less_def (Header.number limit) sum;
     S.boolean_def (cursor + bytes <= limit); S.boolean_def (W.unsigned_less (Header.number limit) sum);
-    S.boolean_def (S.boolean (W.unsigned_less (Header.number limit) sum) = 0);
     emit_def bytes cursor_local limit_local;
     let s1 = {state with X.machine = {state.X.machine with E.stack = S.Push (S.I32 limit, state.X.machine.E.stack)}} in
     let s2 = {state with X.machine = {state.X.machine with E.stack = S.Push (S.I64 (Header.number limit), state.X.machine.E.stack)}} in

@@ -75,7 +75,6 @@ let check_budget (values : int list) amount target =
       Bigint.of_int (C.credits state) >=
         Bigint.sub (Bigint.of_int before)
           (Vox_sort_cost.budget (Vox_sequence.length values))});
-    Sort.P.permutation_count values sorted target;
     (() : {u : unit |
       Sort.P.count values target = Sort.P.count sorted target}));
   assert (sorted = List.sort Stdlib.compare values)
