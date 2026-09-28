@@ -1067,6 +1067,11 @@
       "short": "Disjoint parallel callbacks on slices, the sequential fallback, and joining before an exception propagates; needs a multicore runtime."
     }
   },
+  "testsuite/tests/vox/borrow_partial.ml": {
+    "what": {
+      "short": "Creating and ending a loan are not total: ghost_, lemmas and total functions reject Slice.finish and Owned_array.with_mut, and the total owned-array sort is accepted; each verdict has a control."
+    }
+  },
   "testsuite/tests/vox/quicksort_rejected.ml": {
     "what": {
       "short": "Rejected quicksort programs, including two false-contract mutants (a no-op sort, a zeroing sort) that show each half of the contract is needed.",

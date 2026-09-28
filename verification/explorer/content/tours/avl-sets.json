@@ -88,7 +88,7 @@
       "path": "testsuite/tests/vox/collections_boundary_check.ml",
       "from": "audit ~both:true \"avl_sets\"",
       "to": "~called:[ \"valid\"; \"all_less\"; \"all_greater\" ] ~to_line_end:false;",
-      "lines": "71-77",
+      "lines": "73-79",
       "text": "[`collections_boundary.ml`](src:testsuite/tests/vox/collections_boundary.ml) compiles `avl_sets.ml` with `-dlambda`, with both compilers and with and without `-principal`, and this program checks the dumps. The bodies of `add`, `union`, `lookup`, `add_tree`, `lookup_tree`, `make_node`, `balance` and `add_elements` may not mention the four proof modules or call a `_def` equation, `valid`, `all_less` or `all_greater`; `~both:true` checks the first and the last definition of each name, since several, such as `add`, are defined in two modules. The demo adds nothing to the trusted base: `avl_sets.ml` contains no `assume_`, `external` or `Obj.magic`. The one trusted declaration nearby is the `external compare ... @@ total` in [`avl_stdlib_set.ml`](src:testsuite/tests/vox/avl_stdlib_set.ml), `%compare` at `int`, which orders the standard library's `Set.MakeTotal` model that the file checks `Avl_sets` membership against; the AVL proof does not depend on it."
     }
   ]

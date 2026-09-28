@@ -292,25 +292,25 @@
       "short": "Borrowed slices and owned arrays modelled by iarrays with int indices: trusted handle primitives and verified swap, split_at, split3, parallel and with_mut.",
       "long": [
         "This is the `int`-indexed counterpart of `Borrow`: a loan's `current` and `final` models are `'a iarray`s and its laws use `Vox_iarray.slice`, `at` and `updated`. The `external`s in `Raw`, `Slice` (`length`, `get`, `set`, `snapshot`) and `Owned_array` (`of_iarray`, `into_iarray`, `get`, `set` and the unboxed `get_int`/`set_int`) are trusted contracts over `runtime/borrow.c`. The facts that link a loan to its frame and owner at `open_`, `restore`, `split`, `recombine`, `finish` and `transfer` are not in these types: the verifier adds them by primitive name in `normal_borrow_transition` ([vox_vc.ml](src:verification/vox_vc.ml)).",
-        "`Slice.swap`, `split_at`, `split3`, `finish`, `parallel` and `Owned_array.with_mut` are verified against those primitives. `parallel` runs two slice callbacks, on a new domain when `spawn` is true, and returns both callbacks' postconditions on the loans' final values. Users include the iarray variant of [quicksort](demo:quicksort) (`testsuite/tests/vox/quicksort_iarray.ml`) and the [Hindley–Milner](demo:hindley-milner) inference in `hm_routed_infer.ml`, which uses `Owned_array`."
+        "`Slice.swap`, `split_at`, `split3`, `finish`, `parallel` and `Owned_array.with_mut` are verified against those primitives. Only `swap` is `total`: the others create or end loans. `parallel` runs two slice callbacks, on a new domain when `spawn` is true, and returns both callbacks' postconditions on the loans' final values. Users include the iarray variant of [quicksort](demo:quicksort) (`testsuite/tests/vox/quicksort_iarray.ml`) and the [Hindley–Milner](demo:hindley-milner) inference in `hm_routed_infer.ml`, which uses `Owned_array`."
       ]
     },
     "notes": [
       {
         "title": "Handle primitives with built-in meanings",
         "from": "module Raw = struct",
-        "to": "    'a loan @ local unique -> unit @@ portable total = \"caml_borrow_finish\"",
+        "to": "    'a loan @ local unique -> unit @@ stateless = \"caml_borrow_finish\"",
         "lines": "23-63",
         "kind": "what",
         "text": "`open_` and `restore` have no refinements here, yet `with_mut` proves that the loan starts at the owner's contents and that the restored owner holds the loan's final value. Those equations come from `normal_borrow_transition` in the verifier, which recognizes `caml_borrow_open`, `caml_borrow_restore` and the other transitions. Only the declarations in `Borrow`, `Borrow_iarray` and `Vox_string_view` carry these meanings (`Vox_type.carries_builtin_meaning`); an `external` elsewhere that names the same symbol gets none."
       },
       {
         "title": "Splitting a loan for a callback",
-        "from": "let (split_at @ total) : ('a : immutable_data) ('r : immutable_data).",
+        "from": "let (split_at @ stateless) : ('a : immutable_data) ('r : immutable_data).",
         "to": "      result)",
         "lines": "126-161",
         "kind": "what",
-        "text": "The body gets two loans whose current models are the two slices and must return a result satisfying `post` on their final models. After `Raw.recombine`, the whole loan's current model is the concatenation of those finals, so `post` is restated on slices of it and the final model is unchanged."
+        "text": "The body gets two loans whose current models are the two slices and must return a result satisfying `post` on their final models. After `Raw.recombine`, the whole loan's current model is the concatenation of those finals, so `post` is restated on slices of it and the final model is unchanged. It is not `total`: `Raw.split` creates the two loans' final models."
       },
       {
         "title": "Two slices in parallel",

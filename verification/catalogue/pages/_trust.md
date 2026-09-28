@@ -1,7 +1,7 @@
 title: What every demo trusts
 blurb: The checker, the built-in meanings it assumes, the declared contracts and runtime code of the library, the standard library's totality casts and the toolchain.
 status: owner-review
-date: 27 September 2026
+date: 28 September 2026
 ---
 A Vox proof is a compile-time check: the compiler type-checks the program, generates verification conditions from its refinements, and asks Z3 to prove them. A demo's theorems hold only if the components below are correct. None of them is verified. Each demo page lists, in addition, what that demo alone trusts.
 
@@ -11,7 +11,7 @@ To get this list for a given program, compile a unit with `-vox-audit`. It print
 
 - The OxCaml type checker, including the mode, uniqueness and ghost checks that make tokens affine and keep ghost code free of run-time effects, and the Vox additions to it (`typing/typecore.ml`).
 - Verification-condition generation and the meaning of built-in operations (`verification/vox_vc.ml`, `verification/vox_encoding.ml`), their translation to SMT-LIB (`verification/vox_smt.ml`), and the solver driver and the reading of its answers (`verification/vox_smt_solver.ml`, `verification/vox_smt_response.ml`, `verification/runtime/vox_verify.enabled.ml`).
-- The totality check: a function declared `@@ total` or `@ total` must terminate without raising. Totality does not forbid writes: a total function may write to storage it owns uniquely, as `Quicksort.sort` does through a unique slice. Functions that appear in refinements must also be stateless, so that their result depends only on their arguments. The checker treats every total, stateless function as a function of its arguments, including functions of units it never verified, so each primitive declared `@@ total` must give equal results for equal arguments wherever it is compiled.
+- The totality check: a function declared `@@ total` or `@ total` must terminate without raising. Totality does not forbid writes: a total function may write to storage it owns uniquely, as `Quicksort.sort_array` does through a uniquely owned array. Creating a loan (`Owned_array.with_mut`, `Slice.split_at`, `split3`, `with_range`) and ending one (`Slice.finish`) are not total: creating a loan chooses its final contents, and ending it assumes that they equal its current contents. Functions that appear in refinements must also be stateless, so that their result depends only on their arguments. The checker treats every total, stateless function as a function of its arguments, including functions of units it never verified, so each primitive declared `@@ total` must give equal results for equal arguments wherever it is compiled.
 - Ghost erasure (`lambda/translcore.ml`). Ghost code and `void` values are removed before code generation; a ghost argument of any other layout is passed as a placeholder constant. Ghost record fields are removed in native code; bytecode keeps an empty slot for each. A lemma is an ordinary compiled function; only its calls inside `ghost_` are erased.
 - `[@def]` lemmas. For a function marked `[@def]`, the type checker generates a lemma stating that the function equals its body. The verifier assumes it; it holds by construction.
 - The rest of the OxCaml compiler, runtime and standard library, which compile and run the erased program.
@@ -33,7 +33,7 @@ The checker gives these operations a fixed meaning instead of deriving it from c
 
 ## Declared contracts
 
-An `external` has no body to check, so its type is an assumption: its refinements, its modes and, if it is declared total, its totality. The library's externals are in `verification/library/`: the token, cell and heap operations of `Pref` and `Ghost_pref`; borrowed slices and owned arrays (`borrow.mli`, `borrow_iarray.mli`, `vox_string_view.mli`), including `Owned_array.split_at` and `append`, whose results share storage with their arguments; `Raw_memory`; the flat hash table's storage (`vox_table_storage.mli`); `Vox_iarray`, `Vox_sequence` and `Vox_control`; all seven atomic operations of `verified_atomic.mli`; and the operations of `Unique_cell`. The standard library's are the operations of `Bigint`, the division and shift operators of `Int.Refined` (nonzero divisor, count in [0, 63]), `Iarray.length` and `Iarray.Refined.get`, and `find` in the `Refined` modules of `Set.MakeTotal` and `Map.MakeTotal`. An interface can hide an external: `Pref.empty`, `Pref.alloc`, `Ghost_pref.alloc`, `Borrow.Owned_array.split_at` and `append` are `val` in their `.mli` and `external` in their `.ml`, as are the operations of `Unique_cell` other than `location`. `-vox-audit` lists them all.
+An `external` has no body to check, so its type is an assumption: its refinements, its modes and, if it is declared total, its totality. The library's externals are in `verification/library/`: the token, cell and heap operations of `Pref` and `Ghost_pref`; borrowed slices and owned arrays (`borrow.mli`, `borrow_iarray.mli`, `vox_string_view.mli`), including `Owned_array.split_at` and `append`, whose results share storage with their arguments, and the bound on an owner's length in `Owned_array.length` (at most `Borrow.max_length ()`, which is `%max_wosize`); `Raw_memory`; the flat hash table's storage (`vox_table_storage.mli`); `Vox_iarray`, `Vox_sequence` and `Vox_control`; all seven atomic operations of `verified_atomic.mli`; and the operations of `Unique_cell`. The standard library's are the operations of `Bigint`, the division and shift operators of `Int.Refined` (nonzero divisor, count in [0, 63]), `Iarray.length` and `Iarray.Refined.get`, and `find` in the `Refined` modules of `Set.MakeTotal` and `Map.MakeTotal`. An interface can hide an external: `Pref.empty`, `Pref.alloc`, `Ghost_pref.alloc`, `Borrow.max_length`, `Borrow.Owned_array.get`, `set`, `split_at` and `append` are `val` in their `.mli` and `external` in their `.ml`, as are the operations of `Unique_cell` other than `location`. `-vox-audit` lists them all.
 
 ## Runtime code
 
@@ -45,7 +45,7 @@ These C and compiler files implement the externals. They are ordinary unverified
 - `runtime/vox_control.c`: the trailing-zero count and the 16-byte control-group scans.
 - `backend/cmm_builtins.ml`: native lowering of these primitives.
 
-Where a refinement guarantees that an index is in bounds, the primitive does not check it: `Owned_array.get_int` and `set_int` in native code, and the reads and writes of `Raw_memory` and of the table storage in native code and bytecode. The generic `get` and `set` of borrowed slices check bounds in both.
+Where a refinement guarantees that an index is in bounds, the primitive does not check it: `Owned_array.get_int` and `set_int` in native code, and the reads and writes of `Raw_memory` and of the table storage in native code and bytecode. The generic `get` and `set` of borrowed slices and owned arrays check bounds in both.
 
 ## Totality casts in the standard library
 

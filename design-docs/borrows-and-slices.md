@@ -58,9 +58,12 @@ The table uses `C = current s`, `F = final s`, and bigint model indices.
 | --- | --- |
 | `Owned_array.of_iarray xs` | Fresh copy with model `Model.of_iarray xs` |
 | `Owned_array.into_iarray a` | Consume ownership; freeze the underlying array without copying (a piece of a split owner is copied out) |
-| `Owned_array.length (borrow_ a)` | Length of the contents |
+| `Owned_array.length (borrow_ a)` | Length of the contents, at most `max_length ()` |
+| `Owned_array.get (borrow_ a) i` | Shared element; `Some value === Model.at (contents a) i` |
+| `Owned_array.set a i x` | Successor owner with `contents = Model.set (contents a) i x` |
+| `Owned_array.swap a i j` | Successor owner with `contents = Model.swap (contents a) i j` |
 | `Owned_array.split_at a k` | Two owners of the first `k` and the remaining elements, sharing the storage without copying |
-| `Owned_array.append a b` | Owner of the concatenation; adjacent pieces of one array join in place, any other pair is copied |
+| `Owned_array.append a b` | Owner of the concatenation, if the combined length is at most `max_length ()`; adjacent pieces of one array join in place, any other pair is copied |
 | `Owned_array.with_mut a post body` | Root loan; return the callback result and owner satisfying `post` |
 | `Slice.length (borrow_ s)` | Length of the current model |
 | `Slice.get (borrow_ s) i` | Shared element; `Some value === Model.at C i` |
@@ -76,6 +79,10 @@ The table uses `C = current s`, `F = final s`, and bigint model indices.
 All indices have checked bounds. Empty/full splits and empty ranges are
 allowed. Loan length is invariant; resizing and arbitrary joining are absent.
 `swap`, `split3`, and `with_range` are verified library implementations.
+
+`with_mut`, `Slice.split_at`, `split3`, `with_range`, `finish` and `parallel`
+are not `total`; every other operation in the table is. See "Totality of
+borrowing" below.
 
 Scoped operations returning a callback result and a restored handle use:
 
@@ -204,6 +211,7 @@ mutable reads in ghost code, and partial proof computations.
 | `borrow_parallel.ml` | Separate domains, sequential fallback, and joining before exception propagation |
 | `quicksort_client.ml` | Sequential and parallel sorting, with sortedness and preservation of every multiplicity |
 | `borrow_rejected.ml` | Ownership, bounds, ghost/runtime separation, stale models, and split consistency |
+| `borrow_partial.ml` | Loan creation and `finish` rejected in erased code, lemmas and total functions; the total owned-array sort accepted |
 | `borrow_runtime.ml` | Storage primitives, snapshots, empty slices, float arrays, and owned splits and appends |
 
 Quicksort uses a middle-position pivot and distributes equal values using
@@ -214,10 +222,12 @@ and permutation of the original model. Permutation is equality of canonical
 insertion-sorted models; additional checked lemmas establish equality of every
 element count.
 
-Parallel quicksort (`parallel_sort_array`) works on an owned array: it
-partitions in place through `with_mut`, splits the owner into left, pivot and
-right owners, sorts the two sides with `Vox_parallel.fork_join`, and appends
-the pieces in place. It divides its domain budget between the two children and
+`sort_array` and parallel quicksort (`parallel_sort_array`) work on an owned
+array without borrowing it. They partition it in place with `Owned_array.get`
+and `Owned_array.swap`, split the owner into left, pivot and right owners,
+sort the two sides, and append the pieces in place. `sort_array` sorts the
+sides one after the other and is `total`; `parallel_sort_array` sorts them
+with `Vox_parallel.fork_join`. It divides its domain budget between the two children and
 spawns only when both children meet the cutoff. Sequential children retain
 the full budget for later splits; arrays of at most twice the cutoff, and all
 arrays once the budget is used up, are sorted by the sequential `sort_array`.
@@ -225,10 +235,55 @@ The public API accepts `?max_domains` and `?cutoff`. Tests exercise duplicates, 
 ordered/reverse-ordered inputs, and deterministic random inputs.
 
 Pure model functions and lemmas are total. Partition also has a checked
-numeric decreases measure. Sequential sorting also checks its size decrease through scoped callbacks
-and exposes a total contract. Parallel sorting exposes normal-return
-correctness: domain joining remains partial. Element borrows, shared read loans,
+numeric decreases measure. The borrowing `sort` checks its size decrease
+through scoped callbacks, but it lends and ends loans, so it is not `total`.
+The owned-array `sort_array` is `total`. Parallel sorting exposes
+normal-return correctness: domain joining remains partial. Element borrows, shared read loans,
 and a reusable parallel worker pool remain separate extensions.
+
+## Totality of borrowing
+
+Decided by the owner on 28 September 2026. A `total` function is a function
+of its arguments: the verifier encodes a call to it as an application of an
+uninterpreted function, lemmas are total functions, and `ghost_` erases only
+total code.
+
+Operations that take a handle uniquely and return its successor fit this
+reading. `Slice.set` can be read as a pure function that returns an updated
+copy of the slice, with the same `final`. `Owned_array.set`, `swap`,
+`split_at` and `append` are the same for owned arrays.
+
+Creating a loan does not fit it. In the prophecy reading (RustHorn),
+`with_mut`, `Slice.split_at`, `split3` and `with_range` choose the new loans'
+`final` contents nondeterministically, and `finish` assumes `final s ===
+current s`, which removes every other choice. As a function of its argument,
+`finish` would state that every slice's final contents are its current
+contents. These operations are therefore not `total`, and neither is any
+function that uses them. Their callbacks were already partial function types.
+Before this decision they were declared `total`; erasing a borrowing call was
+prevented only because `ghost_` captures values as aliased and the loan
+operations need unique ones.
+
+In `verification/library/borrow.ml` and `borrow_iarray.ml` the internal
+`Raw.open_`, `Raw.split` and `Raw.finish` are not `total` either. `Raw.restore`,
+`Raw.recombine` and `Raw.transfer` stay `total`: they read the `final`
+contents recorded in a frame or loan and choose nothing.
+
+The borrowing `Quicksort.sort` is no longer `total`; its recursion still has
+a checked decreases measure. `Quicksort.sort_array` is `total` again through
+the owned-array operations. `Quicksort_iarray.sort` and `sort_array`, which
+borrow, are no longer `total`.
+
+`Owned_array.append` copies when its arguments are not adjacent pieces of one
+array, and the copy raises above `max_length ()` (`Sys.max_array_length`)
+elements. It is `total` with a precondition that excludes this. To prove the
+precondition, `Owned_array.length` states that an owner is no longer than
+`max_length ()`, an assumption on the `Raw.owned_length` external: every
+owner covers a range of one OCaml array.
+
+`borrow_partial.ml` checks that `ghost_`, lemmas and total functions reject
+the loan operations, that call congruence does not apply to a function that
+lends, and that the total sort proves sortedness and permutation.
 
 ## Building
 
@@ -513,6 +568,8 @@ experiment.
 
 Branch: `jujacobs/vox/scoped-termination-20260908`, baseline `13c52c9fe7`.
 **Verdict: adopt direct callback recursion and sequential totality.**
+The totality of the borrow primitives was revised on 28 September 2026; see
+"Totality of borrowing".
 The recursion-use checker now traverses directly supplied callback bodies with
 its current permission to call the recursive function. Numeric recursion still
 proves the existing nonnegative, strictly decreasing measure at each recursive
