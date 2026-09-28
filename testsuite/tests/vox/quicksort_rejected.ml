@@ -30,10 +30,7 @@ Error: The value "Quicksort.parallel_sort_array" is "partial"
          which is expected to be "total".
 |}]
 
-(* The borrowing [sort] is not total, so a total function cannot call it.
-   [sort_array] is total. Only the interfaces are loaded here, so the
-   accepted control is checked inside [module type of], which does not run
-   it. *)
+(* Neither sort is total: both lend the array and end the loan. *)
 let (sort_slice @ total) (s : int Borrow.Slice.t @ local unique) =
   Quicksort.sort s;;
 [%%expect{|
@@ -46,15 +43,31 @@ Error: The value "Quicksort.sort" is "partial"
          which is expected to be "total".
 |}]
 
+let (sort_owned @ total) (values : int Borrow.Owned_array.t @ unique) =
+  Quicksort.sort_array values;;
+[%%expect{|
+Line 2, characters 2-22:
+2 |   Quicksort.sort_array values;;
+      ^^^^^^^^^^^^^^^^^^^^
+Error: The value "Quicksort.sort_array" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 1-2, characters 25-29
+         which is expected to be "total".
+|}]
+
+(* Control: splitting an owned array takes it and returns the two pieces, so
+   it is total. Only the interfaces are loaded here, so the control is
+   checked inside [module type of], which does not run it. *)
 module type Control = module type of struct
-  let (sort_owned @ total) (values : int Borrow.Owned_array.t @ unique) =
-    Quicksort.sort_array values
+  let (halves @ total) (values : int Borrow.Owned_array.t @ unique) =
+    Borrow.Owned_array.split_at values 0
 end;;
 [%%expect{|
 module type Control =
   sig
-    val sort_owned :
-      int Borrow.Owned_array.t @ unique -> int Borrow.Owned_array.t @@ total
+    val halves :
+      int Borrow.Owned_array.t @ unique ->
+      int Borrow.Owned_array.t * int Borrow.Owned_array.t @@ total
   end
 |}]
 

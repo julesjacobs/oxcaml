@@ -2,12 +2,6 @@ ok: quicksort.partition runs no model or proof code
 ok: quicksort.partition_middle runs no model or proof code
 ok: quicksort.sort_sized runs no model or proof code
 ok: quicksort.sort runs no model or proof code
-ok: quicksort.partition_array runs no model or proof code
-ok: quicksort.partition_middle_array runs no model or proof code
-ok: quicksort.split_partition runs no model or proof code
-ok: quicksort.join_partition runs no model or proof code
-ok: quicksort.sort_array_sized runs no model or proof code
-ok: quicksort.sort_array runs no model or proof code
 ok: quicksort.sort_owned runs no model or proof code
 ok: functional_queue.enqueue runs no model or proof code
 ok: functional_queue.dequeue runs no model or proof code
