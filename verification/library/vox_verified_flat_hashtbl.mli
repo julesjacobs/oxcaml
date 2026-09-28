@@ -49,8 +49,8 @@ module P = Ghost_pref
 module H = P.Heap
 
 (** Keys: [equal] must be an equivalence and equal keys must hash equally.
-    Both functions are [total], so they terminate without raising or
-    touching mutable state. *)
+    Both functions are [total] and stateless: they terminate without
+    raising, and their results depend only on their arguments. *)
 module type Key = sig
   type t : immutable_data
   val equal : t -> t -> bool @@ total
