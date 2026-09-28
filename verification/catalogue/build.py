@@ -37,11 +37,6 @@ ROUTE = [
      'A result type that carries its own evidence: SAT returns a model, UNSAT a proof that no assignment satisfies the formula, both erased.'),
 ]
 
-LEGEND = ('<p><strong>Reviewed</strong>: checked by the owner after independent reviews. <strong>Ready for owner '
-          'review</strong>: two independent reviews found no false claim, and the page states every gap they found. '
-          '<strong>Review pending</strong>: the page is current, but a review found something to fix or has not been '
-          'redone. <strong>In progress</strong>: work on the demo is under way.</p>')
-
 COUNTS = ('<p>Line counts are physical lines with code, comments excluded. <strong>Spec</strong> is the interface the '
           'page quotes. <strong>Impl</strong> and <strong>Proof</strong> cover every module reachable from the demo\'s root '
           'modules; Proof is the lines inside <code>ghost_</code> expressions or refinement types, plus whole '
@@ -91,15 +86,10 @@ def build(args):
                  if ident in stats else '')
         P.build_page(ident, meta, body, source, output, CSS, extra)
 
-    by_status = {s: sum(pages[d][0]['status'] == s for d in demos) for s in P.STATUS}
     def plain(text):
         return esc(text.replace('`', ''))
 
     meanings = {
-        'reviewed': 'Checked by the owner after independent reviews.',
-        'owner-review': 'Two independent reviews found no false claim, and the page states every gap they found.',
-        'review-pending': 'The page is current, but a review found something to fix or has not been redone.',
-        'in-progress': 'Work on the demo is under way.',
         'future': 'A language feature we intend to add.',
         'question': 'A design question: whether to add this is open.'}
 
@@ -113,7 +103,7 @@ def build(args):
         f'<li id="{d}" title="{plain(pages[d][0]["blurb"])}">'
         f'<a class="card-title" href="specs/{d}.html">{P.inline(pages[d][0]["title"])}</a>'
         f'<p class="card-claim">{P.inline(pages[d][0]["blurb"])}</p>'
-        f'<p class="card-foot">{badge(pages[d][0]["status"], P.STATUS[pages[d][0]["status"]])}'
+        f'<p class="card-foot">'
         f'<a class="card-counts" href="statistics/{d}.html" title="Lines: spec {stats[d]["spec"]:,}, '
         f'impl {stats[d]["impl"]:,}, proof {stats[d]["proof"]:,}">Spec {short(stats[d]["spec"])} · '
         f'Impl {short(stats[d]["impl"])} · Proof {short(stats[d]["proof"])}</a></p></li>' for d in demos)
@@ -123,7 +113,6 @@ def build(args):
         + (badge('question', 'Open question') if m.get('question') else '')
         + f'<p class="card-claim">{P.inline(m["summary"])}</p></li>'
         for m in catalogue['mechanisms'])
-    summary = ' · '.join(f'{n} {P.STATUS[s].lower()}' for s, n in by_status.items() if n)
     (output / 'index.html').write_text(
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -134,8 +123,8 @@ def build(args):
         '<p class="overview-intro">OxCaml with refinement types checked by Z3 at compile time, erased ghost code and '
         'affine ghost ownership. Each demo is ordinary OxCaml code whose specification the compiler checks; its page '
         'states what is proved, what it trusts and what it does not claim. '
-        f'{P.commit_line(source).removeprefix("Sources: ")}. <strong>{len(demos)} demos</strong>: {summary}. '
-        'Hover over a status for its meaning, and over a demo for its full claim.</p>'
+        f'{P.commit_line(source).removeprefix("Sources: ")}. <strong>{len(demos)} demos</strong>. '
+        'Hover over a demo for its full claim.</p>'
         '<div class="overview-body"><section><h2>Demos</h2>'
         f'<ul class="cards">{cards}</ul></section>'
         f'<section><h2>Language mechanisms</h2><ul class="mechs">{mechanisms}</ul></section></div>'
@@ -147,13 +136,13 @@ def build(args):
         f'<p>{P.inline(pages[d][0]["blurb"])}</p><p>{esc(show)}</p></section>'
         for n, (d, minutes, show) in enumerate(ROUTE, 1) if d in pages)
     table = ''.join(f'<tr><th scope="row"><a href="specs/{d}.html">{P.inline(pages[d][0]["title"])}</a></th>'
-                    f'<td>{P.STATUS[pages[d][0]["status"]]}</td><td>{P.inline(pages[d][0]["blurb"])}</td></tr>' for d in demos)
+                    f'<td>{P.inline(pages[d][0]["blurb"])}</td></tr>' for d in demos)
     (output / 'presentation.html').write_text(shell('Presentation guide',
         header() + '<h1>Presentation guide</h1>'
-        '<p>A route through four demos for a 20-minute talk, then the state of every demo.</p>' + route
+        '<p>A route through four demos for a 20-minute talk, then every demo with its claim.</p>' + route
         + compiler_example(output, source, 'hm-wasm-compiler' in pages)
-        + '<section class="tour-step"><h2>All demos</h2>' + LEGEND
-        + f'<div class="table-scroll"><table class="stats-table"><thead><tr><th>Demo</th><th>Status</th><th>Claim</th>'
+        + '<section class="tour-step"><h2>All demos</h2>'
+        + f'<div class="table-scroll"><table class="stats-table"><thead><tr><th>Demo</th><th>Claim</th>'
           f'</tr></thead><tbody>{table}</tbody></table></div></section>',
         script='<script src="compiler-demo.js"></script>'))
 

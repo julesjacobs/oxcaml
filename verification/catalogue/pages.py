@@ -297,8 +297,7 @@ def build_page(ident, meta, body, source, output, css, stats_html=''):
                         '\n## Trusted base\n\nBeyond [what every demo trusts](../trust.html):\n\n', 1)
     content = (f'<p>{home_link()}<a href="../index.html#{ident}">← Catalogue</a></p>'
                f'<h1>{inline(meta["title"])}</h1>'
-               f'<p class="page-meta"><span class="status status-{meta["status"]}">{STATUS[meta["status"]]}</span>'
-               f' · {esc(meta["date"])} · {commit_line(source)}</p>'
+               f'<p class="page-meta">{esc(meta["date"])} · {commit_line(source)}</p>'
                + render_body(body, source, '../', ident, used) + stats_html)
     listed = []
     for entry in meta.get('sources', []):
