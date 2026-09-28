@@ -2232,6 +2232,48 @@ let refinement_free env ty =
   in
   match visit ty with () -> true | exception Exit -> false
 
+(* [scheme] with its type variables instantiated so that each pattern, a part of
+   [scheme], matches its target. With [~refined:false], [None] when a variable
+   would be instantiated with a type that has refinements. *)
+let scheme_instance ?(refined = true) env scheme pairs =
+  let variables = ref [] in
+  let rec matching pattern target =
+    match get_desc pattern, get_desc target with
+    | Tvar _, _ when get_level pattern = Btype.generic_level ->
+      if not (List.exists (fun (v, _) -> eq_type v pattern) !variables)
+      then variables := (pattern, target) :: !variables
+    | Trefine { ref_payload; _ }, _ | Tpoly (ref_payload, []), _ ->
+      matching ref_payload target
+    | _, (Trefine { ref_payload; _ } | Tpoly (ref_payload, [])) ->
+      matching pattern ref_payload
+    | Tconstr (p, ps, _), Tconstr (p', ts, _)
+      when Path.same
+             (Env.normalize_type_path None env p)
+             (Env.normalize_type_path None env p')
+           && List.compare_lengths ps ts = 0 ->
+      List.iter2 matching ps ts
+    | Tconstr _, _ | _, Tconstr _ ->
+      let pattern' = Ctype.expand_head env pattern in
+      let target' = Ctype.expand_head env target in
+      if not (eq_type pattern pattern' && eq_type target target')
+      then matching pattern' target'
+    | Ttuple ps, Ttuple ts when List.compare_lengths ps ts = 0 ->
+      List.iter2 (fun (_, p) (_, t) -> matching p t) ps ts
+    | Tarrow (_, p, p', _), Tarrow (_, t, t', _) ->
+      matching p t;
+      matching p' t'
+    | _ -> ()
+  in
+  List.iter (fun (pattern, target) -> matching pattern target) pairs;
+  match List.split (List.rev !variables) with
+  | [], _ -> Some scheme
+  | _, targets
+    when (not refined) && not (List.for_all (refinement_free env) targets) ->
+    None
+  | variables, targets -> (
+    try Some (Ctype.apply env variables scheme targets)
+    with Ctype.Cannot_apply -> None)
+
 exception Unusable_lemma
 
 let unfolding_equation env loc path fn_type arity =
@@ -2289,43 +2331,15 @@ let unfolding_equation env loc path fn_type arity =
          generic)
   then fail ();
   (* Instantiate the lemma's type variables at the application's types. *)
-  let variables = ref [] in
-  let rec matching pattern target =
-    match get_desc pattern, get_desc target with
-    | Tvar _, _ when get_level pattern = Btype.generic_level ->
-      if not (List.exists (fun (v, _) -> eq_type v pattern) !variables)
-      then variables := (pattern, target) :: !variables
-    | Trefine { ref_payload; _ }, _ | Tpoly (ref_payload, []), _ ->
-      matching ref_payload target
-    | _, (Trefine { ref_payload; _ } | Tpoly (ref_payload, [])) ->
-      matching pattern ref_payload
-    | Tconstr (p, ps, _), Tconstr (p', ts, _)
-      when Path.same
-             (Env.normalize_type_path None env p)
-             (Env.normalize_type_path None env p')
-           && List.compare_lengths ps ts = 0 ->
-      List.iter2 matching ps ts
-    | Tconstr _, _ | _, Tconstr _ ->
-      let pattern' = Ctype.expand_head env pattern in
-      let target' = Ctype.expand_head env target in
-      if not (eq_type pattern pattern' && eq_type target target')
-      then matching pattern' target'
-    | Ttuple ps, Ttuple ts when List.compare_lengths ps ts = 0 ->
-      List.iter2 (fun (_, p) (_, t) -> matching p t) ps ts
-    | Tarrow (_, p, p', _), Tarrow (_, t, t', _) ->
-      matching p t;
-      matching p' t'
-    | _ -> ()
-  in
-  List.iter2
-    (fun (_, pattern) target -> matching pattern target)
-    generic (arguments fn_type arity);
   let ty =
-    match List.split (List.rev !variables) with
-    | [], _ -> scheme
-    | variables, targets -> (
-      try Ctype.apply env variables scheme targets
-      with Ctype.Cannot_apply -> fail ())
+    match
+      scheme_instance env scheme
+        (List.map2
+           (fun (_, pattern) target -> pattern, target)
+           generic (arguments fn_type arity))
+    with
+    | Some ty -> ty
+    | None -> fail ()
   in
   let parameters, result = parameters ty arity in
   let same_path p =
@@ -2381,6 +2395,62 @@ let transparent_equation env loc path fn_type arity =
          total lemma stating its definition, with no refinement nested inside \
          a parameter type"
         (Path.name path) (Path.last path))
+
+(* The type the verifier knows a predicate subexpression has, when it can tell
+   without evaluating it: the declared type of a value in the environment, or of
+   a field of a record. It does not depend on the refinements of the types
+   recorded in the predicate, which predicate equality compares only by
+   skeleton. *)
+let rec known_type env e =
+  match e.rexp_desc with
+  | Rexp_ghost e | Rexp_refinement (_, e) -> known_type env e
+  | Rexp_var id -> declared_type env (Path.Pident id) e.rexp_type
+  | Rexp_ident path -> declared_type env path e.rexp_type
+  | Rexp_field (record, _, name) | Rexp_unboxed_field (record, _, name) -> (
+    match known_type env record with
+    | Some ty -> field_type env ty name
+    | None ->
+      let rec payload ty =
+        match get_desc (Ctype.expand_head env ty) with
+        | Trefine r -> payload r.ref_payload
+        | _ -> ty
+      in
+      let ty = payload record.rexp_type in
+      if refinement_free env ty then field_type env ty name else None)
+  | _ -> None
+
+(* The declared type of [path], instantiated at the skeleton [ty]. *)
+and declared_type env path ty =
+  match Env.find_value path env with
+  | description ->
+    let scheme = (Subst.Lazy.force_value_description description).val_type in
+    scheme_instance ~refined:false env scheme [scheme, ty]
+  | exception Not_found -> None
+
+(* The declared type of field [name] of a record of type [ty]. *)
+and field_type env ty name =
+  match get_desc (Ctype.expand_head env ty) with
+  | Trefine r -> field_type env r.ref_payload name
+  | Tconstr (path, args, _) -> (
+    match Env.find_type path env with
+    | { type_kind =
+          Type_record (labels, _, _) | Type_record_unboxed_product (labels, _, _);
+        type_params;
+        _
+      } -> (
+      match
+        List.find_opt
+          (fun (l : Types.label_declaration) ->
+            String.equal (Ident.name l.ld_id) name)
+          labels
+      with
+      | Some label -> (
+        try Some (Ctype.apply env type_params label.ld_type args)
+        with Ctype.Cannot_apply -> None)
+      | None -> None)
+    | _ -> None
+    | exception Not_found -> None)
+  | _ -> None
 
 let rec predicate ctx env s e =
   ctx.poll ();
@@ -2444,55 +2514,14 @@ let rec predicate ctx env s e =
       | Some (Function _ | Record _) -> name ctx s value
       | _ -> name ctx s (scalar_value (required e.rexp_loc value)))
     | Rexp_apply (fn, args) ->
-      let prim =
-        match fn.rexp_desc with
-        | Rexp_ident path -> primitive env path
-        | _ -> None
-      in
-      begin match prim, args with
-      | Some ((("%sequand" | "%sequor") as op), 2), [(_, a); (_, b)] ->
-        short_circuit ctx eval e.rexp_loc ~is_and:(op = "%sequand") s a b
-      | _ ->
-        let s, args =
-          arguments_right_to_left (fun s (_, e) -> eval s e) s args
-        in
-        let s, value = eval s fn in
-        let prim = stored_primitive prim value in
-        if s.dead
-        then s, None
-        else
-          let result =
-            apply_function ctx env fn.rexp_type e.rexp_type prim value args
-              ~total:true
-          in
-          let s =
-            match fn.rexp_desc with
-            | Rexp_ident path ->
-              unfold_transparent ctx env s path fn.rexp_type args result
-                e.rexp_loc
-            | _ -> s
-          in
-          let s =
-            match prim with
-            | Some ("caml_vox_sequence_length", 1) ->
-              normal_vox_sequence_length ctx env fn.rexp_type args s
-            | Some (name, 1) when List.mem name borrow_projections ->
-              normal_borrow_projection ctx name args result s
-            | Some ("%array_length", 1) -> normal_iarray_length ctx args s
-            | Some ((("%set_find" | "%set_refined_find") as op_name), 2) ->
-              normal_set_find ctx op_name args result s
-            | Some ((("%map_find" | "%map_refined_find") as op_name), 2) ->
-              normal_map_find ctx op_name args s
-            | _ -> s
-          in
-          begin match result with
-          | Some (Function _) -> s, result
-          | _ -> name ctx s (scalar_value (required e.rexp_loc result))
-          end
-      end
-    | Rexp_refinement (source, body) ->
-      let s, value = eval s body in
-      expose_outer ctx env s source value e.rexp_loc
+      let s, value, _ = application ctx env s e fn args in
+      s, value
+    | Rexp_refinement (_, body) ->
+      (* [body] is used at a less refined type. Typing records the type it had,
+         but that record is not trusted, and predicates are compared up to it:
+         the refinements assumed are those of the type the verifier itself knows
+         [body] has. *)
+      known ctx env s body
     | Rexp_ghost body -> eval s body
     | Rexp_logical_equal (left_exp, right) ->
       let s, right = eval s right in
@@ -2576,6 +2605,148 @@ let rec predicate ctx env s e =
            predicate. Use an explicit total function witness and a pointwise \
            lemma.")
     | _ -> unsupported e.rexp_loc
+
+(* Also returns the values of the arguments, unless the application
+   short-circuits. *)
+and application ctx env s e fn args =
+  let eval = predicate ctx env in
+  let prim =
+    match fn.rexp_desc with Rexp_ident path -> primitive env path | _ -> None
+  in
+  match prim, args with
+  | Some ((("%sequand" | "%sequor") as op), 2), [(_, a); (_, b)] ->
+    let s, value =
+      short_circuit ctx eval e.rexp_loc ~is_and:(op = "%sequand") s a b
+    in
+    s, value, None
+  | _ ->
+    let s, args = arguments_right_to_left (fun s (_, e) -> eval s e) s args in
+    let s, value = eval s fn in
+    let prim = stored_primitive prim value in
+    if s.dead
+    then s, None, None
+    else
+      let result =
+        apply_function ctx env fn.rexp_type e.rexp_type prim value args
+          ~total:true
+      in
+      let s =
+        match fn.rexp_desc with
+        | Rexp_ident path ->
+          unfold_transparent ctx env s path fn.rexp_type args result e.rexp_loc
+        | _ -> s
+      in
+      let s =
+        match prim with
+        | Some ("caml_vox_sequence_length", 1) ->
+          normal_vox_sequence_length ctx env fn.rexp_type args s
+        | Some (name, 1) when List.mem name borrow_projections ->
+          normal_borrow_projection ctx name args result s
+        | Some ("%array_length", 1) -> normal_iarray_length ctx args s
+        | Some ((("%set_find" | "%set_refined_find") as op_name), 2) ->
+          normal_set_find ctx op_name args result s
+        | Some ((("%map_find" | "%map_refined_find") as op_name), 2) ->
+          normal_map_find ctx op_name args s
+        | _ -> s
+      in
+      let s, value =
+        match result with
+        | Some (Function _) -> s, result
+        | _ -> name ctx s (scalar_value (required e.rexp_loc result))
+      in
+      s, value, Some args
+
+(* Evaluates [e] and assumes the refinements of the type the verifier knows it
+   has, whatever types typing recorded in the predicate: the declared type of a
+   value or of a record field ([known_type]), or the result type of the function
+   applied (predicate equality compares the types of applied functions). *)
+and known ctx env s e =
+  match e.rexp_desc with
+  | Rexp_ghost body | Rexp_refinement (_, body) -> known ctx env s body
+  | Rexp_apply (fn, args) -> (
+    let s, value, arguments = application ctx env s e fn args in
+    match arguments with
+    | Some arguments when not s.dead ->
+      applied_result ctx env s fn.rexp_type (List.map fst args) arguments value
+        e.rexp_loc
+    | _ -> s, value)
+  | _ -> (
+    let s, value = predicate ctx env s e in
+    match known_type env e with
+    | Some ty -> expose_outer ctx env s ty value e.rexp_loc
+    | None -> s, value)
+
+(* The refinements of the result of a function of type [fn_type] applied to
+   arguments with these labels and values, its parameters bound to them. They
+   hold when the arguments satisfy the parameters' refinements: as [if premises
+   then result], like the lemma of a transparent definition. Nothing is assumed
+   when a parameter has a refinement below its top level. *)
+and applied_result ctx env s fn_type labels arguments value loc =
+  let same_label (label : Asttypes.arg_label) (label' : Types.arg_label) =
+    match label, label' with
+    | Nolabel, Nolabel -> true
+    | Labelled l, (Labelled l' | Position l') | Optional l, Optional l' ->
+      String.equal l l'
+    | (Nolabel | Labelled _ | Optional _), _ -> false
+  in
+  let rec refinements ty =
+    match get_desc (Ctype.expand_head env ty) with
+    | Tpoly (ty, []) -> refinements ty
+    | Trefine r ->
+      let rest, payload = refinements r.ref_payload in
+      r :: rest, payload
+    | _ -> [], ty
+  in
+  let rec result bound premises ty labels arguments =
+    match labels, arguments, get_desc (Ctype.expand_head env ty) with
+    | [], [], _ -> Some (bound, List.rev premises, ty)
+    | ( label :: labels,
+        argument :: arguments,
+        Tarrow ((label', _, _, binder), parameter, ty, _) )
+      when same_label label label' ->
+      let parameter_refinements, payload = refinements parameter in
+      if not (refinement_free env payload)
+      then None
+      else
+        let premises =
+          List.fold_left
+            (fun premises r -> (r, argument) :: premises)
+            premises parameter_refinements
+        in
+        let bound =
+          match binder with
+          | Some binder -> bind bound binder argument
+          | None -> bound
+        in
+        result bound premises ty labels arguments
+    | _ -> None
+  in
+  match result s [] fn_type labels arguments with
+  | None -> s, value
+  | Some (bound, premises, ty) ->
+    let assume s = fst (expose_outer ctx env s ty value loc) in
+    let assumed =
+      match premises with
+      | [] -> assume bound
+      | _ -> (
+        try
+          let bound, premises =
+            List.fold_left
+              (fun (s, terms) (r, argument) ->
+                let s, premise =
+                  predicate ctx env (bind s r.ref_binder argument) r.ref_pred
+                in
+                s, required loc premise :: terms)
+              (bound, []) premises
+          in
+          fst
+            (choose ctx bound
+               (List.fold_left (both And) (Boolean true) premises)
+               (fun s -> assume s, None)
+               (fun s -> s, None))
+        with Location.Error _ -> bound)
+    in
+    { assumed with values = s.values }, value
 
 and unfold_transparent ctx env s path fn_type args result loc =
   match result with

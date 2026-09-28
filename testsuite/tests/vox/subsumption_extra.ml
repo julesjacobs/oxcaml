@@ -617,6 +617,12 @@ Error: Signature mismatch:
        Type "{v : int | v > 0}" is not equal to type "{v : int | v >= 0}"
 |}]
 
+(* In [match u with y -> ...] and [(fun y -> ...) u], u is used at int, so
+   the pattern and the parameter have type int on both sides.  The
+   eliminations of u record its two declared types, but the verifier does
+   not assume what an elimination records: it assumes the refinement of u's
+   type where the predicate is evaluated.  So the two predicates are equal,
+   and the [_different] declarations are accepted. *)
 module Pattern_exposed_same : sig
   val u : {v : int | v > 0}
   type w = {r : bool | r = (match u with y -> y > 0)}
@@ -640,29 +646,11 @@ end = struct
   type w = {r : bool | r = (match u with y -> y > 0)}
 end;;
 [%%expect{|
-Lines 4-7, characters 6-3:
-4 | ......struct
-5 |   let u : {v : int | v > 0} = 1
-6 |   type w = {r : bool | r = (match u with y -> y > 0)}
-7 | end..
-Error: Signature mismatch:
-       Modules do not match:
-         sig
-           val u : {v : int | v > 0}
-           type w = {r : bool | r = (match u with | y -> y > 0)}
-         end
-       is not included in
-         sig
-           val u : {v : int | v >= 0}
-           type w = {r : bool | r = (match u with | y -> y > 0)}
-         end
-       Type declarations do not match:
-         type w = {r : bool | r = (match u with | y -> y > 0)}
-       is not included in
-         type w = {r : bool | r = (match u with | y -> y > 0)}
-       The type "{r : bool | r = (match u with | y -> y > 0)}"
-       is not equal to the type "{r : bool | r = (match u with | y -> y > 0)}"
-       Type "{v : int | v > 0}" is not equal to type "{v : int | v >= 0}"
+module Pattern_exposed_different :
+  sig
+    val u : {v : int | v >= 0}
+    type w = {r : bool | r = (match u with | y -> y > 0)}
+  end
 |}]
 
 module Lambda_exposed_same : sig
@@ -688,34 +676,17 @@ end = struct
   type w = {r : bool | r = (fun y -> y > 0) u}
 end;;
 [%%expect{|
-Lines 4-7, characters 6-3:
-4 | ......struct
-5 |   let u : {v : int | v > 0} = 1
-6 |   type w = {r : bool | r = (fun y -> y > 0) u}
-7 | end..
-Error: Signature mismatch:
-       Modules do not match:
-         sig
-           val u : {v : int | v > 0}
-           type w = {r : bool | r = ((fun y -> y > 0) u)}
-         end
-       is not included in
-         sig
-           val u : {v : int | v >= 0}
-           type w = {r : bool | r = ((fun y -> y > 0) u)}
-         end
-       Type declarations do not match:
-         type w = {r : bool | r = ((fun y -> y > 0) u)}
-       is not included in
-         type w = {r : bool | r = ((fun y -> y > 0) u)}
-       The type "{r : bool | r = ((fun y -> y > 0) u)}"
-       is not equal to the type "{r : bool | r = ((fun y -> y > 0) u)}"
-       Type "{v : int | v > 0}" is not equal to type "{v : int | v >= 0}"
+module Lambda_exposed_different :
+  sig
+    val u : {v : int | v >= 0}
+    type w = {r : bool | r = ((fun y -> y > 0) u)}
+  end
 |}]
 
-(* An elimination wrapper present in only one of two otherwise equal
-   predicates (the exception kept by "Compare exposed refinements of
-   predicate node types").  Verdicts only. *)
+(* An elimination present in only one of two otherwise equal predicates.
+   Predicates are compared up to eliminations; the verifier assumes the
+   refinement of the eliminated subexpression's type where the predicate is
+   evaluated, not the type the elimination records.  Verdicts only. *)
 
 (* Accepted. *)
 module Wrapper_declared_only : sig
@@ -842,4 +813,280 @@ Line 6, characters 17-22:
 6 |     : {z : int | z > 0} =
                      ^^^^^
   The refinement is stated here.
+|}]
+
+(* Since predicates are compared up to eliminations, what the verifier
+   assumes of an eliminated subexpression comes from where the predicate is
+   evaluated: the declared type of a value, the type of an applied function,
+   or a record declaration.  Verdicts only. *)
+
+(* Accepted: both declarations of w are equal up to eliminations, and a
+   client assumes u >= 0, from the declared type of u. *)
+module Recorded_stronger : sig
+  val u : {v : int | v >= 0}
+  type w = {r : int | r = u + 0}
+end = struct
+  let u : {v : int | v > 0} = 1
+  type w = {r : int | r = u + 0}
+end
+
+let (recorded_stronger @ total) (x : Recorded_stronger.w)
+    : {z : int | z >= 0} = x;;
+[%%expect{|
+module Recorded_stronger :
+  sig val u : {v : int | v >= 0} type w = {r : int | r = (u + 0)} end
+val recorded_stronger : Recorded_stronger.w -> {z : int | z >= 0} = <fun>
+|}]
+
+(* Rejected: the implementation's elimination recorded u > 0, but the
+   client only knows u >= 0. *)
+let (recorded_stronger_false @ total) (x : Recorded_stronger.w)
+    : {z : int | z > 0} = x;;
+[%%expect{|
+Line 2, characters 26-27:
+2 |     : {z : int | z > 0} = x;;
+                              ^
+Error: Refinement could not be proved (counterexample: x = 0)
+Line 2, characters 17-22:
+2 |     : {z : int | z > 0} = x;;
+                     ^^^^^
+  The refinement is stated here.
+|}]
+
+(* Accepted: the refinement of an eliminated application comes from the
+   type of the function applied. *)
+let (successor @ total) (x : {v : int | 0 <= v && v < 100})
+    : {r : int | r > x} = x + 1
+
+let (successor_known @ total) (x : {v : int | 0 <= v && v < 100})
+    : {u : unit | successor x + 0 > x} = ();;
+[%%expect{|
+val successor : (x : {v : int | (0 <= v) && (v < 100)}) -> {r : int | r > x} =
+  <fun>
+val successor_known :
+  (x : {v : int | (0 <= v) && (v < 100)}) ->
+  {u : unit | ((successor x) + 0) > x} = <fun>
+|}]
+
+(* Rejected. *)
+let (successor_known_false @ total) (x : {v : int | 0 <= v && v < 100})
+    : {u : unit | successor x + 0 > x + 1} = ();;
+[%%expect{|
+Line 2, characters 45-47:
+2 |     : {u : unit | successor x + 0 > x + 1} = ();;
+                                                 ^^
+Error: Refinement could not be proved (counterexample: x = 0)
+Line 2, characters 18-41:
+2 |     : {u : unit | successor x + 0 > x + 1} = ();;
+                      ^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
+(* Accepted: the refinement of an eliminated field comes from the record
+   declaration. *)
+type limb_pair = {lo : {n : int | 0 <= n && n < 256}; hi : int}
+
+let (limb_known @ total) (p : limb_pair) : {u : unit | p.lo + 0 < 256} = ();;
+[%%expect{|
+type limb_pair = { lo : {n : int | (0 <= n) && (n < 256)}; hi : int; }
+val limb_known : (p : limb_pair) -> {u : unit | (p.lo + 0) < 256} = <fun>
+|}]
+
+(* Rejected. *)
+let (limb_known_false @ total) (p : limb_pair)
+    : {u : unit | p.hi + 0 < 256} = ();;
+[%%expect{|
+Line 2, characters 36-38:
+2 |     : {u : unit | p.hi + 0 < 256} = ();;
+                                        ^^
+Error: Refinement could not be proved (counterexample)
+Line 2, characters 18-32:
+2 |     : {u : unit | p.hi + 0 < 256} = ();;
+                      ^^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
+(* Accepted: the record's type, and so the field's, comes from the declared
+   type of s. *)
+type 'a box = {contents : 'a}
+
+let (box_known @ total) (s : {v : int | v > 0} box)
+    : {u : unit | s.contents + 0 > 0} = ();;
+[%%expect{|
+type 'a box = { contents : 'a; }
+val box_known :
+  (s : {v : int | v > 0} box) -> {u : unit | (s.contents + 0) > 0} = <fun>
+|}]
+
+(* Rejected. *)
+let (box_known_false @ total) (s : int box)
+    : {u : unit | s.contents + 0 > 0} = ();;
+[%%expect{|
+Line 2, characters 40-42:
+2 |     : {u : unit | s.contents + 0 > 0} = ();;
+                                            ^^
+Error: Refinement could not be proved (counterexample)
+Line 2, characters 18-36:
+2 |     : {u : unit | s.contents + 0 > 0} = ();;
+                      ^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
+(* Accepted: the argument 5 replaces the parameter y, whose elimination in
+   the result type stays around it.  The declared result type has no
+   elimination. *)
+let (positive_id @ total) (y : {v : int | v > 0}) : {r : int | r = y + 0} =
+  y + 0
+
+let (positive_five @ total) (u : unit) : {r : int | r = 5 + 0} =
+  positive_id 5;;
+[%%expect{|
+val positive_id : (y : {v : int | v > 0}) -> {r : int | r = (y + 0)} = <fun>
+val positive_five : unit -> {r : int | r = (5 + 0)} = <fun>
+|}]
+
+(* Rejected. *)
+let (positive_five_false @ total) (u : unit) : {r : int | r = 6 + 0} =
+  positive_id 5;;
+[%%expect{|
+Line 2, characters 2-15:
+2 |   positive_id 5;;
+      ^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 1, characters 58-67:
+1 | let (positive_five_false @ total) (u : unit) : {r : int | r = 6 + 0} =
+                                                              ^^^^^^^^^
+  The refinement is stated here.
+|}]
+
+(* A type variable on one side, instantiated on the other with a type that
+   has a refinement inside a constructor: xs is eliminated in the
+   declaration's predicate only. *)
+let[@def] (is_nil @ total) (xs : 'a list @ immutable) : bool =
+  match xs with [] -> true | _ :: _ -> false
+
+(* Accepted. *)
+module Variable_instance : sig
+  val f :
+    (xs : {l : {v : int | v > 0} list | not (l === [])}) @ immutable ->
+    {r : bool | r = is_nil xs}
+end = struct
+  let (f @ total) (xs : 'a list @ immutable) : {r : bool | r = is_nil xs} =
+    is_nil xs
+end;;
+[%%expect{|
+val is_nil : 'a list @ immutable -> bool = <fun>
+val is_nil_def :
+  (xs : 'a list) @ immutable ->
+  {u : unit
+    | (is_nil xs) === (match xs with | [] -> true | _::_ -> false : bool)} =
+  <fun>
+module Variable_instance :
+  sig
+    val f :
+      (xs : {l : {v : int | v > 0} list | not (l === [])}) @ immutable ->
+      {r : bool | r = (is_nil xs)}
+  end
+|}]
+
+(* Rejected. *)
+module Variable_instance_false : sig
+  val f :
+    (xs : {l : {v : int | v > 0} list | not (l === [])}) @ immutable ->
+    {r : bool | r = is_nil xs && r}
+end = struct
+  let (f @ total) (xs : 'a list @ immutable) : {r : bool | r = is_nil xs} =
+    is_nil xs
+end;;
+[%%expect{|
+Line 6, characters 7-8:
+6 |   let (f @ total) (xs : 'a list @ immutable) : {r : bool | r = is_nil xs} =
+           ^
+Error: The value "f" does not satisfy its declaration in the signature.
+       Refinement could not be proved (counterexample)
+Line 4, characters 33-34:
+4 |     {r : bool | r = is_nil xs && r}
+                                     ^
+  The refinement is stated here.
+|}]
+
+(* Accepted: the implementation's x : 'a is x : {v > 0} in the
+   declaration, whose predicate eliminates it. *)
+module Variable_refined : sig
+  val g : (x : {v : int | v > 0}) -> {r : int | r === x}
+end = struct
+  let (g @ total) (x : 'a) : {r : 'a | r === x} = x
+end;;
+[%%expect{|
+module Variable_refined :
+  sig val g : (x : {v : int | v > 0}) -> {r : int | r === x} end
+|}]
+
+(* Rejected. *)
+module Variable_refined_false : sig
+  val g : (x : int) -> {r : {v : int | v > 0} | r === x}
+end = struct
+  let (g @ total) (x : 'a) : {r : 'a | r === x} = x
+end;;
+[%%expect{|
+Line 4, characters 7-8:
+4 |   let (g @ total) (x : 'a) : {r : 'a | r === x} = x
+           ^
+Error: The value "g" does not satisfy its declaration in the signature.
+       Refinement could not be proved (counterexample: x = 0)
+Line 2, characters 39-44:
+2 |   val g : (x : int) -> {r : {v : int | v > 0} | r === x}
+                                           ^^^^^
+  The refinement is stated here.
+|}]
+
+(* Rejected: in [at_count]'s parameter type for i, s is eliminated, and the
+   elimination records s.count > 5.  The caller's type for a is equal to it
+   up to that elimination, but there s has type counter, and nothing checks
+   s.count > 5.  (Accepted while the verifier assumed what eliminations
+   record: it assumed s.count > 5 when it used a.) *)
+type counter = {count : int}
+
+let (at_count @ total) (s : {s : counter | s.count > 5})
+    (i : {i : int | i = s.count}) : int = i
+
+let (unchecked_call @ total) (s : counter) (a : {i : int | i = s.count})
+    : int =
+  at_count s a;;
+[%%expect{|
+type counter = { count : int; }
+val at_count :
+  (s : {s : counter | s.count > 5}) -> {i : int | i = s.count} -> int = <fun>
+Line 8, characters 11-12:
+8 |   at_count s a;;
+               ^
+Error: Refinement could not be proved (counterexample)
+Line 3, characters 43-54:
+3 | let (at_count @ total) (s : {s : counter | s.count > 5})
+                                               ^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
+(* Rejected, for the same reason. *)
+let (unchecked_premise @ total) (s : counter) (a : {i : int | i = s.count})
+    : {u : unit | s.count > 5} =
+  let _ = at_count s a in ();;
+[%%expect{|
+Line 3, characters 19-20:
+3 |   let _ = at_count s a in ();;
+                       ^
+Error: Refinement could not be proved (counterexample)
+Line 3, characters 43-54:
+3 | let (at_count @ total) (s : {s : counter | s.count > 5})
+                                               ^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
+(* Accepted. *)
+let (checked_call @ total) (s : {s : counter | s.count > 5})
+    (a : {i : int | i = s.count}) : int =
+  at_count s a;;
+[%%expect{|
+val checked_call :
+  (s : {s : counter | s.count > 5}) -> {i : int | i = s.count} -> int = <fun>
 |}]

@@ -401,22 +401,13 @@ let equal_with_types ~pairs rexp1 rexp2 =
   in
   let rec eq ?exposed pairs rexp1 rexp2 =
     match rexp1.rexp_desc, rexp2.rexp_desc with
-    | Rexp_refinement (source1, e1), Rexp_refinement (source2, e2) ->
-        (* The source of an elimination is exposed. *)
-        pair_types ~exposed:true pairs source1 source2;
-        pair_types ?exposed pairs rexp1.rexp_type rexp2.rexp_type;
-        eq pairs e1 e2
-    | Rexp_refinement (source1, e1), _ ->
-        (* Whether an elimination is recorded depends on elaboration (a
-           dependent type instantiated with an argument has none).  Its
-           source is the type typing gave to the same subexpression, so the
-           premise it adds holds of the other side's subexpression as well;
-           only the skeletons are compared. *)
-        pair_types pairs source1 rexp2.rexp_type;
-        eq pairs e1 rexp2
-    | _, Rexp_refinement (source2, e2) ->
-        pair_types pairs rexp1.rexp_type source2;
-        eq pairs rexp1 e2
+    | Rexp_refinement (_, e1), _ ->
+        (* Eliminations are skipped on both sides.  The type an elimination
+           records is not assumed by the verifier, which assumes instead the
+           refinements of the type it knows the subexpression has; those come
+           from the environment or from types compared here. *)
+        eq ?exposed pairs e1 rexp2
+    | _, Rexp_refinement (_, e2) -> eq ?exposed pairs rexp1 e2
     | _ ->
         pair_types ?exposed pairs rexp1.rexp_type rexp2.rexp_type;
         eq_desc pairs rexp1 rexp2

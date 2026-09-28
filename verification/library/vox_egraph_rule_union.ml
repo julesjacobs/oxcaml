@@ -198,6 +198,7 @@ let same : (state : {s : t | valid s}) @ immutable ->
     {equal : bool |
       equal = (M.root state.union.parents a = M.root state.union.parents b)}
     @ immutable = fun state a b ->
+  ghost_ (valid_def state);
   let left = U.find state.union a in
   let right = U.find state.union b in
   left = right
