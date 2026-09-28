@@ -429,11 +429,24 @@ Error: The loop is "partial"
          which is expected to be "total".
 |}]
 
+(* Unchecked recursion is partial like a loop, even when it is unused
+   (vox/local_recursion_totality.ml). *)
 let (unused_recursive @ total) () =
   let rec _loop () = _loop () in
   ()
 [%%expect{|
-val unused_recursive : unit -> unit = <fun>
+Line 2, characters 2-29:
+2 |   let rec _loop () = _loop () in
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 1-3, characters 31-4
+         which is expected to be "total".
+Line 2, characters 16-18:
+2 |   let rec _loop () = _loop () in
+                    ^^
+  This recursive function is partial:
+  checked recursion requires simple unlabelled parameters.
 |}]
 
 let (add_one @ total) = (+) 1

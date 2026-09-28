@@ -13813,6 +13813,21 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
         Some m
     | Nonrecursive -> None
   in
+  (* Recursion that is not shown to terminate is partial in itself, like a
+     loop: the bound functions are partial, and so is every enclosing
+     closure, since a call to them from its body crosses no lock. *)
+  let partial_recursion ?(reason_loc = Location.none) loc reason =
+    try Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Function)
+    with exn ->
+      match Location.error_of_exn exn with
+      | Some (`Ok error) ->
+          let why =
+            Location.msg ~loc:reason_loc
+              "@[This recursive function is partial:@ %s.@]" reason
+          in
+          raise (Error_forward { error with sub = error.sub @ [why] })
+      | Some `Already_displayed | None -> raise exn
+  in
   let provisional_recursion =
     rec_flag = Recursive && entirely_functions
     && List.length spat_sexp_list = 1
@@ -13820,7 +13835,11 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
   if not provisional_recursion then Option.iter
     (fun mode ->
       Totality.submode_exn Totality.partial
-        (Value.proj_comonadic Axis.Totality mode))
+        (Value.proj_comonadic Axis.Totality mode);
+      partial_recursion (List.hd spat_sexp_list).pvb_loc
+        (if entirely_functions
+         then "mutually recursive functions are never total"
+         else "recursive values are never total"))
     rec_mode_var;
   let spatl = List.map vb_pat_constraint spat_sexp_list in
   let spatl =
@@ -14000,7 +14019,9 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
                 (* Kept for an interface that requires totality. *)
                 Option.iter (fun uid ->
                   Types.Uid.Tbl.replace Includecore.partial_recursion uid
-                    (loc, reason)) uid
+                    (loc, reason)) uid;
+                partial_recursion ~reason_loc:loc
+                  (List.hd spat_sexp_list).pvb_loc reason
             | Error _ ->
                 Location.raise_errorf ~loc
                   "This recursive function cannot be total: %s." reason
