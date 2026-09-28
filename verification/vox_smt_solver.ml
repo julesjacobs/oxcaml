@@ -44,10 +44,11 @@ type connection =
     errors : Unix.file_descr
   }
 
-(* A solver that does not answer within a few seconds is treated as having no
-   version. *)
+(* A solver that does not answer within 30 seconds is treated as having no
+   version. The limit is generous because a loaded build machine can take
+   several seconds to start a process; it only delays a solver that hangs. *)
 let version ~executable =
-  let deadline = Unix.gettimeofday () +. 5. in
+  let deadline = Unix.gettimeofday () +. 30. in
   match Unix.pipe ~cloexec:true () with
   | exception Unix.Unix_error _ -> None
   | output, input -> (
