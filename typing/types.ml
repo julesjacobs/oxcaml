@@ -566,6 +566,7 @@ type type_declaration =
     type_unboxed_default: bool;
     type_inductive: bool;
     type_phantom_parameters: bool;
+    type_total_matchable: bool;
     type_uid: Uid.t;
     type_unboxed_version : type_declaration option;
  }

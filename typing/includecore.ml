@@ -472,6 +472,7 @@ type type_mismatch =
   | Arity
   | Inductiveness
   | Phantom_parameters
+  | Total_matchable
   | Privacy of privacy_mismatch
   | Kind of kind_mismatch
   | Constraint of Errortrace.equality_error
@@ -873,6 +874,10 @@ let report_type_mismatch first second decl env ppf err =
   | Inductiveness ->
       pr "Their inductive guarantees differ;@ the guarantee can only be \
           hidden@ behind an abstract type."
+  | Total_matchable ->
+      pr "Their total-matchability guarantees differ;@ an interface may \
+          promise@ %a only if the implementation's declaration does."
+        Style.inline_code "[@@total_matchable]"
   | Privacy err ->
       report_privacy_mismatch ppf err
   | Kind err ->
@@ -1693,13 +1698,17 @@ let type_manifest env ty1 ty2 priv2 kind2 =
    types, this is the case as soon as the two type declarations share the same
    arity and the privacy of [td1] is less than the privacy of [td2] (consider a
    context E where all type constructors are equal). *)
-let type_declarations_consistency env decl1 decl2 =
+let type_declarations_consistency env path decl1 decl2 =
   if decl1.type_arity <> decl2.type_arity then Some Arity
   else if decl1.type_inductive <> decl2.type_inductive
        && (decl2.type_inductive || not (Btype.type_kind_is_abstract decl2))
   then Some Inductiveness
   else if decl2.type_phantom_parameters && not decl1.type_phantom_parameters
   then Some Phantom_parameters
+  else if decl2.type_total_matchable
+       && not (decl1.type_total_matchable
+               || Ctype.declaration_total_matchable env path decl1)
+  then Some Total_matchable
   else match privacy_mismatch env decl1 decl2 with
     | Some err -> Some (Privacy err)
     | None -> None
@@ -1713,7 +1722,7 @@ let type_declarations ?(equality = false) ~loc env ~mark name
     loc
     decl1.type_attributes decl2.type_attributes
     name;
-  let err = type_declarations_consistency env decl1 decl2 in
+  let err = type_declarations_consistency env path decl1 decl2 in
   if err <> None then err else
   (* Step 1 from the Note *)
   let err =

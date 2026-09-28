@@ -1065,6 +1065,7 @@ module Merge = struct
               type_unboxed_default = false;
               type_inductive = false;
               type_phantom_parameters = false;
+              type_total_matchable = false;
               type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
               type_unboxed_version = None;
             }

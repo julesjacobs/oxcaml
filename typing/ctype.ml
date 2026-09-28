@@ -1803,6 +1803,7 @@ let new_local_type ?(loc = Location.none) ?manifest_and_scope origin jkind =
     type_unboxed_default = false;
     type_inductive = false;
     type_phantom_parameters = false;
+    type_total_matchable = false;
     type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
     type_unboxed_version = None;
   }
@@ -3937,7 +3938,23 @@ let declaration_is_hidden path decl =
   | Type_open -> true
   | Type_variant _ | Type_record _ | Type_record_unboxed_product _ -> false
 
-let declaration_can_pattern_match_total env root root_args decl =
+(* Two modes share this walk:
+   - [~knot_free:false] (the default) is the pattern-match check: the matched
+     type must be definitely nonrecursive (or [@@inductive]); every hidden type
+     it reaches, in ANY position, must be a safe component (carry the
+     [@@total_matchable] guarantee or have a pointer-free jkind).
+   - [~knot_free:true] verifies a [@@total_matchable] guarantee: the type must
+     not reach ITSELF, nor an unsafe hidden type, through a NEGATIVE (function-
+     argument) position. Positive recursion (a tree, a list, a functional map)
+     is fine -- you cannot loop by matching a container that merely holds such
+     a value, only by feeding it to a function that reaches back. This is why a
+     recursive-but-knot-free data structure can carry the guarantee while a
+     negatively recursive group cannot. The lemma that makes the guarantee
+     sound to consult in the match: if the match walk reaches an attributed
+     type [X], and [X] is knot-free (does not reach [X] negatively), then [X]
+     does not reach the matched type either. *)
+let declaration_can_pattern_match_total ?(knot_free = false) env root root_args
+      decl =
   (* Visited sets are keyed by [direct] (drives the inductive allowance) and by
      [negative] (drives the hidden-type check), so a type seen in one polarity
      is still walked in the other. *)
@@ -3985,16 +4002,24 @@ let declaration_can_pattern_match_total env root root_args decl =
            eq_type arg previous || strictly_contains previous arg)
          args previous
   in
-  (* A hidden type reached negatively could be the matched type appearing as a
-     function argument -- the knot. Reject it unless its jkind rules out being
-     a pointer. If the walk cannot see into a type at all ([Not_found]), reject
-     regardless of polarity. Positive hidden types cannot be called, so they
-     stay allowed as before. *)
+  (* A hidden type the walk reaches could be, or reach, the matched type in
+     ANY position: even a positive field can hide a bare function that an
+     exported total consumer applies to the matched value (the abstract-
+     consumer knot). It is safe only if its declaration carries a checked
+     [@@total_matchable] guarantee -- verified where the type is defined, with
+     its manifest visible, and preserved by signature inclusion -- or if its
+     jkind rules out pointers, so it can be neither a function nor the boxed
+     matched type. If the walk cannot see into a type at all ([Not_found]),
+     reject. *)
   let check_not_hidden ~negative path ty =
     match Env.find_type path env with
     | decl ->
-      if negative
+      (* In [knot_free] mode only a negative occurrence of an unsafe hidden
+         type can close a knot; positive occurrences are harmless. In match
+         mode any position is unsafe (abstract-consumer route). *)
+      if (not knot_free || negative)
          && declaration_is_hidden path decl
+         && not decl.type_total_matchable
          && type_may_be_matched_type env ty
       then raise_notrace Not_definitely_nonrecursive
     | exception Not_found -> raise_notrace Not_definitely_nonrecursive
@@ -4016,7 +4041,11 @@ let declaration_can_pattern_match_total env root root_args decl =
       match get_desc ty with
       | Tconstr (path, args, _) ->
         if Path.same path root then begin
-          if not (allow_direct_recursion
+          if knot_free then begin
+            (* Only a negative self-occurrence is a knot; positive recursion
+               (a tree, a list) is harmless in a component. *)
+            if negative then raise_notrace Not_definitely_nonrecursive
+          end else if not (allow_direct_recursion
                   && direct
                   && List.equal eq_type args root_args)
           then raise_notrace Not_definitely_nonrecursive
@@ -4095,8 +4124,10 @@ let declaration_can_pattern_match_total env root root_args decl =
         (fun constructor ->
           (* Only the directly matched constructor exposes its existentials;
              a nested type's constructors are matched (and checked) on their
-             own. *)
-          if direct then check_existentials constructor;
+             own. In [knot_free] mode we are verifying that a value of this type
+             is a safe component, not matching it, so its own existentials are
+             opaque and irrelevant. *)
+          if direct && not knot_free then check_existentials constructor;
           Btype.iter_type_expr_cstr_args visit constructor.cd_args)
         constructors
     | Type_record (labels, _, _)
@@ -4167,6 +4198,7 @@ let can_unpack_total env ty =
     | Sig_type (id, decl, _, _) ->
       declaration_is_hidden (Path.Pident id) decl
       && not (List.mem (prefix @ [Ident.name id]) constrained)
+      && not decl.type_total_matchable
       && not (jkind_cannot_be_pointer env decl.type_jkind)
     | Sig_module (id, _, md, _, _) ->
       module_type_hides env ~constrained
@@ -4186,6 +4218,38 @@ let can_unpack_total env ty =
      whose type is known), so it cannot be shown safe and is conservatively
      rejected. *)
   | _ -> false
+
+(* Verify a declaration's claimed [@@total_matchable] guarantee, at its
+   definition where its manifest/representation is visible: eliminating a value
+   of the type cannot reach the type itself through a knot. An abstract type
+   with no manifest is a safe leaf. The walk consults the (already recorded)
+   guarantee of the abstract types it reaches, which is sound: if the walk from
+   [decl] reaches an attributed type [X], and [X] carries the guarantee (so [X]
+   does not reach [X]), then [X] does not reach [decl] either -- otherwise
+   [decl] would reach [decl] via [X] and this check would fail. *)
+let declaration_total_matchable env path decl =
+  declaration_can_pattern_match_total ~knot_free:true env path
+    decl.type_params decl
+
+(* Whether [ty] is a safe component of a type matched in total code: its jkind
+   rules out pointers, or it is a nominal type that carries [@@total_matchable]
+   or whose visible representation is definitely nonrecursive. Used to check a
+   [with type] constraint against a signature type that carries the guarantee. *)
+let type_is_total_matchable env ty =
+  not (type_may_be_matched_type env ty)
+  || match get_desc (expand_head env ty) with
+     | Tconstr (path, _, _) ->
+       begin match Env.find_type path env with
+       | decl ->
+         decl.type_total_matchable
+         || (match decl.type_kind with
+             | Type_variant _ | Type_record _ | Type_record_unboxed_product _ ->
+               declaration_can_pattern_match_total ~knot_free:true env path
+                 decl.type_params decl
+             | Type_abstract _ | Type_open -> false)
+       | exception Not_found -> false
+       end
+     | _ -> false
 
 let check_type_jkind_exn env texn ty jkind =
   match check_type_jkind env ty jkind with
@@ -9788,6 +9852,7 @@ let rec nondep_type_decl env mid is_covariant decl =
       type_unboxed_default = decl.type_unboxed_default;
       type_inductive = decl.type_inductive;
       type_phantom_parameters = decl.type_phantom_parameters;
+      type_total_matchable = decl.type_total_matchable;
       type_uid = decl.type_uid;
       type_unboxed_version;
     }
