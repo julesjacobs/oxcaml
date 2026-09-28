@@ -80,7 +80,7 @@ Line 8, characters 6-7:
 8 |       u) in
           ^
 Error: Refinement could not be proved (counterexample)
-File "borrow.mli", line 248, characters 18-53:
+File "borrow.mli", line 213, characters 18-53:
   The refinement is stated here.
 |}]
 
