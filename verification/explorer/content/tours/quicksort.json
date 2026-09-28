@@ -72,7 +72,7 @@
       "path": "verification/vox_vc.ml",
       "from": "| \"caml_borrow_open\", _, Some [frame; loan] ->",
       "to": "same_size loan receiver ]",
-      "lines": "1370-1401",
+      "lines": "1372-1403",
       "focus": "verification/",
       "text": "The slice operations above are verified OCaml over private `Raw` externals in [`borrow.ml`](src:verification/library/borrow.ml), implemented in [`runtime/borrow.c`](src:runtime/borrow.c). The checker's knowledge of them has two sources: the refinements on those `external` declarations, and these fixed equations in `normal_borrow_transition`. `open` ties the loan's `final` to its frame, `restore` sets the owner's contents to the frame's final, `split` and `recombine` pass children's finals to the parent's `current`, and `finish` equates `final` and `current`. These equations are assumed: nothing proves them against the C code, and they are part of the checker's trusted base."
     },

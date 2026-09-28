@@ -1035,7 +1035,7 @@
       {
         "title": "When the verifier runs",
         "from": "(** Run after delayed typing checks and before emitting artifacts.",
-        "to": "val run_unit : Typedtree.structure -> unit",
+        "to": "val run_unit : ?interface:Typedtree.refinement_site -> Typedtree.structure -> unit",
         "kind": "what",
         "text": "The default implementations fail closed: without an installed verifier, a static refinement introduction is rejected. `whole_unit` tells the verifier whether it sees a compilation unit or a toplevel phrase."
       },

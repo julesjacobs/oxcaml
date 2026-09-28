@@ -12,7 +12,7 @@
     "notes": [
       {
         "title": "Entry point",
-        "from": "let generate ?(poll = fun () -> ()) ?unused_steps ~prove str =",
+        "from": "let generate ?(poll = fun () -> ()) ?unused_steps ?interface ~prove str =",
         "to": "with_warnings warnings (fun () -> verify_steps ctx prove result.code)",
         "text": "First checks every `external` that declares a shift total (`check_total_shift`). Then a scan looks for an obligation or a proof step; a unit without one never starts the solver. Otherwise the structure is evaluated once, and each function's batch, then the top level, is proved with the warning state in force where it was written."
       },

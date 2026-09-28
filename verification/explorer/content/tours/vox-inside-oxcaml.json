@@ -46,16 +46,16 @@
         "and unify3 uenv t1 t1' t2 t2' =",
         "(Tarrow ((l1,a1,r1,binder1), t1, u1, c1),"
       ],
-      "to": "then raise_unexplained_for Unify",
-      "lines": "5757-5782",
-      "text": "Two arrows unify only if both or neither are dependent; `align_arrow_codomains` renames one binder to the other before the codomains are unified. Two refinements unify when their payloads unify and `refinement_predicates_equal` finds the predicates alpha-equivalent after normalizing paths. A refined type never unifies with an unrefined one, and `moregen` and `eqtype` follow the same rules, so there is no subsumption on trunk: an implementation that proves `r > c` does not match an interface that states `r >= c`. `build_subtype` has no rule for `Trefine` yet, so `:>` does not help either. The comparison is syntactic and ignores the types inside predicates; comparing predicates with their types is an open item."
+      "to": "relate_predicate_types (get_env uenv) (unify uenv) types",
+      "lines": "5846-5874",
+      "text": "Two arrows unify only if both or neither are dependent; `align_arrow_codomains` renames one binder to the other before the codomains are unified. Refinements stay rigid in unification: the payloads unify, and `refinement_predicate_types` requires the predicates to be alpha-equivalent, pairing the types of their subterms, which `relate_predicate_types` then unifies. A refined type never unifies with an unrefined one. Weakening a refinement happens elsewhere: at module inclusion and at a coercion `:>`, the typer records a `Texp_subsumption` obligation, and the verifier proves the implication. An implementation that proves `r > c` therefore matches an interface that states `r >= c`."
     },
     {
       "title": "Elimination and introduction as Typedtree extras",
       "path": "typing/typecore.ml",
       "from": "let rec eliminate_refinement_to env target exp =",
       "to": "{ exp with exp_type = instance target; exp_extra }",
-      "lines": "7659-7691",
+      "lines": "7663-7727",
       "text": [
         "Every refinement boundary is recorded as a `Texp_refinement { source; target }` extra, and these extras are all the verifier needs from the typer. `eliminate_refinement`, just above, peels the outer refinement off an inferred type; `type_expect_`'s `rue` applies it to every result, so each elimination is an assumption. `introduce_refinement` records the opposite step, from a payload to an expected refined type, and each introduction is a proof obligation. It cancels against an elimination from the same type on the same expression, so passing a refined value where the same refinement is expected costs nothing.",
         "`type_expect` introduces whenever the expected type has an outer refinement, after coercing the expected mode to total, stateless and portable (`refinement_operand_mode`); that every introduced value has those modes is what makes it sound for a refined type to cross those axes even when its payload does not."
@@ -69,7 +69,7 @@
         "requires a known refinement type from its context",
         "end"
       ],
-      "lines": "8415-8444",
+      "lines": "8451-8480",
       "text": "`assume_ x` needs a refinement type from its context. The operand is typed at the payload, at total, stateless, portable and real modes, and must be a plain local variable. `walk_locks_for_partial_construct` makes every enclosing function partial, so no `ghost_` can erase the check. `type_assume` builds a `Texp_assume` whose predicate is compiled as real code: [translcore.ml](src:lambda/translcore.ml) evaluates it and raises `Assert_failure` if it is false, and `-noassert` keeps it. The verifier assumes the refinement afterwards; just below, `refine_ e` asks for the same refinement to be proved instead, at no run-time cost except the adapter closure built for a function."
     },
     {
@@ -77,7 +77,7 @@
       "path": "typing/typecore.ml",
       "from": "| Pexp_ghost e ->",
       "to": "{exp with exp_extra}",
-      "lines": "10583-10604",
+      "lines": "10619-10640",
       "text": "`@ ghost` only restricts; `ghost_ e` is what removes code. Its context must accept a ghost value, and `e` is typed under `enter_total_ghost_context`: a constant closure lock at total, stateless and portable, plus a flag that switches off ghostliness checks inside. `e` itself must be total, which is what makes erasure sound: a diverging call of type `{u : unit | false}` would otherwise prove anything and then vanish. Because the lock is a constant closure lock, a unique value captured by `ghost_` is seen as aliased, so ghost code cannot consume a token. The `Texp_ghost` extra tells translation to emit a placeholder instead."
     },
     {
@@ -85,7 +85,7 @@
       "path": "typing/typecore.ml",
       "from": "let make_definition_lemma_at_level env binding =",
       "to": "let constant = params = [] in",
-      "lines": "16770-16802",
+      "lines": "16856-16888",
       "text": "`let[@def] f x = e` is elaborated in two places. `type_let` adds the `total` mode to the binding and turns pattern parameters into variables. After typing, `make_definition_lemma_at_level` checks the shape shown here (unlabelled variable parameters; a constant `c` gets `c_def : unit -> ...`), converts the body to a predicate with `refinement_expression_of_typed`, and binds `f_def : (x : t) -> {u : unit | f x === e}`. The equation is assumed; it is sound because `f` is a total, stateless function whose body is `e`. Verified code unfolds a definition only by calling `f_def`, except for non-recursive `[@def transparent]` definitions, which the verifier unfolds itself."
     },
     {
@@ -112,7 +112,7 @@
       "path": "typing/typecore.ml",
       "from": "let partial ?uid loc reason =",
       "to": "partial (List.hd spat_sexp_list).pvb_loc",
-      "lines": "13914-13953",
+      "lines": "13996-14035",
       "text": "A single recursive function binding is total only if Vox can see why it terminates. With `[@@decreases m]`, `type_decreases` types the measure in a total, stateless context (an `int`, a `Bigint`, or a tuple of them, ordered lexicographically), and `Verification.check_termination` has Z3 prove that every recursive call decreases it, during typing, before generalization. Without a measure, `Structural_recursion.check` looks for descent on an `[@@inductive]` parameter. If neither works, `partial` makes the function partial, or reports why it cannot be total when its mode is already required to be; the reason is kept in `Includecore.partial_recursion` for an interface that demands `@@ total` later. A group of several recursive bindings is made partial before typing, so mutual recursion is never total."
     },
     {
@@ -126,9 +126,9 @@
     {
       "title": "The verifier plugs into the typer",
       "path": "verification/runtime/vox_verify.enabled.ml",
-      "from": "Verification.install (fun ~whole_unit structure ->",
+      "from": "Verification.install (fun ~whole_unit ~interface structure ->",
       "to": "~measure ()));",
-      "lines": "913-950",
+      "lines": "853-891",
       "text": [
         "The typer knows only the hooks in [verification.ml](src:typing/verification.ml): `Typemod` calls `Verification.run_unit` after the delayed checks and the interface inclusion check and before writing the `.cmt` and `.cmi`, and without an installed verifier any refinement introduction is an error. The `ocamlc` and `ocamlopt` drivers call `Vox_verify.install`, which installs this function.",
         "It first looks for the unit in the cache under `VOX_VERIFY_CACHE`, keyed by the compiler's digest, the solver's name, version and platform, the source, `OCAMLPARAM`, the settings that change typing, the flags and the imported CRCs. Otherwise it runs `Vox_vc.generate` against one Z3 process from [`Vox_smt_solver.with_session`](src:verification/vox_smt_solver.ml), which resets the solver before each query. `prove`, above, refuses a solver that does not report Z3 4.16.0 unless `-smt-solver-any-version` is given, and bounds queries by Z3's resource count, with a wall-clock deadline only as a backstop; `-smt-assume-verified` skips verification, and the compiled unit records that it did."
@@ -139,10 +139,10 @@
       "path": "verification/vox_vc.ml",
       "from": [
         "let generate ?(poll",
-        "match scan.structure scan str with"
+        "scan.structure scan str"
       ],
       "to": "with_warnings warnings (fun () -> verify_steps ctx prove result.code)",
-      "lines": "4683-4701",
+      "lines": "5075-5102",
       "text": "`generate` first runs `check_total_shift` on every primitive declaration, then scans for a refinement introduction, a refined parameter or a proof step; a unit with none generates no query. Otherwise `structure` executes the Typedtree once, forward, into a list of commands: `Define`s of SSA symbols, `Assume`s for path conditions and eliminated refinements, `Assert`s for obligations, and a `Choice` for each branch, whose values are joined rather than enumerated. Each function body becomes one batch in `ctx.batches`. `verify_steps` hands each batch to `verify_batch`, which proves it as one quantifier-free query and, only if that fails, proves each refinement and then each conjunct alone, so the error names the conjunct that fails."
     },
     {
@@ -150,7 +150,7 @@
       "path": "verification/vox_vc.ml",
       "from": "and expression_extras ?deferred ctx s e ty = function",
       "to": "| None | Some _ -> introduce ctx e.exp_env s target value loc",
-      "lines": "3151-3180",
+      "lines": "3466-3497",
       "text": "Here the typer's extras become verification commands. `expression_extras` handles an expression's extras from the inside out: the value is exposed with `expose_outer`, which assumes its outer refinement, and each `Texp_refinement` whose target is refined calls `introduce`, at once or deferred to the end of a function body. `introduce`, just below, splits the predicate at top-level `&&`, and each conjunct becomes an `Assert` proved under the ones before it, as `&&` evaluates. Besides `introduce`, the only obligations are shift counts and `[@@decreases]` measures; everything else, including the declared types of callees, is assumed. The meaning is partial correctness on normal return: a raise or `assert false` ends a path, and `@@ total` adds termination."
     },
     {
@@ -158,7 +158,7 @@
       "path": "verification/vox_vc.ml",
       "from": "(* Totality is relative to the arguments: a total, stateless [apply f x = f x]",
       "to": "(fun () -> Ctype.cross_left e.exp_env e.exp_type mode))",
-      "lines": "316-355",
+      "lines": "318-357",
       "text": "A call becomes an uninterpreted function of its arguments only if repeating it must give the same result. The head must be total and stateless at its use site (`logical_function_mode`), and since the call-congruence fix every argument must be too: by crossing both axes, as a function value already known total, through its use-site mode, or by filling a dependent parameter. Any other call gets a fresh result symbol, so only its declared type is known about it. A callee's body is never inspected, except for ghost lambdas and `[@def transparent]` definitions. A recursive call uses the function's declared type, which is induction when the function is total."
     },
     {
