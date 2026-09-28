@@ -11436,8 +11436,11 @@ and type_function
           exp_type)
       in
       let newtype = id, newtype_var, jkind_annot, uid in
+      (* [type_newtype] closes [exp_type] over the enclosing parameters,
+         while [ty_expected] is opened by them: compare them closed. *)
       with_explanation ty_fun.explanation (fun () ->
-          unify_exp_types loc env exp_type (instance ty_expected));
+          unify_exp_types loc env exp_type
+            (close_dependent_type dependent_openings (instance ty_expected)));
       { function_ = exp_type, params, body;
         params_contain_gadt = contains_gadt; newtypes = newtype :: newtypes;
         fun_alloc_mode; ret_info; calling_convention_sorts;
@@ -11616,7 +11619,11 @@ and type_function
                     introduced_dependency :=
                       Some (opening, close_dependent_type [opening] body_type)
                   else
-                    unify_exp_types loc ext_env body_type ty_ret
+                    (* A result constraint gives [body_type] in terms of the
+                       enclosing binders, while [ty_ret] is opened by the
+                       enclosing parameters: compare them closed. *)
+                    let close = close_dependent_type dependent_openings in
+                    unify_exp_types loc ext_env (close body_type) (close ty_ret)
               | Some opening, Some _, Some _ ->
                   (* A result constraint gives [body_type] in terms of the
                      binders, while [ty_ret] and inner function types are
