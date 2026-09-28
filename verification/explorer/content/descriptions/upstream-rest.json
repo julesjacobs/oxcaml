@@ -97,9 +97,9 @@
       "short": "The interface of warnings: the type of all warnings with their numbers, and the state that enables and disables them."
     },
     "vox": {
-      "short": "Adds warnings 222 to 227, the unused_proof_step type for 227, and a refined_unit flag on unused-variable warnings 26 and 27.",
+      "short": "Adds warnings 222 to 229, the unused_proof_step type for 227 and the trusted_external_reason type for 228, and a refined_unit flag on unused-variable warnings 26 and 27.",
       "long": [
-        "222 `Slow_refinement` reports a proof whose solver resource count passes the warning threshold; 223 `Unerased_ghost_body` a function whose result is ghost but whose body is not wrapped in `ghost_`; 224 `Unerased_ghost_call` a call evaluated at run time only to discard its ghost result; 225 `Redundant_ghost` a `ghost_` inside code that is already ghost; 226 `Proof_only_binding` a binding computed at run time but used only in ghost code; 227 `Unused_proof_step` a lemma call, `assume_` or argument refinement whose fact no proof in the function used.",
+        "222 `Slow_refinement` reports a proof whose solver resource count passes the warning threshold; 223 `Unerased_ghost_body` a function whose result is ghost and whose body is not wrapped in `ghost_`; 224 `Unerased_ghost_call` a call evaluated at run time only to discard its ghost result; 225 `Redundant_ghost` a `ghost_` inside code that is already ghost; 226 `Proof_only_binding` a binding computed at run time but used only in ghost code; 227 `Unused_proof_step` a lemma call, `assume_` or argument refinement whose fact no proof in the function used; 228 `Trusted_external` an external outside the verified library whose refinement or totality the verifier assumes, or a `%identity` cast to total; 229 `Unverified_import` an imported interface whose verification was skipped.",
         "`refined_unit` is set when the unused variable has a refinement of `unit` as its type: the fact holds without the name, and the message says so."
       ]
     }
@@ -128,7 +128,7 @@
     "vox": {
       "short": "Adds Int.Refined: total division and remainder with a nonzero divisor, and total shifts whose count is proved to be in [0, 63].",
       "long": [
-        "OCaml leaves `x lsl n`, `lsr` and `asr` unspecified for `n` outside [0, 63], and compiled code disagrees: native code folds `1 lsl 64` to 0, while arm64 computes `1 lsl n` with `n = 64` as 1. The verifier had modelled the out-of-range result as one uninterpreted function, which proved a false equation; the fix (`cbca48d5d5`) gives every shift that verified code performs the obligation `0 <= n && n <= 63`, and made the standard shifts `Stdlib.( lsl )`, `( lsr )`, `( asr )` partial again, like `( / )`.",
+        "OCaml leaves `x lsl n`, `lsr` and `asr` unspecified for `n` outside [0, 63], and compiled code disagrees: native code folds `1 lsl 64` to 0, while arm64 computes `1 lsl n` with `n = 64` as 1. The verifier had modeled the out-of-range result as one uninterpreted function, which proved a false equation; the fix (`cbca48d5d5`) gives every shift that verified code performs the obligation `0 <= n && n <= 63`, and made the standard shifts `Stdlib.( lsl )`, `( lsr )`, `( asr )` partial again, like `( / )`.",
         "A total function or a predicate that needs a shift uses `Int.Refined`, whose count is refined to that range; each application is a refinement introduction, so a unit that uses it is verified. The rest of `Int` is unchanged and carries no `@@ total`, so `Int.add` and `Int.shift_left` are partial; `Stdlib.( + )` is total."
       ]
     },
@@ -148,7 +148,7 @@
       "short": "The Dune rules that build the standard library: flags, the list of source files, and the installed artifacts."
     },
     "vox": {
-      "short": "Compiles the stdlib with -extension refinement_types, and adds bigint.ml and ghost.ml with their installed .cmi, .cms, .cmt and .cmx files."
+      "short": "Compiles the stdlib with -extension refinement_types and -vox-library, and adds bigint.ml and ghost.ml with their installed .cmi, .cms, .cmt and .cmx files."
     }
   },
   "stdlib/Makefile": {
@@ -156,7 +156,7 @@
       "short": "The Makefile build of the standard library, used by the upstream-style build path."
     },
     "vox": {
-      "short": "Adds -extension refinement_types to COMPFLAGS, matching stdlib/dune."
+      "short": "Adds -extension refinement_types and -vox-library to COMPFLAGS, matching stdlib/dune."
     }
   },
   "stdlib/StdlibModules": {
@@ -190,7 +190,7 @@
         "title": "Verifying a phrase",
         "from": ["let typecheck_phrase ppf oldenv oldsig sstr =", "Verification.run str;"],
         "kind": "vox",
-        "text": "Runs after `Typecore.force_delayed_checks`, so the phrase is fully typed, and before evaluation, so an unproved refinement stops the phrase with an error."
+        "text": "Runs after `Typecore.force_delayed_checks`, so the phrase is fully typed, and before evaluation, so a refinement that is not proved stops the phrase with an error."
       }
     ]
   },
@@ -297,7 +297,7 @@
       "short": "String conversions of types and declarations for ocamldoc's output."
     },
     "vox": {
-      "short": "A refinement type is neither an arrow nor needs parentheses in is_arrow_type and need_parent."
+      "short": "is_arrow_type and need_parent answer false for a refinement type: it is not an arrow and needs no parentheses."
     }
   },
   "ocamldoc/odoc_value.ml": {
@@ -476,7 +476,7 @@
       "short": "The upstream OCaml Makefile, with its lists of the compiler's and the runtime's source files."
     },
     "vox": {
-      "short": "Adds the new typing modules (verification, vox_type, recursive_function, structural_recursion) and the runtime files bigint, borrow, pref and vox_control."
+      "short": "Adds the new typing modules (verification, vox_type, vox_trust, recursive_function, structural_recursion), driver/vox_audit, and the runtime files bigint, borrow, pref and vox_control."
     }
   },
   "dune": {
@@ -484,7 +484,7 @@
       "short": "The root Dune file: the compiler-libs libraries (ocamlcommon, ocamlfrontend, ocamlbytecomp, ocamloptcomp) with their module lists, and the main executables."
     },
     "vox": {
-      "short": "ocamlfrontend gains refinement_predicate, verification, vox_type, structural_recursion and recursive_function; ocamlbytecomp and ocamloptcomp depend on vox_verify.",
+      "short": "ocamlfrontend gains refinement_predicate, verification, vox_type, vox_trust, vox_audit, structural_recursion and recursive_function; ocamlbytecomp and ocamloptcomp depend on vox_verify.",
       "long": "`vox_verify` (in `verification/runtime/`) selects `vox_verify.enabled.ml` when `vox_smt_solver`, `vox_vc` and `unix` are available and `vox_verify.disabled.ml` otherwise, which is how the bootstrap compiler is built without a verifier."
     },
     "notes": [
@@ -501,7 +501,7 @@
       "short": "A Vox-added shell script for the incremental test loop: ./dev init, and ./dev test on test files, directories or --affected BASE."
     },
     "vox": {
-      "short": "New. It asks ocamltest which artifacts the selected tests need, builds only those with Dune, and runs the tests in parallel against them.",
+      "short": "New script that asks ocamltest which artifacts the selected tests need, builds only those with Dune, and runs the tests in parallel against them.",
       "long": [
         "`plan_tests` runs `ocamltest -plan-incremental` on each test and `add_requirement` maps each requirement (`expect`, `ocamlc.byte`, `ocamlopt.opt`, `compilerlibs.ocamlbytecomp`, ...) to a Dune target and to an `OCAMLTEST_*` variable that ocamltest reads instead of its installed tools. A test ocamltest cannot plan is refused, with the `make test-one` command to use instead.",
         "`start_test_library` builds the prebuilt test library in the background while tests that do not need it start; `VOX_VERIFY_CACHE` skips re-verifying units with identical inputs; slow proofs are collected into one list at the end instead of appearing as warnings in test output. The compiler host defaults to native. Runs are serialized per worktree with a lock."
@@ -532,7 +532,7 @@
     "vox": {
       "short": "Adds a section on totality (total < partial) and inductive pattern matching: why total code may only destructure nonrecursive or [@@inductive] types.",
       "long": [
-        "It lists what a total closure may not do (call captured partial functions, recurse, loop, raise, match non-exhaustively, read or write mutable state, allocate identity-bearing values), shows the Landin knot that motivates the pattern rule, and covers aliases, recursive modules, functors over `[@@inductive]` signatures, phantom occurrences and type parameters.",
+        "It lists what a total closure may not do (call captured partial functions, recurse, loop, raise, match non-exhaustively, read or write mutable state, allocate identity-bearing values), shows the Landin knot that motivates the pattern rule, and covers aliases, recursive modules, functors over `[@@inductive]` signatures, phantom occurrences and type parameters. The rule on mutable state concerns the built-in reads and writes: a total function may still write storage it owns uniquely, through the verified library's total externals.",
         "It says that neither an alias nor a module boundary may hide a cycle. Hidden types in the totality check (GADT existentials and abstract types) are a known soundness issue whose fix is in progress and not merged, and the section does not mention it. Ghostliness is not documented in these pages."
       ]
     }

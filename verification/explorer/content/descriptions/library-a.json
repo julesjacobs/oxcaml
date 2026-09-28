@@ -31,7 +31,7 @@
     "what": {
       "short": "Trusted externals that restate Pref's token operations with ghost tokens, so that ownership is erased and only the cell operations remain at run time.",
       "long": [
-        "The types are `Pref`'s (`'a t`, `'a token`, `'a heap`, `Heap`); what changes is the mode. `own`, `empty`, `read`, `write`, `split`, `join` and `alloc` take and return their tokens `@ ghost`, and `partition` is a boxed record with two ghost fields where `Pref` uses an unboxed pair. Each is an `external` over the same C primitives in `runtime/pref.c` (`split` has its own bytecode stub, `caml_pref_ghost_split_bytecode`), so every contract here is trusted.",
+        "The types are `Pref`'s (`'a t`, `'a token`, `'a heap`, `Heap`); what changes is the mode. `own`, `empty`, `read`, `write`, `split`, `join` and `alloc` take and return their tokens `@ ghost`, and `partition` is a boxed record with two ghost fields where `Pref` uses an unboxed pair. Each is an `external` over the same C primitives in `runtime/pref.c` (`split` has its own bytecode stub, `caml_pref_ghost_split_bytecode`), so every contract here is assumed.",
         "Code that keeps ownership only in proofs uses this module: the locks and one-shot channels, raw memory and the LZ4 buffers, the e-graph owner, the flat hash table's storage and the union–find forest. `alloc` is declared with `val` in `ghost_pref.mli` and is an `external` here, which the shared trust page lists among the trusted token operations."
       ]
     },
@@ -192,7 +192,7 @@
       "short": "Verified one-shot channels: a Unique_cell.Slot and an atomic flag whose invariant owns nothing at 0 and the full slot at 1.",
       "long": [
         "`create` allocates an empty `Slot` and an atomic whose `Invariant.holds` is: flag 0 with the empty heap (the sender owns the empty slot), or flag 1 with exactly the full slot. `send` puts the payload in the slot and makes one compare-and-set from 0 to 1, handing the full slot to the invariant. `recv` calls `await`, which retries a compare-and-set from 1 to 0, with `Domain.cpu_relax` between attempts, and takes the payload with the resource that the successful step hands it.",
-        "The module is checked against the trusted contracts of `Verified_atomic` and `Unique_cell.Slot`. Endpoints are unique records, so each is used at most once, and the payload's refinement travels in the type parameter. `await` is recursive and not total: `recv` may spin forever. See [the one-shot channel demo](demo:one-shot-channels)."
+        "The module is checked against the trusted contracts of `Verified_atomic` and `Unique_cell.Slot`. Endpoints are unique records, so each is used at most once, and the payload's refinement travels in the type parameter. `await` is recursive and partial: `recv` may spin forever. See [the one-shot channel demo](demo:one-shot-channels)."
       ]
     },
     "notes": [
@@ -267,7 +267,7 @@
         "to": "  @@ total = \"caml_pref_heap_law4\"",
         "lines": "16-24",
         "kind": "what",
-        "text": "`location` is erased; `location_law` is an axiom stating that locations are injective in the block and the index. It is bound to the generic heap-law stub, so its truth rests on the stated contract alone."
+        "text": "`location` is erased; `location_law` is assumed: it states that locations are injective in the block and the index. It is bound to the generic heap-law stub, so its truth rests on the stated contract alone."
       },
       {
         "title": "Allocation and freeing",
@@ -297,12 +297,12 @@
     },
     "notes": [
       {
-        "title": "Handle primitives with name-keyed meanings",
+        "title": "Handle primitives with built-in meanings",
         "from": "module Raw = struct",
         "to": "    'a loan @ local unique -> unit @@ portable total = \"caml_borrow_finish\"",
         "lines": "23-63",
         "kind": "what",
-        "text": "`open_` and `restore` have no refinements here, yet `with_mut` proves that the loan starts at the owner's contents and that the restored owner holds the loan's final value. Those equations come from `normal_borrow_transition` in the verifier, keyed by the names `caml_borrow_open`, `caml_borrow_restore` and so on. Hardening such name-keyed meanings is in progress and not merged."
+        "text": "`open_` and `restore` have no refinements here, yet `with_mut` proves that the loan starts at the owner's contents and that the restored owner holds the loan's final value. Those equations come from `normal_borrow_transition` in the verifier, which recognizes `caml_borrow_open`, `caml_borrow_restore` and the other transitions. Only the declarations in `Borrow`, `Borrow_iarray` and `Vox_string_view` carry these meanings (`Vox_type.carries_builtin_meaning`); an `external` elsewhere that names the same symbol gets none."
       },
       {
         "title": "Splitting a loan for a callback",
@@ -426,7 +426,7 @@
       "short": "The iarray theory behind Vox_iarray: at, updated, slice, swap and to_list with proved laws, For_all, and the sorting and counting theory in Int.",
       "long": [
         "`at`, `updated`, `slice`, `swap` and `to_list` are `let[@def]` definitions over three primitives. The laws (`set_read`, `updated_read`, `slice_read`, `slice_slice`, `swap_read`, the `to_list_*` bridge to `Vox_sequence`) are proved. `For_all (P)` provides `range`, `holds`, `intro`, `get` and slice and update laws. `Int` defines `sorted`, `ordered`, `count`, `bag` and `permutation` on `int iarray`s and proves, among others, `sorted_glue` (recombining partitions around a pivot) and `permutation_swap`; `permutation` is defined through `to_list` and `Vox_int_sequence.bag`.",
-        "Trusted: `get` binds `%array_safe_get` as a total function under an in-bounds refinement; `set` and `sub` are `external`s whose types give only the result length, and the verifier supplies their element-wise meaning by primitive name (`caml_vox_iarray_set`, `caml_vox_iarray_sub` in `vox_vc.ml`); `extensional` is an unproved axiom. The theory is used by [sparse arrays](demo:sparse-arrays), [e-graphs](demo:egraphs), [Hindley–Milner](demo:hindley-milner) and `Borrow_iarray`."
+        "Trusted: `get` binds `%array_safe_get` as a total function under an in-bounds refinement; `set` and `sub` are `external`s whose types give only the result length, and the verifier supplies their element-wise meaning by primitive name (`caml_vox_iarray_set`, `caml_vox_iarray_sub` in `vox_vc.ml`); `extensional` is assumed. The theory is used by [sparse arrays](demo:sparse-arrays), [e-graphs](demo:egraphs), [Hindley–Milner](demo:hindley-milner) and `Borrow_iarray`."
       ]
     },
     "notes": [
@@ -436,7 +436,7 @@
         "to": "    @ immutable total @@ total = \"caml_vox_iarray_sub\"",
         "lines": "32-53",
         "kind": "what",
-        "text": "`extensional` is an axiom: two iarrays with equal length and equal `at` everywhere are logically equal. `set` and `sub` state only lengths here; their read-after-write and slice meanings are built into the verifier, which is what makes `set_read` and `slice_read` provable in one step."
+        "text": "`extensional` is assumed: two iarrays with equal length and equal `at` everywhere are logically equal. `set` and `sub` state only lengths here; their read-after-write and slice meanings are built into the verifier, which is what makes `set_read` and `slice_read` provable in one step."
       },
       {
         "title": "Gluing sorted partitions",
@@ -819,7 +819,7 @@
   },
   "verification/library/vox_table_search_spec.ml": {
     "what": {
-      "short": "What a partial search has established: the candidates of a mask miss the query, and every group so far on its probe sequence was searched.",
+      "short": "The facts a partial search carries: the candidates of a mask miss the query, and every group so far on its probe sequence was searched.",
       "long": [
         "`misses model query index` says the slot at `index` does not hold a key equal to `query`. `candidates_absent model query group mask` walks the mask in the order the search does (`Vox_table_bits.first`, then `clear`) and requires every candidate to miss. `prefix_absent model query count` says this holds for the fingerprint mask of each of the first `count` groups on the query's probe sequence. `candidate_at`, `prefix_at` and `empty_free_at` extract single instances.",
         "Verified ghost definitions and lemmas. They are the loop invariants of `Vox_table_search.candidates` and `groups` in [the flat hash table](demo:flat-hash-table), consumed by [`vox_table_stop_proof.ml`](src:verification/library/vox_table_stop_proof.ml)."
@@ -967,7 +967,7 @@
     "what": {
       "short": "Proves the freshly allocated or cleared table valid: all slots empty, all control bytes EMPTY, zero counts and trivial routes.",
       "long": [
-        "`empty_distinct`, `empty_count`, `no_deleted`, `shape`, `clones`, `cells` and `routes` establish each conjunct of `Vox_table_invariant.valid` for `Vox_table_model.initial capacity None` with routes `repeat capacity (0, 0)`. `initial` combines them for any power-of-two capacity in `[16, 2^30]` whose ghost plan matches.",
+        "`empty_distinct`, `empty_count`, `no_deleted`, `shape`, `clones`, `cells` and `routes` prove each conjunct of `Vox_table_invariant.valid` for `Vox_table_model.initial capacity None` with routes `repeat capacity (0, 0)`. `initial` combines them for any power-of-two capacity in `[16, 2^30]` whose ghost plan matches.",
         "Verified ghost code, used by `create`, `create_capacity` and `clear` in [`vox_table_mutation.ml`](src:verification/library/vox_table_mutation.ml) for [the flat hash table](demo:flat-hash-table)."
       ]
     },
@@ -1128,7 +1128,7 @@
     "what": {
       "short": "Map lemmas for the rebuild loop: prefixes of a distinct slot list stay distinct, a later key is absent from the prefix, and copy and skip steps extend the prefix.",
       "long": [
-        "`take_absent`, `take_distinct`, `prefix_absent` and `prefix_next` are facts about `Vox_sequence.take` of a slot list under `Vox_table_map`. `destination_absent` shows that the key at source index `i` is absent from a destination `same` as the first `i` slots. `copy_step` and `skip_step` extend the loop invariant by one slot, for a copied entry and for a hole; `empty_start` establishes it at index 0 for a fresh table.",
+        "`take_absent`, `take_distinct`, `prefix_absent` and `prefix_next` are facts about `Vox_sequence.take` of a slot list under `Vox_table_map`. `destination_absent` shows that the key at source index `i` is absent from a destination `same` as the first `i` slots. `copy_step` and `skip_step` extend the loop invariant by one slot, for a copied entry and for a hole; `empty_start` proves it at index 0 for a fresh table.",
         "Verified ghost code, used by [`vox_table_migrate.ml`](src:verification/library/vox_table_migrate.ml) and [`vox_table_resize.ml`](src:verification/library/vox_table_resize.ml) in [the flat hash table](demo:flat-hash-table)."
       ]
     },
@@ -1380,7 +1380,7 @@
       "short": "LZ4 specification: byte equality at a distance, the maximal match search, candidate validation (choose_match) and the four-byte multiplicative hash.",
       "long": [
         "Part of the ten-file [LZ4](demo:lz4) specification; it fixes how the compressor model hashes and matches. `source_matches_distance source index distance n` says the `n` bytes at `index` equal those `distance` bytes earlier. `scan_match` and `match_length` extend a match byte by byte up to a limit and return the maximal length. `choose_match source position limit hint` treats `hint` as a candidate earlier position: it returns `None` if the hint is negative, at or after `position`, more than 65,535 back, or if fewer than 4 bytes match, and otherwise the distance and maximal length. `hash_bytes` packs four bytes little-endian into an `int32`, multiplies by `0x9e3779b1l`, shifts right by 16 and returns the result, so hashes are 16-bit; `hash4` applies it at a position.",
-        "Trusted: the six `int32` externals (`int32_of_int`, `int32_to_int`, `int32_or`, `int32_mul`, `int32_lsl`, `int32_lsr`) are declared total with no contract, so nothing is proved about the values they compute; `hash_bytes` therefore falls back to 0 if the result is outside 0 to 65,535, which keeps its refinement provable, and the correctness of every match is re-established by `choose_match`, whatever the hash. The rest is checked. The body of `source_matches_distance_extend` is proof evidence that `vox_lz4_review_boundary.md` excludes from the review surface; its signature and termination are checked."
+        "Trusted: the six `int32` externals (`int32_of_int`, `int32_to_int`, `int32_or`, `int32_mul`, `int32_lsl`, `int32_lsr`) are declared total with no contract, so nothing is proved about the values they compute; `hash_bytes` therefore falls back to 0 if the result is outside 0 to 65,535, which keeps its refinement provable, and `choose_match` checks every match against the source bytes, whatever the hash. The rest is checked. The body of `source_matches_distance_extend` is proof evidence that `vox_lz4_review_boundary.md` excludes from the review surface; its signature and termination are checked."
       ]
     },
     "notes": [
@@ -1469,7 +1469,7 @@
   },
   "verification/library/vox_lz4_spec_storage.ml": {
     "what": {
-      "short": "The predicate initialized: the first count cells of a raw LZ4 buffer hold a byte in a ghost heap. Used by the trusted final-copy contract.",
+      "short": "The predicate initialized, which says the first count cells of a raw LZ4 buffer hold a byte in a ghost heap; the assumed final-copy contract uses it.",
       "long": [
         "A single ghost definition for the [LZ4](demo:lz4) executable boundary. `initialized h p count` holds when every location of raw buffer `p` below `count` maps to `Some (Some _)` in heap `h`, that is, has been written.",
         "It is a checked total definition, and it gives meaning to trusted contracts: `vox_lz4_review_boundary.md` names it, with `vox_lz4_heap_bytes.ml`, as the storage predicates behind `Vox_lz4_string_copy.copy_prefix`'s assumed contract. The buffer and snapshot modules use it too. It is not part of the ten-file semantic specification."
@@ -1486,7 +1486,7 @@
     },
     "notes": [
       {
-        "title": "Validated match consumption",
+        "title": "Checked match consumption",
         "from": "let[@def] rec (consume_match @ total)",
         "to": [
           "let rec (consume_match_sound @ total)",
@@ -1511,7 +1511,7 @@
       "short": "Unverified test reference: runs the compressor model's scan with stdlib maps and records the hash candidate seen at each position.",
       "long": [
         "A test helper for [LZ4](demo:lz4). `from_source` repeats the scan of the compressor model with `Map.Make (Int)` in place of the association list and returns an `int iarray` giving, for every visited position, the candidate the hash lookup produced (-1 elsewhere). `lz4_fast_reference.ml` feeds these hints to `Vox_lz4_general_plan.from_hints` and checks that the resulting plan equals the plans of the checked scanners.",
-        "It is compiled with the library and type-checked, but it has no contract beyond the source-length refinement on its argument, and its inner `scan` is not declared total, so it carries no proved property; its agreement with the models is established by testing."
+        "It is compiled with the library and type-checked, but it has no contract beyond the source-length refinement on its argument, and its inner `scan` is not declared total, so it carries no proved property; its agreement with the models is tested."
       ]
     }
   },
@@ -1663,7 +1663,7 @@
         "to": "&& G.own after.permission === model.E.state} @ unique",
         "lines": "9-22",
         "kind": "what",
-        "text": "The size precondition is established once at allocation and re-established for the rest of the plan by `encoded_size_loose_bound` at each sequence, so no capacity test remains in the code."
+        "text": "The size precondition holds from the allocation on: at each sequence `encoded_size_loose_bound` proves it for the rest of the plan, so no capacity test remains in the code."
       }
     ]
   },
@@ -1902,7 +1902,7 @@
       "short": "Decoder output buffer: a raw-memory block of at most 4 MiB with a ghost permission, a used count, and the invariant that the first used bytes are initialized.",
       "long": [
         "Type `t` is a record `{block; permission; used}` refined so that `used <= Raw_memory.length block <= 4194304`, the permission's heap covers every byte of the block and the marker location `location block (-1)`, and the first `used` bytes are initialized (`Vox_lz4_spec_storage.initialized`). Operations: `create` (through `Raw_memory.malloc`, `None` on allocation failure, with the heap equal to `Raw_memory.footprint block`), `append` (one `Raw_memory.write`, specified as a `Heap.put` at `location block used`), `get` and `observe` (reads below `used`), `used`, `capacity`, and `release` (`Raw_memory.free`). The lemmas `initialized_get`, `write_preserves_initialized` and `append_initialized` maintain the invariant.",
-        "Verified; the trusted parts are the `Raw_memory` externals it calls and the axiom `location_law`. Used by the public decoder `Vox_lz4_string_decode` and by the iarray decoder `Vox_lz4_packed`. [vox_lz4_encode_buffer.ml](src:verification/library/vox_lz4_encode_buffer.ml) is the same file with a larger size bound, for compressor output. Part of [the LZ4 demo](demo:lz4)."
+        "Verified; the trusted parts are the `Raw_memory` externals it calls and the assumed `location_law`. Used by the public decoder `Vox_lz4_string_decode` and by the iarray decoder `Vox_lz4_packed`. [vox_lz4_encode_buffer.ml](src:verification/library/vox_lz4_encode_buffer.ml) is the same file with a larger size bound, for compressor output. Part of [the LZ4 demo](demo:lz4)."
       ]
     },
     "notes": [
@@ -2019,7 +2019,7 @@
   },
   "verification/library/vox_lz4_string_codec.ml": {
     "what": {
-      "short": "A string compressor that scans to a plan and then encodes it, with its own compresses relation; Vox_lz4 does not use it (it uses Vox_lz4_streaming_codec).",
+      "short": "A string compressor that scans to a plan and then encodes it, with its own compresses relation; it is off the public path, where Vox_lz4 uses Vox_lz4_streaming_codec.",
       "long": [
         "Defines its own `compresses source wire` (length at most 4 MiB and `wire_matches_plan` against `Vox_lz4_fast_plan_model.from_source`), `compress` (build the plan with `Vox_lz4_string_scan.from_source`, write it with `Vox_lz4_string_encode.encode`, copy with the trusted `Vox_lz4_string_copy.copy_prefix`, and bridge to bytes with `Vox_lz4_general_bridge.model_wire`), `compress_string`, and the ghost lemma `compressed_decodes`. Its structure matches `Vox_lz4_streaming_codec`, except that the plan exists at run time.",
         "Verified. Off the public path of [the LZ4 demo](demo:lz4): its only client is `Vox_lz4_string_roundtrip`, which nothing references. Its `compresses` is a separate definition from `Vox_lz4_spec.compresses`, which is stated with `Vox_lz4_spec_scan.from_source`."
@@ -2754,7 +2754,7 @@
       "long": [
         "`Internal` is a forward model: a state `{core; budget}` whose `core` is `Line`, `Body`, `Complete`, `Malformed` or `Limit`, the byte transition `step`, the budgeted `advance`, and `feed`; accumulators grow at the end with `S.append`. Its proofs are the substance of the demo: `accounting` and `suffix_preservation` (exact byte accounting), `chunking_invariance`, the reachable-state invariant `reachable` (built from `valid_core` and `core_wire`) preserved by `feed_reachable`, soundness in `accepted_input`, completeness in `roundtrip` (through the unbudgeted `drain`, `serializer_core_roundtrip` and `feed_matches_drain`), `header_outcome`, and the line-error lemmas. `Reverse` proves the list-reversal facts, including `involution`.",
         "`Driver` is the code that runs. Its `push` and `consume` are the same machine with line, header and body accumulators consed in reverse and reversed once when complete. `Driver.model` maps a driver state to a model state, `simulation` proves that `consume` followed by `model` equals `Internal.feed` on the model, and `Driver.involution` (`model (model s) === s`) makes `model` injective, which is how equalities such as chunking invariance transfer from the model to driver states. The public `state` is `Internal.state` refined by `good (Driver.model machine)`; `run` executes only `Driver.consume`, and every model and proof call on that path is inside `ghost_`. The public wrappers (`initial`, `feed`, `parse`, `transition`, the observations and the laws) derive each law from its model counterpart through `feed_machine` and `machine_injective`.",
-        "All of it is verified: there are no externals, no `assume_` and no unproved statements. It belongs to [the HTTP parser](demo:http); [vox_http.mli](src:verification/library/vox_http.mli) seals `Internal`, `Reverse` and `Driver`, which `http_private_rejected.ml` checks. `build.sh` verifies this module without `-principal`."
+        "All of it is verified: there are no externals, no `assume_` and no statement without proof. It belongs to [the HTTP parser](demo:http); [vox_http.mli](src:verification/library/vox_http.mli) seals `Internal`, `Reverse` and `Driver`, which `http_private_rejected.ml` checks. `build.sh` verifies this module without `-principal`."
       ]
     },
     "notes": [
@@ -2832,7 +2832,7 @@
       "short": "Reader's guide to the RSA demo: domain and public claims, the review order, the trust statement, and an outline of the proof across the four implementation files.",
       "long": [
         "Documentation for [RSA](demo:rsa). It states the public guarantees of `modexp` and `roundtrip_correct`, lists the review surface in order (`stdlib/bigint.mli`, `vox_rsa_spec.ml`, `vox_rsa_spec.mli`, `vox_rsa.mli`, itself), and outlines the proof: exponent and remainder laws in `vox_rsa_arithmetic.ml`, extended Euclid and CRT uniqueness in `vox_rsa_number_theory.ml`, Fermat's little theorem in `vox_rsa_fermat.ml`, and the round trip and CRT decryption in `vox_rsa.ml`.",
-        "It states that the demo adds no arithmetic axioms or trusted RSA primitives, which holds at HEAD: the five RSA source files contain no `external`, no `assume_` and no statement without proof. It also records that the tests omit `-principal` because of a `Bigint` access-mode coercion in the ghost proof."
+        "It states that the demo assumes no arithmetic facts and adds no trusted RSA primitives, which holds at HEAD: the five RSA source files contain no `external`, no `assume_` and no statement without proof. It also records that the tests omit `-principal` because of a `Bigint` access-mode coercion in the ghost proof."
       ]
     }
   },
@@ -2860,7 +2860,7 @@
       "short": "The RSA definitions as checked equations: power_def, no_divisors_def, prime_def, gcd_def, lcm_def, lambda_def and valid_key_def.",
       "long": [
         "Declares each definition of [vox_rsa_spec.ml](src:verification/library/vox_rsa_spec.ml) as a total function together with a lemma stating its defining equation; the compiler checks the implementation against it, so the equations are verified. It exports no proof machinery.",
-        "It is part of the review surface of [RSA](demo:rsa): `vox_rsa.mli` aliases it as `Spec`, and clients call the `_def` lemmas to unfold `prime` or `valid_key` when establishing preconditions, as `rsa_public_client.ml` does."
+        "It is part of the review surface of [RSA](demo:rsa): `vox_rsa.mli` aliases it as `Spec`, and clients call the `_def` lemmas to unfold `prime` or `valid_key` when proving preconditions, as `rsa_public_client.ml` does."
       ]
     }
   },
@@ -2895,7 +2895,7 @@
     "what": {
       "short": "Extended Euclid with Bézout coefficients, and from it prime cancellation, the lcm properties and uniqueness in the Chinese remainder theorem.",
       "long": [
-        "`extended_gcd` returns a ghost record `bezout = {g; x; y}` with `g = gcd a b = a * x + b * y` and `g` dividing both inputs. `no_divisors_at` and `prime_divisors` turn trial-division primality into the fact that a prime's only positive divisors are 1 and itself; `prime_coprime` gives a Bézout identity `1 = a * x + p * y`; `prime_cancel` is Euclid's lemma (if `p` divides `a * b` and not `a`, it divides `b`). `lcm_properties` proves `lcm` is a positive common multiple dividing every common multiple, and `crt_unique` proves that two values in [0, p * q) with the same residues modulo distinct primes are equal.",
+        "`extended_gcd` returns a ghost record `bezout = {g; x; y}` with `g = gcd a b = a * x + b * y` and `g` dividing both inputs. `no_divisors_at` and `prime_divisors` turn trial-division primality into the fact that a prime's only positive divisors are 1 and itself; `prime_coprime` gives a Bézout identity `1 = a * x + p * y`; `prime_cancel` is Euclid's lemma (for `a >= 0` with `a mod p <> 0`, if `p` divides `a * b` it divides `b`). `lcm_properties` proves `lcm` is a positive common multiple dividing every common multiple, and `crt_unique` proves that two values in [0, p * q) with the same residues modulo distinct primes are equal.",
         "Part of [RSA](demo:rsa); all functions are `@ ghost` lemmas, verified, with no externals or assumptions. `prime_cancel` suppresses the slow-refinement warning; its comment records about 15.6 million solver resource units."
       ]
     },
@@ -2966,7 +2966,7 @@
       "short": "RSA on top of modexp: encrypt, decrypt, the round-trip theorem for distinct primes via Fermat and CRT, and CRT decryption with a proved recombination.",
       "long": [
         "`encrypt` and `decrypt` are `modexp`. `rsa_power` proves `power m (e * d) mod (p * q) = m` under the key conditions: `lambda_lcm` shows `p - 1` and `q - 1` divide `e * d - 1`, `fermat_period` applies at each prime, and `reduce_divisor` with `crt_unique` combines the two congruences. `roundtrip_correct` adds `reduce_power` and `power_multiply` to reach the statement about `power (power m e mod (p * q)) d`, and `roundtrip` runs encryption then decryption and returns the plaintext refined equal to the message. `decrypt_crt` computes residues modulo `p` and `q` with `modexp`, computes the inverse of `p` modulo `q` as `modexp p (q - 2) q` (justified by `prime_inverse` and `computed_inverse_correct`), and recombines with `recombine`, proved by `recombine_correct` and `decrypt_crt_correct`.",
-        "This is the top of [RSA](demo:rsa); [vox_rsa.mli](src:verification/library/vox_rsa.mli) exports `modexp`, `encrypt`, `decrypt`, `roundtrip_correct`, `roundtrip` and `decrypt_crt`. It is verified and, together with the four other RSA modules, adds no axioms: there is no `external`, no `assume_` and no unproved statement, so the demo trusts only the shared base, notably the built-in meaning of `Bigint`. The RSA modules are absent from `build.sh`; they are verified when the tests (`rsa.ml`, `rsa_rejected.ml`, `rsa_public_client.ml`) compile them from source."
+        "This is the top of [RSA](demo:rsa); [vox_rsa.mli](src:verification/library/vox_rsa.mli) exports `modexp`, `encrypt`, `decrypt`, `roundtrip_correct`, `roundtrip` and `decrypt_crt`. It is verified and, together with the four other RSA modules, adds no assumptions: there is no `external`, no `assume_` and no statement without proof, so the demo trusts only the shared base, notably the built-in meaning of `Bigint`. The RSA modules are absent from `build.sh`; they are verified when the tests (`rsa.ml`, `rsa_rejected.ml`, `rsa_public_client.ml`) compile them from source."
       ]
     },
     "notes": [
@@ -3010,7 +3010,7 @@
       "short": "Implementation of the edit-script equations; minimum_cost is a fuel-bounded distance, and minimum_cost_equation proves the fuel-free recurrence the interface states.",
       "long": [
         "Implements `source`, `target`, `cost`, `apply`, `invert`, `size` and `script_size` as `let[@def]` recursions, proves `apply_characterization` by induction, and defines `minimum_cost old fresh` as `distance` with fuel `size old + size fresh`. `minimum_cost_equation` proves that this satisfies the recurrence stated in [vox_diff_spec.mli](src:verification/library/vox_diff_spec.mli), which hides `distance` and the fuel.",
-        "Part of [Myers diff](demo:myers-diff); verified, with no externals or assumptions. The lemmas here are ordinary total functions that return `unit` (they are not declared `@ ghost`), so a caller that does not want them to run wraps the call in `ghost_`. `diff_rejected.ml` checks that clients cannot reach the private fuel."
+        "Part of [Myers diff](demo:myers-diff); verified, with no externals or assumptions. The lemmas here are ordinary total functions that return `unit`, declared without `@ ghost`, so a caller that does not want them to run wraps the call in `ghost_`. `diff_rejected.ml` checks that clients cannot reach the private fuel."
       ]
     },
     "notes": [
@@ -3057,7 +3057,7 @@
       "long": [
         "The private `Proof` and `M` modules hold the script reasoning: `restore_old`, `restore_new` and `reverse_into` for rebuilding a script from its reversed prefix, the `suffix` lemmas, `invert_correct`, `inverse_patch`, and in `M` the distance facts `neighbors`, `strip`, `crop`, `properties` and `lower_bound` (`minimum_cost (source s) (target s) <= cost s` for every script). A search `entry` is `{x; old_tail; new_tail; rev}`; the ghost predicate `valid old fresh k depth e` ties it to diagonal `k` and edit depth `depth`, and `dominance` shows that, on one diagonal, the entry further along the old input has no larger remaining distance. `Entry_proof`, `Choice_proof` and `Frontier_proof` collect the preservation lemmas.",
         "The running code is `snake` (consume equal heads as `Keep`), `step_delete`, `step_insert`, `choose` (keep the candidate further along the old input, insertion on ties, then snake), `advance` (the next frontier, one slot wider), `finished` (find an entry with both tails empty and rebuild its script with `reverse_into`), `search` and `diff`. `search` terminates by `[@@decreases budget]` on a ghost budget that starts at `minimum_cost old fresh`; its invariant says some slot's remaining distance is within the budget, so it returns a script of cost at most `depth + budget`, and `lower_bound` in `diff` turns this into equality. `optimal_at` is `apply_characterization` plus `lower_bound`.",
-        "Verified, with no externals, no `assume_` and no unproved statements; [vox_diff.mli](src:verification/library/vox_diff.mli) hides every helper module. Part of [Myers diff](demo:myers-diff). The module is absent from `build.sh` and is verified when the tests compile it from source. That `diff` runs no proof code is checked by the Lambda audit in `diff_boundary.ml`; the tie rule is checked only by tests in `diff.ml`."
+        "Verified, with no externals, no `assume_` and no statement without proof; [vox_diff.mli](src:verification/library/vox_diff.mli) hides every helper module. Part of [Myers diff](demo:myers-diff). The module is absent from `build.sh` and is verified when the tests compile it from source. That `diff` runs no proof code is checked by the Lambda audit in `diff_boundary.ml`; the tie rule is checked only by tests in `diff.ml`."
       ]
     },
     "notes": [

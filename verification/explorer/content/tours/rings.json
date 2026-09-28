@@ -76,12 +76,12 @@
       "text": "`splice` takes one token that owns two rings, with sentinels `s` and `t`, and requires the concatenation of their node lists to be `separated`. It removes the nonempty range `first :: rest`, whose last node the caller passes as `final`, from the first ring and inserts it after `destination_left` in the second. The postcondition gives both new models, proves both are rings and still separated together, and states the heap as the old one after six link writes (`spliced`, three applications of `connected`). The implementation reads three links and calls `Pref_ring.splice_range`, with `splice_law` carrying the proof; `Owned.splice` and `Owned.swap` wrap it for a pair of rings, and a move within one ring is outside the scope."
     },
     {
-      "title": "The trusted base: two heap laws",
+      "title": "The trusted base, and two heap laws",
       "path": "testsuite/tests/vox/pref_ring_general.ml",
       "from": "let (allocation_overwrite @ total)",
       "to": "else ())",
       "lines": "735-756",
-      "text": "Beyond the shared `Pref` base, the C primitives behind `alloc`, `read` and `write` and the checker's encoding of heap terms, the ring proofs call two heap laws, in this lemma only. `commute_law` reorders writes to distinct cells and `put_law` drops a write that a later write to the same cell overrides; `insert` needs them, through `allocation_inserted`, to show that the allocation's writes disappear under the insertion's. Like every law in `Pref.Heap` they are `external`s, so each call adds a trusted axiom instance. The other ring proofs rely only on the encoding of `put`, `at` and `mem` and on the contracts of the `Pref` operations."
+      "text": "Beyond the shared `Pref` base, the C primitives behind `alloc`, `read` and `write` and the checker's encoding of heap terms, the ring proofs call two heap laws, in this lemma only. `commute_law` reorders writes to distinct cells and `put_law` drops a write that a later write to the same cell overrides; `insert` needs them, through `allocation_inserted`, to show that the allocation's writes disappear under the insertion's. `put_law` is an `external`, so each call adds an assumed instance; `commute_law` is proved in `pref.ml`. The other ring proofs rely only on the encoding of `put`, `at` and `mem` and on the contracts of the `Pref` operations."
     },
     {
       "title": "Emitted code: the audited ring functions",

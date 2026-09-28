@@ -39,7 +39,7 @@
         "from": "val add_field_with_bounds :",
         "span": 5,
         "kind": "vox",
-        "text": "A ghost field has no slot, so its type bounds every modal axis of the record's kind but not externality. `relevant_axes_of_field` and `add_modality ?ghost` are the same rule at the level of axis sets."
+        "text": "A ghost field has no slot, so its type bounds every modal axis of the record's kind except externality. `relevant_axes_of_field` and `add_modality ?ghost` are the same rule at the level of axis sets."
       }
     ]
   },
@@ -71,7 +71,7 @@
         "from": "val is_inductive: Env.t -> type_expr -> bool",
         "span": 2,
         "kind": "vox",
-        "text": "`is_inductive` tests for an `[@@inductive]` type; `can_pattern_match_total` decides whether a match on the type can stay total. It treats abstract types and GADT existentials as leaves, which is the known open soundness issue; the fix is in progress and not merged."
+        "text": "`is_inductive` tests for an `[@@inductive]` type; `can_pattern_match_total` decides whether a match on the type can stay total. It treats abstract types and GADT existentials as leaves, which is a known soundness issue; the fix is in progress and not merged."
       },
       {
         "title": "The dependent binder of an arrow",
@@ -522,7 +522,7 @@
         "from": "| Texp_refine ->",
         "span": 10,
         "kind": "vox",
-        "text": "`Texp_refinement` prints without its `source` and `target` types, so `-dtypedtree` shows where refinements are eliminated and introduced but not which ones."
+        "text": "`Texp_refinement` prints without its `source` and `target` types, so `-dtypedtree` shows only where refinements are eliminated and introduced."
       },
       {
         "title": "assume_ and ===",
@@ -636,7 +636,7 @@
         "from": "val check :",
         "span": 2,
         "kind": "what",
-        "text": "`Error (loc, reason)` means the function is not structurally recursive, and is not an error: the function is then partial. `Typecore` stores the location and reason in `Includecore.partial_recursion` for later interface errors."
+        "text": "`Error (loc, reason)` means the function is not structurally recursive; the caller then makes it partial and reports nothing. `Typecore` stores the location and reason in `Includecore.partial_recursion` for later interface errors."
       }
     ]
   },
@@ -1076,7 +1076,7 @@
 
   "typing/vox_type.mli": {
     "what": {
-      "short": "Interface of Vox_type: classifies a type as int, bool or Bigint.t, the types with an exact SMT meaning."
+      "short": "Interface of Vox_type: classifies a type as int, bool or Bigint.t, the types with an exact SMT meaning, and decides which declarations carry a C primitive's built-in meaning."
     },
     "vox": {
       "short": "The whole file is new.",

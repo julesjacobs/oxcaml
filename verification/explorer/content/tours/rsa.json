@@ -1,6 +1,6 @@
 {
   "_about": "Demo tour of Vox_rsa. Sources: verification/catalogue/pages/rsa.md (its sources: list is the backbone), verification/library/vox_rsa.md, research/mastery-20260927/trust-builtins.md section 2.2 (Bigint meanings, name keying), research/mastery-20260927/runtime-checks-testing.md sections 2 and 8 (assume_), and the code at HEAD (8479634adc).",
-  "_status": "Name-keyed built-in meanings (stop 9): fix in progress on the trust-hardening branch, not merged at HEAD, as the content brief states.",
+  "_status": "Built-in meanings of C primitives are keyed by declaration since trust hardening merged (a187b9ab9c, Vox_type.carries_builtin_meaning); stop 9 says so.",
   "id": "rsa",
   "title": "Textbook RSA",
   "kind": "demo",
@@ -65,7 +65,7 @@
       "from": "let (fermat_little @ total) (a : t) (p : t) :",
       "to": "  end)",
       "lines": "210-228",
-      "text": "The proof is the classical one: multiplication by an `a` coprime to `p` permutes the residues `1, ..., p - 1`. `prime_coprime` returns Bézout coefficients for `a` and `p`, computed by the ghost function `extended_gcd`; `multiples_permute` uses the inverse they give to show, by counting occurrences, that the products of the multiples and of the interval agree, and `multiples_product` shows that the first is `a^(p-1)` times the second modulo `p`. `prime_cancel` then cancels the product, which is nonzero modulo `p`. `prime_cancel`, in [`vox_rsa_number_theory.ml`](src:verification/library/vox_rsa_number_theory.ml), suppresses the slow-refinement warning: its nonlinear arithmetic takes about 16 million solver resource units on macOS arm64, against a warning threshold of 1 million and a limit of 40 million. The library adds no axioms."
+      "text": "The proof is the classical one: multiplication by an `a` coprime to `p` permutes the residues `1, ..., p - 1`. `prime_coprime` returns Bézout coefficients for `a` and `p`, computed by the ghost function `extended_gcd`; `multiples_permute` uses the inverse they give to show, by counting occurrences, that the products of the multiples and of the interval agree, and `multiples_product` shows that the first is `a^(p-1)` times the second modulo `p`. `prime_cancel` then cancels the product, which is nonzero modulo `p`. `prime_cancel`, in [`vox_rsa_number_theory.ml`](src:verification/library/vox_rsa_number_theory.ml), suppresses the slow-refinement warning: its nonlinear arithmetic takes about 16 million solver resource units on macOS arm64, against a warning threshold of 1 million and a limit of 40 million. The RSA modules declare no `external`, so the proofs assume nothing beyond the shared base."
     },
     {
       "title": "Decryption by the Chinese remainder theorem",
@@ -80,8 +80,8 @@
       "path": "verification/vox_encoding.ml",
       "from": "| \"caml_bigint_neg\" -> unary Int Int_neg",
       "to": "| \"caml_bigint_modulo\" -> bigint_division Int_mod",
-      "lines": "880-885",
-      "text": "The demo trusts nothing beyond the base every demo trusts, and the part it leans on is here: the verifier gives `Bigint`'s C primitives the meaning of SMT integer arithmetic. Addition, subtraction and multiplication are exact, and `div` and `modulo` are SMT's Euclidean `div` and `mod`, with division by zero defined as in [`bigint.mli`](src:stdlib/bigint.mli): quotient 0, remainder the dividend. `runtime/bigint.c` implements them over base-10^9 digits and is trusted to agree. The meaning is keyed by the bytecode primitive name alone, so a user `external` with that name and a different native name would get it too; the fix (trust hardening) is in progress and not merged."
+      "lines": "883-888",
+      "text": "The demo trusts nothing beyond the base every demo trusts, and the part it leans on is here: the verifier gives `Bigint`'s C primitives the meaning of SMT integer arithmetic. Addition, subtraction and multiplication are exact, and `div` and `modulo` are SMT's Euclidean `div` and `mod`, with division by zero defined as in [`bigint.mli`](src:stdlib/bigint.mli): quotient 0, remainder the dividend. `runtime/bigint.c` implements them over base-10^9 digits and is assumed to agree. The meaning belongs to `Bigint`'s own declarations: `Vox_type.carries_builtin_meaning` gives it only to an `external` of `Stdlib__Bigint` with the library's native name, so a user `external` that names `caml_bigint_add` gets none ([builtin_declaration_identity.ml](src:testsuite/tests/vox/builtin_declaration_identity.ml))."
     },
     {
       "title": "Tests: preconditions checked at run time",

@@ -6,7 +6,7 @@
   "demo": "merge-sort",
   "order": 30,
   "summary": [
-    "`Vox_merge_sort.Make` is a merge sort on immutable lists, generic in the element type and its order, proved to return a sorted permutation of its input. It also has a cost bound, stated with erased credit tokens: each call of the comparator spends one credit, and `sort` spends at most n⌈log₂ n⌉. Vox has no built-in notion of cost. The credits are a verified library built from uniqueness, ghost fields and refinements.",
+    "`Vox_merge_sort.Make` is a merge sort on immutable lists, generic in the element type and its order, proved to return a sorted permutation of its input. It also has a cost bound, stated with erased credit tokens: each call of the comparator spends one credit, and `sort` spends at most n⌈log₂ n⌉. Vox has no built-in notion of cost: the credits are a verified library built from uniqueness, ghost fields and refinements.",
     "The tour reads the functor's parameters and contract, the credit signature, a client and a rejected client, then the implementation: the token type, the merge that spends, the invariant of the recursion and the proof that its budget is n⌈log₂ n⌉. The [catalogue page](demo:merge-sort) states the claim, the trusted base and the scope."
   ],
   "stops": [
@@ -32,7 +32,7 @@
       "from": "module type S = sig",
       "to": "end",
       "lines": "3-33",
-      "text": "A token is `void`: it has no run-time representation, and `credits` is a ghost observation. `tick` spends one credit, `split` and `merge` conserve the total and `empty` makes zero; `Budget.create`, which makes credits, exists only on the result of the generative functor `Make ()`, which the sort does not receive. Uniqueness forbids copying a token, and each `Make ()` has its own token type. It follows that the sort makes at most `budget n` calls to `Compare.compare`, but that step is an argument from the signatures; the checked statement is the bound on credits. Beyond the checker, this argument is the demo's trusted base: the merge-sort, credit and cost modules contain no `external` or `assume_`."
+      "text": "A token is `void`: it has no run-time representation, and `credits` is a ghost observation. `tick` spends one credit, `split` and `merge` conserve the total and `empty` makes zero; `Budget.create`, which makes credits, exists only on the result of the generative functor `Make ()`, which the sort does not receive. Uniqueness forbids copying a token, and each `Make ()` has its own token type. It follows that the sort makes at most `budget n` calls to `Compare.compare`; that step is an argument from the signatures, and the proved statement is the bound on credits. Beyond the checker, this argument is the demo's trusted base: the merge-sort, credit and cost modules contain no `external` or `assume_`."
     },
     {
       "title": "A client: integers, one credit per comparison",

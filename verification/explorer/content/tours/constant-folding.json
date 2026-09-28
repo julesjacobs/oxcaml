@@ -74,7 +74,7 @@
       "to": "maximum modulus minimum modulus);",
       "lines": "974-981",
       "focus": "verification/",
-      "text": "The demo adds nothing to the trusted base; what its claim about wrapping rests on is the checker's meaning of `int`. `Stdlib.( + )` is the primitive `%addint`, which [`vox_encoding.ml`](src:verification/vox_encoding.ml) maps to the SMT operator `Add` of sort `Int63`. In a query without bitwise operations, `Add` is printed as this `int63_add`: addition on SMT `Int` with one correction by 2^63, which is exact because every `int` term carries a range assertion for [-2^62, 2^62). A query with a bitwise operation uses 63-bit bit-vectors and `bvadd` instead. The meaning is attached by primitive name; a fix that keys built-in meanings by declaration, for user externals that reuse a built-in name, is in progress and not yet merged."
+      "text": "The demo adds nothing to the trusted base; what its claim about wrapping rests on is the checker's meaning of `int`. `Stdlib.( + )` is the primitive `%addint`, which [`vox_encoding.ml`](src:verification/vox_encoding.ml) maps to the SMT operator `Add` of sort `Int63`. In a query without bitwise operations, `Add` is printed as this `int63_add`: addition on SMT `Int` with one correction by 2^63, which is exact because every `int` term carries a range assertion for [-2^62, 2^62). A query with a bitwise operation uses 63-bit bit-vectors and `bvadd` instead. Every `external` that names `%addint` gets this meaning, which is sound because the compiler implements `%` primitives itself; a C primitive's meaning, such as `Bigint`'s, belongs only to the library's own declaration of it."
     }
   ]
 }

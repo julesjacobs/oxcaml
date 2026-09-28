@@ -40,7 +40,7 @@
       "from": "(* Lowering a regex to a DFA may fail. *)",
       "to": "|}]",
       "lines": "280-294",
-      "text": "`dfa_boundary.ml` checks this claim against the public interfaces and requires it to fail: nothing in `regex_language.mli` says that `lower` returns `Some`. Inside the implementation the bridge proves that the raw table is always built (`compiled_lower_raw_complete`); whether it passes the validity check is left unproved, and in Vox's logic the check does fail for large enough regexes (stop 8). Against the implementation, [`regex.ml`](src:testsuite/tests/vox/regex.ml) rejects three false claims, among them `fabricated_evidence`, which offers `Epsilon_match` as the derivation for every match."
+      "text": "`dfa_boundary.ml` checks this claim against the public interfaces and requires it to fail: nothing in `regex_language.mli` says that `lower` returns `Some`. Inside the implementation the bridge proves that the raw table is always built (`compiled_lower_raw_complete`); nothing proves that it passes the validity check, and in Vox's logic the check does fail for large enough regexes (stop 8). Against the implementation, [`regex.ml`](src:testsuite/tests/vox/regex.ml) rejects three false claims, among them `fabricated_evidence`, which offers `Epsilon_match` as the derivation for every match."
     },
     {
       "title": "The matcher: Brzozowski derivatives",

@@ -35,7 +35,7 @@
       "short": "Refinements are rigid in unify, moregen and eqtype; dependent arrows align binders; scope tracking for term dependencies; the totality tests on types.",
       "long": [
         "Two `Trefine` nodes unify when their payloads unify and their predicates are alpha-equal after path normalization (`refinement_predicates_equal`); a refined and an unrefined type never unify, and there is no subsumption. The predicates are compared without their types, which is an open issue (the same law can be reused at another type); variance treats parameters that occur only in predicate types as non-phantom to limit it.",
-        "A predicate can mention term variables, so a type now has term dependencies. `register_refinement_value_scope` and `Refinement_scope_escape` extend the GADT-style escape check to them, and `apply_dependent_type` substitutes an argument for a dependent binder.",
+        "A predicate can mention term variables, so a type now has term dependencies. `register_refinement_value_scope` and `Refinement_scope_escape` extend the GADT-style escape check to them. `Typecore` substitutes an argument for a dependent binder with `substitute_refinement_expression`, and renames one with `substitute_refinement_ident`; `apply_dependent_type` is exported but has no caller.",
         "`is_inductive` and `can_pattern_match_total` decide when a match is total: the representation of the scrutinee's type must not lead back to the type itself, except through the direct, unchanged recursive fields of an `[@@inductive]` type. This stops a Landin-style knot from being built and taken apart in total code."
       ]
     },
@@ -55,7 +55,7 @@
         "from": "let can_pattern_match_total env ty",
         "to": "check Path.Set.empty ty",
         "kind": "vox",
-        "text": "Variants and records are checked by `declaration_can_pattern_match_total`, which walks the representation and rejects any route back to the type other than a direct, unchanged recursive field of an `[@@inductive]` type. An abstract or open type is treated as a leaf there, so a knot hidden behind an abstract type or a GADT existential is not detected: this is a known open soundness issue."
+        "text": "Variants and records are checked by `declaration_can_pattern_match_total`, which walks the representation and rejects any route back to the type other than a direct, unchanged recursive field of an `[@@inductive]` type. An abstract or open type is treated as a leaf there, so a knot hidden behind an abstract type or a GADT existential is not detected: this is a known soundness issue whose fix is in progress and not merged."
       }
     ]
   },
@@ -65,7 +65,7 @@
       "long": "`iter_type_expr`, `snapshot`/`backtrack` and the `Jkind0` module (the parts of jkinds that `Types` needs) live here."
     },
     "vox": {
-      "short": "fold_type_expr visits a refinement's payload and copy_type_desc copies its predicate too; ghost fields count in a record's with-bounds but not its externality.",
+      "short": "fold_type_expr visits a refinement's payload and copy_type_desc copies its predicate too; ghost fields count in a record's with-bounds on every axis except externality.",
       "long": "`add_field_with_bounds ~ghost` adds a ghost field's type as a bound on every modal axis except externality, since the field has no slot. `Mod_bounds.min_crossable` is `min` with ghostliness pinned to no crossing, because no type crosses ghostliness."
     }
   },
@@ -83,7 +83,7 @@
         "**Refinement boundaries.** `type_expect` introduces the outer refinement of an expected type: it checks the expression against the payload and records `Texp_refinement` with the refined target (`introduce_refinement`), which the verifier turns into a proof obligation. `rue` eliminates the outer refinement of an inferred type (`eliminate_refinement`), which the verifier assumes. A refined expected type also requires the value at total, stateless and portable modes, which is what lets refined types cross those axes.",
         "**Predicates** are typed as ordinary OCaml under `enter_total_ghost_context` (a total, stateless, portable closure lock in a ghost context), with the binder at an immutable total mode, then converted to a `refinement_expression` by `refinement_expression_of_typed`. `refine_ e` introduces a refinement explicitly; on a function it builds an eta-adapter. `assume_ x` requires a plain variable, is always partial, and becomes `Texp_assume`. `unreachable_ ()` is a proof of a `false`-refined unit followed by a kept `assert false`.",
         "**Totality.** Constructs that may fail or loop (`try`, loops, `assert`, mutation and mutable reads, `lazy`, objects, local exceptions, non-exhaustive matches, matches on types that fail `can_pattern_match_total`) constrain every enclosing closure to be partial through `Env.walk_locks_for_partial_construct`. A single `let rec` is total only through `Structural_recursion.check` or a `[@@decreases]` measure proved by `Verification.check_termination`.",
-        "**Ghost code.** `ghost_ e` requires a ghost-accepting context and types `e` as total inside a ghost context; reads of `@@ ghost` fields return a ghost value that keeps the record's other modes, including locality. `let[@def] f x = e` makes `f` total and generates the unchecked equation `f_def`. Warnings 223 to 226 point at ghost code that still runs and at redundant `ghost_`."
+        "**Ghost code.** `ghost_ e` requires a ghost-accepting context and types `e` as total inside a ghost context; reads of `@@ ghost` fields return a ghost value that keeps the record's other modes, including locality. `let[@def] f x = e` makes `f` total and generates the equation `f_def`, which the verifier assumes. Warnings 223 to 226 point at ghost code that still runs and at redundant `ghost_`."
       ]
     },
     "notes": [
@@ -156,6 +156,7 @@
       "short": "Runs the verifier on each unit before artifacts are written, and closes routes by which recursive modules could certify their own totality.",
       "long": [
         "`Verification.run_unit` is called after `force_delayed_checks` and the interface check, before the `.cmi`, `.cmt` and code are written. Values bound by `include` and `open struct` are registered as scopes for term dependencies.",
+        "`Vox_trust.check_external` warns (228) about trusted externals in structures and signatures, and after verification `Vox_trust.record_implementation` builds the unit's trust record, which `Env.save_signature` stores in the `.cmi`; packs merge their members' records (`Vox_trust.pack_record`).",
         "In a recursive module group, value signatures are weakened to partial while the group is typed, and a signature may not contain an `[@@inductive]` type, expose a total value whose type depends on the group, or contain other items that depend on the group in unsupported ways. When printing an inferred interface with the extension on, the totality and ghostliness of values are kept."
       ]
     }
@@ -169,7 +170,7 @@
       "short": "Adds the ghost-context flag, the total closure lock, walk_locks_for_partial_construct, and path-based lookups for elaborating stored predicates.",
       "long": [
         "`walk_locks_for_partial_construct` constrains every enclosing closure to be partial on the totality axis only; this is how partial constructs make functions partial. `add_total_closure_lock` restricts captures to what a total, stateless and portable computation may use.",
-        "Closure locks exclude ghostliness: capturing a ghost value does not make the closure ghost, while uses inside still see the value as ghost. `lookup_value_path` and `lookup_constructor_path` resolve already-resolved paths, never by printed name, when a stored predicate is re-elaborated."
+        "Closure locks exclude ghostliness: capturing a ghost value does not make the closure ghost, while uses inside still see the value as ghost. When a stored predicate is re-elaborated, `lookup_value_path` and `lookup_constructor_path` look up its resolved paths directly; printed names are not looked up again."
       ]
     }
   },
@@ -219,7 +220,7 @@
     },
     "vox": {
       "short": "Parses total, partial, real and ghost; total implies stateless and hence portable unless statefulness is written; ghost is not a modality.",
-      "long": "`dependent_argument_mode` (total, stateless, portable) is the view a dependent result type gets of its argument. `@@ ghost` on a record field is handled by `Typedecl` as a representation flag, not as a modality."
+      "long": "`dependent_argument_mode` (total, stateless, portable) is the view a dependent result type gets of its argument. `@@ ghost` on a record field is a representation flag, handled by `Typedecl`."
     }
   },
   "typing/jkind.ml": {
@@ -228,7 +229,7 @@
       "long": "A jkind pairs a layout with a mod-bound on each axis and with-bounds on type parameters; `Jkind.sub` and `intersection` decide kind compatibility."
     },
     "vox": {
-      "short": "Kinds gain the totality and ghostliness axes; ghost fields are left out of a record's layout but kept in its with-bounds.",
+      "short": "Kinds gain the totality and ghostliness axes; ghost fields take no space in a record's layout and still count in its with-bounds.",
       "long": "Kinds such as `immutable_data` now also cross totality. An all-ghost record reports `Void_creation Ghost_record` when its layout is explained."
     }
   },
@@ -238,7 +239,7 @@
       "long": "`crossing_of_type` and the subjkind check go through this representation."
     },
     "vox": {
-      "short": "A refined type's kind is its payload's, met with refinement_crossings: it crosses portability, totality and statefulness, but not uniqueness or locality.",
+      "short": "A refined type's kind is its payload's met with refinement_crossings, which adds crossing of portability, totality and statefulness and leaves the other axes as they were.",
       "long": "This is why `{f : int -> int | true}` is `value mod portable` while `int -> int` is not. It is sound because every introduction of a refinement checks the value at total, stateless and portable modes. Tokens inside refined types stay affine, since uniqueness and locality are not crossed."
     }
   },
@@ -288,7 +289,7 @@
       "long": "Used by `Typedecl` for every declaration and by `Includecore` when comparing variances."
     },
     "vox": {
-      "short": "Occurrences under a refinement are invariant; a parameter that occurs only in a predicate's types is invariant but not injective, so it is not phantom.",
+      "short": "Occurrences under a refinement are invariant; a parameter that occurs only in a predicate's types is invariant and non-injective, which keeps it from being phantom.",
       "long": "Otherwise `int t` could be converted to `bool t` and carry a fact proved at `int` to `bool` (the W8 fix, `70a56a181f`)."
     }
   },
@@ -308,8 +309,8 @@
       "long": "Meet and join are bitwise operations on this encoding."
     },
     "vox": {
-      "short": "Adds bit fields for totality and ghostliness, with accessors and setters.",
-      "long": "`oxcaml/tests/typing/axis_lattice_roundtrip_test.ml` checks the encoding."
+      "short": "Adds bit fields for totality and ghostliness; the .mli exposes only totality, and create pins ghostliness to Ghost.",
+      "long": "The ghostliness field (axis 11) has an accessor and a setter here, but [axis_lattice.mli](src:typing/axis_lattice.mli) hides them, and `create` always sets the field to `Ghost`, the top of `Real -> Ghost`, so no ikind bound crosses ghostliness. `oxcaml/tests/typing/axis_lattice_roundtrip_test.ml` checks the encoding."
     }
   },
   "typing/value_rec_check.ml": {
@@ -416,12 +417,45 @@
   },
   "typing/vox_type.ml": {
     "what": {
-      "short": "New in Vox: classifies a type as int, bool or Bigint.t, the three types with an exact SMT meaning, looking through refinements and aliases.",
-      "long": "Used by the measure check in `Typecore` (an `int` or `Bigint` measure) and by `Translcore` to decide how `===` can be checked at run time."
+      "short": "New in Vox: classifies a type as int, bool or Bigint.t, the types with an exact SMT meaning, and says which external declarations carry a C primitive's built-in meaning.",
+      "long": [
+        "Used by the measure check in `Typecore` (an `int` or `Bigint` measure) and by `Translcore` to decide how `===` can be checked at run time.",
+        "`builtin_c_primitives` lists the C primitives with a built-in meaning in the verifier (`Bigint`, the trailing-zero count, iarray and sequence primitives, the `Pref` heap and the borrow transitions), each with the library units that own it. `carries_builtin_meaning` holds for such a primitive only when the declaration's UID belongs to one of those units and its native name is the library's; `Vox_encoding.primitive` and `Vox_trust` use it. `%` primitives need no check: the compiler implements them whatever the declaration says."
+      ]
     },
     "vox": {
       "short": "The whole file is new.",
       "long": "`Bigint.t` is recognized by its path `Stdlib__Bigint.t`."
+    },
+    "notes": [
+      {
+        "title": "Built-in meanings belong to declarations",
+        "from": "let builtin_c_primitives =",
+        "to": "\"caml_borrow_frame_right\" ] ]",
+        "kind": "vox",
+        "text": "Before trust hardening (`9864700994`) the verifier looked meanings up by bytecode primitive name alone, so `external plus : Bigint.t -> Bigint.t -> Bigint.t = \"caml_bigint_add\" \"caml_bigint_sub\"` verified `2 + 3 = 5` while native code subtracted. [builtin_declaration_identity.ml](src:testsuite/tests/vox/builtin_declaration_identity.ml) is the regression test."
+      }
+    ]
+  },
+  "typing/vox_trust.ml": {
+    "what": {
+      "short": "New in Vox: what a unit's verification trusts, recorded in its compiled files; warnings 228 (trusted external) and 229 (unverified import); -vox-library and -vox-audit.",
+      "long": [
+        "`trusted_external` classifies an external as trusted when its type states a refinement (`Refined`), it provides a value declared total (`Total`), or it is a `%identity` cast to total (`Total_cast`), looking through abbreviations, record fields and first-class module types. `check_external` reports such a declaration with warning 228 unless the unit is compiled with `-vox-library`, as the verified library and the standard library are.",
+        "`record_implementation` and `interface_record` build a unit's `Cmi_format.vox_unit`: its trusted externals, the definitions that apply a totality cast, uses of unsafe features (`Obj`, `Marshal`'s readers, `input_value`, unsafe primitives, `-unsafe`), other externals, and whether verification ran. A compilation with `-smt-assume-verified` is recorded as not verified unless a `.cmo` or `.cmi` left by a verified compilation of the same parse tree, settings and interfaces vouches for it (`counterparts`), which is how the library's native build counts as verified. A verified unit that imports an interface recorded as not verified draws warning 229."
+      ]
+    },
+    "vox": {
+      "short": "The whole file is new, from trust hardening (a187b9ab9c)."
+    }
+  },
+  "typing/vox_trust.mli": {
+    "what": {
+      "short": "Interface of Vox_trust: the -vox-library and -vox-audit flags, trusted-external classification and warning, and building, reading and merging units' trust records."
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "The implementation is described at [vox_trust.ml](src:typing/vox_trust.ml)."
     }
   },
   "lambda/lambda.ml": {
@@ -522,7 +556,7 @@
     },
     "vox": {
       "short": "Adds Ptyp_refine, a binder on Ptyp_arrow, and Pexp_ghost, Pexp_refine, Pexp_assume and Pexp_let_refine.",
-      "long": "In `{x : T | P}` the binder scopes over `P` but not `T`; in `(x : T1) -> T2` it scopes over `T2`. The extra argument of `Ptyp_arrow` changes a constructor that ppx code commonly matches on."
+      "long": "In `{x : T | P}` the binder scopes over `P` only; in `(x : T1) -> T2` it scopes over `T2`. The extra argument of `Ptyp_arrow` changes a constructor that ppx code commonly matches on."
     }
   },
   "parsing/ast_helper.ml": {
@@ -551,7 +585,7 @@
       "long": "Built on the GADT in `utils/language_extension_kernel.ml`."
     },
     "vox": {
-      "short": "Adds Refinement_types, an alpha extension named refinement_types, not erasable.",
+      "short": "Adds Refinement_types, a non-erasable alpha extension named refinement_types.",
       "long": "It gates the refinement syntax in the typer: refinement types, dependent binders, `refine_`, `assume_`, `unreachable_`, `===`, `[@def]` and `[@decreases]`. Totality and ghost modes do not need it."
     }
   },
@@ -605,16 +639,34 @@
       "long": "One added line."
     }
   },
+  "driver/vox_audit.ml": {
+    "what": {
+      "short": "New in Vox: reads the trust records of compiled units from .cmi, .cmo and .cmx files, and prints the -vox-audit report for a unit and everything it depends on.",
+      "long": "`print_unit` follows the imports of the unit's interface and implementation through the load path and lists, by kind, what each unit trusts: refined and total externals, totality casts and their uses, unsafe features, other externals, units whose verification was skipped, and solvers other than the expected one. It also names units, and compiled files, that have no record, and units whose files it cannot find. `counterparts` reads the records an earlier compilation left in a unit's `.cmo` and `.cmi`, for `Vox_trust`."
+    },
+    "vox": {
+      "short": "The whole file is new, from trust hardening (a187b9ab9c)."
+    }
+  },
+  "driver/vox_audit.mli": {
+    "what": {
+      "short": "Interface of Vox_audit: counterparts, the records earlier compilations left for a unit, and print_unit, the -vox-audit report."
+    },
+    "vox": {
+      "short": "The whole file is new."
+    }
+  },
   "utils/warnings.ml": {
     "what": {
       "short": "The definition of every compiler warning: constructors, numbers, names, descriptions, default settings and messages.",
       "long": "Warnings are enabled, disabled and made errors by number or name through `-w` and `-warn-error`."
     },
     "vox": {
-      "short": "Adds warnings 222 (slow proof), 223 to 226 (ghost code that still runs) and 227 (unused proof step, off by default), and a hint on unused refined units.",
+      "short": "Adds warnings 222 (slow proof), 223 to 226 (ghost code that still runs), 227 (unused proof step, off by default), 228 and 229 (trusted externals, unverified imports).",
       "long": [
         "222 `slow-refinement`: a proof used more solver resources than `-smt-resource-warning`. 223 `unerased-ghost-body`: a total function with a ghost result whose body is not `ghost_ (...)`. 224 `unerased-ghost-call`: real code calls such a function only to discard its result. 225 `redundant-ghost`. 226 `proof-only-binding`: a value computed at run time but used only in ghost code.",
-        "227 `unused-proof-step` reports lemma calls, `assume_` checks and refined arguments whose facts no proof in the function used, found from Z3 unsat cores. Warning 26 now suggests replacing an unused binding of a refined `unit` by a statement."
+        "227 `unused-proof-step` reports lemma calls, `assume_` checks and refined arguments whose facts no proof in the function used, found from Z3 unsat cores. Warning 26 now suggests replacing an unused binding of a refined `unit` by a statement.",
+        "228 `trusted-external`, on by default: an external outside the verified library whose type states a refinement or totality, or a `%identity` cast to total, which the verifier assumes. 229 `unverified-import`: a verified unit imports an interface whose compilation skipped verification with `-smt-assume-verified`, with no verified compilation of the same program to vouch for it."
       ]
     }
   },
@@ -655,7 +707,7 @@
     },
     "vox": {
       "short": "The whole file is new.",
-      "long": "The verifier encodes `Bigint.t` as SMT `Int`, so a `Bigint` measure or ghost counter never wraps. The C implementation is trusted; it was checked by differential testing."
+      "long": "The verifier encodes `Bigint.t` as SMT `Int`, so a `Bigint` measure or ghost counter never wraps. The C implementation is assumed correct; it was tested by differential testing."
     }
   },
   "stdlib/bigint.ml": {
@@ -714,8 +766,8 @@
       "long": "Tail-modulo-cons is used for the non-tail-recursive functions."
     },
     "vox": {
-      "short": "The totality annotations are trusted: each function is re-bound through trust_total, an identity external at mode total, rather than checked.",
-      "long": "Forty-five functions are re-bound this way at the end of the file. The two functions of `Refined` introduce their precondition (`l` is not `[]`) with `let refine_` and are cast the same way."
+      "short": "Most functions are checked total; concat_map, merge, the four sorts, to_seq and Refined.hd and tl are re-bound through trust_total, an identity external at mode total.",
+      "long": "Trust hardening (`46c8f22a56`) removed the cast from 38 of the 45 functions that had it: written with explicit parameters, they pass the structural-recursion check. The seven that keep it are `concat_map` (mutual recursion), `merge`, `stable_sort`, `sort`, `fast_sort` and `sort_uniq` (their recursion is not structural) and `to_seq` (partial self-application). The two functions of `Refined` introduce their precondition (`l` is not `[]`) with `let refine_` and are cast the same way."
     }
   },
   "stdlib/listLabels.mli": {
@@ -744,8 +796,8 @@
       "long": "AVL-style balanced trees."
     },
     "vox": {
-      "short": "MakeTotal applies Make and re-binds its operations through trust_total and similar identity externals, so their totality is trusted, not checked.",
-      "long": "The functor's law witnesses are required by its signature but are not used by the implementation."
+      "short": "MakeTotal applies Make and re-binds its operations through trust_total and similar identity externals, so their totality is assumed.",
+      "long": "The functor's law witnesses are required by its signature; the implementation does not use them."
     }
   },
   "stdlib/set.mli": {
@@ -764,7 +816,7 @@
       "long": "AVL-style balanced trees."
     },
     "vox": {
-      "short": "MakeTotal applies Make and re-binds its operations through trust_total, so their totality is trusted, not checked.",
+      "short": "MakeTotal applies Make and re-binds its operations through trust_total, so their totality is assumed.",
       "long": "As for `Map.MakeTotal`."
     }
   },
@@ -795,7 +847,7 @@
     },
     "vox": {
       "short": "Re-binds the total functions through trust_total, and defines Refined.get as a refined external.",
-      "long": "As for `List`, the totality of these functions is trusted."
+      "long": "As in `Map.MakeTotal` and `Set.MakeTotal`, the totality of these functions is assumed."
     }
   },
   "stdlib/templates/map.template.mli": {

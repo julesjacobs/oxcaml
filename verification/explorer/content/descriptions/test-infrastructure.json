@@ -281,10 +281,10 @@
       "short": "A Vox-added script that builds, once per test run, the library modules that the selected tests list in prebuilt_modules."
     },
     "vox": {
-      "short": "New. It builds and verifies each listed module with both test compilers, in parallel, incrementally, into the directory that ocamltest links from.",
+      "short": "New: builds and verifies each listed module with both test compilers, in parallel and incrementally, into the directory that ocamltest links from.",
       "long": [
         "The modules and their flags come from `ocamltest -list-sources`. A module's flags are the union of `-principal` and `-g` over the tests in the same directories that list it, so they do not depend on which tests were selected; any compiler output fails the build, as it would have failed the tests that compiled the module themselves.",
-        "Each compiler builds and verifies its own tree, and neither uses `-smt-assume-verified`, which changes some `.cmi` files. Objects depend on the compilers, the standard library and the script by content. Without `z3` on `PATH` it does nothing, and the tests that use the library skip."
+        "Each compiler builds and verifies its own tree without `-smt-assume-verified`, which would record in the compiled units that verification was skipped; modules of `verification/library` get `-vox-library`, as in the library's own build. Objects depend on the compilers, the standard library and the script by content. Without `z3` on `PATH` it does nothing, and the tests that use the library skip."
       ]
     }
   },
@@ -293,7 +293,7 @@
       "short": "A Vox-added script that prints the tests in vox/ and typing-refinement-types/ that a change since a base revision can affect."
     },
     "vox": {
-      "short": "New; used by ./dev test --affected BASE. A test is affected if it compiles or reads a changed file, directly or through ocamldep dependencies.",
+      "short": "New, used by ./dev test --affected BASE: a test is affected if it compiles or reads a changed file, directly or through ocamldep dependencies.",
       "long": "Changed files include uncommitted ones and untracked files below `testsuite/tests` and `verification/library`. A change anywhere else, except under `research/` or `verification/catalogue/` or to a Markdown file, affects every test, because the compiler itself may have changed. A change to the header of another test that lists the same prebuilt module also counts, since it can change that module's flags."
     }
   },
@@ -303,7 +303,7 @@
       "short": "Type-checker tests for refinement types: syntax and printing, dependent arrows, scope escape, assume_, [@def], cross-module round trips and failure modes."
     },
     "vox": {
-      "short": "New in Vox, 55 files. Unlike tests/vox/, these focus on the typer's side of refinements; most are expect tests, and those that need proofs start with has-z3.",
+      "short": "New in Vox (81 files): the typer's side of refinements, mostly as expect tests; those that need proofs start with has-z3.",
       "long": [
         "`type-formers.ml` covers `{x : t | p}` in every type position; `dependent-*.ml` the dependent arrow `(x : t) -> u`, including labels and functor application; `scope-extrusion.ml`, `scope_backtracking.ml` and `include_refinement_scope.ml` the escape check for term variables that predicates mention; `assume*.ml` `assume_`, including its run-time check under `-noassert`; `definition-*.ml` `let[@def]` and its generated `f_def`.",
         "The `*-roundtrip/` directories compile an interface and use it from a second unit, to check that refinements, dependent binders, `Bigint` and `===` survive `.cmi` serialization and substitution. `no_unverified_cmi.ml`, `numerical_no_cmi.ml` and `numerical_solver_failure.ml` check that a failed or impossible proof leaves no `.cmi`, using `file-not-exists`. `rectypes-incompatible*.ml` check that `-rectypes` and `#rectypes` are refused with the extension."
@@ -315,7 +315,7 @@
       "short": "Checks that a unit whose refinement cannot be proved produces no .cmi, with both ocamlc and ocamlopt."
     },
     "vox": {
-      "short": "New. Verification runs before any artifact is written, so a client can never compile against an interface whose refinements were not proved."
+      "short": "New: verification runs before any artifact is written, so a failed proof leaves no interface for a client to compile against."
     }
   },
   "testsuite/tests/typing-refinement-types/extension-disabled-scope/": {
@@ -323,7 +323,7 @@
       "short": "A producer interface compiled with refinement_types and a consumer compiled without it."
     },
     "vox": {
-      "short": "New. A client that does not enable the extension still sees refinements from an interface, and the scope-escape check still applies to it."
+      "short": "New: a client that does not enable the extension still sees refinements from an interface, and the scope-escape check still applies to it."
     }
   },
   "testsuite/tests/typing-refinement-types/total_printing.ml": {
@@ -331,7 +331,7 @@
       "short": "Checks the interface that ocamlc -i prints for total, ghost and partial values."
     },
     "vox": {
-      "short": "New. A printed interface must keep @@ total, or a client compiled against it would see the values as partial."
+      "short": "New: a printed interface must keep @@ total, or a client compiled against it would see the values as partial."
     }
   },
   "testsuite/tests/typing-refinement-types/vc_dumps.ml": {
@@ -339,7 +339,7 @@
       "short": "Compiles a trivial refinement with -dvc -dsmtlib and compares the dumped verification condition and SMT-LIB query."
     },
     "vox": {
-      "short": "New. Pins the format of the verifier's debugging dumps."
+      "short": "A new test that pins the format of the verifier's debugging dumps."
     }
   },
 
@@ -350,7 +350,7 @@
     "vox": {
       "short": "Vox adds the totality tests (totality*.ml, structural_recursion.ml, recursive_module_*.ml, inductive_functors.ml) and updates outputs that now print total and partial.",
       "long": [
-        "Totality is inferred for every structure, so many upstream expected outputs change: a module or functor that was printed `@@ stateless` is now `@@ total`, since total implies stateless and portable and the printer shows the strongest mode, and a structure that was `@ stateful` is now `@ partial`.",
+        "Totality is inferred for every structure, so many upstream expected outputs change: a module or functor that was printed `@@ stateless` is now `@@ total`, since `total` implies `stateless` and `portable` unless statefulness is stated, and the printer leaves implied modalities out, and a structure that was `@ stateful` is now `@ partial`.",
         "`inductive-modules/` and `phantom-parameters-modules/` are separate-compilation tests: an `[@@inductive]` guarantee must agree between interface and implementation (it can only be hidden behind an abstract type), and `[@@phantom_parameters]` lets a field of type `node Handle.t` be projected in total code."
       ]
     }
@@ -360,7 +360,7 @@
       "short": "Expect tests of the totality axis on expressions, closures and modules."
     },
     "vox": {
-      "short": "New. Which constructs make a closure partial (assert, loops, lazy, objects, fresh exception constructors, including in local modules) and which values can be used at total."
+      "short": "New: which constructs make a closure partial (assert, loops, lazy, objects, fresh exception constructors, including in local modules) and which values can be used at total."
     }
   },
   "testsuite/tests/typing-modes/totality_inductive.ml": {
@@ -368,7 +368,7 @@
       "short": "Expect tests of pattern matching in total code on recursive types."
     },
     "vox": {
-      "short": "New. An ordinary recursive type cannot be destructured in total code; an [@@inductive] one can, and its values cannot be built cyclically with let rec.",
+      "short": "New: an ordinary recursive type cannot be destructured in total code; an [@@inductive] one can, and its values cannot be built cyclically with let rec.",
       "long": "It also rejects invalid `[@@inductive]` declarations (a recursive occurrence under an arrow) and checks that the guarantee is compared by signature inclusion. `let rec cyclic_nat = S cyclic_nat` fails with the ordinary \"not allowed as right-hand side of let rec\" error."
     }
   },
@@ -377,7 +377,7 @@
       "short": "Expect tests of totality for records whose fields mention the record type through an abstract type constructor."
     },
     "vox": {
-      "short": "New. Projecting run from { run : callback heap -> bool } is partial, because an abstract heap may contain its argument and close a knot.",
+      "short": "New: projecting run from { run : callback heap -> bool } is partial, because an abstract heap may contain its argument and close a knot.",
       "long": "This covers abstract type applications whose arguments lead back to the type. An abstract type or GADT existential that hides a knot without such an argument is the known open issue in `Ctype.can_pattern_match_total`, whose fix is in progress and not merged."
     }
   },
@@ -386,7 +386,7 @@
       "short": "Expect tests of total let rec by structural recursion on [@@inductive] types."
     },
     "vox": {
-      "short": "New. Which recursive calls Structural_recursion.check accepts as structurally smaller, and inference of totality for recursive functions."
+      "short": "New: which recursive calls Structural_recursion.check accepts as structurally smaller, and inference of totality for recursive functions."
     }
   },
   "testsuite/tests/typing-modes/recursive_module_totality.ml": {
@@ -394,7 +394,7 @@
       "short": "Expect tests of totality through recursive modules, run with and without -principal."
     },
     "vox": {
-      "short": "New. A container whose instantiation depends on the recursive module group cannot carry a total field or a total arrow result, except through arrow domains."
+      "short": "New: a container whose instantiation depends on the recursive module group cannot carry a total field or a total arrow result, except through arrow domains."
     }
   },
   "testsuite/tests/typing-modes/recursive_module_inductive.ml": {
@@ -402,7 +402,7 @@
       "short": "Expect tests of [@@inductive] declarations inside recursive modules."
     },
     "vox": {
-      "short": "New. A recursive module signature cannot introduce an inductive guarantee or a group-dependent alias to one; an existing inductive type may appear in value types."
+      "short": "New: a recursive module signature cannot introduce an inductive guarantee or a group-dependent alias to one; an existing inductive type may appear in value types."
     }
   },
   "testsuite/tests/typing-modes/inductive_functors.ml": {
@@ -410,7 +410,7 @@
       "short": "Expect tests of [@@inductive] types declared inside functors and in functor parameters."
     },
     "vox": {
-      "short": "New. A functor can define an inductive container over its parameter's element type and match on it in total code."
+      "short": "New: a functor can define an inductive container over its parameter's element type and match on it in total code."
     }
   },
   "testsuite/tests/typing-modes/val_modalities.ml": {
@@ -426,7 +426,7 @@
       "short": "Upstream expect tests of modes on functors and their parameters."
     },
     "vox": {
-      "short": "Outputs updated only: functors and modules printed @@ stateless are now @@ total, since an empty or pure body is inferred total."
+      "short": "Outputs updated only: functors and modules printed @@ stateless are now @@ total, since a body without partial constructs is inferred total."
     }
   },
 
@@ -436,7 +436,7 @@
     },
     "vox": {
       "short": "Expected outputs updated for the totality axis: kinds list total, and crossing errors gain a totality line; several files were also re-promoted by the #6806 cherry-pick.",
-      "long": "In kind annotations `mod ... stateless` becomes `mod ... total`, since crossing to total implies crossing to stateless. `subsumption/fuel.ml` re-exports `list` and must now repeat `[@@inductive]`, because the guarantee is part of the declaration."
+      "long": "In kind annotations `mod ... stateless` becomes `mod ... total`, since `total` in a `mod` bound implies `stateless` unless statefulness is stated. `subsumption/fuel.ml` re-exports `list` and must now repeat `[@@inductive]`, because the guarantee is part of the declaration."
     }
   },
   "testsuite/tests/typing-jkind-bounds/verbosity/verbosity2.ml": {
@@ -566,7 +566,7 @@
       "short": "A parser test for the scope of ghost_."
     },
     "vox": {
-      "short": "New. ghost_ binds like an application argument (ghost_ x + y is (ghost_ x) + y), ghost_ f x is a syntax error, and Pprintast round-trips each case."
+      "short": "New: ghost_ binds like an application argument (ghost_ x + y is (ghost_ x) + y), ghost_ f x is a syntax error, and Pprintast round-trips each case."
     }
   },
   "testsuite/tests/lib-bigint/": {
@@ -574,7 +574,7 @@
       "short": "Run-time tests of the Bigint standard-library module."
     },
     "vox": {
-      "short": "New. Checks Bigint arithmetic and decimal conversion against expected strings, and that its operations can be used in total functions."
+      "short": "New: checks Bigint arithmetic and decimal conversion against expected strings, and that its operations can be used in total functions."
     }
   },
 

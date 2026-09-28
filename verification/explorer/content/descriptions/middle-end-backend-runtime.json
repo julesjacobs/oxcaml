@@ -172,7 +172,7 @@
   },
   "middle_end/flambda2/z3/": {
     "what": {
-      "short": "Z3 scripts that check bit-level identities behind Cmm helpers: tagged-integer comparisons and a sign-extension rewrite. Upstream; unrelated to Vox's use of Z3."
+      "short": "Upstream Z3 scripts, unrelated to Vox's use of Z3, that check bit-level identities behind Cmm helpers: tagged-integer comparisons and a sign-extension rewrite."
     }
   },
   "middle_end/flambda2/ui/": {
@@ -188,6 +188,10 @@
   "middle_end/compilenv.ml": {
     "what": {
       "short": "Per-unit compilation state shared by the middle end and backend: .cmx export info, imported unit infos, generic function needs, zero-alloc info."
+    },
+    "vox": {
+      "short": "A .cmx file now holds the unit's Vox trust record right after the magic number; write_unit_info takes it and read_vox_record reads it.",
+      "long": "The record comes before `unit_infos_raw`, so code that does not know that type can read it; `read_unit_info` skips it, and a file written before records existed reads as having none."
     }
   },
   "middle_end/backend_var.ml": {
@@ -287,7 +291,7 @@
     "vox": {
       "short": "Native inline expansions of Vox runtime primitives: borrow int accesses, raw-memory bytes, flat-table fields and 16-byte SIMD control-group matching.",
       "long": [
-        "Each case reads the block layout that the matching C stub in `runtime/pref.c` or `runtime/borrow.c` allocates; comments name the C function to keep in sync. None of these expansions checks an index: the refined external contracts in `verification/library/` make the index a verified precondition. The C versions used by bytecode check bounds for borrow slices (`borrow_index`) but not for raw memory or table slots.",
+        "Each case reads the block layout that the matching C stub in `runtime/pref.c` or `runtime/borrow.c` allocates; comments name the C function to keep in sync. None of these expansions checks an index: the refined external contracts in `verification/library/` make the index a verified precondition. Of the C versions used by bytecode, only the borrow-slice stubs check bounds (`borrow_index`); the raw-memory and table-slot stubs do not.",
         "`caml_vox_int_ctz_untagged` reuses the upstream count-trailing-zeros lowering, and `caml_pref_empty`, which returns a void token, becomes its argument followed by an empty tuple."
       ]
     },
@@ -438,7 +442,7 @@
       "short": "C stubs for Vox's owned heap cells (Pref, Unique_cell), verified atomics, raw memory buffers and the flat hash table's storage.",
       "long": [
         "Every handle is an `Object_tag` block whose field 1 is a fresh identifier from `pref_fresh_id`, so polymorphic comparison and hashing see the identity rather than the payload, while the GC still scans the payload. Ownership is entirely in the types: tokens have layout `void`, so native stubs take no token and return the bare result, while the `_bytecode` variants receive unit placeholders and return records with a unit slot (see [pref.mli](src:verification/library/pref.mli)).",
-        "Stubs for ghost-only operations (`caml_pref_heap_*`, `caml_pref_own`, `caml_unique_cell_location`, `caml_raw_memory_location`) return `Val_unit`: their meaning exists only for the verifier. The contracts of all these stubs are trusted."
+        "Stubs for ghost-only operations (`caml_pref_heap_*`, `caml_pref_own`, `caml_unique_cell_location`, `caml_raw_memory_location`) return `Val_unit`: their meaning exists only for the verifier. The contracts of all these stubs are assumed."
       ]
     },
     "vox": {
@@ -462,7 +466,7 @@
         "title": "Ghost and token stubs",
         "from": "CAMLprim value caml_pref_heap_empty(value unit) { return Val_unit; }",
         "to": "CAMLprim value caml_pref_heap_law5",
-        "text": "The finite-map operations on heaps are ghost externals that the verifier interprets by their C names (see `Vox_vc.operation`); the heap laws are trusted externals whose refined result types state the law. At run time these return unit if called. Splitting and joining tokens do nothing, since tokens have no representation; the bytecode split returns a pair of unit placeholders."
+        "text": "The finite-map operations on heaps are ghost externals; the verifier gives them built-in meanings (`Vox_vc.operation`) only for the declarations in `Pref` and `Ghost_pref` (`Vox_type.carries_builtin_meaning`). Six heap laws are externals over the `caml_pref_heap_law*` stubs, assumed through their refined result types; the other four are proved in `pref.ml`. At run time these return unit if called. Splitting and joining tokens do nothing, since tokens have no representation; the bytecode split returns a pair of unit placeholders."
       },
       {
         "title": "Atomics",
@@ -488,7 +492,7 @@
     "what": {
       "short": "C stubs for Vox's Borrow and Borrow_iarray: owned arrays, exclusive slices over ranges of them, and helpers for Vox_sequence and Vox_iarray.",
       "long": [
-        "A handle is `[backing; offset; length]`. Opening a loan pairs the owner with itself; restoring, transferring and recombining return their argument; splitting allocates two handles over the same backing array. The prophecy projections (`caml_borrow_current`, `final` and the frame projections) and `caml_borrow_contents` return unit: they are ghost, and the verifier interprets them by name. The file also holds three helpers for iarrays and one for `Vox_sequence.length`.",
+        "A handle is `[backing; offset; length]`. Opening a loan pairs the owner with itself; restoring, transferring and recombining return their argument; splitting allocates two handles over the same backing array. The prophecy projections (`caml_borrow_current`, `final` and the frame projections) and `caml_borrow_contents` return unit: they are ghost, and the verifier gives them their meaning, for the library's own declarations only. The file also holds three helpers for iarrays and one for `Vox_sequence.length`.",
         "Slice `get` and `set` check their index in C (`borrow_index`) and raise `Invalid_argument`; the native int accessors in [cmm_builtins.ml](src:backend/cmm_builtins.ml) do not."
       ]
     },

@@ -62,7 +62,7 @@
       "from": "let[@def] (get_raw @ total)",
       "to": "{overlay with updates}",
       "lines": "49-83",
-      "text": "`get_raw` searches the overrides and falls back to `Iarray.Refined.get` on the base, a bounds-checked read whose meaning, like that of `Iarray.length`, is built into the checker; these are the demo's trusted base beyond the checker itself. `lookup` checks the bounds and `get` relies on its refinement. `set` removes any earlier entry for the index and conses the new one, and `clear` removes the entry. `set` does not check its index: an out-of-bounds write is stored, never read, and lengthens the list that later operations traverse. Reads and updates are linear in the number of overrides."
+      "text": "`get_raw` searches the overrides and falls back to `Iarray.Refined.get` on the base, a bounds-checked read whose meaning, like that of `Iarray.length`, is built into the checker; these are the demo's trusted base beyond the checker itself. `lookup` checks the bounds and `get` relies on its refinement. `set` removes any earlier entry for the index and conses the new one, and `clear` removes the entry. `set` does not check its index: it stores an out-of-bounds write as an entry that no read returns, and that entry lengthens the list later operations traverse. Reads and updates are linear in the number of overrides."
     },
     {
       "title": "The one lemma about the association list",

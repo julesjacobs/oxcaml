@@ -4,7 +4,7 @@
     "what": {
       "short": "The verification-condition generator: symbolically executes a typed unit once and turns each refinement introduction into an SMT query for Z3.",
       "long": [
-        "`generate` walks the Typedtree after type checking. Each expression evaluates to an SMT term, or to `None` when it has no logical meaning, in which case its value is a fresh symbol. The state is a list of commands: `Define` (a fresh SSA symbol bound to a term), `Assume`, `Assert` (an obligation), `Choice` for the two sides of a branch, and `Check` (a nested computation proved without exporting its assumptions). Branches are joined, not enumerated. Each function body becomes one batch of obligations.",
+        "`generate` walks the Typedtree after type checking. Each expression evaluates to an SMT term, or to `None` when it has no logical meaning, in which case its value is a fresh symbol. The state is a list of commands: `Define` (a fresh SSA symbol bound to a term), `Assume`, `Assert` (an obligation), `Choice` for the two sides of a branch, and `Check` (a nested computation proved without exporting its assumptions). Branches are joined, so paths are never enumerated. Each function body becomes one batch of obligations.",
         "Obligations come from three places: refinement introductions (`introduce`, reached through the `Texp_refinement` marks the type checker inserts), shift counts (`require_shift_count`), and `[@@decreases]` measures (`check_termination`, called from the type checker). Everything else is an assumption: an eliminated refinement, a callee's declared result type, a lemma's conclusion.",
         "Calls are never unfolded except for ghost lambdas and `[@def transparent]` definitions. A call to a total, stateless function with total, stateless arguments is an uninterpreted function application, so equal calls are equal; otherwise its result is a fresh symbol. Heaps, iarrays, sets, maps and sequences are opaque sorts given meaning by ground rewriting of observations (`pref_observe`, `iarray_get`, `set_mem`, `map_find`) under fixed budgets."
       ]
@@ -94,7 +94,7 @@
       "short": "The encoding of OCaml types and primitives into SMT: which types become which sorts, and the logical meaning of built-in operations.",
       "long": [
         "`sort` maps `int` to `Int63`, `bool` to `Bool`, `Bigint.t` to unbounded `Int`, iarrays to an opaque sort, immutable tuples, records and variants to SMT datatypes, and everything else to an opaque sort. A recursive type becomes a datatype only if it is `[@@inductive]`; mutual recursion is rejected.",
-        "`operation` gives meaning to primitives by their name: integer arithmetic, comparison and bitwise operations, `Bigint` arithmetic, `%equal`/`%compare`, iarray access, set and map operations, and `caml_vox_int_ctz`. The name comes from the external's declaration (`primitive`), so these meanings are part of the trusted base: any `external` with one of these names receives it."
+        "`operation` gives meaning to primitives: integer arithmetic, comparison and bitwise operations, `Bigint` arithmetic, `%equal`/`%compare`, iarray access, set and map operations, and `caml_vox_int_ctz`. `primitive` takes the name from the external's declaration. A `%` primitive is implemented by the compiler, so every declaration of it gets its meaning; a C primitive's meaning goes only to the library's own declarations, with the library's native name (`Vox_type.carries_builtin_meaning`). These meanings are part of the trusted base."
       ]
     },
     "notes": [
@@ -102,7 +102,7 @@
         "title": "Finding a primitive",
         "from": "let primitive env path =",
         "to": "with Not_found -> None",
-        "text": "Set and map operations are recognised through the standard `Set.Make`/`Map.Make` results; a few stdlib functions that are not externals (`Iarray.get`, `Iarray.sub`, `abs`, ...) are recognised by their value's uid; anything else uses the external's primitive name."
+        "text": "Set and map operations are recognised through the standard `Set.Make`/`Map.Make` results; a few stdlib functions that are not externals (`Iarray.get`, `Iarray.sub`, `abs`, ...) are recognised by their value's uid; anything else uses the external's primitive name, if its declaration carries the meaning."
       },
       {
         "title": "Bigint division by zero",
@@ -192,7 +192,7 @@
   "verification/vox_proof_steps.ml": {
     "what": {
       "short": "Warning 227, unused proof steps: after a pass, proves each query again with indicator literals on lemma calls, assume_ and refined parameters, and reads the unsat cores.",
-      "long": "A step is reported when no core contains any of its indicators. Cores need not be minimal, but each query is proved from its core, so all unreported steps can be removed together. `-smt-unused-steps-precise` also proves each query without each step in its core. The warning is off by default."
+      "long": "A step is reported when no core contains any of its indicators. Cores may be larger than necessary; each query is proved from its core, so all unreported steps can be removed together. `-smt-unused-steps-precise` also proves each query without each step in its core. The warning is off by default."
     },
     "notes": [
       {
@@ -216,15 +216,15 @@
   "verification/runtime/": {
     "what": {
       "short": "The glue that installs the verifier into the compiler: Vox_verify.install registers the unit and termination hooks, the solver session, caches and -smt flags.",
-      "long": "Dune selects `vox_verify.enabled.ml` when the verifier libraries are available, which is only in the `main` build context, and otherwise `vox_verify.disabled.ml`, whose `install` does nothing. The drivers (`ocamlc`, `ocamlopt`, the toplevels) call `Vox_verify.install` at startup, and the type checker calls the installed hooks through `Verification.run_unit` and `Verification.check_termination`."
+      "long": "Dune selects `vox_verify.enabled.ml` when the verifier libraries are available, which is only in the `main` build context, and otherwise `vox_verify.disabled.ml`, whose `install` registers only the trust flags `-vox-library` and `-vox-audit`. The drivers (`ocamlc`, `ocamlopt`, the toplevels) call `Vox_verify.install` at startup, and the type checker calls the installed hooks through `Verification.run_unit` and `Verification.check_termination`."
     }
   },
   "verification/runtime/vox_verify.enabled.ml": {
     "what": {
       "short": "The verifier's driver: one Z3 session per pass, resource limits and warnings, the proof caches, counterexample reporting, and the -smt-* and -dvc flags.",
       "long": [
-        "Proofs are bounded by Z3's resource count, not by time: a batch gets the warning threshold (1,000,000 units by default) and a single obligation the limit (40,000,000); the 60-second wall-clock deadline is a backstop. Only `unsat` counts as a proof. A query with bitwise operations is first tried with them abstracted.",
-        "With `VOX_VERIFY_CACHE` set there are two caches. A unit is skipped when the compiler executable's digest, the solver's identity, the source, the imported interfaces' CRCs and the flags are unchanged. A query is not sent again when its SMT-LIB text, the solver identity (name, reported version and platform), the source names of its symbols and the kind of attempt are unchanged; since resource limits make outcomes reproducible, failures are cached too. `-smt-assume-verified` skips verification entirely."
+        "Proofs are bounded by Z3's resource count: a batch gets the warning threshold (1,000,000 units by default) and a single obligation the limit (40,000,000); the 60-second wall-clock deadline is only a backstop. Only `unsat` counts as a proof. A query with bitwise operations is first tried with them abstracted.",
+        "With `VOX_VERIFY_CACHE` set there are two caches. A unit is skipped when the compiler executable's digest, the solver's identity, the source, the settings that change typing (`Vox_trust.config`), the imported interfaces' CRCs and the flags are unchanged; an entry counts only if it holds its key's digest, and the unit cache is not used under `-pp`, `-ppx`, `-args` or `-args0`. A query is not sent again when its SMT-LIB text, the solver identity (name, reported version and platform), the source names of its symbols and the kind of attempt are unchanged; since resource limits make outcomes reproducible, failures are cached too. A cache directory that another user owns, or that group or others can write, is ignored. `-smt-assume-verified` skips verification, and the compiled unit records that it did."
       ]
     },
     "notes": [
@@ -232,7 +232,7 @@
         "title": "Solver identity",
         "from": "(* The solver's configured name, the version it reports and the platform it",
         "span": 12,
-        "text": "The platform is part of the key because resource counts differ between builds of one Z3 version, so a cache shared between machines could replay an outcome obtained under other counts. Without a version answer, the caches that need it are not used."
+        "text": "The platform is part of the key because resource counts differ between builds of one Z3 version, so a cache shared between machines could replay an outcome obtained under other counts. The verifier refuses a solver whose `-version` does not report Z3 4.16.0, or reports nothing, unless `-smt-solver-any-version` is given; the compiled unit then records the version used."
       },
       {
         "title": "Budgets",
@@ -262,7 +262,7 @@
   },
   "verification/runtime/vox_verify.disabled.ml": {
     "what": {
-      "short": "The stand-in used when the verifier libraries are not built: install does nothing."
+      "short": "The stand-in used when the verifier libraries are not built: install only registers -vox-library and -vox-audit (Vox_trust.add_arguments)."
     }
   },
   "verification/tests/": {
@@ -275,8 +275,8 @@
     "what": {
       "short": "The verified Vox library: ownership primitives, sequence and array theories, time credits, and the code of the verified demos.",
       "long": [
-        "Ownership and storage: `Pref`, `Ghost_pref`, `Borrow`, `Borrow_iarray`, `Raw_memory`, `Unique_cell`, `Verified_atomic`, the locks and `One_shot` channels. Their externals are trusted contracts over the C stubs in `runtime/pref.c` and `runtime/borrow.c`; everything built on them is verified. Theories: `Vox_sequence`, `Vox_int_sequence`, `Vox_iarray`, `Vox_machine_semantics`. Credits: `Vox_credits`, `Vox_big_credits`.",
-        "The demos' modules are here too: the flat hash table (`vox_table_*`, `Vox_verified_flat_hashtbl`), union-find, SAT and CDCL, LZ4, HTTP, RSA, e-graphs, diff and merge sort. `build.sh` verifies every module with `ocamlc`, compiles it with `ocamlopt -smt-assume-verified` so that it is not verified twice, and installs `vox_borrow.cma`/`.cmxa` under `lib/ocaml/vox`. See the [README](src:verification/library/README.md)."
+        "Ownership and storage: `Pref`, `Ghost_pref`, `Borrow`, `Borrow_iarray`, `Raw_memory`, `Unique_cell`, `Verified_atomic`, the locks and `One_shot` channels. Their externals are contracts over the C stubs in `runtime/pref.c` and `runtime/borrow.c`, assumed without proof; everything built on them is verified. Theories: `Vox_sequence`, `Vox_int_sequence`, `Vox_iarray`, `Vox_machine_semantics`. Credits: `Vox_credits`, `Vox_big_credits`.",
+        "The demos' modules are here too: the flat hash table (`vox_table_*`, `Vox_verified_flat_hashtbl`), union-find, SAT and CDCL, LZ4, HTTP, RSA, e-graphs, diff and merge sort. `build.sh` verifies each module it lists with `ocamlc`, compiles it again with `ocamlopt -smt-assume-verified`, which is recorded as verified because the bytecode compilation verified the same program, and installs `vox_borrow.cma`/`.cmxa` under `lib/ocaml/vox`. RSA, diff, the e-graphs, `Vox_machine_semantics` and `Vox_traversal` are not in its list: the tests that compile them are what verifies them. See the [README](src:verification/library/README.md)."
       ]
     }
   },
@@ -310,7 +310,7 @@
   },
   "verification/catalogue/pages/": {
     "what": {
-      "short": "One Markdown page per demo, plus _trust.md: what is proved and not proved, a client, a rejected program, the interface, the trusted base and how to reproduce."
+      "short": "One Markdown page per demo, plus _trust.md: what is proved and its limits, a client, a rejected program, the interface, the trusted base and how to reproduce."
     }
   },
   "verification/catalogue/compiler-example/": {
@@ -352,7 +352,7 @@
   },
   "verification/library/build.sh": {
     "what": {
-      "short": "Builds and installs the library: each module is verified by ocamlc (with -principal where possible), then compiled by ocamlopt -smt-assume-verified."
+      "short": "Builds and installs the library: ocamlc verifies each listed module, then ocamlopt -smt-assume-verified compiles it; RSA, diff, e-graphs, Vox_machine_semantics and Vox_traversal are unlisted."
     }
   },
   "verification/library/pref.mli": {
@@ -360,13 +360,13 @@
       "short": "Typed heaps with affine ownership: handles 'a Pref.t, void tokens whose meaning own t is a ghost finite map, and alloc, read and write as heap equations.",
       "long": [
         "A token `'a token : void mod total contended` is erased at run time; uniqueness keeps live tokens disjoint and `split`/`join` partition them. Operations state their effect as equations on `own`, for example `own u === Heap.put (own t) p v` for `write`. Reads borrow the token locally.",
-        "The `Heap` operations and the heap laws are trusted externals. `alloc`, `read` and `write` are partial, so heap code is not `total` even though its state is uniquely owned."
+        "The `Heap` operations and six of the heap laws are `external`s, assumed without proof; `put_union_law`, `commute_law`, `exclude_put_law` and `exclude_union_law` are `val`s proved in `pref.ml`. `alloc`, `read` and `write` are partial, so heap code is not `total` even though its state is uniquely owned."
       ]
     }
   },
   "verification/library/pref.ml": {
     "what": {
-      "short": "The Pref externals over the C stubs in runtime/pref.c; the contracts are trusted."
+      "short": "The Pref externals over the C stubs in runtime/pref.c, whose contracts are assumed, and proofs of four heap laws."
     }
   },
   "verification/library/ghost_pref.mli": {
@@ -408,7 +408,7 @@
   "verification/library/verified_atomic.mli": {
     "what": {
       "short": "Sequentially consistent integer atomics with an invariant: each operation opens it at its event and needs a total ghost transition restoring it.",
-      "long": "The transition receives the invariant's and the caller's disjoint ghost tokens and returns new ones; it is never executed. The external contracts are trusted. Natively, results are bare scalars."
+      "long": "The transition receives the invariant's and the caller's disjoint ghost tokens and returns new ones; it is never executed. The external contracts are assumed. Natively, results are bare scalars."
     }
   },
   "verification/library/spin_lock.mli": {
@@ -465,7 +465,7 @@
   "verification/library/vox_sequence.mli": {
     "what": {
       "short": "The theory of lists as sequences with Bigint.t indices: length, append, at, take, drop and more, each with its _def equation and laws.",
-      "long": "The checker does not unfold definitions; each `f_def` states one unfolding and is called explicitly in proofs. `For_all`, `Map` and `Fold` functors lift a named predicate or function over whole lists. `length` is an external (`caml_vox_sequence_length`) that the verifier knows by name."
+      "long": "The checker does not unfold these definitions; each `f_def` states one unfolding and is called explicitly in proofs. `For_all`, `Map` and `Fold` functors lift a named predicate or function over whole lists. `length` is an external (`caml_vox_sequence_length`) with a built-in meaning in the verifier."
     }
   },
   "verification/library/vox_int_sequence.mli": {
@@ -490,7 +490,7 @@
   },
   "verification/library/vox_control.mli": {
     "what": {
-      "short": "Trusted 16-byte control-group matching for the flat hash table (NEON, SSE2 or scalar), and verified mask helpers."
+      "short": "A trusted 16-byte control-group match (NEON, SSE2 or scalar) with a bounds-checked wrapper, and verified mask helpers; the flat hash table uses Vox_table_storage.match16 instead."
     }
   },
   "verification/library/vox_table_storage.mli": {

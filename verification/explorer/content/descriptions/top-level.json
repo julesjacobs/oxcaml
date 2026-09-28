@@ -12,7 +12,7 @@
       "short": "Vox adds refinement types checked by Z3, ghost code, a totality mode and affine ghost ownership; the upstream merge base is f42b1a9726 (24 August 2026).",
       "long": [
         "Most of the language lives in [typing/](src:typing/): the type former `Trefine` for `{x : t | p}`, dependent arrows `(x : t) -> u`, two new comonadic mode axes (totality `Total < Partial` and ghostliness `Real < Ghost`), `@@ ghost` record fields, `[@@inductive]` datatypes, and the typer-inserted `Texp_refinement` coercions that mark where a refinement is assumed or must be proved.",
-        "The verifier is in [verification/](src:verification/). `Vox_vc.generate` runs inside `ocamlc`/`ocamlopt` after typing and before any artifact is written, and sends one quantifier-free query per function body to Z3. Only an `unsat` answer (or a cache hit) counts as a proof. After verification, ghost code is erased and refinements are dropped before Lambda, so the backend sees ordinary code.",
+        "The verifier is in [verification/](src:verification/). `Vox_vc.generate` runs inside `ocamlc`/`ocamlopt` after typing and before any artifact is written, and sends each function body's obligations to Z3 as one quantifier-free query, split up only if it fails. Only an `unsat` answer (or a cache hit) counts as a proof. After verification, ghost code is erased and refinements are dropped before Lambda, so the backend sees ordinary code.",
         "Around that: `stdlib/` gains `Ghost`, `Bigint` and `@@ total` annotations; `runtime/` gains C primitives for typed heaps, loans, atomics and big integers; `backend/cmm_builtins.ml` gains native lowerings for some of them; `testsuite/tests/vox/` holds the tests and demos. Totality and ghostliness are checked in every compilation; the refinement syntax requires `-extension refinement_types`."
       ]
     }
@@ -24,7 +24,7 @@
     },
     "vox": {
       "short": "The default x86_64-linux CI job downloads Z3 4.16.0, checks its SHA-256 and version, and sets VOX_TEST_Z3 so the SMT tests run.",
-      "long": "This is the only place where a solver version is enforced. The compiler itself runs whatever binary `-smt-solver` names."
+      "long": "The verifier enforces the same version: it refuses a solver that does not report Z3 4.16.0 unless `-smt-solver-any-version` is given, and the unit then records the version it used."
     }
   },
   "api_docgen/": {
@@ -51,7 +51,7 @@
       "short": "One file changes: cmm_builtins.ml lowers seventeen cases of Vox C primitives (loans, raw memory, Pref, the flat table's SIMD control bytes, ctz) to inline Cmm.",
       "long": [
         "Each case of `Cmm_builtins` is keyed by the C symbol of an `external` and replaces the call with inline Cmm: `caml_borrow_int_get`/`set`, the `caml_raw_memory_*` accessors, `caml_pref_empty`, the `caml_vox_table_*` field accessors, `caml_vox_control_match16` (a 16-byte SIMD compare with SSE2 or NEON), and `caml_vox_int_ctz_untagged`.",
-        "These lowerings are trusted. `caml_borrow_int_get`/`set` and the table accessors do no bounds check in native code; their contracts require the index to be proved in range."
+        "These lowerings are assumed to agree with the C stubs they replace. `caml_borrow_int_get`/`set` and the table accessors do no bounds check in native code; their contracts require the index to be proved in range."
       ]
     }
   },
@@ -68,7 +68,11 @@
   "bytecomp/": {
     "what": {
       "short": "The bytecode backend: Lambda to Blambda to ZINC instructions, bytecode emission, and the bytecode linker, librarian and packager.",
-      "long": "`blambda_of_lambda.ml` and `bytegen.ml` compile Lambda to instructions; `emitcode.ml` writes `.cmo`; `bytelink.ml`, `bytelibrarian.ml` and `bytepackager.ml` build executables, `.cma` and packs. Vox does not change it: ghost code and refinements are gone before Lambda, and bytecode keeps a slot for every record field, ghost ones included."
+      "long": "`blambda_of_lambda.ml` and `bytegen.ml` compile Lambda to instructions; `emitcode.ml` writes `.cmo`; `bytelink.ml`, `bytelibrarian.ml` and `bytepackager.ml` build executables, `.cma` and packs."
+    },
+    "vox": {
+      "short": "Only the trust record: emitcode.ml writes a unit's Vox record after its compilation unit description, and bytepackager.ml merges the members' records into a pack's.",
+      "long": "Code generation is unchanged: ghost code and refinements are gone before Lambda, and bytecode keeps a slot for every record field, ghost ones included. Readers that do not know the record ignore what follows the unit description."
     }
   },
   "chamelon/": {
@@ -101,7 +105,7 @@
     "what": {
       "short": "Design notes written for Vox; the directory does not exist upstream.",
       "long": [
-        "The documents that describe the language are [ghost.md](src:design-docs/ghost.md) (ghost mode, `ghost_`, `@@ ghost` fields and erasure), [typed-heaps.md](src:design-docs/typed-heaps.md) (why heaps are indexed by payload type), [borrows-and-slices.md](src:design-docs/borrows-and-slices.md) (loans with prophecies), [total-recursion-closures.md](src:design-docs/total-recursion-closures.md), [verification-programming.md](src:design-docs/verification-programming.md) and [vox-v1.md](src:design-docs/vox-v1.md) (the capability contract).",
+        "The documents that describe the language are [ghost.md](src:design-docs/ghost.md) (ghost mode, `ghost_`, `@@ ghost` fields and erasure; it is stale on ghost-field reads, where it still gives the old rule of the minimum on every other axis), [typed-heaps.md](src:design-docs/typed-heaps.md) (why heaps are indexed by payload type), [borrows-and-slices.md](src:design-docs/borrows-and-slices.md) (loans with prophecies), [total-recursion-closures.md](src:design-docs/total-recursion-closures.md), [verification-programming.md](src:design-docs/verification-programming.md) and [vox-v1.md](src:design-docs/vox-v1.md) (the capability contract).",
         "The rest are working notes for particular demos (the flat hash table checklist, the HM inference and unifier series) and ergonomics checklists. Some are dated; the code and the tests are authoritative."
       ]
     },
@@ -116,8 +120,11 @@
       "long": "`compile_common.ml` runs parsing and typing for both backends; `compile.ml` finishes the bytecode pipeline; `maindriver.ml` and `optmaindriver.ml` are the `main` functions of `ocamlc` and `ocamlopt`."
     },
     "vox": {
-      "short": "Three one-line hooks: Vox_verify.install () at the top of both main functions and of Compile.implementation, which plugs the verifier into the typer.",
-      "long": "`Vox_verify.install` (in `verification/runtime/`) registers the verifier's options (`-smt-solver`, `-smt-timeout`, `-smt-resource-limit`, `-smt-assume-verified`, `-dvc`, `-dsmtlib` and others) and sets the callbacks in `typing/verification.ml`. The typer calls them after typing a unit (`Verification.run_unit`) and for `[@@decreases]` measures (`Verification.check_termination`). Without the hook the typer rejects any unit that needs a proof, with \"Refinement verification is unavailable in this compiler\"."
+      "short": "Vox_verify.install () starts both main functions and Compile.implementation; Compile_common saves interfaces' trust records, finds earlier records for Vox_trust, and runs -vox-audit.",
+      "long": [
+        "`Vox_verify.install` (in `verification/runtime/`) registers the verifier's options (`-smt-solver`, `-smt-timeout`, `-smt-resource-limit`, `-smt-assume-verified`, `-dvc`, `-dsmtlib` and others) and sets the callbacks in `typing/verification.ml`. The typer calls them after typing a unit (`Verification.run_unit`) and for `[@@decreases]` measures (`Verification.check_termination`). Without the hook the typer rejects any unit that needs a proof, with \"Refinement verification is unavailable in this compiler\".",
+        "For an interface, `Compile_common` builds the record of what its verification trusts (`Vox_trust.interface_record`) and passes it to `Env.save_signature`; for an implementation it points `Vox_trust.counterparts` at the records earlier compilations left, and `Typemod` saves the record. With `-vox-audit` it prints the unit's record with the records of every unit the unit depends on, through [vox_audit.ml](src:driver/vox_audit.ml)."
+      ]
     }
   },
   "duneconf/": {
@@ -138,8 +145,11 @@
       "long": "`cmt_format.ml` also has `iter_on_occurrences`, which tools use to find every use of an identifier in a typed tree."
     },
     "vox": {
-      "short": "cmt_format.ml learns the new Typedtree constructors (Texp_assume, Texp_logical_equal, Ttyp_refine, Tpat_refinement) in iter_on_occurrences.",
-      "long": "No format changes are made here; the serialized types change through `typing/types.mli`, and the magic number is bumped in `build-aux/`."
+      "short": "cmi_format.ml gains the Vox trust record of a unit (vox_unit) as a .cmi flag and in .cmo and .cmx files; cmt_format.ml learns the new Typedtree constructors.",
+      "long": [
+        "`vox_unit` lists what a unit's verification assumed: trusted externals, totality casts and their uses, unsafe features, other externals, whether verification ran or was skipped with `-smt-assume-verified`, and the solver version if it was not the expected one. `output_vox_record` and `input_vox_record` write and read it in `.cmo` and `.cmx` files, where files written before it read as having none.",
+        "`iter_on_occurrences` in `cmt_format.ml` covers `Texp_assume`, `Texp_logical_equal`, `Ttyp_refine` and `Tpat_refinement`. The other serialized types change through `typing/types.mli`, and the magic number is bumped in `build-aux/`."
+      ]
     }
   },
   "jane/": {
@@ -149,7 +159,7 @@
     },
     "vox": {
       "short": "The modes and kinds documentation gains the totality axis: a section on total functions and inductive pattern matching, and total in the kind syntax.",
-      "long": "`_05-modes/intro.md` documents totality as a future mode, with the rules for `[@@inductive]` pattern matching; `_06-kinds/02-syntax.md` adds `total` to the lists of axes that kinds such as `immutable_data` cross."
+      "long": "`_05-modes/intro.md` documents totality as a future mode (in the page's sense: an axis that restricts what may later be done with a value), with the rules for `[@@inductive]` pattern matching; `_06-kinds/02-syntax.md` adds `total` to the lists of axes that kinds such as `immutable_data` cross."
     }
   },
   "lambda/": {
@@ -221,7 +231,7 @@
       "long": "`optcompile.ml` runs the native pipeline for one file through `Optcomp_intf.Backend`, so the same code serves the amd64 and arm64 backends and the JIT."
     },
     "vox": {
-      "short": "One line: the implementation function of Optcompile.Make calls Vox_verify.install () before compiling a file, as driver/compile.ml does for bytecode.",
+      "short": "Optcompile.Make calls Vox_verify.install () before compiling a file, as driver/compile.ml does for bytecode, and the packager merges its members' Vox records.",
       "long": "`optmaindriver.ml` also calls it; `install` does its work only once. It sets the callbacks in `typing/verification.ml` and registers the verifier's command-line options."
     }
   },
@@ -300,7 +310,7 @@
       "short": "Adds Ghost and Bigint, marks terminating functions @@ total, adds Refined submodules with refined domains, and Map/Set.MakeTotal for law-carrying orders.",
       "long": [
         "The stdlib is now compiled with `-extension refinement_types`. `'a Ghost.t` is an all-ghost record of kind `void`; `Bigint.t` is an unbounded integer with `@@ total` arithmetic (division by zero is defined). `list` is `[@@inductive]`, so functions over it can be total by structural recursion.",
-        "Most totality annotations are trusted: `List`, `Iarray`, `Map` and `Set` re-bind their functions through `trust_total`, an identity `external` at mode `total`. The standard shifts stay partial, because an out-of-range count gives a result that can differ between evaluations; `Int.Refined` has total shifts whose count is proved to be in `[0, 63]`, and total `/` and `mod` with a nonzero divisor."
+        "Some totality annotations are assumed: `Iarray`, `Map` and `Set` re-bind their functions through `trust_total`, an identity `external` at mode `total`, and `List` does so for seven functions and `Refined.hd` and `tl`; the other `List` functions are checked total. The standard shifts stay partial, because an out-of-range count gives a result that can differ between evaluations; `Int.Refined` has total shifts whose count is proved to be in `[0, 63]`, and total `/` and `mod` with a nonzero divisor."
       ]
     }
   },
@@ -310,7 +320,7 @@
       "long": "Each test is a source file whose header comment is an ocamltest script. Expect tests (`[%%expect]`) record the toplevel's output inline; others compare against `.reference` files."
     },
     "vox": {
-      "short": "Adds tests/vox/ (about 1,500 test files), tests/typing-refinement-types/, totality and ghost tests in typing-modes/, and two scripts for the prebuilt test library.",
+      "short": "Adds tests/vox/ (about 490 ocamltest tests and 1,200 other files), tests/typing-refinement-types/, totality and ghost tests in typing-modes/, and two scripts for the prebuilt test library.",
       "long": [
         "`vox-test-library.sh` builds the library modules that tests list in `prebuilt_modules` once, with both compilers; `vox-affected-tests.sh` selects the tests a change can affect. Both are used by `./dev test`.",
         "Tests that need Z3 start with the `has-z3` predicate and are skipped when it is not installed; CI installs a pinned version."
@@ -373,7 +383,7 @@
       "long": [
         "Refinements are a new `type_desc`, `Trefine`, with a resolved predicate (`refinement_expression`) stored in the type. They are rigid: never inferred, and equal only when payloads unify and predicates are alpha-equal. The typer eliminates an outer refinement from an inferred type (an assumption) and introduces one on an expected type (an obligation), recording each as a `Texp_refinement` extra for the verifier.",
         "Totality and ghostliness are comonadic axes in `mode.ml`, checked by OxCaml's closure-lock walk. The typer marks constructs such as `try`, loops, mutation, `assert` and non-exhaustive matches as partial, and accepts a `let rec` as total only by structural descent on an `[@@inductive]` argument or a proved `[@@decreases]` measure.",
-        "Four files are new: [refinement_predicate.ml](src:typing/refinement_predicate.ml), [structural_recursion.ml](src:typing/structural_recursion.ml), [recursive_function.ml](src:typing/recursive_function.ml), [verification.ml](src:typing/verification.ml), plus the small [vox_type.ml](src:typing/vox_type.ml)."
+        "Six implementation files are new: [refinement_predicate.ml](src:typing/refinement_predicate.ml), [structural_recursion.ml](src:typing/structural_recursion.ml), [recursive_function.ml](src:typing/recursive_function.ml), [verification.ml](src:typing/verification.ml), [vox_trust.ml](src:typing/vox_trust.ml) (what verification trusts, warnings 228 and 229) and the small [vox_type.ml](src:typing/vox_type.ml)."
       ]
     }
   },
@@ -383,7 +393,7 @@
       "long": "`warnings.ml` defines every warning with its number, names and message; `language_extension_kernel.ml` defines the extension GADT that `parsing/language_extension.ml` builds on."
     },
     "vox": {
-      "short": "Warnings 222 to 227 for proof cost, unerased ghost code and unused proof steps, a hint on warning 26, and the Refinement_types extension constructor.",
+      "short": "Warnings 222 to 229 for proof cost, unerased ghost code, unused proof steps, trusted externals and unverified imports, a hint on warning 26, and the Refinement_types extension constructor.",
       "long": "The Vox warnings are described under `utils/warnings.ml`. Warning 227 is off by default."
     }
   },
@@ -400,7 +410,7 @@
   "yacc/": {
     "what": {
       "short": "ocamlyacc, the LALR(1) parser generator written in C, derived from Berkeley yacc.",
-      "long": "The compiler's own parser is built with Menhir, not ocamlyacc; `lex/parser.mly` and the debugger's parser still use ocamlyacc."
+      "long": "The compiler's own parser is built with Menhir; `lex/parser.mly` and the debugger's parser still use ocamlyacc."
     }
   }
 }

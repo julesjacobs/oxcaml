@@ -3,7 +3,7 @@
   "_sources": "The code at HEAD (8479634adc): file header comments, contracts and definitions; build.sh (module list, installation); catalogue pages sat-solver.md, egraphs.md, constant-folding.md; vox_cdcl_total.md, vox_sat_boundary.md, vox_egraph_rule_handle.md; research/mastery-20260927/demos-algorithms.md sections 3.1 and 3.7, re-checked against the code.",
   "verification/library/vox_sat.ml": {
     "what": {
-      "short": "The proof of Vox_sat.unsat_at: a ghost call to Vox_sat_proof.semantic_unsat_at. Verified; part of the SAT solver demo.",
+      "short": "The verified proof of Vox_sat.unsat_at, a ghost call to Vox_sat_proof.semantic_unsat_at, in the SAT solver demo.",
       "long": [
         "`unsat_at n formula assignment` turns `Vox_sat_spec.unsatisfiable n formula`, which quantifies over assignments of length exactly `n`, into the fact that any `bool list`, of any length, falsifies the formula. The work is in `Vox_sat_proof.semantic_unsat_at`, which pads or truncates the assignment to length `n`; this file only re-exports it so that the public interface does not mention the proof module.",
         "The result is ghost, so the whole body is erased. `sat_boundary_check.ml` checks that the `-dlambda` of `Vox_sat` makes no calls. See [the demo page](demo:sat-solver)."
@@ -23,8 +23,8 @@
     "what": {
       "short": "The SAT specification as let[@def] definitions: evaluation, well-sizedness, satisfiability, unsatisfiability by enumeration, and the accepted inputs.",
       "long": [
-        "The definitions behind `vox_sat_spec.mli`. Each `let[@def]` also generates an `f_def` lemma stating its equation, which proofs call explicitly; the interface states those equations, and the compiler checks that these definitions satisfy them. This is part of what a reader must trust for the SAT demo, together with `vox_sat.mli` and `vox_cdcl_total.mli`; nothing in it is an axiom or an `external`.",
-        "`unsatisfiable n formula` is defined by `rejects_extensions`, a recursion that enumerates all `2^n` assignments of length `n`. It is a logical definition only: the solver never runs it, and `Vox_sat_proof.empty_unsatisfiable` establishes it by induction."
+        "The definitions behind `vox_sat_spec.mli`. Each `let[@def]` also generates an `f_def` lemma stating its equation, which proofs call explicitly; the interface states those equations, and the compiler checks that these definitions satisfy them. This is part of what a reader must trust for the SAT demo, together with `vox_sat.mli` and `vox_cdcl_total.mli`; it contains no `external` and assumes nothing.",
+        "`unsatisfiable n formula` is defined by `rejects_extensions`, a recursion that enumerates all `2^n` assignments of length `n`. It is a logical definition only: the solver never runs it, and `Vox_sat_proof.empty_unsatisfiable` proves it by induction."
       ]
     },
     "notes": [
@@ -78,10 +78,10 @@
   },
   "verification/library/vox_sat_proof.ml": {
     "what": {
-      "short": "Resolution derivations and their soundness, the proof that a derivation of the empty clause makes a formula unsatisfiable, and clause scanning under a partial assignment. Verified.",
+      "short": "Verified resolution derivations and their soundness, the proof that a derivation of the empty clause makes a formula unsatisfiable, and clause scanning under a partial assignment.",
       "long": [
         "A `derivation` is an input clause by index or a resolution of two derivations on a pivot. `derivation_valid` checks each premise's conclusion against the stated side clause, and `derivation_sound` proves by structural recursion that a valid derivation's conclusion holds under every assignment that satisfies the formula. `resolve_clause` deduplicates its result, which is what later bounds a learned clause to `2n` literals.",
-        "`empty_rejects_extensions` proves `rejects_extensions` over the whole `2^n` enumeration tree by induction, never executing it. The scanning half (`scan_clause`, `scan_formula`, `scan_database`) is executable and is proved to classify each clause as satisfied, open, unit or conflicting. Part of the SAT demo; internal, not installed."
+        "`empty_rejects_extensions` proves `rejects_extensions` over the whole `2^n` enumeration tree by induction; the tree is never executed. The scanning half (`scan_clause`, `scan_formula`, `scan_database`) is executable and is proved to classify each clause as satisfied, open, unit or conflicting. Part of the SAT demo; internal: `build.sh` does not install its `.cmi`."
       ]
     },
     "notes": [
@@ -97,7 +97,7 @@
         "from": "let rec (derivation_sound @ total) :",
         "span": 20,
         "kind": "what",
-        "text": "Structural recursion on the derivation; the one semantic step is `resolution_sound`. Proofs call the `_def` lemmas of `derivation_valid` and `conclusion` explicitly because the checker does not unfold definitions."
+        "text": "Structural recursion on the derivation; the one semantic step is `resolution_sound`. Proofs call the `_def` lemmas of `derivation_valid` and `conclusion` explicitly because the checker does not unfold these definitions."
       },
       {
         "title": "The 2^n enumeration, by induction",
@@ -110,7 +110,7 @@
   },
   "verification/library/vox_cdcl_total.ml": {
     "what": {
-      "short": "The public SAT wrappers: solve and solve_complete call the proof module and turn its Unsat, which carries a derivation, into a nullary Unsat. Verified.",
+      "short": "The verified public SAT wrappers: solve and solve_complete call the proof module and turn its Unsat, which carries a derivation, into a nullary Unsat.",
       "long": [
         "`convert_report` is the only place where the internal answer `Unsat entry` becomes the public `Unsat`: in ghost code it calls `Vox_sat_proof.empty_unsatisfiable`, which turns the derivation of `[]` into `Vox_sat_spec.unsatisfiable n formula`. The statistics are copied field by field. Both wrappers are `total`.",
         "`sat_boundary_check.ml` checks the `-dlambda` of this module for proof calls; ghost `n` and `formula` survive only as placeholders in the call to `convert_report`. See [the demo page](demo:sat-solver)."
@@ -156,7 +156,7 @@
   },
   "verification/library/vox_cdcl_total_proof.ml": {
     "what": {
-      "short": "The CDCL search and its proofs: propagation by scanning, decisions, conflict analysis by resolution, learning, backjumping and a ghost Bigint termination measure. Verified.",
+      "short": "The verified CDCL search: propagation by scanning, decisions, conflict analysis by resolution, learning, backjumping and a ghost Bigint termination measure.",
       "long": [
         "The state is an immutable list of bindings (value, level, reason), a trail and a level; the database is a list of `proof_result`s. `propagate` scans every input and learned clause (no watched literals, restarts or deletion). `analyze` resolves the conflict clause with the reason of its latest-assigned literal until one current-level literal remains, extending the ghost derivation at each step. `search` carries fourteen invariants on the state, among them `prefix_stable`: no input or learned clause is unit under the bindings retained at any lower level.",
         "`search` terminates by `progress_measure = count_absent * (n + 1) + unassigned`, where `count_absent` counts the literal lists of length at most `2n` over the variables below `n` that are not yet in the database. For `n = 256` it is a number of about 1,400 digits that is never computed. `prepare_learning` proves the learned clause is new: it is unit after the backjump, and `prefix_stable` says no existing clause is. Part of the SAT demo; the design is in [vox_cdcl_total.md](src:verification/library/vox_cdcl_total.md)."
@@ -223,7 +223,7 @@
   "verification/library/vox_sat_boundary.md": {
     "what": {
       "short": "The SAT solver's review guide: the three public interfaces to read, what the proof modules do, and what each test checks.",
-      "long": "The public contract is `vox_sat_spec.mli`, `vox_sat.mli` and `vox_cdcl_total.mli`; they contain no axiom, `external`, abstract predicate or name from the proof modules. The page also states the limits of the erasure check: `sat_boundary_check.ml` looks for a list of named proof helpers in the native object, which is a targeted check and not a proof that every proof function is erased."
+      "long": "The public contract is `vox_sat_spec.mli`, `vox_sat.mli` and `vox_cdcl_total.mli`; they assume nothing (no `external`) and contain no abstract predicate or name from the proof modules. The page also states the limits of the erasure check: `sat_boundary_check.ml` looks for a list of named proof helpers in the native object, which is a targeted check: it does not prove that every proof function is erased."
     },
     "notes": [
       {
@@ -269,7 +269,7 @@
   },
   "verification/library/vox_egraph_rule_spec.ml": {
     "what": {
-      "short": "Rewrite rules for the e-graph: patterns with sorted variables, rule validity, substitutions and instantiation. Part of the trusted specification.",
+      "short": "Rewrite rules in the e-graph's trusted specification: patterns with sorted variables, rule validity, substitutions and instantiation.",
       "long": "A `rule` rewrites `lhs` to `rhs` over the variables `vars`; `t` is a list of rules numbered from 0. `rule_valid` requires both sides to have the same defined sort and every right-hand variable to occur on the left, so a match of the left side determines the right side. Nothing requires the two sides to evaluate alike: the e-graph's equality is relative to exactly these rules."
     },
     "notes": [
@@ -306,7 +306,7 @@
   },
   "verification/library/vox_egraph_match_spec.ml": {
     "what": {
-      "short": "The e-graph model exposed by the interface (a node count, a node and a class label per id) and pattern matching in it. Part of the trusted specification.",
+      "short": "The e-graph model exposed by the interface (a node count, a node and a class label per id) and pattern matching in it, as part of the trusted specification.",
       "long": "`classes graph pat bindings` lists the class labels at which `pat` matches: a variable matches only the class of its bound id, and a constructor pattern matches the class of every node with that constructor whose children lie in classes matched by the subpatterns. In the implementation the label is the id's union-find root (`Vox_egraph_match_observation.observe`)."
     },
     "notes": [
@@ -343,7 +343,7 @@
   },
   "verification/library/vox_egraph_preservation_spec.ml": {
     "what": {
-      "short": "extends before after: the node count has not decreased and every existing id keeps its origin. Every public e-graph operation promises it.",
+      "short": "extends before after, which every public e-graph operation promises: the node count has not decreased and every existing id keeps its origin.",
       "long": "Part of the e-graph's trusted specification. It lets a client keep using an id returned by `admit` across later operations. It says nothing about classes, so the interface does not promise that classes equal before an operation stay equal after it."
     },
     "notes": [
@@ -421,7 +421,7 @@
   },
   "verification/library/vox_egraph_saturation_spec.ml": {
     "what": {
-      "short": "closed_rule and closed_rules: closure of a graph under each rule for every well-sorted assignment and every root. Part of the trusted specification.",
+      "short": "closed_rule and closed_rules, in the trusted specification: closure of a graph under each rule for every well-sorted assignment and every root.",
       "long": "For a rule with `n` variables there are `(count + 1)^n` assignments; `Vox_egraph_assignment_spec` lists them as the cases saturation checks, and `Vox_egraph_assignment_proof` shows the two agree."
     },
     "notes": [
@@ -466,7 +466,7 @@
   },
   "verification/library/vox_egraph_interpret_wrapping.mli": {
     "what": {
-      "short": "sound: a derivation valid for rules that preserve evaluation relates two expressions with equal evaluations. Part of the trusted specification.",
+      "short": "sound, in the trusted specification: a derivation valid for rules that preserve evaluation relates two expressions with equal evaluations.",
       "long": "The rules of an e-graph need not agree with `eval`, so an `Equal` answer says only that the two expressions are derivable from each other. `sound` takes as a premise a ghost function proving that, in `env`, both sides of every valid instance of every rule evaluate alike. `egraph_derivation.ml` discharges the premise for a concrete rule with the lemmas of `Vox_egraph_language_proof`."
     },
     "notes": [
@@ -481,7 +481,7 @@
   },
   "verification/library/vox_egraph_interpret_wrapping.ml": {
     "what": {
-      "short": "The proof of Vox_egraph_interpret_wrapping.sound, by structural recursion on the derivation. Verified.",
+      "short": "The verified proof of Vox_egraph_interpret_wrapping.sound, by structural recursion on the derivation.",
       "long": "The caller's premise `holds` is used only at `Rule` steps. The congruence cases unfold `as_int` and `as_bool` because `eval` combines coerced values."
     },
     "notes": [
@@ -511,8 +511,8 @@
   },
   "verification/library/vox_egraph_rule_handle.md": {
     "what": {
-      "short": "The e-graph's review guide: the thirteen specification files in reading order, what Fixed_point claims and does not, and the resource limits and search fuel.",
-      "long": "States that the checker, SMT encoding, compiler and runtime are trusted and that no new axiom or trusted e-graph primitive is introduced. The resources section defines what the saturation fuel charges: generator visits, rule and assignment visits and root attempts, but not matching or right-hand-side admission within one attempt."
+      "short": "The e-graph's review guide: the thirteen specification files in reading order, exactly what Fixed_point claims, and the resource limits and search fuel.",
+      "long": "States that the checker, SMT encoding, compiler and runtime are trusted and that the e-graph introduces no assumption or trusted primitive of its own. The resources section defines what the saturation fuel charges: generator visits, rule and assignment visits and root attempts; matching and right-hand-side admission within one attempt are not charged separately."
     },
     "notes": [
       {
@@ -938,7 +938,7 @@
   },
   "verification/library/vox_egraph_match_bindings.ml": {
     "what": {
-      "short": "present: every variable of a pattern is bound to an id with a class. A match implies it, and rule validity carries it from the left side to the right.",
+      "short": "present: every variable of a pattern is bound to an id with a class; a match implies it, and rule validity carries it from the left side to the right.",
       "long": "Verified. Together `matched` and `transfer` show that the right-hand side of a matched rule can be admitted."
     },
     "notes": [
@@ -1022,7 +1022,7 @@
         "from": "let (extends @ total) : (before : V.t)",
         "span": 13,
         "kind": "what",
-        "text": "Every mutating operation establishes `preserved` for the old count; this lemma turns it into the public promise."
+        "text": "Every mutating operation returns `preserved` for the old count; this lemma turns it into the public promise."
       }
     ]
   },
@@ -1232,7 +1232,7 @@
     "what": {
       "short": "A byte-level control-group API: a trusted SIMD matching builtin with a bounds-checked wrapper, the 7-bit fingerprint, and clearing a mask's lowest bit.",
       "long": [
-        "`match16_valid` is an `external` marked `[@@builtin]`, compiled inline by `backend/cmm_builtins.ml` (NEON, SSE2 or scalar) with the C stub in `runtime/vox_control.c`. Its checked contract is only the result type `mask`, an int in `[0, 65535]`; which lanes are set is stated in prose in `vox_control.mli` and tested by `control_group.ml`. `match16` checks the offset and byte and raises `Invalid_argument` otherwise. `fingerprint` and `clear_first` are verified.",
+        "`match16_valid` is an `external` marked `[@@builtin]`, compiled inline by `backend/cmm_builtins.ml` (NEON, SSE2 or scalar) with the C stub in `runtime/vox_control.c`. Its assumed contract is only the result type `mask`, an int in `[0, 65535]`; which lanes are set is stated in prose in `vox_control.mli` and tested by `control_group.ml`. `match16` checks the offset and byte and raises `Invalid_argument` otherwise. `fingerprint` and `clear_first` are verified.",
         "No verified library module calls it. The flat hash table matches through its own externals, `Vox_table_storage.match16` and `match16_empty`, whose stubs in `runtime/pref.c` call the same C matching code on the table's control bytes and whose lane semantics are part of `Vox_table_storage`'s contract."
       ]
     },
@@ -1256,7 +1256,7 @@
   "verification/library/vox_string_view.ml": {
     "what": {
       "short": "Three trusted externals that view a string as a ghost char iarray: contents, and length and unchecked get specified against it.",
-      "long": "`contents` is ghost and never runs; `length` is `%string_length` and `get` is `%string_unsafe_get`, whose index precondition is proved by the caller. The contracts are trusted. Used by the LZ4 string codecs; compiled at `-O3` in native code so that client functors are specialised."
+      "long": "`contents` is ghost and never runs; `length` is `%string_length` and `get` is `%string_unsafe_get`, whose index precondition is proved by the caller. The contracts are assumed. Used by the LZ4 string codecs; compiled at `-O3` in native code so that client functors are specialised."
     },
     "notes": [
       {
@@ -1308,7 +1308,7 @@
   "verification/library/META": {
     "what": {
       "short": "The findlib description of the installed library: the archives vox_borrow.cma and vox_borrow.cmxa.",
-      "long": "`build.sh` copies it to `lib/ocaml/vox`. The archive holds every module in `build.sh`'s list; the `.cmi` files of `vox_sat_proof` and `vox_cdcl_total_proof` are not installed, and the e-graph modules are not in the list (the e-graph tests compile them)."
+      "long": "`build.sh` copies it to `lib/ocaml/vox`. The archive holds every module in `build.sh`'s list; the `.cmi` files of `vox_sat_proof` and `vox_cdcl_total_proof` are not installed, and RSA, diff, the e-graph modules, `vox_machine_semantics` and `vox_traversal` are not in the list (tests compile them)."
     },
     "notes": [
       {

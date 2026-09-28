@@ -262,8 +262,11 @@
  },
  "verification/catalogue/pages/_trust.md": {
   "what": {
-   "short": "What every demo trusts: the checker (type checker, VC generation, Z3 4.16.0, totality, erasure), the built-in meanings, the C runtime primitives, and the concurrency contracts.",
-   "long": "Each demo page lists only what it trusts beyond this page. The built-in meanings section is where the shift-count rule, `===`, the ghost heap laws and the token and slice contracts are stated."
+   "short": "What every demo trusts: the checker, the built-in meanings, the library's declared contracts and runtime code, the standard library's totality casts and the toolchain.",
+   "long": [
+    "Each demo page lists only what it trusts beyond this page. It names `-vox-audit`, which prints what a unit and every unit it depends on trust, and warning 228 for trusted externals outside the library.",
+    "The built-in meanings section says that a C primitive's meaning applies only to the library's own declaration of it, and states the shift-count rule, `===`, the ghost heap laws (four proved, six assumed) and the borrowed-slice transitions. The page's status is owner-review."
+   ]
   }
  },
  "verification/catalogue/pages/flat-hash-table.performance.json": {
@@ -279,13 +282,13 @@
  },
  "verification/catalogue/pages/binary-search.md": {
   "what": {
-   "short": "The catalogue page: A persistent sorted integer array whose searches, insertion and removal are proved against its elements.",
+   "short": "The catalogue page: a persistent sorted integer array whose searches, insertion and removal are proved against its elements.",
    "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:binary-search). The built page is [binary-search](demo:binary-search)."
   }
  },
  "verification/catalogue/pages/constant-folding.md": {
   "what": {
-   "short": "The catalogue page: A constant folder for integer expressions proved to preserve evaluation with wrapping int addition.",
+   "short": "The catalogue page: a constant folder for integer expressions proved to preserve evaluation with wrapping int addition.",
    "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:constant-folding). The built page is [constant-folding](demo:constant-folding)."
   }
  },
@@ -303,13 +306,13 @@
  },
  "verification/catalogue/pages/flat-hash-table.md": {
   "what": {
-   "short": "The catalogue page: A mutable SIMD-probed hash table proved to act as a finite map.",
+   "short": "The catalogue page: a mutable SIMD-probed hash table proved to act as a finite map.",
    "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:flat-hash-table). The built page is [flat-hash-table](demo:flat-hash-table)."
   }
  },
  "verification/catalogue/pages/functional-queue.md": {
   "what": {
-   "short": "The catalogue page: A persistent two-list queue proved to act on the list of its elements.",
+   "short": "The catalogue page: a persistent two-list queue proved to act on the list of its elements.",
    "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:functional-queue). The built page is [functional-queue](demo:functional-queue)."
   }
  },
@@ -321,13 +324,13 @@
  },
  "verification/catalogue/pages/hm-wasm-compiler.md": {
   "what": {
-   "short": "The catalogue page: A compiler from the HM language to WebAssembly bytes, proved against a WebAssembly model for every input passed at run time.",
+   "short": "The catalogue page: a compiler from the HM language to WebAssembly bytes, proved against a WebAssembly model for every input passed at run time.",
    "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:hm-wasm-compiler). The built page is [hm-wasm-compiler](demo:hm-wasm-compiler)."
   }
  },
  "verification/catalogue/pages/http.md": {
   "what": {
-   "short": "The catalogue page: A total, chunk-by-chunk HTTP/1.1 request parser proved sound and complete for a specified request grammar.",
+   "short": "The catalogue page: a total, chunk-by-chunk HTTP/1.1 request parser proved sound and complete for a specified request grammar.",
    "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:http). The built page is [http](demo:http)."
   }
  },
@@ -363,7 +366,7 @@
  },
  "verification/catalogue/pages/one-shot-channels.md": {
   "what": {
-   "short": "The catalogue page: A single-use channel between domains whose receiver takes the payload only after the sender has put it.",
+   "short": "The catalogue page: a single-use channel between domains whose receiver takes the payload only after the sender has put it.",
    "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:one-shot-channels). The built page is [one-shot-channels](demo:one-shot-channels)."
   }
  },
@@ -387,13 +390,13 @@
  },
  "verification/catalogue/pages/regex-automata.md": {
   "what": {
-   "short": "The catalogue page: A regex matcher proved against membership derivations, and a conversion to DFA tables with the same language.",
+   "short": "The catalogue page: a regex matcher proved against membership derivations, and a conversion to DFA tables with the same language.",
    "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:regex-automata). The built page is [regex-automata](demo:regex-automata)."
   }
  },
  "verification/catalogue/pages/register-allocation.md": {
   "what": {
-   "short": "The catalogue page: A liveness-based register allocator proved to preserve every finite run of each program it allocates.",
+   "short": "The catalogue page: a liveness-based register allocator proved to preserve every finite run of each program it allocates.",
    "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:register-allocation). The built page is [register-allocation](demo:register-allocation)."
   }
  },
@@ -411,13 +414,13 @@
  },
  "verification/catalogue/pages/sat-solver.md": {
   "what": {
-   "short": "The catalogue page: A CDCL SAT solver proved to terminate within its size limits, whose Unsat means no assignment satisfies the formula.",
+   "short": "The catalogue page: a CDCL SAT solver proved to terminate within its size limits, whose Unsat means no assignment satisfies the formula.",
    "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:sat-solver). The built page is [sat-solver](demo:sat-solver)."
   }
  },
  "verification/catalogue/pages/sparse-arrays.md": {
   "what": {
-   "short": "The catalogue page: A persistent array made of an immutable base and overriding writes, with laws for the value read at every index.",
+   "short": "The catalogue page: a persistent array made of an immutable base and overriding writes, with laws for the value read at every index.",
    "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:sparse-arrays). The built page is [sparse-arrays](demo:sparse-arrays)."
   }
  },

@@ -80,8 +80,8 @@
       "path": "verification/library/pref.mli",
       "from": "(** Allocate a fresh cell and extend the token.",
       "to": ["external join", "&& Heap.disjoint (own left) (own right)} @ unique"],
-      "lines": "127-170",
-      "text": "What the proofs know about cells comes from these declarations. `alloc`, `read` and `write` are C primitives in [`runtime/pref.c`](src:runtime/pref.c), trusted to meet their contracts; they are partial, so every list and tree operation that touches a cell is partial and only normal return is specified. `split` and `join` move ownership between tokens and are empty C functions in native code; `join`'s disjointness is a postcondition, sound because distinct live unique tokens own disjoint cells. The heap laws earlier in the file are `external`s too, so each call adds a trusted axiom instance: the list proofs use `partition_law`, `put_law`, `put_union_law` and `union_law`, and the tree proofs also `commute_law`, `domain_law` and `union_domain_law`."
+      "lines": "130-173",
+      "text": "What the proofs know about cells comes from these declarations. `alloc`, `read` and `write` are C primitives in [`runtime/pref.c`](src:runtime/pref.c), trusted to meet their contracts; they are partial, so every list and tree operation that touches a cell is partial and only normal return is specified. `split` and `join` move ownership between tokens and are empty C functions in native code; `join`'s disjointness is a postcondition, sound because distinct live unique tokens own disjoint cells. Six heap laws earlier in the file are `external`s too, so each call of one adds an assumed instance; `put_union_law`, `commute_law`, `exclude_put_law` and `exclude_union_law` are `val`s proved in `pref.ml`. The list proofs use `partition_law`, `put_law`, `put_union_law` and `union_law`, and the tree proofs also `commute_law`, `domain_law` and `union_domain_law`."
     },
     {
       "title": "Emitted code: no proof survives",

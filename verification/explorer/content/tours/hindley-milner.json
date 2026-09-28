@@ -89,7 +89,7 @@
       "from": "external extensional : ('a : immutable_data).",
       "to": "@ immutable total @@ total = \"caml_vox_iarray_sub\"",
       "lines": "36-57",
-      "text": "Beyond the shared base (the checker, Z3, the compiler, and the contracts of `Pref` and `Borrow_iarray`), the demo trusts these `external` declarations, whose refined types the checker assumes, and `get` at the top of the file. The per-level pools live in a `Borrow_iarray.Owned_array` whose contents the contracts describe with `Vox_iarray.updated`, which calls `set`. `extensional` is an axiom: arrays that agree at every index, shown by a ghost function, are equal. The other trusted declaration is `raise_any`, the layout-polymorphic `%raise` in [`hm_routed_infer.ml`](src:testsuite/tests/vox/hm_routed_infer.ml); the `unreachable_ ()` arms of the algorithm add nothing to this list, since the checker proves each unreachable and a run-time trap remains."
+      "text": "Beyond the shared base (the checker, Z3, the compiler, and the contracts of `Pref` and `Borrow_iarray`), the demo trusts these `external` declarations, whose refined types the checker assumes, and `get` at the top of the file. The per-level pools live in a `Borrow_iarray.Owned_array` whose contents the contracts describe with `Vox_iarray.updated`, which calls `set`. `extensional` is assumed: arrays that agree at every index, shown by a ghost function, are equal. The other trusted declaration is `raise_any`, the layout-polymorphic `%raise` in [`hm_routed_infer.ml`](src:testsuite/tests/vox/hm_routed_infer.ml); the `unreachable_ ()` arms of the algorithm add nothing to this list, since the checker proves each unreachable and a run-time trap remains."
     }
   ]
 }
