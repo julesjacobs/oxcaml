@@ -5573,10 +5573,99 @@ let normalize_refinement_predicate env =
     ~constructor_path
     ~type_path:(normalize_owner_type_path env)
 
-let refinement_predicates_equal env ~pairs pred1 pred2 =
-  Refinement_predicate.equal ~pairs
+(* Alpha-equal predicates, with the types of their corresponding nodes.  The
+   predicates are equal only when these types are also related, by the
+   relation at hand: a law about [int t] is not a law about [bool t]. *)
+let refinement_predicate_types env ~pairs pred1 pred2 =
+  Refinement_predicate.equal_with_types ~pairs
     (normalize_refinement_predicate env pred1)
     (normalize_refinement_predicate env pred2)
+
+(* The types of corresponding predicate nodes are related by their
+   skeletons: the verifier encodes a predicate by sorts, which ignore
+   refinements and modes, so only the instantiation of the types matters (a
+   law about [int t] is not a law about [bool t]).  [relate] is applied where
+   the skeletons stop, in particular at type variables.  An [exposed] type's
+   refinements are assumed by the verifier, so they are compared too: two
+   refinements must have alpha-equal predicates whose own types are related
+   in the same way, and any other refinement is left to [relate], which
+   compares refinements exactly.  Arrow modes are ignored throughout. *)
+let rec relate_predicate_type env relate ~exposed ~binders ty1 ty2 =
+  let in_scope univar =
+    List.exists
+      (fun (cl1, cl2) ->
+        List.exists (fun (t, _) -> eq_type t univar) cl1
+        || List.exists (fun (t, _) -> eq_type t univar) cl2)
+      !univar_pairs
+  in
+  let visited = TypePairs.create 7 in
+  (* [binders] pairs the binders of the arrows around the current types, which
+     their refinements may mention. *)
+  let rec skeleton ?(binders = []) ty1 ty2 =
+    let ty1 = expand_head env ty1 and ty2 = expand_head env ty2 in
+    if eq_type ty1 ty2 || TypePairs.mem visited (ty1, ty2) then () else begin
+      TypePairs.add visited (ty1, ty2);
+      match get_desc ty1, get_desc ty2 with
+      | Trefine r1, Trefine r2 when exposed -> (
+          match
+            refinement_predicate_types env
+              ~pairs:((r1.ref_binder, r2.ref_binder) :: binders)
+              r1.ref_pred r2.ref_pred
+          with
+          | Some types ->
+              skeleton ~binders r1.ref_payload r2.ref_payload;
+              relate_predicate_types env relate types
+          | None -> relate ty1 ty2)
+      | (Trefine _, _ | _, Trefine _) when exposed -> relate ty1 ty2
+      | Trefine r, _ -> skeleton ~binders r.ref_payload ty2
+      | _, Trefine r -> skeleton ~binders ty1 r.ref_payload
+      | Tarrow ((l1, _, _, b1), a1, r1, _), Tarrow ((l2, _, _, b2), a2, r2, _)
+        when l1 = l2 ->
+          skeleton ~binders a1 a2;
+          let binders =
+            match b1, b2 with
+            | Some b1, Some b2 -> (b1, b2) :: binders
+            | _ -> binders
+          in
+          skeleton ~binders r1 r2
+      | Tpoly (t1, []), Tpoly (t2, []) -> skeleton ~binders t1 t2
+      | Ttuple c1, Ttuple c2
+        when List.equal (fun (l1, _) (l2, _) -> Option.equal String.equal l1 l2)
+               c1 c2 ->
+          List.iter2 (fun (_, t1) (_, t2) -> skeleton ~binders t1 t2) c1 c2
+      | Tconstr (p1, a1, _), Tconstr (p2, a2, _)
+        when Path.same p1 p2 && List.compare_lengths a1 a2 = 0 ->
+          List.iter2 (skeleton ~binders) a1 a2
+      | Tunivar _, (Tvar _ | Tunivar _) when not (in_scope ty1) -> ()
+      | (Tvar _ | Tunivar _), Tunivar _ when not (in_scope ty2) -> ()
+          (* A type variable that occurs only in a predicate is not
+             quantified with the others (item 1 of
+             polymorphism-definitions.md), so a universal variable there may
+             be out of the scope of this comparison.  Against another
+             variable it is then left unrelated, as before predicates were
+             compared with their types.  A universal variable in scope, or
+             one against any other type, is related as usual. *)
+      | _ -> relate ty1 ty2
+    end
+  in
+  skeleton ~binders ty1 ty2
+
+and relate_predicate_types env relate types =
+  List.iter
+    (fun { Refinement_predicate.left; right; exposed; binders } ->
+      relate_predicate_type env relate ~exposed ~binders left right)
+    types
+
+(* Set while comparing two type declarations (see [Includecore]), with their
+   parameters, which are shared by the two declarations at that point. *)
+let predicate_variable_renaming = ref None
+
+let with_predicate_variable_renaming ~params f =
+  let saved = !predicate_variable_renaming in
+  (* Every variable of the parameters, including those of a constraint. *)
+  predicate_variable_renaming := Some (free_variables_list params);
+  Fun.protect ~finally:(fun () -> predicate_variable_renaming := saved) f
+
 
 (*
    1. When unifying two non-abbreviated types, one type is made a link
@@ -5775,11 +5864,15 @@ and unify3 uenv t1 t1' t2 t2' =
              syntactically alpha-equivalent.  One-sided refinement falls
              into the mismatch case below. *)
           unify uenv r1.ref_payload r2.ref_payload;
-          if not
-            (refinement_predicates_equal (get_env uenv)
-               ~pairs:[r1.ref_binder, r2.ref_binder]
-               r1.ref_pred r2.ref_pred)
-          then raise_unexplained_for Unify
+          begin match
+            refinement_predicate_types (get_env uenv)
+              ~pairs:[r1.ref_binder, r2.ref_binder]
+              r1.ref_pred r2.ref_pred
+          with
+          | None -> raise_unexplained_for Unify
+          | Some types ->
+              relate_predicate_types (get_env uenv) (unify uenv) types
+          end
       | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
           unify_labeled_list uenv labeled_tl1 labeled_tl2
       | (Tunboxed_tuple labeled_tl1, Tunboxed_tuple labeled_tl2) ->
@@ -7035,7 +7128,127 @@ let may_instantiate inst_nongen t1 =
   if inst_nongen then level <> subject_level
                  else level =  generic_level
 
-let rec moregen inst_nongen variance type_pairs env t1 t2 =
+(* Refinement subsumption.  Refinements are erased, so a refined type can be
+   compared with an unrefined one by its payload, provided the refinement is
+   only forgotten, or is proved by the verifier.  [refinement_pos] says what
+   may happen to a refinement at a position:
+   - [Forget]: equal refinements, or dropping one in the direction of flow
+     (covariantly from the first type, contravariantly from the second);
+   - [Syntactic]: equal refinements only (rows, objects, package constraints
+     and quotes, where the verifier does not look);
+   - [Proof]: also refinements that must be proved; [needs_proof] records
+     that the verifier has to walk the pair.  [mode] is the mode of the
+     flowing value when it is known, for the mode condition below. *)
+type refinement_deferral = { mutable needs_proof : bool }
+
+type refinement_pos =
+  | Forget
+  | Syntactic
+  | Proof of
+      { deferral : refinement_deferral;
+        mode : Value.l option;
+        depth : int }
+
+let refinement_operand_mode () =
+  Value.of_const
+    { Value.Const.max with
+      totality = Totality.Const.Total;
+      statefulness = Statefulness.Const.Stateless;
+      portability = Portability.Const.Portable }
+
+(* Refined types cross portability, totality and statefulness, so a value
+   that enters one must have these modes: at [mode] when it is known, and by
+   the crossing of its type otherwise.  Returns the failing axis. *)
+let refinement_mode_violation env ty mode =
+  let mode =
+    match mode with
+    | Some mode -> mode
+    | None -> Value.disallow_right Value.max
+  in
+  let mode = cross_left env ty mode in
+  List.find_map
+    (fun (violation, required) ->
+      match Value.submode mode (Value.of_const required) with
+      | Ok () -> None
+      | Error _ -> Some violation)
+    [ "partial", { Value.Const.max with totality = Totality.Const.Total };
+      "stateful",
+      { Value.Const.max with statefulness = Statefulness.Const.Stateless };
+      "nonportable",
+      { Value.Const.max with portability = Portability.Const.Portable } ]
+
+let is_refined ty = match get_desc ty with Trefine _ -> true | _ -> false
+
+let refinement_payload ty =
+  match get_desc ty with Trefine r -> r.ref_payload | _ -> ty
+
+let is_syntactic = function Syntactic -> true | Forget | Proof _ -> false
+
+let proof_mode = function
+  | Proof p -> p.mode
+  | Forget | Syntactic -> None
+
+(* Modes are known at the root and at arrows, and inherited by the
+   components of a tuple.  Values of type parameters have unknown modes.
+   Positions with a known mode are not memoised, so on cyclic types deep
+   positions forget the mode and use the memo table again. *)
+let refinement_child pos ~mode =
+  match pos with
+  | Forget | Syntactic -> pos
+  | Proof p ->
+      let mode = if p.depth >= 64 then None else mode in
+      Proof { p with mode; depth = p.depth + 1 }
+
+(* A value enters a refined type: check the mode condition.  This happens
+   before memoisation, since the memo tables do not record modes. *)
+let check_refinement_add env ~instantiable variance pos t1 t2 =
+  match pos with
+  | Proof { mode; _ } ->
+      let enters source target =
+        if is_refined target && not (is_refined source) then
+          match refinement_mode_violation env source mode with
+          | None -> ()
+          | Some violation ->
+              raise_for Moregen (Refinement (Refinement_modes (target, violation)))
+      in
+      begin match variance with
+      | Covariant ->
+          (* An implementation variable is instantiated, not added to. *)
+          if not (is_Tvar t1 && instantiable t1) then enters t1 t2
+      | Contravariant -> enters t2 t1
+      | Invariant | Bivariant -> ()
+      end
+  | Forget | Syntactic -> ()
+
+type moregen_memo =
+  { forget_pairs : moregen_pairs;
+    syntactic_pairs : moregen_pairs;
+    proof_pairs : moregen_pairs }
+
+let fresh_moregen_memo () =
+  { forget_pairs = fresh_moregen_pairs ();
+    syntactic_pairs = fresh_moregen_pairs ();
+    proof_pairs = fresh_moregen_pairs () }
+
+(* A pair visited with a known mode is not memoised: its subtree may contain
+   additions whose mode condition depends on that mode. *)
+let memo_pairs memo pos variance =
+  match pos with
+  | Forget -> Some (relevant_pairs memo.forget_pairs variance)
+  | Syntactic -> Some (relevant_pairs memo.syntactic_pairs variance)
+  | Proof { mode = None; _ } -> Some (relevant_pairs memo.proof_pairs variance)
+  | Proof { mode = Some _; _ } -> None
+
+let blame_refinement blame f =
+  try f () with Moregen_trace trace ->
+    raise (Moregen_trace
+      (List.map
+         (function
+           | Refinement (Invariant_refinement None) -> Refinement blame
+           | elt -> elt)
+         trace))
+
+let rec moregen inst_nongen variance pos type_pairs env t1 t2 =
   if eq_type t1 t2 then () else
 
   try
@@ -7054,10 +7267,18 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
         let t1' = expand_head env t1 in
         let t2' = expand_head env t2 in
         (* Expansion may have changed the representative of the types... *)
-        if eq_type t1' t2' then () else
-        let pairs = relevant_pairs type_pairs variance in
-        if not (TypePairs.mem pairs (t1', t2')) then begin
-          TypePairs.add pairs (t1', t2');
+        if eq_type t1' t2' then () else begin
+        check_refinement_add env ~instantiable:(may_instantiate inst_nongen)
+          variance pos t1' t2';
+        let pairs = memo_pairs type_pairs pos variance in
+        let visited =
+          match pairs with
+          | Some pairs -> TypePairs.mem pairs (t1', t2')
+          | None -> false
+        in
+        if not visited then begin
+          Option.iter (fun pairs -> TypePairs.add pairs (t1', t2')) pairs;
+          let same = refinement_child pos ~mode:(proof_mode pos) in
           match (get_desc t1', get_desc t2') with
             (Tvar { jkind }, _) when may_instantiate inst_nongen t1' ->
               let t2 = reduce_head ~expand_reducible_abbrevs:false env t2 in
@@ -7070,12 +7291,29 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
           | (Tarrow ((l1,a1,r1,binder1), t1, u1, _),
              Tarrow ((l2,a2,r2,binder2), t2, u2, _)) ->
               eq_labels Moregen ~in_pattern_mode:false l1 l2;
-              moregen inst_nongen (neg_variance variance) type_pairs env t1 t2;
-              begin match align_arrow_codomains binder1 u1 binder2 u2 with
-              | Some (u1, u2) ->
-                  moregen inst_nongen variance type_pairs env u1 u2
-              | None -> raise_unexplained_for Moregen
-              end;
+              (* Arguments flow at the caller's parameter mode, results at
+                 the returning side's result mode. *)
+              let param_mode, result_mode =
+                match variance with
+                | Contravariant -> a1, r2
+                | Covariant | Invariant | Bivariant -> a2, r1
+              in
+              let as_value mode =
+                Some (Value.disallow_right (alloc_as_value mode))
+              in
+              moregen inst_nongen (neg_variance variance)
+                (refinement_child pos ~mode:(as_value param_mode))
+                type_pairs env t1 t2;
+              (* A binder on one side only cannot occur on the other side, so
+                 the codomains are compared as they are. *)
+              let u1, u2 =
+                match align_arrow_codomains binder1 u1 binder2 u2 with
+                | Some codomains -> codomains
+                | None -> u1, u2
+              in
+              moregen inst_nongen variance
+                (refinement_child pos ~mode:(as_value result_mode))
+                type_pairs env u1 u2;
               (* [t2] and [u2] is the user-written interface, which we deem as
                  more "principal" and used for mode crossing. See
                  [typing-modes/crossing.ml]. *)
@@ -7084,34 +7322,55 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
               moregen_alloc_mode env t2 ~is_ret:false (neg_variance variance) a1 a2;
               moregen_alloc_mode env u2 ~is_ret:true variance r1 r2
           | (Trefine r1, Trefine r2) ->
-              (* Refinements are rigid: the payloads are compared and the
-                 predicates must be syntactically alpha-equivalent.  There
-                 is no weakening — that is a later piece. *)
-              moregen inst_nongen variance type_pairs env
+              moregen inst_nongen variance same type_pairs env
                 r1.ref_payload r2.ref_payload;
-              if not
-                (refinement_predicates_equal env
-                   ~pairs:[r1.ref_binder, r2.ref_binder]
-                   r1.ref_pred r2.ref_pred)
-              then raise_unexplained_for Moregen
+              moregen_predicates inst_nongen variance pos env r1 r2
+          | (Trefine r1, _)
+            when not (is_syntactic pos)
+                 && (variance = Covariant || variance = Bivariant) ->
+              moregen inst_nongen variance same type_pairs env
+                r1.ref_payload t2'
+          | (_, Trefine r2)
+            when not (is_syntactic pos)
+                 && (variance = Contravariant || variance = Bivariant) ->
+              moregen inst_nongen variance same type_pairs env
+                t1' r2.ref_payload
+          | (Trefine _, _) | (_, Trefine _) ->
+              (* An addition, or a refinement in an invariant position.  Its
+                 mode was checked above. *)
+              moregen inst_nongen variance same type_pairs env
+                (refinement_payload t1') (refinement_payload t2');
+              begin match variance, pos with
+              | (Covariant | Contravariant), Proof p ->
+                  p.deferral.needs_proof <- true
+              | (Invariant | Bivariant), _ | _, Syntactic ->
+                  raise_for Moregen (Refinement (Invariant_refinement None))
+              | (Covariant | Contravariant), Forget ->
+                  raise_for Moregen (Refinement Refinement_needs_proof)
+              end
           | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
-              moregen_labeled_list inst_nongen variance type_pairs env
+              moregen_labeled_list inst_nongen variance same type_pairs env
                 labeled_tl1 labeled_tl2
           | (Tunboxed_tuple labeled_tl1, Tunboxed_tuple labeled_tl2) ->
-              moregen_labeled_list inst_nongen variance type_pairs env
+              moregen_labeled_list inst_nongen variance same type_pairs env
                 labeled_tl1 labeled_tl2
           | (Tconstr (p1, tl1, _), Tconstr (p2, tl2, _))
                 when Path.same p1 p2 -> begin
               match variance with
               | Invariant | Bivariant ->
-                  moregen_list inst_nongen variance type_pairs env tl1 tl2
+                  moregen_list inst_nongen variance
+                    (refinement_child pos ~mode:None) type_pairs env tl1 tl2
               | _ ->
                 match Env.find_type p1 env with
                 | decl ->
-                    moregen_param_list inst_nongen variance type_pairs env
-                      decl.type_variance tl1 tl2
+                    moregen_param_list inst_nongen variance pos type_pairs env
+                      p1 decl.type_variance tl1 tl2
                 | exception Not_found ->
-                    moregen_list inst_nongen Invariant type_pairs env tl1 tl2
+                    blame_refinement (Invariant_refinement (Some p1))
+                      (fun () ->
+                        moregen_list inst_nongen Invariant
+                          (refinement_child pos ~mode:None) type_pairs env
+                          tl1 tl2)
             end
           | (Tpackage pack1, Tpackage pack2) ->
               moregen_package inst_nongen variance type_pairs env
@@ -7128,10 +7387,10 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
           | (Tnil, Tnil) ->
               ()
           | (Tpoly (t1, []), Tpoly (t2, [])) ->
-              moregen inst_nongen variance type_pairs env t1 t2
+              moregen inst_nongen variance same type_pairs env t1 t2
           | (Tpoly (t1, tl1), Tpoly (t2, tl2)) ->
               enter_poly_for Moregen env t1 tl1 t2 tl2
-                (moregen inst_nongen variance type_pairs env)
+                (moregen inst_nongen variance same type_pairs env)
           | (Trepr (t1, sort_vars1), Trepr (t2, sort_vars2)) ->
               (* For layout-polymorphic types, establish correspondence
                  between sort variables positionally, then check moregen on
@@ -7139,40 +7398,75 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
               (try
                 let pairs = List.combine sort_vars1 sort_vars2 in
                 Jkind_types.Sort.enter_repr pairs (fun () ->
-                    moregen inst_nongen variance type_pairs env t1 t2)
+                    moregen inst_nongen variance same type_pairs env t1 t2)
               with Invalid_argument _ -> raise_unexplained_for Moregen)
           | (Tunivar {jkind=k1}, Tunivar {jkind=k2}) ->
               unify_univar_for Moregen env t1' t2' k1 k2 !univar_pairs
           | (Tquote t1, _) ->
-              moregen inst_nongen variance type_pairs
+              moregen inst_nongen variance Syntactic type_pairs
                 (incr_stage env) t1 (new_splice_ty t2)
           | (Tsplice t1, _) ->
-              moregen inst_nongen variance type_pairs
+              moregen inst_nongen variance Syntactic type_pairs
                 (decr_stage env) t1 (new_quote_ty t2)
           | (Tquote_eval t1, Tquote_eval t2) ->
-              moregen inst_nongen variance type_pairs
+              moregen inst_nongen variance Syntactic type_pairs
                 (incr_stage env) t1 t2
           | (Tbox t1, Tbox t2) ->
-              moregen inst_nongen variance type_pairs env t1 t2
+              moregen inst_nongen variance same type_pairs env t1 t2
           | (Tbox t, _) when is_unboxable_ty env t2' ->
-              moregen inst_nongen variance type_pairs
+              moregen inst_nongen variance same type_pairs
                 env t (unbox_ty_exn env t2')
           | (_, Tbox t) when is_unboxable_ty env t1' ->
-              moregen inst_nongen variance type_pairs
+              moregen inst_nongen variance same type_pairs
                 env (unbox_ty_exn env t1') t
           | (_, _) ->
               raise_unexplained_for Moregen
         end
+        end
   with Moregen_trace trace ->
     raise_trace_for Moregen (Diff {got = t1; expected = t2} :: trace)
 
+(* The predicates of two refinements whose payloads are compared.  Alpha-equal
+   predicates are equal when the types of their corresponding nodes are
+   (implementation variables may be instantiated); otherwise the refinements
+   differ, which needs a proof. *)
+and moregen_predicates inst_nongen variance pos env r1 r2 =
+  let differ () =
+    match variance, pos with
+    | (Covariant | Contravariant), Proof p -> p.deferral.needs_proof <- true
+    | (Covariant | Contravariant), Forget ->
+        raise_for Moregen (Refinement Refinement_needs_proof)
+    | (Invariant | Bivariant), _ | _, Syntactic ->
+        raise_for Moregen (Refinement (Invariant_refinement None))
+  in
+  if variance = Bivariant then () else
+  match
+    refinement_predicate_types env ~pairs:[r1.ref_binder, r2.ref_binder]
+      r1.ref_pred r2.ref_pred
+  with
+  | None -> differ ()
+  | Some types ->
+      (* A failed attempt is undone, including its memo entries. *)
+      let relate () =
+        let memo = fresh_moregen_memo () in
+        relate_predicate_types env
+          (moregen inst_nongen Invariant Syntactic memo env) types
+      in
+      match pos, variance with
+      | Proof _, (Covariant | Contravariant) ->
+          let snap = snapshot () in
+          begin try relate () with Moregen_trace _ ->
+            backtrack snap;
+            differ ()
+          end
+      | _ -> relate ()
 
-and moregen_list inst_nongen variance type_pairs env tl1 tl2 =
+and moregen_list inst_nongen variance pos type_pairs env tl1 tl2 =
   if List.length tl1 <> List.length tl2 then
     raise_unexplained_for Moregen;
-  List.iter2 (moregen inst_nongen variance type_pairs env) tl1 tl2
+  List.iter2 (moregen inst_nongen variance pos type_pairs env) tl1 tl2
 
-and moregen_labeled_list inst_nongen variance type_pairs env labeled_tl1
+and moregen_labeled_list inst_nongen variance pos type_pairs env labeled_tl1
     labeled_tl2 =
   if 0 <> List.compare_lengths labeled_tl1 labeled_tl2 then
     raise_unexplained_for Moregen;
@@ -7180,22 +7474,36 @@ and moregen_labeled_list inst_nongen variance type_pairs env labeled_tl1
     (fun (label1, ty1) (label2, ty2) ->
       if not (Option.equal String.equal label1 label2) then
         raise_unexplained_for Moregen;
-      moregen inst_nongen variance type_pairs env ty1 ty2)
+      moregen inst_nongen variance pos type_pairs env ty1 ty2)
     labeled_tl1 labeled_tl2
 
-and moregen_param_list inst_nongen variance type_pairs env vl tl1 tl2 =
+(* [variance] is [Covariant] or [Contravariant].  A parameter that the
+   constructor makes invariant has equal refinements, and the error names the
+   constructor.  The values of a parameter have unknown modes: a covariant
+   parameter need not be a component of the value (it can be the result of a
+   function inside it). *)
+and moregen_param_list inst_nongen variance pos type_pairs env path vl tl1 tl2 =
   match vl, tl1, tl2 with
   | [], [], [] -> ()
   | v :: vl, t1 :: tl1, t2 :: tl2 ->
     let param_variance = compose_variance variance v in
-    moregen inst_nongen param_variance type_pairs env t1 t2;
-    moregen_param_list inst_nongen variance type_pairs env vl tl1 tl2
+    let compare () =
+      moregen inst_nongen param_variance (refinement_child pos ~mode:None)
+        type_pairs env t1 t2
+    in
+    if param_variance = Invariant
+    then blame_refinement (Invariant_refinement (Some path)) compare
+    else compare ();
+    moregen_param_list inst_nongen variance pos type_pairs env path vl tl1 tl2
   | _, _, _ -> raise_unexplained_for Moregen
 
+(* Package constraints are type equations. *)
 and moregen_package inst_nongen variance type_pairs env lvl1 pack1 lvl2 pack2 =
   match
-    compare_package env (moregen_list inst_nongen variance type_pairs env)
-      lvl1 pack1 lvl2 pack2
+    blame_refinement Package_refinement (fun () ->
+      compare_package env
+        (moregen_list inst_nongen variance Syntactic type_pairs env)
+        lvl1 pack1 lvl2 pack2)
   with
   | Ok () -> ()
   | Error fme -> raise_for Moregen (First_class_module fme)
@@ -7210,13 +7518,13 @@ and moregen_fields inst_nongen variance type_pairs env ty1 ty2 =
     | (n, _, _) :: _ -> raise_for Moregen (Obj (Missing_field (Second, n)))
     | [] -> ()
   end;
-  moregen inst_nongen variance type_pairs env rest1
+  moregen inst_nongen variance Syntactic type_pairs env rest1
     (build_fields (get_level ty2) miss2 rest2);
   List.iter
     (fun (name, k1, t1, k2, t2) ->
        (* The below call should never throw [Public_method_to_private_method] *)
        moregen_kind k1 k2;
-       try moregen inst_nongen variance type_pairs env t1 t2 with Moregen_trace trace ->
+       try moregen inst_nongen variance Syntactic type_pairs env t1 t2 with Moregen_trace trace ->
          raise_trace_for Moregen
            (incompatible_fields ~name ~got:t1 ~expected:t2 :: trace)
     )
@@ -7270,7 +7578,7 @@ and moregen_row inst_nongen variance type_pairs env row1 row2 =
       (* This [link_type] has to be undone if the rest of the function fails *)
       link_type rm1 ext
   | Tconstr _, Tconstr _ ->
-      moregen inst_nongen variance type_pairs env rm1 rm2
+      moregen inst_nongen variance Syntactic type_pairs env rm1 rm2
   | _ -> raise_unexplained_for Moregen
   end;
   try
@@ -7281,7 +7589,7 @@ and moregen_row inst_nongen variance type_pairs env row1 row2 =
          (* Both matching [Rpresent]s *)
          | Rpresent(Some t1), Rpresent(Some t2) -> begin
              try
-               moregen inst_nongen variance type_pairs env t1 t2
+               moregen inst_nongen variance Syntactic type_pairs env t1 t2
              with Moregen_trace trace ->
                raise_trace_for Moregen
                  (Variant (Incompatible_types_for l) :: trace)
@@ -7296,11 +7604,11 @@ and moregen_row inst_nongen variance type_pairs env row1 row2 =
                    rf_either [] ~use_ext_of:f2 ~no_arg:c2 ~matched:m2 in
                  link_row_field_ext ~inside:f1 f2';
                  if List.length tl1 = List.length tl2 then
-                   List.iter2 (moregen inst_nongen variance type_pairs env) tl1 tl2
+                   List.iter2 (moregen inst_nongen variance Syntactic type_pairs env) tl1 tl2
                  else match tl2 with
                    | t2 :: _ ->
                      List.iter
-                       (fun t1 -> moregen inst_nongen variance type_pairs env t1 t2)
+                       (fun t1 -> moregen inst_nongen variance Syntactic type_pairs env t1 t2)
                        tl1
                    | [] -> if tl1 <> [] then raise_unexplained_for Moregen
                end
@@ -7313,7 +7621,7 @@ and moregen_row inst_nongen variance type_pairs env row1 row2 =
              try
                link_row_field_ext ~inside:f1 f2;
                List.iter
-                 (fun t1 -> moregen inst_nongen variance type_pairs env t1 t2)
+                 (fun t1 -> moregen inst_nongen variance Syntactic type_pairs env t1 t2)
                  tl1
              with Moregen_trace trace ->
                raise_trace_for Moregen
@@ -7354,7 +7662,12 @@ and moregen_row inst_nongen variance type_pairs env row1 row2 =
    Usually, the subject is given by the user, and the pattern
    is unimportant.  So, no need to propagate abbreviations.
 *)
-let moregeneral env inst_nongen pat_sort_vars subj_sort_vars pat_sch subj_sch =
+type refinement_inclusion =
+  { root_mode : Value.l option;
+    mutable instantiated : (type_expr * type_expr) option }
+
+let moregeneral ?refinements env inst_nongen pat_sort_vars subj_sort_vars
+    pat_sch subj_sch =
   (* Moregen splits the generic level into two finer levels:
      [generic_level] and [subject_level = generic_level - 1].
      In order to properly detect and print weak variables when
@@ -7388,8 +7701,15 @@ let moregeneral env inst_nongen pat_sort_vars subj_sort_vars pat_sch subj_sch =
       in
       try
         with_univar_pairs [] begin fun () ->
-          let type_pairs = fresh_moregen_pairs () in
-          moregen inst_nongen Covariant type_pairs env patt subj;
+          let type_pairs = fresh_moregen_memo () in
+          let deferral = { needs_proof = false } in
+          let pos =
+            match refinements with
+            | None -> Forget
+            | Some { root_mode; _ } ->
+                Proof { deferral; mode = root_mode; depth = 0 }
+          in
+          moregen inst_nongen Covariant pos type_pairs env patt subj;
           (* After [moregen], [pat_sorts] have been set to [subj_sorts].
              [subj_sorts] are ephemeral rigid vars created by [instance_with] to
              stand for [subj_sort_vars] during moregen.  Replace them back with
@@ -7407,7 +7727,12 @@ let moregeneral env inst_nongen pat_sort_vars subj_sort_vars pat_sch subj_sch =
                  |> Option.map (Jkind_types.Sort.subst subst_map))
               pat_sorts
           in
-          subj_inst, Ok sorts
+          let pair =
+            if deferral.needs_proof
+            then Some (newty (Ttuple [None, patt; None, subj]))
+            else None
+          in
+          subj_inst, Ok (sorts, pair)
         end
       with Moregen_trace trace -> subj_inst, Error trace
     end
@@ -7415,7 +7740,16 @@ let moregeneral env inst_nongen pat_sort_vars subj_sort_vars pat_sch subj_sch =
         ignore
           (Jkind_types.Sort.generalize_with (fun () -> generalize subj_inst)))
     with
-    | _, Ok sorts -> sorts
+    | _, Ok (sorts, pair) ->
+        (* The verifier needs the instantiated pair: copy it whole, so that it
+           keeps its shared variables and survives backtracking. *)
+        Option.iter (fun pair ->
+            match refinements, get_desc (generic_instance pair) with
+            | Some request, Ttuple [_, patt; _, subj] ->
+                request.instantiated <- Some (patt, subj)
+            | _ -> assert false)
+          pair;
+        sorts
     | _, Error trace -> raise (Moregen (expand_to_moregen_error env trace))
   end
 
@@ -7622,11 +7956,30 @@ let rec eqtype rename type_pairs subst env ~do_jkind_check t1 t2 =
           | (Trefine r1, Trefine r2) ->
               eqtype rename type_pairs subst env
                 r1.ref_payload r2.ref_payload ~do_jkind_check:true;
-              if not
-                (refinement_predicates_equal env
-                   ~pairs:[r1.ref_binder, r2.ref_binder]
-                   r1.ref_pred r2.ref_pred)
-              then raise_unexplained_for Equality
+              begin match
+                refinement_predicate_types env
+                  ~pairs:[r1.ref_binder, r2.ref_binder]
+                  r1.ref_pred r2.ref_pred
+              with
+              | None -> raise_unexplained_for Equality
+              | Some types ->
+                  (* The kinds of variables do not matter to a predicate.
+                     Between two declarations, the variables local to their
+                     predicates may be renamed, not their parameters. *)
+                  let local ty =
+                    match !predicate_variable_renaming with
+                    | None -> false
+                    | Some params ->
+                        is_Tvar ty
+                        && not (List.exists (fun p -> eq_type p ty) params)
+                  in
+                  relate_predicate_types env
+                    (fun ty1 ty2 ->
+                      let rename = rename || (local ty1 && local ty2) in
+                      eqtype rename type_pairs subst env ty1 ty2
+                        ~do_jkind_check:false)
+                    types
+              end
           | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
               eqtype_labeled_list rename type_pairs subst env labeled_tl1
                 labeled_tl2
@@ -7969,7 +8322,7 @@ let rec moregen_clty ~arrow_index trace type_pairs env cty1 cty2 =
     | Cty_arrow (l1, ty1, cty1'), Cty_arrow (l2, ty2, cty2') when l1 = l2 ->
         let arrow_index = arrow_index + 1 in
         begin
-          try moregen true Covariant type_pairs env ty1 ty2 with Moregen_trace trace ->
+          try moregen true Covariant Syntactic type_pairs env ty1 ty2 with Moregen_trace trace ->
             raise (Failure [
                 CM_Parameter_mismatch
                   (arrow_index, env, expand_to_moregen_error env trace)])
@@ -7984,7 +8337,7 @@ let rec moregen_clty ~arrow_index trace type_pairs env cty1 cty2 =
                   all methods in sign2 are present in sign1. *)
                assert false
              | (_, _, ty') ->
-                 match moregen true Covariant type_pairs env ty' ty with
+                 match moregen true Covariant Syntactic type_pairs env ty' ty with
                  | () -> ()
                  | exception Moregen_trace trace ->
                      raise (Failure [
@@ -8002,7 +8355,7 @@ let rec moregen_clty ~arrow_index trace type_pairs env cty1 cty2 =
                   all instance variables in sign2 are present in sign1. *)
                assert false
              | (_, _, ty') ->
-                 match moregen true Covariant type_pairs env ty' ty with
+                 match moregen true Covariant Syntactic type_pairs env ty' ty with
                  | () -> ()
                  | exception Moregen_trace trace ->
                      raise (Failure [
@@ -8054,16 +8407,17 @@ let match_class_types ?(trace=true) env pat_sch subj_sch =
           let (_, patt) =
             with_level ~level:generic_level
               (fun () -> instance_class [] pat_sch) in
-          let type_pairs = fresh_moregen_pairs () in
+          let type_pairs = fresh_moregen_memo () in
           let sign1 = signature_of_class_type patt in
           let sign2 = signature_of_class_type subj in
           let self1 = sign1.csig_self in
           let self2 = sign2.csig_self in
           let row1 = sign1.csig_self_row in
           let row2 = sign2.csig_self_row in
-          TypePairs.add type_pairs.invariant_pairs (self1, self2);
+          TypePairs.add type_pairs.syntactic_pairs.invariant_pairs
+            (self1, self2);
           (* Always succeeds *)
-          moregen true Covariant type_pairs env row1 row2;
+          moregen true Covariant Syntactic type_pairs env row1 row2;
           (* May fail *)
           try moregen_clty trace type_pairs env patt subj; []
           with Failure res -> res
@@ -8485,6 +8839,11 @@ let enlarge_type env ty =
 *)
 
 let subtypes = TypePairs.create 17
+(* Pairs compared where refinements must be equal, and pairs compared where a
+   refinement may be proved.  Each needs its own table: a pair accepted in one
+   kind of position may be rejected in another. *)
+let syntactic_subtypes = TypePairs.create 17
+let proof_subtypes = TypePairs.create 17
 
 let subtype_error ~env ~trace ~unification_trace =
   raise (Subtype (Subtype.error
@@ -8496,28 +8855,60 @@ let subtype_alloc_mode env trace a1 a2 =
   | Ok () -> ()
   | Error _ -> subtype_error ~env ~trace ~unification_trace:[]
 
-let rec subtype_rec env trace t1 t2 cstrs =
-  if eq_type t1 t2 then cstrs else
+let subtype_memo = function
+  | Forget -> Some subtypes
+  | Syntactic -> Some syntactic_subtypes
+  | Proof { mode = None; _ } -> Some proof_subtypes
+  | Proof { mode = Some _; _ } -> None
 
-  if TypePairs.mem subtypes (t1, t2) then
+(* Values flow from [t1] to [t2].  A value entering a refined type must have
+   the modes the refinement guarantees (see [check_refinement_add]). *)
+let subtype_refinement_add env trace pos t1 t2 =
+  match pos with
+  | Proof { mode; _ } ->
+      let t1' = expand_head env t1 and t2' = expand_head env t2 in
+      if is_refined t2' && not (is_refined t1') && not (is_Tvar t1') then
+        begin match refinement_mode_violation env t1' mode with
+        | None -> ()
+        | Some violation ->
+            subtype_error ~env ~trace
+              ~unification_trace:
+                [Refinement (Refinement_modes (t2', violation))]
+        end
+  | Forget | Syntactic -> ()
+
+let rec subtype_rec env trace pos t1 t2 cstrs =
+  if eq_type t1 t2 then cstrs else begin
+  subtype_refinement_add env trace pos t1 t2;
+  let memo = subtype_memo pos in
+  let visited =
+    match memo with
+    | Some memo -> TypePairs.mem memo (t1, t2)
+    | None -> false
+  in
+  if visited then
     cstrs
   else begin
-    TypePairs.add subtypes (t1, t2);
+    Option.iter (fun memo -> TypePairs.add memo (t1, t2)) memo;
+    let same = refinement_child pos ~mode:(proof_mode pos) in
     match (get_desc t1, get_desc t2) with
       (Tvar _, _) | (_, Tvar _) ->
         (trace, t1, t2, !univar_pairs)::cstrs
     | (Tarrow((l1,a1,r1,binder1), t1, u1, _),
        Tarrow((l2,a2,r2,binder2), t2, u2, _))
       when compatible_labels ~in_pattern_mode:false l1 l2 ->
+        (* A binder on one side only cannot occur on the other side. *)
         let u1, u2 =
           match align_arrow_codomains binder1 u1 binder2 u2 with
           | Some codomains -> codomains
-          | None -> subtype_error ~env ~trace ~unification_trace:[]
+          | None -> u1, u2
         in
+        let as_value mode = Some (Value.disallow_right (alloc_as_value mode)) in
         let cstrs =
           subtype_rec
             env
             (Subtype.Diff {got = t2; expected = t1} :: trace)
+            (refinement_child pos ~mode:(as_value a2))
             t2 t1
             cstrs
         in
@@ -8525,23 +8916,59 @@ let rec subtype_rec env trace t1 t2 cstrs =
         subtype_alloc_mode env trace a2 a1;
         let r2 = cross_right_alloc_ret env u2 r2 in
         subtype_alloc_mode env trace r1 r2;
+        (* [r2] was crossed with the target's result type; when that type is
+           refined, the source's result mode [r1] is checked when the result
+           enters the refinement. *)
         subtype_rec
           env
           (Subtype.Diff {got = u1; expected = u2} :: trace)
+          (refinement_child pos ~mode:(as_value r1))
           u1 u2
           cstrs
     | (Ttuple tl1, Ttuple tl2) ->
-        subtype_labeled_list env trace tl1 tl2 cstrs
+        subtype_labeled_list env trace same tl1 tl2 cstrs
     | (Tunboxed_tuple tl1, Tunboxed_tuple tl2) ->
-        subtype_labeled_list env trace tl1 tl2 cstrs
+        subtype_labeled_list env trace same tl1 tl2 cstrs
     | (Tconstr(p1, [], _), Tconstr(p2, [], _)) when Path.same p1 p2 ->
         cstrs
     | (Tconstr(p1, _tl1, _abbrev1), _)
       when generic_abbrev env p1 && safe_abbrev env t1 ->
-        subtype_rec env trace (expand_abbrev env t1) t2 cstrs
+        subtype_rec env trace pos (expand_abbrev env t1) t2 cstrs
     | (_, Tconstr(p2, _tl2, _abbrev2))
       when generic_abbrev env p2 && safe_abbrev env t2 ->
-        subtype_rec env trace t1 (expand_abbrev env t2) cstrs
+        subtype_rec env trace pos t1 (expand_abbrev env t2) cstrs
+    | (Trefine r1, Trefine r2) ->
+        begin match
+          refinement_predicate_types env ~pairs:[r1.ref_binder, r2.ref_binder]
+            r1.ref_pred r2.ref_pred
+        with
+        | Some types ->
+            (* Equal predicates, provided their types unify. *)
+            let cstrs = ref cstrs in
+            relate_predicate_types env
+              (fun ty1 ty2 ->
+                cstrs := (trace, ty1, ty2, !univar_pairs) :: !cstrs)
+              types;
+            subtype_rec env trace same r1.ref_payload r2.ref_payload !cstrs
+        | None ->
+            begin match pos with
+            | Proof p ->
+                p.deferral.needs_proof <- true;
+                subtype_rec env trace same r1.ref_payload r2.ref_payload
+                  cstrs
+            | Forget | Syntactic -> (trace, t1, t2, !univar_pairs)::cstrs
+            end
+        end
+    | (Trefine r1, _) when not (is_syntactic pos) ->
+        subtype_rec env trace same r1.ref_payload t2 cstrs
+    | (_, Trefine r2) ->
+        begin match pos with
+        | Proof p ->
+            (* The mode of the entering value was checked above. *)
+            p.deferral.needs_proof <- true;
+            subtype_rec env trace same t1 r2.ref_payload cstrs
+        | Forget | Syntactic -> (trace, t1, t2, !univar_pairs)::cstrs
+        end
     | (Tconstr(p1, tl1, _), Tconstr(p2, tl2, _)) when Path.same p1 p2 ->
         begin try
           let decl = Env.find_type p1 env in
@@ -8558,6 +8985,7 @@ let rec subtype_rec env trace t1 t2 cstrs =
                   subtype_rec
                     env
                     (Subtype.Diff {got = t1; expected = t2} :: trace)
+                    (refinement_child pos ~mode:None)
                     t1 t2
                     cstrs
               else
@@ -8566,6 +8994,7 @@ let rec subtype_rec env trace t1 t2 cstrs =
                   subtype_rec
                     env
                     (Subtype.Diff {got = t2; expected = t1} :: trace)
+                    (refinement_child pos ~mode:None)
                     t2 t1
                     cstrs
                 else cstrs)
@@ -8575,7 +9004,7 @@ let rec subtype_rec env trace t1 t2 cstrs =
         end
     | (Tconstr(p1, _, _), _)
       when generic_private_abbrev env p1 && safe_abbrev_opt env t1 ->
-        subtype_rec env trace (expand_abbrev_opt env t1) t2 cstrs
+        subtype_rec env trace pos (expand_abbrev_opt env t1) t2 cstrs
 (*  | (_, Tconstr(p2, _, _)) when generic_private_abbrev false env p2 ->
         subtype_rec env trace t1 (expand_abbrev_opt env t2) cstrs *)
     | (Tobject (f1, _), Tobject (f2, _))
@@ -8591,14 +9020,14 @@ let rec subtype_rec env trace t1 t2 cstrs =
           (trace, t1, t2, !univar_pairs)::cstrs
         end
     | (Tpoly (u1, []), Tpoly (u2, [])) ->
-        subtype_rec env trace u1 u2 cstrs
+        subtype_rec env trace same u1 u2 cstrs
     | (Tpoly (u1, tl1), Tpoly (u2, [])) ->
         let u1' = instance_poly tl1 u1 in
-        subtype_rec env trace u1' u2 cstrs
+        subtype_rec env trace same u1' u2 cstrs
     | (Tpoly (u1, tl1), Tpoly (u2,tl2)) ->
         begin try
           enter_poly env u1 tl1 u2 tl2
-            (fun t1 t2 -> subtype_rec env trace t1 t2 cstrs)
+            (fun t1 t2 -> subtype_rec env trace same t1 t2 cstrs)
         with Escape _ ->
           (trace, t1, t2, !univar_pairs)::cstrs
         end
@@ -8608,28 +9037,30 @@ let rec subtype_rec env trace t1 t2 cstrs =
         (try
           let pairs = List.combine sort_vars1 sort_vars2 in
           Jkind_types.Sort.enter_repr pairs
-            (fun () -> subtype_rec env trace u1 u2 cstrs)
+            (fun () -> subtype_rec env trace same u1 u2 cstrs)
         with Invalid_argument _ -> (trace, t1, t2, !univar_pairs)::cstrs)
     | (Tpackage pack1, Tpackage pack2) ->
         subtype_package env trace (get_level t1) pack1
           (get_level t2) pack2 cstrs
     | (Tquote t1, Tquote t2) ->
-         subtype_rec (incr_stage env) trace t1 t2 cstrs
+         subtype_rec (incr_stage env) trace Syntactic t1 t2 cstrs
     | (Tsplice t1, Tsplice t2) ->
-         subtype_rec (decr_stage env) trace t1 t2 cstrs
+         subtype_rec (decr_stage env) trace Syntactic t1 t2 cstrs
     | (Tquote_eval t1, Tquote_eval t2) ->
-         subtype_rec (incr_stage env) trace t1 t2 cstrs
+         subtype_rec (incr_stage env) trace Syntactic t1 t2 cstrs
     | (Tbox t1, Tbox t2) ->
          subtype_rec
            env
            (Subtype.Diff {got = t1; expected = t2} :: trace)
+           same
            t1 t2
            cstrs
     | (_, _) ->
         (trace, t1, t2, !univar_pairs)::cstrs
   end
+  end
 
-and subtype_labeled_list env trace labeled_tl1 labeled_tl2 cstrs =
+and subtype_labeled_list env trace pos labeled_tl1 labeled_tl2 cstrs =
   if 0 <> List.compare_lengths labeled_tl1 labeled_tl2 then
     subtype_error ~env ~trace ~unification_trace:[];
   List.fold_left2
@@ -8639,6 +9070,7 @@ and subtype_labeled_list env trace labeled_tl1 labeled_tl2 cstrs =
       subtype_rec
         env
         (Subtype.Diff { got = ty1; expected = ty2 } :: trace)
+        pos
         ty1 ty2
         cstrs)
     cstrs labeled_tl1 labeled_tl2
@@ -8679,6 +9111,7 @@ and subtype_fields env trace ty1 ty2 cstrs =
       subtype_rec
         env
         (Subtype.Diff {got = rest1; expected = rest2} :: trace)
+        Syntactic
         rest1 rest2
         cstrs
     else
@@ -8697,6 +9130,7 @@ and subtype_fields env trace ty1 ty2 cstrs =
        subtype_rec
          env
          (Subtype.Diff {got = t1; expected = t2} :: trace)
+         Syntactic
          t1 t2
          cstrs)
     cstrs pairs
@@ -8715,6 +9149,7 @@ and subtype_row env trace row1 row2 cstrs =
       subtype_rec
         env
         (Subtype.Diff {got = more1; expected = more2} :: trace)
+        Syntactic
         more1 more2
         cstrs
   | (Tvar _|Tconstr _|Tnil), (Tvar _|Tconstr _|Tnil)
@@ -8728,12 +9163,14 @@ and subtype_row env trace row1 row2 cstrs =
               subtype_rec
                 env
                 (Subtype.Diff {got = t1; expected = t2} :: trace)
+                Syntactic
                 t1 t2
                 cstrs
           | Reither(false, t1::_, _), Rpresent(Some t2) ->
               subtype_rec
                 env
                 (Subtype.Diff {got = t1; expected = t2} :: trace)
+                Syntactic
                 t1 t2
                 cstrs
           | Rabsent, _ -> cstrs
@@ -8750,6 +9187,7 @@ and subtype_row env trace row1 row2 cstrs =
         subtype_rec
           env
           (Subtype.Diff {got = more1; expected = more2} :: trace)
+          Syntactic
           more1 more2
           cstrs
       in
@@ -8765,6 +9203,7 @@ and subtype_row env trace row1 row2 cstrs =
               subtype_rec
                 env
                 (Subtype.Diff {got = t1; expected = t2} :: trace)
+                Syntactic
                 t1 t2
                 cstrs
           | _ -> raise Exit)
@@ -8772,14 +9211,29 @@ and subtype_row env trace row1 row2 cstrs =
   | _ ->
       raise Exit
 
-let subtype env ty1 ty2 =
-  TypePairs.clear subtypes;
+let subtype ?refinements env ty1 ty2 =
+  let clear () =
+    TypePairs.clear subtypes;
+    TypePairs.clear syntactic_subtypes;
+    TypePairs.clear proof_subtypes
+  in
+  clear ();
   with_univar_pairs [] (fun () ->
+    let deferral = { needs_proof = false } in
+    let pos =
+      match refinements with
+      | None -> Forget
+      | Some { root_mode; _ } -> Proof { deferral; mode = root_mode; depth = 0 }
+    in
     (* Build constraint set. *)
     let cstrs =
-      subtype_rec env [Subtype.Diff {got = ty1; expected = ty2}] ty1 ty2 []
+      subtype_rec env [Subtype.Diff {got = ty1; expected = ty2}] pos ty1 ty2 []
     in
-    TypePairs.clear subtypes;
+    clear ();
+    Option.iter
+      (fun request ->
+        if deferral.needs_proof then request.instantiated <- Some (ty1, ty2))
+      refinements;
     (* Enforce constraints. *)
     function () ->
       List.iter

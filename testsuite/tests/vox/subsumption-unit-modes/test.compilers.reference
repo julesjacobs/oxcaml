@@ -1,0 +1,15 @@
+File "closures.ml", line 1:
+Error: The implementation closures.ml
+       does not match the interface closures.cmi: 
+       Values do not match:
+         val counter : unit -> int -> int
+       is not included in
+         val counter : unit -> {f : int -> int | true}
+       The type unit -> int -> int is not compatible with the type
+         unit -> {f : int -> int | true}
+       Type int -> int is not compatible with type {f : int -> int | true}
+       The refined type {f : int -> int | true} requires values that are
+       total, stateless and portable, but at this position they may be
+       partial.
+       File "closures.mli", line 9, characters 0-45: Expected declaration
+       File "closures.ml", line 2, characters 4-11: Actual declaration

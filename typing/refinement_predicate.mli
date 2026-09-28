@@ -49,6 +49,26 @@ val equal :
   pairs:(Ident.t * Ident.t) list ->
   refinement_expression -> refinement_expression -> bool
 
+(** The types of corresponding nodes of two predicates.  [exposed] marks
+    the types whose refinements the verifier assumes while evaluating the
+    predicate (elimination sources, [let refine_] bindings, function
+    parameters, patterns, applied functions); their refinements are part of
+    the predicate's meaning. *)
+type type_pair =
+  { left : type_expr;
+    right : type_expr;
+    exposed : bool;
+    binders : (Ident.t * Ident.t) list
+      (** the pairing of binders in scope, which the types may mention *) }
+
+(** [equal], returning the types of corresponding nodes when the predicates
+    are alpha-equivalent.  Equal predicates denote the same proposition only
+    when these types are also related. *)
+val equal_with_types :
+  pairs:(Ident.t * Ident.t) list ->
+  refinement_expression -> refinement_expression ->
+  type_pair list option
+
 (** Back to surface syntax, for printing.  [var_name] chooses the printed
     name of a bound ident; [value_ident] renders a free ident from its
     resolved (possibly substituted) path. [type_constraint] optionally

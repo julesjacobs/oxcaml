@@ -224,7 +224,8 @@ module Int_table : sig end = Vox_verified_flat_hashtbl.Make (Int_key);;
 module Int_table : sig end
 |}]
 
-(* 2b. The same law with its equation commuted is rejected on trunk. *)
+(* 2b. The same law with its equation commuted is accepted: the functor
+   application proves the declared law from the stated one. *)
 module Commuted_key = struct
   include Int_key
   let (symmetric @ total) (x : int) (y : int) :
@@ -253,48 +254,52 @@ module Commuted_key :
   end
 |}]
 
-module Commuted_table = Vox_verified_flat_hashtbl.Make (Commuted_key);;
+module Commuted_table : sig end =
+  Vox_verified_flat_hashtbl.Make (Commuted_key);;
 [%%expect{|
-Line 1, characters 24-69:
-1 | module Commuted_table = Vox_verified_flat_hashtbl.Make (Commuted_key);;
-                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Modules do not match:
-       sig
-         type t = int
-         val equal : int -> int -> bool
-         val equal_def :
-           (x : int) -> (y : int) -> {u : unit | (equal x y) === (x = y)}
-         val hash : int -> int
-         val hash_def : (x : int) -> {u : unit | (hash x) === (x land 1023)}
-         val reflexive : (x : int) -> {u : unit | equal x x}
-         val transitive :
-           (x : int) ->
-           (y : int) ->
-           (z : int) ->
-           {u : unit | (not ((equal x y) && (equal y z))) || (equal x z)}
-         val hash_equal :
-           (x : int) ->
-           (y : int) ->
-           {u : unit | (not (equal x y)) || ((hash x) = (hash y))}
-         val symmetric :
-           (x : int) -> (y : int) -> {u : unit | (equal y x) = (equal x y)}
-       end
-     is not included in Vox_verified_flat_hashtbl.Key
-     Values do not match:
-       val symmetric :
-         (x : int) -> (y : int) -> {u : unit | (equal y x) = (equal x y)}
-     is not included in
-       val symmetric :
-         (x : t) -> (y : t) -> {u : unit | (equal x y) = (equal y x)} @@
-         total
-     The type
-       "(x : int) -> (y : int) -> {u : unit | (equal y x) = (equal x y)}"
-     is not compatible with the type
-       "(x : t) -> (y : t) -> {u : unit | (equal x y) = (equal y x)}"
-     Type "{u : unit | (equal y x) = (equal x y)}" is not compatible with type
-       "{u : unit | (equal x y) = (equal y x)}"
-     File "vox_verified_flat_hashtbl.mli", lines 59-60, characters 2-12:
-       Expected declaration
+module Commuted_table : sig end
+|}]
+
+(* 2c. A law that states only one direction of symmetry is rejected, with a
+   counterexample. *)
+module One_way_key = struct
+  include Int_key
+  let (symmetric @ total) (x : int) (y : int) :
+      {u : unit | not (equal x y) || equal y x} = equal_def x y; equal_def y x
+end;;
+[%%expect{|
+module One_way_key :
+  sig
+    type t = int
+    val equal : int -> int -> bool
+    val equal_def :
+      (x : int) -> (y : int) -> {u : unit | (equal x y) === (x = y)}
+    val hash : int -> int
+    val hash_def : (x : int) -> {u : unit | (hash x) === (x land 1023)}
+    val reflexive : (x : int) -> {u : unit | equal x x}
+    val transitive :
+      (x : int) ->
+      (y : int) ->
+      (z : int) ->
+      {u : unit | (not ((equal x y) && (equal y z))) || (equal x z)}
+    val hash_equal :
+      (x : int) ->
+      (y : int) -> {u : unit | (not (equal x y)) || ((hash x) = (hash y))}
+    val symmetric :
+      (x : int) -> (y : int) -> {u : unit | (not (equal x y)) || (equal y x)}
+  end
+|}]
+
+module One_way_table : sig end =
+  Vox_verified_flat_hashtbl.Make (One_way_key);;
+[%%expect{|
+Line 2, characters 2-46:
+2 |   Vox_verified_flat_hashtbl.Make (One_way_key);;
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The value "One_way_key.symmetric" does not satisfy the functor's parameter.
+       Refinement could not be proved (counterexample: x = 0, y = 1)
+File "vox_verified_flat_hashtbl.mli", line 59, characters 52-73:
+  The refinement is stated here.
 |}]
 
 (* 3. Store 84 and claim 84, without the two law calls: rejected. *)

@@ -300,6 +300,7 @@ type error =
   | Unbound_instance_variable of string * string list
   | Instance_variable_not_mutable of string
   | Not_subtype of Errortrace.Subtype.error
+  | Refinement_coercion_unsupported
   | Outside_class
   | Value_multiply_overridden of string
   | Coercion_failure of
