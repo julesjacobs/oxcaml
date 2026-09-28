@@ -34,7 +34,7 @@
     "vox": {
       "short": "Refinements are rigid in unify, moregen and eqtype; dependent arrows align binders; scope tracking for term dependencies; the totality tests on types.",
       "long": [
-        "Two `Trefine` nodes unify when their payloads unify and their predicates are alpha-equal after path normalization (`refinement_predicates_equal`); a refined and an unrefined type never unify, and there is no subsumption. The predicates are compared without their types, which is an open issue (the same law can be reused at another type); variance treats parameters that occur only in predicate types as non-phantom to limit it.",
+        "Two `Trefine` nodes unify when their payloads unify and their predicates are alpha-equal after path normalization (`refinement_predicate_types`). The comparison skips elimination wrappers (`Rexp_refinement`) on both sides, because the verifier does not assume the types they record. It returns the types of corresponding predicate nodes, and `relate_predicate_types` unifies them by their skeletons, so a law about `int t` does not unify with the same law about `bool t`. A refined and an unrefined type never unify. Weakening a refinement is subsumption, which is not done by unification: at module inclusion and at a coercion `:>` the typer records an obligation, and the verifier proves the implication. Variance treats parameters that occur only in predicate types as non-phantom.",
         "A predicate can mention term variables, so a type now has term dependencies. `register_refinement_value_scope` and `Refinement_scope_escape` extend the GADT-style escape check to them. `Typecore` substitutes an argument for a dependent binder with `substitute_refinement_expression`, and renames one with `substitute_refinement_ident`; `apply_dependent_type` is exported but has no caller.",
         "`is_inductive` and `can_pattern_match_total` decide when a match is total: the representation of the scrutinee's type must not lead back to the type itself, except through the direct, unchanged recursive fields of an `[@@inductive]` type. This stops a Landin-style knot from being built and taken apart in total code. `can_unpack_total` applies the same jkind test to the abstract types of a first-class module that total code unpacks."
       ]
@@ -48,7 +48,7 @@
         ],
         "span": 10,
         "kind": "vox",
-        "text": "Payloads unify; predicates must be alpha-equal, pairing the two binders. A one-sided refinement falls through to the ordinary mismatch, so `{x : int | p}` and `int` do not unify. The typer moves between the two only at expression boundaries, through `Texp_refinement`."
+        "text": "Payloads unify; predicates must be alpha-equal, pairing the two binders, and the types of their corresponding nodes are unified. A one-sided refinement falls through to the ordinary mismatch, so `{x : int | p}` and `int` do not unify. The typer moves between the two only at expression boundaries, through `Texp_refinement`."
       },
       {
         "title": "Can a match on this type be total?",

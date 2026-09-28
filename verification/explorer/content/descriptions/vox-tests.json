@@ -175,7 +175,7 @@
       "short": "Regression for phantom predicate parameters (W8): a type parameter that occurs only in a refinement predicate is invariant, so :> cannot move a law from int to bool.",
       "long": [
         "Before the fix (70a56a181f), such a parameter was phantom, and `(l :> bool law)` turned a law proved at `int` into the same law at `bool`. The test covers records, unboxed constructors, kind annotations, variance annotations and signatures.",
-        "It also records the open hole W1: predicates are compared without their types, so an abbreviation still unifies `int w` with `bool w`. The subsumption branch will close it and is not merged."
+        "It also covers the same law through an abbreviation. Since subsumption was merged, predicates are compared with the types of their nodes (W1), so an abbreviation no longer unifies `int w` with `bool w`."
       ]
     },
     "notes": [
@@ -186,10 +186,10 @@
         "text": "The coercion from `int law` to `bool law` is now a subtyping error."
       },
       {
-        "title": "W1, still open",
+        "title": "Through an abbreviation",
         "from": "(* The same through an abbreviation: [put] and [get] share one weak",
         "to": "(* Coercing a law to itself, and covariant parameters next to a",
-        "text": "Because the parameter is invariant, `cell ()`'s result is not generalized and one cell cannot store a law at `int` and return it at `bool`. The comment names the remaining hole: predicates are compared without their types, so an abbreviation unifies `int w` with `bool w`. No run-time exploit is known."
+        "text": "Because the parameter is invariant, `cell ()`'s result is not generalized and one cell cannot store a law at `int` and return it at `bool`. Predicates are also compared with the types of their nodes, so an abbreviation does not unify `int w` with `bool w` either."
       }
     ]
   },
@@ -521,7 +521,7 @@
   "testsuite/tests/vox/implicit_refinements.ml": {
     "what": {
       "short": "Implicit introduction and elimination at expression boundaries, and their limit: only the outer refinement converts; a refinement inside a list or another type constructor is part of the type.",
-      "long": "This is the rigid behavior on trunk: `unify` compares refined types by payload and alpha-equal predicate, with no subsumption. The subsumption branch would change this; it is not merged."
+      "long": "`unify` stays rigid: it compares refined types by payload and alpha-equal predicate. Subsumption, merged on 28 September, applies at module inclusion and at coercions `:>`, where the verifier proves the implication; the conversions tested here are unchanged by it."
     },
     "notes": [
       {
