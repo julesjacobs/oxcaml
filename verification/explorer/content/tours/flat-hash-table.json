@@ -14,7 +14,10 @@
       "title": "Keys come with proofs",
       "path": "verification/library/vox_verified_flat_hashtbl.mli",
       "from": "(** Keys: [equal] must be an equivalence",
-      "to": "end",
+      "to": [
+        "module type Key = sig",
+        "end"
+      ],
       "lines": "51-65",
       "text": "A client instantiates `Make` with a key module. `equal` and `hash` are declared at `@@ total`, Vox's totality mode: the checker ensures they terminate without raising, and `@@ total` defaults their statefulness to `stateless`, so their results depend only on their arguments. `{u : unit | p}` is `unit` refined by the predicate `p`, and the dependent arrow `(x : t) -> ...` names the argument so that `p` can mention it; each of the four laws is a total function of such a type, and so a proof of `p` for every `x`. The client writes these proofs, and a false law is a compile-time error. Hashes may collide and may be any `int`: the public test hashes every key to 0."
     },

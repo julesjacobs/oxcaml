@@ -533,7 +533,7 @@
       "short": "Adds a section on totality (total < partial) and inductive pattern matching: why total code may only destructure nonrecursive or [@@inductive] types.",
       "long": [
         "It lists what a total closure may not do (call captured partial functions, recurse, loop, raise, match non-exhaustively, read or write mutable state, allocate identity-bearing values), shows the Landin knot that motivates the pattern rule, and covers aliases, recursive modules, functors over `[@@inductive]` signatures, phantom occurrences and type parameters. The rule on mutable state concerns the built-in reads and writes: a total function may still write storage it owns uniquely, through the verified library's total externals.",
-        "It says that neither an alias nor a module boundary may hide a cycle. Hidden types in the totality check (GADT existentials and abstract types) are a known soundness issue whose fix is in progress and not merged, and the section does not mention it. Ghostliness is not documented in these pages."
+        "It says that neither an alias nor a module boundary may hide a cycle. It does not describe the rule for hidden types (GADT existentials, abstract and open types, unpacked modules) that the totality check applies since `09dfd7e2fa`. Ghostliness is not documented in these pages."
       ]
     }
   },

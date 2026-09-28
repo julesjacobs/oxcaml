@@ -378,7 +378,7 @@
     },
     "vox": {
       "short": "New: projecting run from { run : callback heap -> bool } is partial, because an abstract heap may contain its argument and close a knot.",
-      "long": "This covers abstract type applications whose arguments lead back to the type. An abstract type or GADT existential that hides a knot without such an argument is the known open issue in `Ctype.can_pattern_match_total`, whose fix is in progress and not merged."
+      "long": "This covers abstract type applications whose arguments lead back to the type. An abstract type or GADT existential that hides a knot without such an argument is covered by the hidden-types fix (`09dfd7e2fa`) in `Ctype.can_pattern_match_total`, tested in [totality_hidden_types.ml](src:testsuite/tests/vox/totality_hidden_types.ml)."
     }
   },
   "testsuite/tests/typing-modes/structural_recursion.ml": {

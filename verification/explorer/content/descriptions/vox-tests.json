@@ -1,7 +1,7 @@
 {
   "_about": "testsuite/tests/vox/ (1,761 files at c7ec2f92a8). The directory key itself belongs to top-level.json, so the directory-level text is on README.md. About a hundred entries: one representative file per family of prefixes (hmc, wasm, hm, the HM development stages, effective, pref, mode, ghost, level, egraph, copy, lz4 and the smaller demo families), and the checker's regression tests grouped by topic in notes: totality and negative recursion; ghost and erasure; refinement typing and subsumption; soundness regressions; cache determinism. The demo tests are covered by the demo tours, which the entries link to. All Vox-only, so `what` only. American spelling.",
-  "_sources": "The code at HEAD 5c5e606aaf (outside verification/explorer and verification/site identical to trunk a0b99ddfeb): each file's TEST header and leading comment, the README, the catalogue pages' sources lists, design-docs/unifier-pr-sequence.md for the HM stages, research/mastery-20260927/INDEX.md Part C for the soundness record, git log for when regressions were added. Status of soundness items at c7ec2f92a8: shifts, call congruence, ghost-field locality and record kinds fixed and merged; built-in meanings keyed by declaration merged with trust hardening (a187b9ab9c); hidden types in the totality check in progress, not merged; W1 open.",
-  "_talk_tests": "The talk tests (talk_*.ml, talk-*/, property_testing*.ml) and verification/talk/TESTS.md are at HEAD since the merge of trunk (c7ec2f92a8), so their entries are top-level keys. talk_soundness_totality_knot.ml and talk_soundness_borrow_symbol.ml are not at HEAD; builtin_declaration_identity.ml landed with trust hardening (a187b9ab9c).",
+  "_sources": "The code at HEAD 5c5e606aaf (outside verification/explorer and verification/site identical to trunk a0b99ddfeb): each file's TEST header and leading comment, the README, the catalogue pages' sources lists, design-docs/unifier-pr-sequence.md for the HM stages, research/mastery-20260927/INDEX.md Part C for the soundness record, git log for when regressions were added. Status of soundness items at c7ec2f92a8: shifts, call congruence, ghost-field locality and record kinds fixed and merged; built-in meanings keyed by declaration merged with trust hardening (a187b9ab9c); hidden types in the totality check fixed and merged at 953e069209 (09dfd7e2fa), one route open; W1 open.",
+  "_talk_tests": "The talk tests (talk_*.ml, talk-*/, property_testing*.ml) and verification/talk/TESTS.md are at HEAD since the trunk merges (c7ec2f92a8, 953e069209), so their entries are top-level keys, including talk_soundness_totality_knot.ml and talk_soundness_borrow_symbol.ml.",
   "testsuite/tests/vox/README.md": {
     "what": {
       "short": "The guide to the Vox tests: a first tour, how proof, rejection and boundary tests are written, and one section per demo family.",
@@ -258,7 +258,7 @@
       "short": "Negative recursion cannot make a total function diverge or prove false: matching a negative variant, projecting a recursive record, and an alias-hidden negative type are partial.",
       "long": [
         "Total elimination requires the checked `[@@inductive]` guarantee; a type that is recursive through a function argument has none, so `match x with Roll f` is partial. The partial versions stay legal (`Ordinary_partial`). This closed the negative-datatype loophole (9278510f31).",
-        "Types hidden behind an abstract type in a signature, or behind a GADT existential, are the open case: the fix that makes the totality check see through them is in progress and not merged, so this file has no test for it. More totality tests are in [typing-modes/](src:testsuite/tests/typing-modes/) (`totality_*.ml`, `recursive_module_totality.ml`)."
+        "Types hidden behind an abstract type in a signature, a GADT existential or an unpacked module are tested in [totality_hidden_types.ml](src:testsuite/tests/vox/totality_hidden_types.ml), added with the hidden-types fix (`09dfd7e2fa`). More totality tests are in [typing-modes/](src:testsuite/tests/typing-modes/) (`totality_*.ml`, `recursive_module_totality.ml`)."
       ]
     },
     "notes": [
@@ -275,6 +275,12 @@
         "text": "The negative occurrence is hidden behind a type abbreviation; the check expands it."
       }
     ]
+  },
+  "testsuite/tests/vox/totality_hidden_types.ml": {
+    "what": {
+      "short": "Verdicts of the hidden-type rule: total code may not match existentials or negatively reached abstract or open types, or unpack modules, whose jkind allows pointers.",
+      "long": "Added with the hidden-types fix (`09dfd7e2fa`). Each rejected case has an accepted control with an immediate or non-scannable type: existentials, a witness in the same recursive group and defined separately, an extensible GADT, an abstract type hidden by a signature, a functor parameter, and first-class module unpacking. The `immutable_data` cases show why that kind is not enough: a record whose field modality caps a total arrow is `immutable_data` and holds a callable function."
+    }
   },
   "testsuite/tests/vox/total_loop_rejected.ml": {
     "what": {
@@ -1184,7 +1190,7 @@
       "short": "Slide to test: for each quoted verdict or output, the test in testsuite/tests/vox, where the output is read from, and whether it passed on trunk or awaited a named fix when written.",
       "long": [
         "Outputs are read from the first `[%%expect]` block of expect tests, from `*.reference` for run tests and from `*.compilers.reference` for compiler output. Measured numbers (query counts, times, resource counts) are regenerated by a script and are not tests.",
-        "The soundness table (section 6) lists each hole with its test: shifts, call congruence and ghost-field locality pass on trunk with their fixes merged, and the totality knot awaits its fix branch. The table predates the merge of trust hardening: it still lists the name-keyed built-ins as awaiting a fix, which has since landed with [builtin_declaration_identity.ml](src:testsuite/tests/vox/builtin_declaration_identity.ml); `talk_soundness_borrow_symbol.ml` is not at HEAD."
+        "The soundness table (section 6) lists each hole with its test: shifts, call congruence, ghost-field locality and the name-keyed built-ins pass with their fixes merged. Its row for hidden types in the totality check still says the test awaits its fix, which has since merged (`09dfd7e2fa`) with [talk_soundness_totality_knot.ml](src:testsuite/tests/vox/talk_soundness_totality_knot.ml)."
       ]
     }
   },
@@ -1192,6 +1198,18 @@
     "what": {
       "short": "The talk's out-of-range shift row: the verified string read that segfaulted natively is now rejected because the count 64 is out of range; an in-range read is the control.",
       "long": "The plain equation `(1 lsl n) = (1 lsl 64)` is pinned in [int_shift_range.ml](src:testsuite/tests/vox/int_shift_range.ml)."
+    }
+  },
+  "testsuite/tests/vox/talk_soundness_totality_knot.ml": {
+    "what": {
+      "short": "The talk's totality knots: false proved through a GADT existential and through an abstract type in a signature, both now rejected, each with an immediate control.",
+      "long": "From the investigation's `knot.ml` and `knot_false.ml`. Before the hidden-types fix (`09dfd7e2fa`) both were accepted and, because `ghost_` erased the looping call, a program printed a value its refinement excluded."
+    }
+  },
+  "testsuite/tests/vox/talk_soundness_borrow_symbol.ml": {
+    "what": {
+      "short": "The talk's forged borrow transition: a client external named caml_borrow_finish gets no built-in meaning, so the false refinement it enabled is rejected.",
+      "long": "The second half of the name-keyed built-ins row; the first is [builtin_declaration_identity.ml](src:testsuite/tests/vox/builtin_declaration_identity.ml). The accepted control uses the library's own `Slice.finish`."
     }
   },
   "testsuite/tests/vox/talk_midpoint_overflow.ml": {

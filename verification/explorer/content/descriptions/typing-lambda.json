@@ -36,7 +36,7 @@
       "long": [
         "Two `Trefine` nodes unify when their payloads unify and their predicates are alpha-equal after path normalization (`refinement_predicates_equal`); a refined and an unrefined type never unify, and there is no subsumption. The predicates are compared without their types, which is an open issue (the same law can be reused at another type); variance treats parameters that occur only in predicate types as non-phantom to limit it.",
         "A predicate can mention term variables, so a type now has term dependencies. `register_refinement_value_scope` and `Refinement_scope_escape` extend the GADT-style escape check to them. `Typecore` substitutes an argument for a dependent binder with `substitute_refinement_expression`, and renames one with `substitute_refinement_ident`; `apply_dependent_type` is exported but has no caller.",
-        "`is_inductive` and `can_pattern_match_total` decide when a match is total: the representation of the scrutinee's type must not lead back to the type itself, except through the direct, unchanged recursive fields of an `[@@inductive]` type. This stops a Landin-style knot from being built and taken apart in total code."
+        "`is_inductive` and `can_pattern_match_total` decide when a match is total: the representation of the scrutinee's type must not lead back to the type itself, except through the direct, unchanged recursive fields of an `[@@inductive]` type. This stops a Landin-style knot from being built and taken apart in total code. `can_unpack_total` applies the same jkind test to the abstract types of a first-class module that total code unpacks."
       ]
     },
     "notes": [
@@ -55,7 +55,7 @@
         "from": "let can_pattern_match_total env ty",
         "to": "check Path.Set.empty ty",
         "kind": "vox",
-        "text": "Variants and records are checked by `declaration_can_pattern_match_total`, which walks the representation and rejects any route back to the type other than a direct, unchanged recursive field of an `[@@inductive]` type. An abstract or open type is treated as a leaf there, so a knot hidden behind an abstract type or a GADT existential is not detected: this is a known soundness issue whose fix is in progress and not merged."
+        "text": "Variants and records are checked by `declaration_can_pattern_match_total`, which walks the representation and rejects any route back to the type other than a direct, unchanged recursive field of an `[@@inductive]` type. Since the hidden-types fix (`09dfd7e2fa`) the walk tracks polarity through the arrows it traverses and rejects a matched constructor's existentials, and any abstract or open type reached in negative position, unless the hidden type's jkind rules out pointers. One route remains open: an abstract type equal to a function type and consumed by an exported total function, which needs a declared matchability attribute."
       }
     ]
   },

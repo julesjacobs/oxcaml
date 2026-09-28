@@ -47,7 +47,7 @@
         "(Tarrow ((l1,a1,r1,binder1), t1, u1, c1),"
       ],
       "to": "then raise_unexplained_for Unify",
-      "lines": "5556-5581",
+      "lines": "5757-5782",
       "text": "Two arrows unify only if both or neither are dependent; `align_arrow_codomains` renames one binder to the other before the codomains are unified. Two refinements unify when their payloads unify and `refinement_predicates_equal` finds the predicates alpha-equivalent after normalizing paths. A refined type never unifies with an unrefined one, and `moregen` and `eqtype` follow the same rules, so there is no subsumption on trunk: an implementation that proves `r > c` does not match an interface that states `r >= c`. `build_subtype` has no rule for `Trefine` yet, so `:>` does not help either. The comparison is syntactic and ignores the types inside predicates; comparing predicates with their types is an open item."
     },
     {
@@ -55,7 +55,7 @@
       "path": "typing/typecore.ml",
       "from": "let rec eliminate_refinement_to env target exp =",
       "to": "{ exp with exp_type = instance target; exp_extra }",
-      "lines": "7643-7675",
+      "lines": "7659-7691",
       "text": [
         "Every refinement boundary is recorded as a `Texp_refinement { source; target }` extra, and these extras are all the verifier needs from the typer. `eliminate_refinement`, just above, peels the outer refinement off an inferred type; `type_expect_`'s `rue` applies it to every result, so each elimination is an assumption. `introduce_refinement` records the opposite step, from a payload to an expected refined type, and each introduction is a proof obligation. It cancels against an elimination from the same type on the same expression, so passing a refined value where the same refinement is expected costs nothing.",
         "`type_expect` introduces whenever the expected type has an outer refinement, after coercing the expected mode to total, stateless and portable (`refinement_operand_mode`); that every introduced value has those modes is what makes it sound for a refined type to cross those axes even when its payload does not."
@@ -69,7 +69,7 @@
         "requires a known refinement type from its context",
         "end"
       ],
-      "lines": "8399-8428",
+      "lines": "8415-8444",
       "text": "`assume_ x` needs a refinement type from its context. The operand is typed at the payload, at total, stateless, portable and real modes, and must be a plain local variable. `walk_locks_for_partial_construct` makes every enclosing function partial, so no `ghost_` can erase the check. `type_assume` builds a `Texp_assume` whose predicate is compiled as real code: [translcore.ml](src:lambda/translcore.ml) evaluates it and raises `Assert_failure` if it is false, and `-noassert` keeps it. The verifier assumes the refinement afterwards; just below, `refine_ e` asks for the same refinement to be proved instead, at no run-time cost except the adapter closure built for a function."
     },
     {
@@ -77,7 +77,7 @@
       "path": "typing/typecore.ml",
       "from": "| Pexp_ghost e ->",
       "to": "{exp with exp_extra}",
-      "lines": "10567-10588",
+      "lines": "10583-10604",
       "text": "`@ ghost` only restricts; `ghost_ e` is what removes code. Its context must accept a ghost value, and `e` is typed under `enter_total_ghost_context`: a constant closure lock at total, stateless and portable, plus a flag that switches off ghostliness checks inside. `e` itself must be total, which is what makes erasure sound: a diverging call of type `{u : unit | false}` would otherwise prove anything and then vanish. Because the lock is a constant closure lock, a unique value captured by `ghost_` is seen as aliased, so ghost code cannot consume a token. The `Texp_ghost` extra tells translation to emit a placeholder instead."
     },
     {
@@ -85,7 +85,7 @@
       "path": "typing/typecore.ml",
       "from": "let make_definition_lemma_at_level env binding =",
       "to": "let constant = params = [] in",
-      "lines": "16754-16786",
+      "lines": "16770-16802",
       "text": "`let[@def] f x = e` is elaborated in two places. `type_let` adds the `total` mode to the binding and turns pattern parameters into variables. After typing, `make_definition_lemma_at_level` checks the shape shown here (unlabelled variable parameters; a constant `c` gets `c_def : unit -> ...`), converts the body to a predicate with `refinement_expression_of_typed`, and binds `f_def : (x : t) -> {u : unit | f x === e}`. The equation is assumed; it is sound because `f` is a total, stateless function whose body is `e`. Verified code unfolds a definition only by calling `f_def`, except for non-recursive `[@def transparent]` definitions, which the verifier unfolds itself."
     },
     {
@@ -104,15 +104,15 @@
       "path": "typing/ctype.ml",
       "from": "let can_pattern_match_total env ty =",
       "to": "check Path.Set.empty ty",
-      "lines": "2953-2976",
-      "text": "A negative datatype such as `type t = Roll of (t -> int)` gives a fixpoint without `let rec`, so destructuring can itself diverge. A constructor, record or variant pattern, and a field projection, is therefore partial unless `can_pattern_match_total` holds for the scrutinee's type. It expands abbreviations and asks `declaration_can_pattern_match_total`, above, whether the declaration is definitely non-recursive, allowing direct recursion only in a checked `[@@inductive]` type. Abstract and open types are rejected at the top, but inside a declaration an abstract type is a leaf and a GADT existential is a type variable. A rule for such hidden types is in progress on a branch that is not yet merged."
+      "lines": "4115-4138",
+      "text": "A negative datatype such as `type t = Roll of (t -> int)` gives a fixpoint without `let rec`, so destructuring can itself diverge. A constructor, record or variant pattern, and a field projection, is therefore partial unless `can_pattern_match_total` holds for the scrutinee's type. It expands abbreviations and asks `declaration_can_pattern_match_total`, above, whether the declaration is definitely non-recursive, allowing direct recursion only in a checked `[@@inductive]` type. Abstract and open types are rejected at the top; inside a declaration, since the hidden-types fix, the walk tracks polarity and rejects a matched constructor's existentials and any abstract or open type reached in negative position unless its jkind rules out pointers, and `can_unpack_total` applies the same test to unpacked modules. One route remains open: an abstract type equal to a function type, consumed by an exported total function."
     },
     {
       "title": "Recursion: structural descent or a proved measure",
       "path": "typing/typecore.ml",
       "from": "let partial ?uid loc reason =",
       "to": "partial (List.hd spat_sexp_list).pvb_loc",
-      "lines": "13898-13937",
+      "lines": "13914-13953",
       "text": "A single recursive function binding is total only if Vox can see why it terminates. With `[@@decreases m]`, `type_decreases` types the measure in a total, stateless context (an `int`, a `Bigint`, or a tuple of them, ordered lexicographically), and `Verification.check_termination` has Z3 prove that every recursive call decreases it, during typing, before generalization. Without a measure, `Structural_recursion.check` looks for descent on an `[@@inductive]` parameter. If neither works, `partial` makes the function partial, or reports why it cannot be total when its mode is already required to be; the reason is kept in `Includecore.partial_recursion` for an interface that demands `@@ total` later. A group of several recursive bindings is made partial before typing, so mutual recursion is never total."
     },
     {
