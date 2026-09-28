@@ -6,6 +6,18 @@ type ('value, 'state) step =
   { value : 'value @@ global;
     state : 'state }
 
+(* The maximum length of an OCaml array, [Sys.max_array_length]. No owned
+   array or slice is longer. *)
+val max_length : unit -> int @@ total
+
+(* Slices and owned arrays are updated by consuming a handle and returning
+   its successor, so the operations on them can be functions of their
+   arguments and be [total]. The operations that lend a slice
+   ([Slice.split_at], [Slice.split3], [Slice.with_range],
+   [Owned_array.with_mut]) and the one that ends a loan ([Slice.finish]) are
+   not [total]. A new loan's [final] contents are chosen when it is created,
+   and [finish] assumes that they equal its [current] contents; neither step
+   is a function of the arguments. *)
 module Slice : sig @@ portable
   type ('a : immutable_data) t : value mod total contended
 
@@ -74,11 +86,11 @@ module Slice : sig @@ portable
           (Model.drop (Bigint.of_int k) (current r.state))
         && final r.state === final s
         && Model.length (current r.state) === Model.length (current s)}
-      @ local unique @@ total
+      @ local unique @@ stateless
 
   val finish : ('a : immutable_data).
       (s : 'a t) @ local unique ->
-      {u : unit | final s === current s} @@ total
+      {u : unit | final s === current s} @@ stateless
 
 
   val split3 : ('a : immutable_data) ('r : immutable_data).
@@ -111,7 +123,7 @@ module Slice : sig @@ portable
           (Model.drop (Bigint.of_int j) (current r.state))
         && final r.state === final s
         && Model.length (current r.state) === Model.length (current s)}
-      @ local unique @@ total
+      @ local unique @@ stateless
 
 
   val with_range : ('a : immutable_data) ('r : immutable_data).
@@ -139,7 +151,7 @@ module Slice : sig @@ portable
             (Model.drop (Bigint.of_int j) (current s)))
         && final r.state === final s
         && Model.length (current r.state) === Model.length (current s)}
-      @ local unique @@ total
+      @ local unique @@ stateless
 
   val parallel : ('a : immutable_data).
       (spawn : bool) ->
@@ -173,8 +185,35 @@ module Owned_array : sig @@ portable
 
   val length : ('a : immutable_data).
     (a : 'a t) @ local immutable ->
-    {n : int | 0 <= n
+    {n : int | 0 <= n && n <= max_length ()
       && Bigint.of_int n === Model.length (contents a)} @@ total
+
+  val get : ('a : immutable_data).
+    (a : 'a t) @ local immutable ->
+    (index : {i : int | 0 <= i
+      && Bigint.compare (Bigint.of_int i) (Model.length (contents a)) < 0}) ->
+    {value : 'a | let index = index in
+      Some value === Model.at (contents a) (Bigint.of_int index)} @@ total
+
+  val set : ('a : immutable_data).
+    (a : 'a t) @ unique ->
+    (index : {i : int | 0 <= i
+      && Bigint.compare (Bigint.of_int i) (Model.length (contents a)) < 0}) ->
+    (value : 'a) @ immutable ->
+    {r : 'a t | let index = index in
+      contents r === Model.set (contents a) (Bigint.of_int index) value}
+    @ unique @@ total
+
+  val swap : ('a : immutable_data).
+    (a : 'a t) @ unique ->
+    (first : {i : int | 0 <= i
+      && Bigint.compare (Bigint.of_int i) (Model.length (contents a)) < 0}) ->
+    (second : {i : int | 0 <= i
+      && Bigint.compare (Bigint.of_int i) (Model.length (contents a)) < 0}) ->
+    {r : 'a t | let i = first in let j = second in
+      contents r === Model.swap (contents a) (Bigint.of_int i) (Bigint.of_int j)
+      && Model.length (contents r) === Model.length (contents a)}
+    @ unique @@ total
 
   (* The two owners share [a]'s storage; nothing is copied. *)
   val split_at : ('a : immutable_data).
@@ -188,13 +227,17 @@ module Owned_array : sig @@ portable
     @ unique @@ total
 
   (* Adjacent pieces of one array (as produced by [split_at]) are joined in
-     place; any other pair is copied into a new array. Not [total]: the copy
-     raises [Invalid_argument] if the combined length exceeds the maximum
-     array size. *)
+     place; any other pair is copied into a new array. The copy would raise
+     [Invalid_argument] above [max_length ()] elements, which the
+     precondition excludes. *)
   val append : ('a : immutable_data).
-    (left : 'a t) @ unique -> (right : 'a t) @ unique ->
+    (left : 'a t) @ unique ->
+    (right : {right : 'a t | Bigint.compare
+      (Bigint.add (Model.length (contents left))
+        (Model.length (contents right)))
+      (Bigint.of_int (max_length ())) <= 0}) @ unique ->
     {r : 'a t | contents r === Model.append (contents left) (contents right)}
-    @ unique
+    @ unique @@ total
 
   val with_mut : ('a : immutable_data) ('r : immutable_data).
       (a : 'a t) @ unique ->
@@ -205,5 +248,5 @@ module Owned_array : sig @@ portable
         {r : 'r | let s = s in post r (Slice.final s)}) @ local once ->
       {r : ('r, 'a t) step | post r.value (contents r.state)
         && Model.length (contents r.state) === Model.length (contents a)}
-      @ unique @@ total
+      @ unique @@ stateless
 end

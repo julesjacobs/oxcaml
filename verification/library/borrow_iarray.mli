@@ -66,10 +66,11 @@ module Slice : sig @@ portable
             r.state)))
         && final r.state === final s
         && Iarray.length (current r.state) = Iarray.length (current s)}
-      @ local unique @@ total
+      @ local unique @@ stateless
 
   val finish : ('a : immutable_data).
-      (s : 'a t) @ local unique -> {u : unit | final s === current s} @@ total
+      (s : 'a t) @ local unique -> {u : unit | final s === current s}
+      @@ stateless
 
   val split3 : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
@@ -98,7 +99,7 @@ module Slice : sig @@ portable
             r.state)))
         && final r.state === final s
         && Iarray.length (current r.state) = Iarray.length (current s)}
-      @ local unique @@ total
+      @ local unique @@ stateless
 
   val parallel : ('a : immutable_data).
       (spawn : bool) ->
@@ -170,6 +171,6 @@ module Owned_array : sig @@ portable
         {r : 'r | let s = s in post r (Slice.final s)}) @ local once ->
       {r : ('r, 'a t) step | post r.value (contents r.state)
         && Iarray.length (contents r.state) = Iarray.length (contents a)}
-      @ unique @@ total
+      @ unique @@ stateless
 
 end

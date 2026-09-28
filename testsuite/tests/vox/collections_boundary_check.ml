@@ -57,7 +57,9 @@ let () =
         names
   in
   audit "quicksort"
-    [ "partition"; "partition_middle"; "sort_sized"; "sort"; "sort_owned" ]
+    [ "partition"; "partition_middle"; "sort_sized"; "sort";
+      "partition_array"; "partition_middle_array"; "split_partition";
+      "join_partition"; "sort_array_sized"; "sort_array"; "sort_owned" ]
     ~forbidden:
       [ "Quicksort_model"; "Vox_int_sequence"; "Vox_sequence";
         "caml_borrow_current"; "caml_borrow_final"; "caml_borrow_contents" ]

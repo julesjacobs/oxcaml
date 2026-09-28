@@ -30,23 +30,32 @@ Error: The value "Quicksort.parallel_sort_array" is "partial"
          which is expected to be "total".
 |}]
 
-module Blocking_callback = struct
-  let rec forever () = forever ()
-  let (invalid @ total) (values : int Borrow.Owned_array.t @ unique) =
-    let post = ghost_ (fun (_ : unit) (_ : int Vox_sequence.t @ immutable) -> true) in
-    let _result = Borrow.Owned_array.with_mut values post (fun s ->
-      forever ();
-      Borrow.Slice.finish s) in
-    ()
+(* The borrowing [sort] is not total, so a total function cannot call it.
+   [sort_array] is total. Only the interfaces are loaded here, so the
+   accepted control is checked inside [module type of], which does not run
+   it. *)
+let (sort_slice @ total) (s : int Borrow.Slice.t @ local unique) =
+  Quicksort.sort s;;
+[%%expect{|
+Line 2, characters 2-16:
+2 |   Quicksort.sort s;;
+      ^^^^^^^^^^^^^^
+Error: The value "Quicksort.sort" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 1-2, characters 25-18
+         which is expected to be "total".
+|}]
+
+module type Control = module type of struct
+  let (sort_owned @ total) (values : int Borrow.Owned_array.t @ unique) =
+    Quicksort.sort_array values
 end;;
 [%%expect{|
-Line 6, characters 6-13:
-6 |       forever ();
-          ^^^^^^^
-Error: The value "forever" is "partial"
-       but is expected to be "total"
-         because it is used inside the function at lines 3-8, characters 24-6
-         which is expected to be "total".
+module type Control =
+  sig
+    val sort_owned :
+      int Borrow.Owned_array.t @ unique -> int Borrow.Owned_array.t @@ total
+  end
 |}]
 
 let ghost_write : (s : int Borrow.Slice.t) @ local unique ->
@@ -68,7 +77,7 @@ Error: This value is "aliased"
 (* A sort that leaves its slice unchanged keeps the elements (the
    permutation half of [sort]'s contract is proved) but cannot claim the
    sorted half. *)
-let (unchanged @ total) : (s : int Borrow.Slice.t) @ local unique ->
+let unchanged : (s : int Borrow.Slice.t) @ local unique ->
     {u : unit | Quicksort.Spec.sorted (Borrow.Slice.final s)} =
     fun s ->
   let before = ghost_ (Borrow.Slice.current (borrow_ s)) in
@@ -90,7 +99,7 @@ Line 2, characters 16-60:
 
 (* Overwriting the first element before sorting keeps the result sorted (the
    annotation on [sorted] is proved) but loses the permutation. *)
-let (overwrite_then_sort @ total) : (s : int Borrow.Slice.t) @ local unique ->
+let overwrite_then_sort : (s : int Borrow.Slice.t) @ local unique ->
     {u : unit | Quicksort.Spec.sorted (Borrow.Slice.final s)
       && Quicksort.Spec.permutation (Borrow.Slice.current s)
         (Borrow.Slice.final s)} =
