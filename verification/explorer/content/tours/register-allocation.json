@@ -53,7 +53,7 @@
       "path": "testsuite/tests/vox/register_allocation.ml",
       "from": "(* Allocation entrypoint.",
       "to": "source_inputs = program.inputs; input_slots}",
-      "lines": "2027-2057",
+      "lines": "2015-2045",
       "text": "`allocate` checks `valid` and the slot count, computes liveness with at most 2049 sweeps, requires every register live at entry to be an input, builds the interference graph, colours it greedily with the colours `range physical` and renames every operand. It keeps no certificate: the `ghost_` calls are lemmas about `stabilize` and `color` that the proof uses, and they are erased. The comment's argument that 2048 changing sweeps are the most there can be is not proved; if liveness has not settled, the result is `None`. There is no spilling, so a colouring that does not fit is also `None`."
     },
     {
@@ -81,7 +81,7 @@
         "(advance program.code fuel (source_initial program args))",
         "(advance target_code fuel"
       ],
-      "lines": "2615-2658",
+      "lines": "2601-2644",
       "text": "`preserves` repeats `allocate`'s steps inside the ghost proof: `stabilize` and `color` are `[@def]` total functions, so the solver reasons about their results symbolically. With the live sets and colouring in hand, it applies `initial_related` to the two initial states, then `advance_related`, an induction on fuel over `step_related`, and finally `related_observable`. The per-instruction case is `execute_related`, above. The file's 92 private lemmas return `@ ghost` results, so their bodies are erased."
     },
     {

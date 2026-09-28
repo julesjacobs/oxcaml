@@ -80,7 +80,7 @@
       "path": "verification/library/vox_lz4_decode_bytes_roundtrip.ml",
       "from": "let rec (decode_plan @ total) :",
       "to": "&& S.matches_bytes source result.S.count result.S.reversed} @ ghost =",
-      "lines": "265-281",
+      "lines": "264-280",
       "text": "The round-trip theorem reduces to this lemma, by induction over the compressor's plan. The premise says that the bytes decoded so far are the source up to `anchor` and that the wire from `cursor` lays out the rest of the plan; the conclusion says that the decoder model, started there, ends in `Done` with exactly the source's bytes. Each step unfolds one sequence of the wire layout and one step of the model (`decode_sequence_step`), and the lemmas `literals` and `matches` show that the copied literals and the back-reference extend the output by the source's next bytes. `decode_wire` starts it at position 0, and `roundtrip` at the end of the file adds `compresses_def`; `Vox_lz4.roundtrip` is that function. The lemma is a total ghost function, and its implication is written `not premise || conclusion`."
     },
     {

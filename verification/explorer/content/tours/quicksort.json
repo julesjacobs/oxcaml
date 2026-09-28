@@ -81,7 +81,7 @@
       "path": "verification/library/borrow.ml",
       "from": "external split_at : ('a : immutable_data).",
       "to": "@ unique @@ portable = \"caml_borrow_owned_append\"",
-      "lines": "391-403",
+      "lines": "387-399",
       "text": "`Owned_array.split_at` and `append` are externals whose refinements (`Model.take`, `Model.drop`, `Model.append`) the checker assumes. `caml_borrow_owned_append` joins two adjacent ranges of one backing array without copying and copies any other pair. This is sound because owners are unique: the live owners of one array cover disjoint ranges. [`vox_parallel.ml`](src:verification/library/vox_parallel.ml) is also trusted: it spawns with the mode-checked `Domain.Safe.spawn`, joins before returning or re-raising, and applies `Obj.magic_unique` to the joined result, which `Domain.join` returns `aliased`. Finally, `quicksort.ml` declares integer division as a `@@ total` `external` of `%divint` whose divisor is refined to be nonzero; callers prove that refinement, the checker assumes the declared totality, and the declaration silences warning 228, `trusted-external`."
     },
     {

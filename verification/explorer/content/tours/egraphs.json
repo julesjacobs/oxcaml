@@ -79,7 +79,7 @@
       "path": "verification/library/vox_egraph_rule_scan.ml",
       "from": "fun state rules index rule bindings count fuel ->",
       "to": "[@@decreases count]",
-      "lines": "58-90",
+      "lines": "58-88",
       "text": "The search is exhaustive and does no e-matching. For each rule, `rule` below enumerates every assignment of ids (or -1) to the rule's variables with `Vox_egraph_assignments.enumerate`, `cases` walks the assignments, and `roots`, shown here, tries `W.matched_rule` with every id from `count - 1` down to 0 as the root, so one search tries up to (count + 1)^n × count candidates for a rule with n variables. `matched_rule` either admits the right side and merges it with the root, justified by an erased derivation ending in a `Rule` step, or changes nothing, and any change returns `Changed` at once. When nothing changes, the ghost calls accumulate `C.closed_roots` for each assignment, and `Equiv.closed_rule` turns them into `closed_rule` from the specification. Each case, root attempt and enumeration step costs one unit of fuel; matching within one attempt is not charged."
     },
     {

@@ -63,7 +63,7 @@
       "path": "testsuite/tests/vox/dfa_equivalence_proof.ml",
       "from": "let rec (search_pairs_loop @ total) :",
       "to": "else true} @ total immutable contended =",
-      "lines": "4162-4202",
+      "lines": "4153-4193",
       "text": "`compare` runs this worklist search over pairs of states, starting from the initial pair. Each pending pair carries a ghost word that reaches it in both machines (`Pair_trace`), so a pair that disagrees on acceptance yields that word as the `Different` certificate, and an empty worklist makes the pairs seen the `Equal` relation. For letters on neither row, the search pushes one pair of successors under a letter that `missing_letter` finds outside both rows. Termination uses the ghost `int` `remaining` as fuel, with the invariant that fuel plus pairs seen equals `limit` plus pending pairs, and `[@@decreases let fuel = remaining in fuel]`; the only runtime counter is `pair_count`. The contract says `Limit` cannot happen when both tables are valid with at most 64 edges per row and the product of their row counts is within `limit`."
     },
     {
@@ -71,7 +71,7 @@
       "path": "testsuite/tests/vox/dfa_equivalence_proof.ml",
       "from": "let search_result = reachable_states_initial source limit in",
       "to": "let result = Some packet in result",
-      "lines": "7493-7526",
+      "lines": "7474-7506",
       "text": "`reduce` is `minimize_proved` without its ghost half. It collects the reachable states, splits them by acceptance with `initial_partition`, and runs `refine_to_stable`, Moore's partition refinement, whose termination measure is a ghost `Bigint`, the number of pairs of states in the same class. `quotient_raw` then builds one row per class. `minimization_certificate` builds the certificate inside `ghost_`; its separating words come from running the pair search of the previous stop in ghost code on two states of the source (`compare_states`, through `distinguish_classes`). `reduce_preserves` and `reduce_minimum` read the certificate back out of the erased `result_proof`."
     },
     {
@@ -79,7 +79,7 @@
       "path": "testsuite/tests/vox/dfa_equivalence_proof.ml",
       "from": "let (minimum_count_semantic @ total) (source : machine)",
       "to": "ghost_ (state_size_via_ids other);",
-      "lines": "1718-1741",
+      "lines": "1714-1737",
       "text": "`reduce_minimum` rests on this pigeonhole argument, the Myhill–Nerode bound for this table format. `image_ids` maps each state of the reduced machine to the state of `other` that its access word reaches. `distinct_images`, above, shows the map is injective: two distinct states have a separating word, so their access words followed by it get different answers, and `other`, which agrees with the reduced machine on every word, must reach different states. `image_ids_included` shows that the images are rows of `other`, which needs `valid other`, and `included_bound` bounds the length of a duplicate-free list by that of a list containing it."
     },
     {

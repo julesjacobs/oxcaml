@@ -57,7 +57,7 @@
         "let (contents_model @ total)",
         "  ()"
       ],
-      "lines": "37-51",
+      "lines": "37-50",
       "text": "The representation is a record of two lists, and there is no representation invariant: every `{front; rear}` is a valid queue, including one with an empty front and a nonempty rear. `contents` is both the specification and runtime code. It computes `reverse_append q.rear []` and appends it to the front, and its `ghost_` call relates that to the naive `reverse`. `contents_model` states the model the proofs use, `contents q === append q.front (reverse q.rear)`, by unfolding `contents` with `contents_def`. `contents` takes time linear in the queue, and it is the only way a client can test emptiness at run time."
     },
     {
@@ -73,7 +73,7 @@
       "path": "testsuite/tests/vox/functional_queue.ml",
       "from": "let (dequeue @ total) :",
       "to": "      result",
-      "lines": "74-105",
+      "lines": "73-104",
       "text": "`dequeue` assumes its argument's refinement, that `contents q` is not `[]`. When the front is nonempty the proof is `contents_model` for the old and the new queue. When it is empty, the code reverses the rear with `reverse_append`, and the `ghost_` block relates the result to `reverse original.rear`, which is `contents q` when the front is empty. The branch where that reversal is `[]` ends in `unreachable_ ()`, a proof obligation: the checker must show that the branch is dead, here because the contents are nonempty, and the compiled code keeps a trap there. `let reversed = ghost_ (reverse original.rear)` binds a ghost value, available to proofs and erased from the code."
     },
     {

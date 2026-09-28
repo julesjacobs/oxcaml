@@ -71,7 +71,7 @@
       "path": "testsuite/tests/vox/regex_dfa_bridge_core.ml",
       "from": "let[@def] lower_raw dfa =",
       "to": ["let (compiled_lower_raw_complete @ total)", "let u = () in u"],
-      "lines": "790-829",
+      "lines": "787-823",
       "text": [
         "`lower_raw` lists the states as `initial dfa :: [] :: states dfa` and `build_table` numbers them 0, 1, 2, … with `id + 1`, one row each, which gives `2^u + 2` rows (`abcd` gives 34), and `compiled_lower_raw_complete` proves that this always produces a table. `lower`, further down, then passes the table through `Dfa_proof.of_raw`, which returns it only if `Dfa_semantics.valid` holds; `of_raw` lives in the module that declares the DFA demo's three trusted `external` comparisons.",
         "Validity needs distinct row ids, and in Vox's logic `id + 1` wraps at `max_int`, so for `u` of at least 63 the ids repeat and `lower` returns `None`. No such table fits in memory, but ghost code can build lists of any length, so the checker cannot bound a list's length by the memory it would need. The catalogue page discusses this as an open design question."
