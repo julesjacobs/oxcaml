@@ -322,7 +322,9 @@ this file.
 - [x] **`_trust.md` line 13** (fixed with the owner's approval; page back
       to owner-review) conflates totality and
       statelessness: total functions may write through uniquely owned
-      storage (`Quicksort.sort`). Wording proposed to the owner.
+      storage (`Borrow.Slice.set`; `Quicksort.sort` was the example until
+      borrowing became partial on 28 September). Wording proposed to the
+      owner.
       Also: it says ghost fields are removed before code generation, but
       bytecode keeps an empty slot for them (native removes them).
 - [ ] **`assert false` lint**: it ends a path with nothing to prove, which
