@@ -1766,10 +1766,15 @@ type module_variables =
   | Modvars_rejected
   | Modvars_ignored
 
+type total_pattern_kind =
+  | Eliminate  (* matching a constructor or projecting a field *)
+  | Unpack     (* unpacking a first-class module *)
+
 type total_pattern_check =
   { tpc_loc : Location.t;
     tpc_env : Env.t;
     tpc_type : type_expr;
+    tpc_kind : total_pattern_kind;
   }
 
 type type_pat_state =
@@ -1811,26 +1816,31 @@ let create_type_pat_state ?cont allow_modules =
     tps_total_pattern_checks = [];
   }
 
-let defer_partial_if_not_total_pattern_type tps ~loc ~env ty =
+let defer_partial_if_not_total_pattern_type ?(kind = Eliminate) tps ~loc ~env
+    ty =
   tps.tps_total_pattern_checks <-
-    { tpc_loc = loc; tpc_env = env; tpc_type = ty }
+    { tpc_loc = loc; tpc_env = env; tpc_type = ty; tpc_kind = kind }
     :: tps.tps_total_pattern_checks
 
 let run_total_pattern_checks checks =
   let memo = ref [] in
   List.iter
-    (fun { tpc_loc; tpc_env; tpc_type } ->
+    (fun { tpc_loc; tpc_env; tpc_type; tpc_kind } ->
       let total =
         match
           List.find_opt
-            (fun (env', ty', _) ->
-              tpc_env == env' && eq_type tpc_type ty')
+            (fun (env', ty', kind', _) ->
+              tpc_env == env' && eq_type tpc_type ty' && tpc_kind = kind')
             !memo
         with
-        | Some (_, _, total) -> total
+        | Some (_, _, _, total) -> total
         | None ->
-          let total = Ctype.can_pattern_match_total tpc_env tpc_type in
-          memo := (tpc_env, tpc_type, total) :: !memo;
+          let total =
+            match tpc_kind with
+            | Eliminate -> Ctype.can_pattern_match_total tpc_env tpc_type
+            | Unpack -> Ctype.can_unpack_total tpc_env tpc_type
+          in
+          memo := (tpc_env, tpc_type, tpc_kind, total) :: !memo;
           total
       in
       if not total then
@@ -4240,6 +4250,12 @@ and type_pat_aux
             pat_env = !!penv;
             pat_unique_barrier = Unique_barrier.not_computed () }
       | Some s ->
+          (* The unpacked module's abstract types are hidden, like the
+             existentials of a constructor. [expected_ty] (not the fresh copy
+             [t]) is the node the scrutinee's package type unifies into, so it
+             is resolved by the time the deferred check runs. *)
+          defer_partial_if_not_total_pattern_type ~kind:Unpack
+            tps ~loc ~env:!!penv expected_ty;
           let v = { name with txt = s } in
           (* We're able to pass ~is_module:true here without an error because
              [Ppat_unpack] is a case identified by [may_contain_modules]. See
