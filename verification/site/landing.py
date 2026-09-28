@@ -92,7 +92,7 @@ def main():
         'playground_mb': str(round(first_visit_bytes(site / 'playground') / 1e6)),
         'source_lines': source_lines(site / 'source'),
         'talk_scenes': str(talk_scenes),
-        'talk_parts': {3: 'three', 4: 'four', 5: 'five'}.get(talk_parts, str(talk_parts)),
+        'talk_parts': {3: 'three', 4: 'four', 5: 'five', 6: 'six', 7: 'seven'}.get(talk_parts, str(talk_parts)),
         'talk_minutes': str(talk_minutes),
         'date': datetime.date.today().strftime('%-d %B %Y'),
         'css': hashlib.sha256(css).hexdigest()[:10],

@@ -38,7 +38,7 @@ root=$(cd "$here/../.." && pwd)
 revision=
 prefix=$root/_install
 out=$root/_build/site/vox
-talk_branch=jujacobs/vox/talk-20260928
+talk_branch=jujacobs/vox/talk-v6-20260928
 talk_revision=$talk_branch
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -99,7 +99,8 @@ git archive "$talk_revision" verification/talk | tar -x -C "$talk_tmp"
 python3 - "$talk_tmp/verification/talk" "$out/talk" <<'PY'
 # Copy what the deck loads at run time. Scenes: those of the running order
 # (scenes/scenes.json), each with its module, style, speaker track (the
-# narration, and its Q&A and Sources, which practice mode shows) and assets:
+# narration, and its Q&A and Sources, which practice mode shows), the
+# helper modules and styles it imports, and assets:
 # screen recordings and images at the top of the scene directory, and JSON
 # files anywhere in it (layouts and clip lists the scene fetches).
 import json, shutil, sys
@@ -118,7 +119,7 @@ for entry in order['scenes']:
         continue
     for p in scene.rglob('*'):
         top = p.parent == scene
-        if p.is_file() and ((top and (p.name in ('scene.js', 'scene.css', 'track.md') or p.suffix in media)) or p.suffix == '.json'):
+        if p.is_file() and ((top and (p.name == 'track.md' or p.suffix in media)) or p.suffix in ('.js', '.css', '.json')):
             keep.append(p.relative_to(src).as_posix())
 for rel in sorted(set(keep)):
     (dst / rel).parent.mkdir(parents=True, exist_ok=True)
