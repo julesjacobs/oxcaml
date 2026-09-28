@@ -407,14 +407,14 @@
         "title": "Lifting a predicate over a list",
         "from": "module For_all (P : Predicate) = struct",
         "to": "      ()",
-        "lines": "404-420",
+        "lines": "402-418",
         "kind": "what",
         "text": "`holds` is defined by recursion on the list, and `get` specializes it to one index; `intro` (below) builds it from a total pointwise proof. `filter` and its laws live in the same functor."
       },
       {
         "title": "List extensionality, proved",
         "from": "let rec (extensional @ total) : ('a : immutable_data).",
-        "lines": "637-664",
+        "lines": "635-662",
         "kind": "what",
         "text": "Two lists with equal length and equal `at` at every nonnegative index are logically equal. The proof recurses on both lists and shifts the index proof by one; `Vox_iarray` states the corresponding fact for iarrays as a trusted `external`.",
         "span": 28
@@ -472,7 +472,7 @@
           "permutation_def left right;",
           "  ()"
         ],
-        "lines": "720-791",
+        "lines": "720-790",
         "kind": "what",
         "text": "Two sorted lists with equal counts of every integer are equal: compare heads, and if they differ the smaller one has count zero on the other side (`count_below`). `count_extensional` applies this to the bags, which are sorted by `bag_sorted`, so a client proves a permutation by proving equal counts pointwise."
       }
@@ -2366,7 +2366,7 @@
         "title": "Rescaling for a larger capacity",
         "from": "let (reparameterize @ total)",
         "to": "(node_phi small a rank parent) (Bigint.mul (Bigint.sub b a) rank)} =",
-        "lines": "303-309",
+        "lines": "298-304",
         "kind": "what",
         "text": "With ranks below the smaller cap, moving to a larger cap and to `alpha` b ≤ a + 1 adds exactly `(b − a) · rank`. Summed over the forest this is `Vox_union_find_bank.reparameterize`, which fixes the credits the online layer must deposit when its epoch doubles."
       }
@@ -2385,7 +2385,7 @@
         "title": "Counting levels",
         "from": "let rec (counting @ total)",
         "to": "else ()",
-        "lines": "52-78",
+        "lines": "50-75",
         "kind": "what",
         "text": "By induction along the edges: each edge either adds a new level to the set, or its level is already present higher up and `release` gives it a potential drop of at least one. Hence `length edges <= loss + size (levels ...)`, and `range` keeps the levels in [0, alpha)."
       }
