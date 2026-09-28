@@ -37,15 +37,15 @@
       key whose probe passed over this group would become unreachable. The
       identical proof with 254 is accepted. From the investigation's
       empty_instead_of_tombstone.ml and tombstone_ok.ml.
-   2. The functor on trunk matches a parameter's laws syntactically: a key
-      whose [symmetric] law is stated commuted is rejected as a type
-      mismatch, while [Int_key], with the laws written as in [Key], is
-      accepted. (If subsumption is merged, the commuted law is accepted and
-      this expectation changes.)
-   3. "Store 84, read 85", told honestly: flat_hashtbl_boundary.ml rejects
-      the false claim 85 only because its ghost block calls
-      [Key.reflexive] and [Map.put_get]. Without those law calls even the
-      true claim 84 is rejected. *)
+   2. Functor laws are checked by implication: applying the functor proves
+      each law of [Key] from the one its argument states. [Int_key] states
+      the laws as [Key] does and is accepted. A commuted [symmetric] law
+      ([Commuted_table]) is also accepted, and a [symmetric] law that states
+      one direction only ([One_way_table]) is rejected with a counterexample.
+   3. "Store 84, read 85", told honestly: flat_hashtbl_boundary.ml accepts
+      the true claim 84 only because its ghost block calls [Key.reflexive]
+      and [Map.put_get]; it rejects the false claim 85. Without those law
+      calls even the true claim 84 is rejected. *)
 
 #load "vox_sequence.cmo";;
 #load "vox_table_model.cmo";;

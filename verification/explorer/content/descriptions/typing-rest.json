@@ -591,7 +591,7 @@
         "from": "val equal :",
         "span": 3,
         "kind": "what",
-        "text": "Syntactic alpha-equivalence, with `pairs` giving the correspondence between binders on the two sides. It does not compare the types stored at each node. Because of this, a law about `Q.empty : int Q.t` is equal to the same law at `bool Q.t`; this is the open issue W1, which the subsumption branch will close."
+        "text": "Syntactic alpha-equivalence, with `pairs` giving the correspondence between binders on the two sides. Elimination wrappers (`Rexp_refinement`) are skipped on both sides: the verifier does not assume the types they record. `equal` does not compare the types stored at each node; `equal_with_types` returns them, and `Ctype` relates them, so a law about `Q.empty : int Q.t` is not equal to the same law at `bool Q.t` (W1, closed when subsumption was merged)."
       },
       {
         "title": "Printing",

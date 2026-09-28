@@ -185,9 +185,9 @@ module Weak :
 
 (* The same through an abbreviation: [put] and [get] share one weak
    variable instead of being polymorphic, which would let one cell store a
-   law at [int] and return it at [bool].  (An abbreviation still unifies
-   [int w] with [bool w], because predicates are compared without their
-   types; that is a separate hole.) *)
+   law at [int] and return it at [bool].  (Predicates are also compared
+   with the types of their nodes, so an abbreviation does not unify
+   [int w] with [bool w].) *)
 module Cell (Q : Q) = struct
   type ('a : immutable_data) w = {u : unit | Q.is_empty (Q.empty : 'a Q.t)}
   let cell () =
