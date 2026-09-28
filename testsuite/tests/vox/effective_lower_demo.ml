@@ -45,7 +45,7 @@ let run stale =
     let var = Var in cell_def var 7; let arrow = Arrow (link, link) in cell_def arrow 9;
     let indirect = Link pair in cell_def indirect 1;
     head_def link leaf root pair x; let refine_ first = Pref.equal x link in let refine_ second = Pref.equal x root in
-    let u = () in refine_ u) in
+    refine_ ()) in
   let witness : (((x : node Pref.t) @ immutable -> {u : unit |
       E.valid_head h.Ghost.ghost heads.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (fun x ->
     values x; E.valid_head_def h.Ghost.ghost heads.Ghost.ghost x;
@@ -54,18 +54,18 @@ let run stale =
     let here = U.Here in U.resolves_def h.Ghost.ghost leaf leaf here; U.resolves_def h.Ghost.ghost pair pair here;
     U.terminal_def h.Ghost.ghost leaf; U.observe_def h.Ghost.ghost leaf;
     U.terminal_def h.Ghost.ghost pair; U.observe_def h.Ghost.ghost pair;
-    let u = () in refine_ u)} in
+    refine_ ())} in
   let order : (((x : node Pref.t) @ immutable -> {u : unit |
       E.effective_ordered h.Ghost.ghost heads.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (fun x ->
     values x; values link;
     E.effective_ordered_def h.Ghost.ghost heads.Ghost.ghost x;
     E.effective_below_def h.Ghost.ghost heads.Ghost.ghost link 9;
     E.level_def h.Ghost.ghost heads.Ghost.ghost link;
-    at_level_def h.Ghost.ghost leaf; let u = () in refine_ u)} in
+    at_level_def h.Ghost.ghost leaf; refine_ ())} in
   let scope : (((x : node Pref.t) @ immutable -> {u : unit |
       not (H.mem h.Ghost.ghost x) || E.effective_scope h.Ghost.ghost heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> values x; let var = Var in cell_def var 7; let arrow = Arrow (link, link) in cell_def arrow 9; let indirect = Link pair in cell_def indirect 1; source_ok_def h.Ghost.ghost x; order.Ghost.ghost x;
-      let u = () in if H.mem h.Ghost.ghost x then (E.ordered_scope h.Ghost.ghost heads.Ghost.ghost witness.Ghost.ghost x (refine_ u); ()) else (); refine_ u)} in
+      if H.mem h.Ghost.ghost x then (E.ordered_scope h.Ghost.ghost heads.Ghost.ghost witness.Ghost.ghost x (refine_ ()); ()) else (); refine_ ())} in
   let trees : (((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x
       && (if H.mem h.Ghost.ghost x then finite h.Ghost.ghost t else U.observe h.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> values x;
@@ -82,10 +82,10 @@ let run stale =
   let bound = 2 in
   let refine_ out = C.lower h heads witness scope order trees bound root (refine_ state) in
   let after = ghost_ (Pref.own (borrow_ out.#state)) in let edits = ghost_ out.#edits in
-  ghost_ (let u = () in P.lowering_at h.Ghost.ghost heads.Ghost.ghost bound edits leaf (refine_ u);
-    P.lowering_at h.Ghost.ghost heads.Ghost.ghost bound edits link (refine_ u);
-    P.lowering_at h.Ghost.ghost heads.Ghost.ghost bound edits pair (refine_ u);
-    P.lowering_at h.Ghost.ghost heads.Ghost.ghost bound edits root (refine_ u);
+  ghost_ (P.lowering_at h.Ghost.ghost heads.Ghost.ghost bound edits leaf (refine_ ());
+    P.lowering_at h.Ghost.ghost heads.Ghost.ghost bound edits link (refine_ ());
+    P.lowering_at h.Ghost.ghost heads.Ghost.ghost bound edits pair (refine_ ());
+    P.lowering_at h.Ghost.ghost heads.Ghost.ghost bound edits root (refine_ ());
     lower_frame_def h.Ghost.ghost after leaf; lower_frame_def h.Ghost.ghost after link;
     lower_frame_def h.Ghost.ghost after pair; lower_frame_def h.Ghost.ghost after root);
   let state = out.#state in

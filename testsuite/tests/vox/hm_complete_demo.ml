@@ -32,21 +32,21 @@ let run_identity (a : ty @ immutable ghost) =
   let e : {e : D.term | D.scoped_term D.Z e && term_let_free e} = refine_ e in
   let refine_ out = Hm_infer.closed e in let refine_ e = e in
   let after = ghost_ (Pref.own (borrow_ out.#state)) in
-  ghost_ (let target = Function (a, a) in let refine_ d = identity_typing a in let u = () in
-    Hm_complete_proofs.closed_completes out.#execution after out.#pool target d (refine_ u));
+  ghost_ (let target = Function (a, a) in let refine_ d = identity_typing a in 
+    Hm_complete_proofs.closed_completes out.#execution after out.#pool target d (refine_ ()));
   match out.#value with None ->
     ghost_ (let _impossible : {u : unit | false} = refine_ () in ()); assert false
   | Some p ->
-    ghost_ (let u = () in
-      let refine_ tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (refine_ u) in
+    ghost_ (
+      let refine_ tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (refine_ ()) in
       let h = H.empty () in let empty : Generalize_spec.pool = Generalize_spec.Empty in
       let env : Hm_environment_spec.env = Hm_environment_spec.Empty in
-      Hm_execution_proofs.run_result h 0 empty env out.#execution after out.#pool p (refine_ u);
+      Hm_execution_proofs.run_result h 0 empty env out.#execution after out.#pool p (refine_ ());
       let target = Function (a, a) in let refine_ d = identity_typing a in
       let use : ((delta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
         {u : unit | target === Level_mgu_spec.substitute delta (Level_finite_spec.readback tree)} ->
-        {u : unit | true}) @ total = fun _delta _fit -> let u = () in refine_ u in
-      Hm_complete_proofs.closed_factor out.#execution after out.#pool p tree target d (refine_ u) true use; ()); ()
+        {u : unit | true}) @ total = fun _delta _fit -> refine_ () in
+      Hm_complete_proofs.closed_factor out.#execution after out.#pool p tree target d (refine_ ()) true use; ()); ()
 
 let () =
   run_identity (ghost_ Boolean);

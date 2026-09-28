@@ -25,7 +25,7 @@ let infer : (e : {e : term | scoped_term Z e}) @ immutable ->
     let start : (x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
         (if H.mem h x then finite h t else H.at h x === None)} @ immutable total = fun x ->
       let refine_ t = empty_tree x in refine_ t in
-    let u = () in let refine_ t = built_finite_at h start env graph middle x (refine_ u) in refine_ t) in
+    let refine_ t = built_finite_at h start env graph middle x (refine_ ()) in refine_ t) in
   let eqs = generated.#equations in
   let eqs : {eqs : equations | equations_allocated middle eqs} = refine_ eqs in
   let t = generated.#state in let t : {t : node Pref.token | Pref.own t === middle} = refine_ t in
@@ -33,6 +33,6 @@ let infer : (e : {e : term | scoped_term Z e}) @ immutable ->
   let ok = solved.#ok in let solving = ghost_ solved.#solving in
   let t = solved.#state in let after = ghost_ (Pref.own (borrow_ t)) in
   ghost_ (inferred_def e middle graph ok after solving);
-  ghost_ (let u = () in solved_frame middle eqs ok after solving value (refine_ u));
-  let refine_ tree = ghost_ (let u = () in inference_finite_at e middle graph ok after solving value (refine_ u)) in
+  ghost_ (solved_frame middle eqs ok after solving value (refine_ ()));
+  let refine_ tree = ghost_ (inference_finite_at e middle graph ok after solving value (refine_ ())) in
   let r = #{value; ok; state = t; graph; generated_heap = middle; solving; tree} in refine_ r

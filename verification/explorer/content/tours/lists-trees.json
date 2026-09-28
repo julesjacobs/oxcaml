@@ -56,7 +56,7 @@
       "path": "testsuite/tests/vox/pref_list.ml",
       "from": "module Owned = struct",
       "to": "{pointer = b.#pointer; model = b.#model; state = b.#state}",
-      "lines": "302-324",
+      "lines": "300-322",
       "text": "`Owned.t` is an unboxed record with one field, whose type refines `payload` by the representation invariant: the pointer is the model's root, the model is `valid`, and the token owns exactly `heap model`. Its layout is `value & void & void`, so at run time it is the root pointer alone. Every `Owned.t` is built by `adopt` or by an operation of `Owned`, each of which must prove the refinement, and every function that opens one may assume it. The interface exports `model` without its definition, so a client reasons with the contracts of `Owned` only."
     },
     {
@@ -72,7 +72,7 @@
       "path": "testsuite/tests/vox/pref_tree.ml",
       "from": ["let rec mirror :", "| Some n ->"],
       "to": "ghost_ (mirror_rebuild model n new_nh new_lh new_rh after);",
-      "lines": "184-225",
+      "lines": "183-224",
       "text": "A tree node has two link cells, and the tree's `valid` requires them to be distinct and requires each node's links, its left subtree and its right subtree to own pairwise disjoint heaps. `mirror` splits off the node's two cells, reads both children, splits the rest between the two subtrees and recurses on each with its own token. `set_links` then writes the children back exchanged, and after the joins `mirror_rebuild` proves the token's heap equal to `heap (flipped model)`. The recursion follows the tree, so its stack depth is the tree's depth; `mirror_with_frame` adds a frame around it as `reverse` does."
     },
     {

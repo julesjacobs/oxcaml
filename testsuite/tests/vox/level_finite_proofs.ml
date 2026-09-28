@@ -14,7 +14,7 @@ let rec (search_finite @ total) :
   fun h p q x trace premise -> ghost_ (
     let flag = false in searched_def h p x flag trace;
     let after = H.put h p (redirect h p q) in
-    let v = redirect h p q in redirect_desc h p q; observe_write h p v x;
+    let v = redirect h p q in observe_write h p v x;
     match trace with
     | Hit | Left _ -> let t = Free x in t
     | Leaf ->

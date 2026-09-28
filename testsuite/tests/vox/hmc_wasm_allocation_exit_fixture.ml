@@ -26,9 +26,8 @@ let fixture (cursor : B.u32) (limit : B.u32) =
     Wasm_locals.get_def (S.Push (S.I32 limit, S.Push (S.I32 20, S.Empty))) 0;
     X.run_def C.Empty state;
     Exit.correct 32 0 1 C.Empty 3 normal inner_label cursor limit state state ();
-    Continue.labels_def normal inner_label;
     T.branch_def 3 (Continue.labels normal inner_label) state;
-    T.branch_def 2 inner_label state; T.branch_def 1 loop_label state; T.branch_def 0 exit_label state; T.stack_def state S.Empty);
+    T.branch_def 2 inner_label state; T.branch_def 1 loop_label state; T.branch_def 0 exit_label state);
   (match T.run (fuel 100) {T.code; labels = T.No_labels; state} with
   | T.Finished final ->
     if final.X.memory <> B.End || final.X.machine.E.stack <> S.Push (S.I32 expected, S.Empty)

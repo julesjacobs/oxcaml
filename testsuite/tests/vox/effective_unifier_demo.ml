@@ -46,7 +46,7 @@ let run stale reject =
     let var = Var in cell_def var 7; let arrow = Arrow (link, link) in cell_def arrow 9;
     let indirect = Var in cell_def indirect 2;
     head_def link leaf root pair x; let refine_ first = Pref.equal x link in let refine_ second = Pref.equal x root in
-    let u = () in refine_ u) in
+    refine_ ()) in
   let witness : (((x : node Pref.t) @ immutable -> {u : unit |
       E.valid_head h.Ghost.ghost heads.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (fun x ->
     values x; E.valid_head_def h.Ghost.ghost heads.Ghost.ghost x;
@@ -55,18 +55,18 @@ let run stale reject =
     let here = U.Here in U.resolves_def h.Ghost.ghost leaf leaf here; U.resolves_def h.Ghost.ghost pair pair here;
     U.terminal_def h.Ghost.ghost leaf; U.observe_def h.Ghost.ghost leaf;
     U.terminal_def h.Ghost.ghost pair; U.observe_def h.Ghost.ghost pair;
-    let u = () in refine_ u)} in
+    refine_ ())} in
   let order : (((x : node Pref.t) @ immutable -> {u : unit |
       E.effective_ordered h.Ghost.ghost heads.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (fun x ->
     values x; values link;
     E.effective_ordered_def h.Ghost.ghost heads.Ghost.ghost x;
     E.effective_below_def h.Ghost.ghost heads.Ghost.ghost link 9;
     E.level_def h.Ghost.ghost heads.Ghost.ghost link;
-    at_level_def h.Ghost.ghost leaf; let u = () in refine_ u)} in
+    at_level_def h.Ghost.ghost leaf; refine_ ())} in
   let scope : (((x : node Pref.t) @ immutable -> {u : unit |
       not (H.mem h.Ghost.ghost x) || E.effective_scope h.Ghost.ghost heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> values x; let var = Var in cell_def var 7; let arrow = Arrow (link, link) in cell_def arrow 9; let indirect = Var in cell_def indirect 2; source_ok_def h.Ghost.ghost x; order.Ghost.ghost x;
-      let u = () in if H.mem h.Ghost.ghost x then (E.ordered_scope h.Ghost.ghost heads.Ghost.ghost witness.Ghost.ghost x (refine_ u); ()) else (); refine_ u)} in
+      if H.mem h.Ghost.ghost x then (E.ordered_scope h.Ghost.ghost heads.Ghost.ghost witness.Ghost.ghost x (refine_ ()); ()) else (); refine_ ())} in
   let trees : (((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x
       && (if H.mem h.Ghost.ghost x then finite h.Ghost.ghost t else U.observe h.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> values x;
@@ -81,16 +81,16 @@ let run stale reject =
   let unmarked : (((x : node Pref.t) @ immutable -> {u : unit |
       match H.at h.Ghost.ghost x with None -> true | Some v -> not v.visited})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> values x; source_ok_def h.Ghost.ghost x;
-      let u = () in refine_ u)} in
+      refine_ ())} in
   let input = if reject then leaf else root in
   ghost_ (values root; values pair; values leaf; U.observe_def h.Ghost.ghost leaf; active_def h.Ghost.ghost leaf; at_level_def h.Ghost.ghost leaf; U.observe_def h.Ghost.ghost root;
     U.observe_def h.Ghost.ghost pair; U.terminal_def h.Ghost.ghost pair;
     active_def h.Ghost.ghost root; active_def h.Ghost.ghost pair;
     at_level_def h.Ghost.ghost root; at_level_def h.Ghost.ghost pair);
-  ghost_ (witness.Ghost.ghost input; witness.Ghost.ghost pair; let u = () in
+  ghost_ (witness.Ghost.ghost input; witness.Ghost.ghost pair; 
     U.terminal_def h.Ghost.ghost input; U.observe_def h.Ghost.ghost input;
-    E.terminal_level h.Ghost.ghost heads.Ghost.ghost input (refine_ u);
-    E.terminal_level h.Ghost.ghost heads.Ghost.ghost pair (refine_ u);
+    E.terminal_level h.Ghost.ghost heads.Ghost.ghost input (refine_ ());
+    E.terminal_level h.Ghost.ghost heads.Ghost.ghost pair (refine_ ());
     E.effective_active_def h.Ghost.ghost heads.Ghost.ghost input;
     E.effective_active_def h.Ghost.ghost heads.Ghost.ghost pair);
   let state : {t : node Pref.token | Pref.own t === h.Ghost.ghost
@@ -99,11 +99,11 @@ let run stale reject =
   let refine_ out = C.unify h heads witness scope unmarked order trees input pair (refine_ state_argument) in
   assert (out.#ok <> reject);
   let after = ghost_ (Pref.own (borrow_ out.#state)) in let derivation = ghost_ out.#derivation in
-  ghost_ (let u = () in
-    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation leaf (refine_ u);
-    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation link (refine_ u);
-    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation pair (refine_ u);
-    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation root (refine_ u));
+  ghost_ (
+    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation leaf (refine_ ());
+    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation link (refine_ ());
+    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation pair (refine_ ());
+    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation root (refine_ ()));
   let state = out.#state in
   let state : {t : node Pref.token | H.mem (Pref.own t) leaf} = refine_ state in
   let refine_ a = Pref.read leaf (borrow_ state) in let refine_ state = state in
@@ -140,10 +140,10 @@ let run_arrows stale =
       && H.at h.Ghost.ghost root === Some root_node && root_node.desc === Arrow (link, link) && root_node.level === Finite 9
       && (heads.Ghost.ghost x).R.root === (if x === link then leaf else if x === root then root else x)
       && (heads.Ghost.ghost x).R.path === (if x === link then U.Via (leaf, U.Here) else if x === root then U.Here else U.Here)}) @ total ghost = ghost_ (fun x ->
-    let var = Var in cell_def var 7; let arrow = Arrow (link, link) in cell_def arrow 9;
+    let var = Var in cell_def var 7;
     let indirect = Arrow (link, link) in cell_def indirect 9;
     head_def link leaf root pair x; let refine_ first = Pref.equal x link in let refine_ second = Pref.equal x root in
-    let u = () in refine_ u) in
+    refine_ ()) in
   let witness : (((x : node Pref.t) @ immutable -> {u : unit |
       E.valid_head h.Ghost.ghost heads.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (fun x ->
     values x; E.valid_head_def h.Ghost.ghost heads.Ghost.ghost x;
@@ -152,18 +152,18 @@ let run_arrows stale =
     let here = U.Here in U.resolves_def h.Ghost.ghost leaf leaf here; U.resolves_def h.Ghost.ghost pair pair here;
     U.terminal_def h.Ghost.ghost leaf; U.observe_def h.Ghost.ghost leaf;
     U.terminal_def h.Ghost.ghost pair; U.observe_def h.Ghost.ghost pair;
-    let u = () in refine_ u)} in
+    refine_ ())} in
   let order : (((x : node Pref.t) @ immutable -> {u : unit |
       E.effective_ordered h.Ghost.ghost heads.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (fun x ->
     values x; values link;
     E.effective_ordered_def h.Ghost.ghost heads.Ghost.ghost x;
     E.effective_below_def h.Ghost.ghost heads.Ghost.ghost link 9;
     E.level_def h.Ghost.ghost heads.Ghost.ghost link;
-    at_level_def h.Ghost.ghost leaf; let u = () in refine_ u)} in
+    at_level_def h.Ghost.ghost leaf; refine_ ())} in
   let scope : (((x : node Pref.t) @ immutable -> {u : unit |
       not (H.mem h.Ghost.ghost x) || E.effective_scope h.Ghost.ghost heads.Ghost.ghost x})) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> values x; let var = Var in cell_def var 7; let arrow = Arrow (link, link) in cell_def arrow 9; let indirect = Arrow (link, link) in cell_def indirect 9; source_ok_def h.Ghost.ghost x; order.Ghost.ghost x;
-      let u = () in if H.mem h.Ghost.ghost x then (E.ordered_scope h.Ghost.ghost heads.Ghost.ghost witness.Ghost.ghost x (refine_ u); ()) else (); refine_ u)} in
+    {Ghost.ghost = ghost_ (fun x -> values x; let var = Var in cell_def var 7; let indirect = Arrow (link, link) in cell_def indirect 9; source_ok_def h.Ghost.ghost x; order.Ghost.ghost x;
+      if H.mem h.Ghost.ghost x then (E.ordered_scope h.Ghost.ghost heads.Ghost.ghost witness.Ghost.ghost x (refine_ ()); ()) else (); refine_ ())} in
   let trees : (((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x
       && (if H.mem h.Ghost.ghost x then finite h.Ghost.ghost t else U.observe h.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> values x;
@@ -178,16 +178,16 @@ let run_arrows stale =
   let unmarked : (((x : node Pref.t) @ immutable -> {u : unit |
       match H.at h.Ghost.ghost x with None -> true | Some v -> not v.visited})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> values x; source_ok_def h.Ghost.ghost x;
-      let u = () in refine_ u)} in
+      refine_ ())} in
   let input = if reject then leaf else root in
   ghost_ (values root; values pair; values leaf; U.observe_def h.Ghost.ghost leaf; active_def h.Ghost.ghost leaf; at_level_def h.Ghost.ghost leaf; U.observe_def h.Ghost.ghost root;
     U.observe_def h.Ghost.ghost pair; U.terminal_def h.Ghost.ghost pair;
     active_def h.Ghost.ghost root; active_def h.Ghost.ghost pair;
     at_level_def h.Ghost.ghost root; at_level_def h.Ghost.ghost pair);
-  ghost_ (witness.Ghost.ghost input; witness.Ghost.ghost pair; let u = () in
+  ghost_ (witness.Ghost.ghost input; witness.Ghost.ghost pair; 
     U.terminal_def h.Ghost.ghost input; U.observe_def h.Ghost.ghost input;
-    E.terminal_level h.Ghost.ghost heads.Ghost.ghost input (refine_ u);
-    E.terminal_level h.Ghost.ghost heads.Ghost.ghost pair (refine_ u);
+    E.terminal_level h.Ghost.ghost heads.Ghost.ghost input (refine_ ());
+    E.terminal_level h.Ghost.ghost heads.Ghost.ghost pair (refine_ ());
     E.effective_active_def h.Ghost.ghost heads.Ghost.ghost input;
     E.effective_active_def h.Ghost.ghost heads.Ghost.ghost pair);
   let state : {t : node Pref.token | Pref.own t === h.Ghost.ghost
@@ -196,11 +196,11 @@ let run_arrows stale =
   let refine_ out = C.unify h heads witness scope unmarked order trees input pair (refine_ state_argument) in
   assert (out.#ok <> reject);
   let after = ghost_ (Pref.own (borrow_ out.#state)) in let derivation = ghost_ out.#derivation in
-  ghost_ (let u = () in
-    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation leaf (refine_ u);
-    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation link (refine_ u);
-    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation pair (refine_ u);
-    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation root (refine_ u));
+  ghost_ (
+    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation leaf (refine_ ());
+    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation link (refine_ ());
+    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation pair (refine_ ());
+    Effective_unifier_frame.unified_frame h.Ghost.ghost input pair out.#ok after derivation root (refine_ ()));
   let state = out.#state in
   let state : {t : node Pref.token | H.mem (Pref.own t) leaf} = refine_ state in
   let refine_ a = Pref.read leaf (borrow_ state) in let refine_ state = state in

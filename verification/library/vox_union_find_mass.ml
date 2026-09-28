@@ -224,7 +224,6 @@ let (linked_capacity @ total) : (cap : Bigint.t) ->
       F.size paths <= cap then R.weight (M.linked h x y) q < cap else true}
       @ ghost = fun cap h x y paths q -> ghost_ (
   link_sums h x y paths; linked_mass_bounds cap h x y paths q;
-  F.join_valid h x y paths;
   M.winner_def h x y;
   let winner = M.winner h x y in
   F.join_member h x y paths winner;

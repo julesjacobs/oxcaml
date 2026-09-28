@@ -93,7 +93,7 @@ let (scoped_fixture @ total) : (s : sample) ->
   D.scoped_term_def n0 e18;
   D.scoped_term_def n0 e17;
   D.scoped_term_def n0 e19;
-  let u = () in refine_ u)
+  refine_ ())
 
 let run sample expected =
   let e = expression sample in ghost_ (scoped_fixture sample);
@@ -106,21 +106,21 @@ let run sample expected =
     let facts : ((x : node Pref.t) @ immutable -> {u : unit | Hm_runtime_spec.runtime_at h depth pool x}) @ total = fun x ->
       Hm_runtime_spec.runtime_at_def h depth pool x; Hm_runtime_spec.safe_def h x;
       Hm_runtime_spec.depth_bound_def h depth x; let cut = depth - 1 in
-      Generalize_spec.covered_def h cut pool x; Level_spec.ordered_def h x; let u = () in refine_ u in
+      Generalize_spec.covered_def h cut pool x; Level_spec.ordered_def h x; refine_ () in
     let cut = -1 in
     let prior : ((x : node Pref.t) @ immutable ->
       {o : Provenance_spec.origin | not (Leaf_provenance_spec.low_var h x cut) || Provenance_spec.originates h h cut x o} @ immutable) @ total = fun x ->
       let refine_ o = Provenance_proofs.initial_origin h cut x in Leaf_provenance_spec.low_var_def h x cut; refine_ o in
     let _origins : ((p : node Pref.t) @ immutable ->
       {o : Provenance_spec.origin | not (Leaf_provenance_spec.low_var after p cut) || Provenance_spec.originates h after cut p o} @ immutable) @ total = fun p ->
-      let u = () in let refine_ o = Hm_origin_proofs.run_origin h cut h depth pool facts prior env out.#execution after out.#pool p (refine_ u) in refine_ o in ());
+      let refine_ o = Hm_origin_proofs.run_origin h cut h depth pool facts prior env out.#execution after out.#pool p (refine_ ()) in refine_ o in ());
   match out.#value with None -> () | Some p ->
     let after = ghost_ (Pref.own (borrow_ out.#state)) in
-    ghost_ (let u = () in
-      let refine_ _tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (refine_ u) in
+    ghost_ (
+      let refine_ _tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (refine_ ()) in
       let h = H.empty () in let pool : Generalize_spec.pool = Generalize_spec.Empty in
       let env : Hm_environment_spec.env = Hm_environment_spec.Empty in
-      Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (refine_ u));
+      Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (refine_ ()));
     let state = out.#state in let state : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ state in
     let refine_ v = Pref.read p (borrow_ state) in
     assert (v.level = Finite 0 && not v.visited)
@@ -138,7 +138,7 @@ let overflow : unit -> inference @ unique = fun () ->
   let facts : ((x : node Pref.t) @ immutable -> {u : unit | Hm_runtime_spec.runtime_at h depth pool x}) @ total ghost = ghost_ (fun x ->
     Hm_runtime_spec.runtime_at_def h depth pool x; Hm_runtime_spec.safe_def h x;
     Hm_runtime_spec.depth_bound_def h depth x; let cut = depth - 1 in
-    Generalize_spec.covered_def h cut pool x; Level_spec.ordered_def h x; let u = () in refine_ u) in
+    Generalize_spec.covered_def h cut pool x; Level_spec.ordered_def h x; refine_ ()) in
   ghost_ (let z = D.Z in let one = D.S z in D.scoped_term_def z e;
     D.scoped_term_def z rhs; D.scoped_term_def one rhs;
     Generalize_spec.pool_scoped_def h pool; Hm_runtime_spec.env_owned_def h env;

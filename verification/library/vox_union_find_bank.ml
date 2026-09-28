@@ -133,14 +133,12 @@ let rec (compression_potential @ total) : (cap : Bigint.t) ->
   release_step cap alpha h selected;
   match selected with
   | M.Stop _ ->
-      F.refresh_valid h selected paths;
       refresh_potential cap alpha h selected paths h;
       ()
   | M.Step (x, rest) ->
       compression_potential cap alpha h rest paths;
       F.refresh_valid h rest paths;
       F.refresh_member h rest paths x;
-      refresh_potential cap alpha h rest paths (M.compressed h rest);
       R.contains_rank cap h rest x; R.bounds cap h rest;
       compressed_value_frame cap alpha h rest x;
       M.compressed_rank h rest x; M.compressed_rank h rest (M.root rest);
@@ -169,7 +167,7 @@ let (value_nonnegative @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
       let parent = R.weight h (M.head rest) in
       if M.valid h p && R.ordered cap h p && alpha >= 1Z &&
         A.iter cap alpha 1Z 1Z >= cap && rank > 0Z then (
-        let u = () in V.analyze cap alpha rank parent (u);
+        V.analyze cap alpha rank parent ();
         ())
       else (
         V.node_phi_def cap alpha rank parent;
@@ -257,7 +255,7 @@ let (link_value @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
         let rank = R.weight h q in
         let parent = R.weight after winner in
         if not (x === y) && q === loser && rank > 0Z then (
-          let u = () in V.analyze cap alpha rank parent (u);
+          V.analyze cap alpha rank parent ();
           ())
         else (
           V.node_phi_def cap alpha rank parent;
@@ -270,7 +268,7 @@ let (link_value @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
         let old_parent = R.weight h parent in
         let new_parent = R.weight after parent in
         if rank > 0Z then (
-          let u = () in V.compression cap alpha rank old_parent new_parent (u);
+          V.compression cap alpha rank old_parent new_parent ();
           ())
         else (
           V.node_phi_def cap alpha rank old_parent;
@@ -324,7 +322,7 @@ let (reparameterize_value @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
       1Z <= a && a <= b && b <= Bigint.add a 1Z && A.iter small a 1Z 1Z >= small
     then (
       let rank = R.weight h x in let parent = R.weight h (M.head rest) in
-      let u = () in V.reparameterize small large a b rank parent (u);
+      V.reparameterize small large a b rank parent ();
       ())
     else ())
 

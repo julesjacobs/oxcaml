@@ -66,7 +66,7 @@
       "path": "verification/library/vox_cdcl_total_proof.ml",
       "from": "let learned = analyze (ghost_ n) formula database state stop entry in",
       "to": "let database = database_cons formula learned database in",
-      "lines": "4400-4427",
+      "lines": "4387-4413",
       "text": "This is the conflict branch of `search`. `analyze` resolves the conflicting clause with the reason of its latest-assigned current-level literal until at most one current-level literal remains, extending the ghost derivation through `resolve_result` at each step. It needs no fuel: it is `total` with `[@@decreases clause_rank state.trail current.clause]`, because the invariant `reason_order` says each reason's other literals were assigned earlier, so every step lowers the latest trail position among the clause's literals. At level 0 the result is the empty clause and the answer is `Unsat learned`. Otherwise `asserting_clause` picks the literal to assert and the backjump level, `backtrack` unbinds everything above that level, and the ghost lemma `prepare_learning` proves that the new state and the extended database satisfy the invariants `search` requires."
     },
     {
@@ -74,7 +74,7 @@
       "path": "verification/library/vox_cdcl_total_proof.ml",
       "from": "let[@def] progress_measure n database bindings =",
       "to": "unassigned_bounds after)",
-      "lines": "4153-4197",
+      "lines": "4143-4187",
       "text": "`search` is `@ total` with `[@@decreases progress_measure n database state.bindings]`, a ghost `Bigint` equal to `absent * (n + 1) + unassigned`, where `absent` counts the members of `clause_universe n (2 * n)`, the list of every literal list of length at most `2n` over the variables below `n`, that are not in the learned-clause database. For `n = 256` that universe has about 512^512 members; the measure exists only as a term that Z3 reasons about. A decision lowers `unassigned` (`progress_decision`); learning lowers `absent` by at least one, and `progress_learning` shows that the weight `n + 1` pays for the at most `n` variables the backjump unbinds."
     },
     {
@@ -90,7 +90,7 @@
       "path": "verification/library/vox_cdcl_total_proof.ml",
       "from": "unit_clause_unstable (binding_values next.bindings) literal",
       "to": "= () in ();",
-      "lines": "4274-4292",
+      "lines": "4264-4282",
       "text": "Inside `prepare_learning`, this is where `absent` is shown to drop. `unit_clause_unstable` says the learned clause is unit under the bindings kept after the backjump. The invariant `prefix_stable` says no clause already in the input or the database is unit under them, so `formula_stable_member` shows the learned clause is in neither. It has no repeated literal (resolution deduplicates, and the one case where `analyze` returns the conflicting clause unchanged is excluded because that clause is already in the input or the database), so `unique_clause_length` bounds it by `2n` literals, `clause_universe_member` puts it in the universe, and `count_absent_prepend` gives the strict decrease. Clauses are compared as ordered lists, so the permutations of one clause count separately; the bound is loose and sound."
     },
     {

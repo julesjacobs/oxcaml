@@ -97,7 +97,7 @@ let cons : (p : node Pref.t) @ immutable ->
         let tree = Branch (size, p, a, b) in
         let out = Cons (tree, rest) in
         ghost_ (let tail = Cons (b, rest) in valid_forest_def tail; flatten_def tail;
-          tree_sized a; tree_sized b;
+          tree_sized a;
           weight_def tree; valid_tree_def tree; valid_forest_def out;
           flatten_tree_def tree; flatten_def out;
           let left = flatten_tree a in let right = flatten_tree b in

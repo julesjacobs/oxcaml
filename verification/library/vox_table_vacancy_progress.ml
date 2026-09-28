@@ -73,8 +73,6 @@ module Make (Key : Vox_table_map.Key)
               ()
             end else ()));
         Count.reserve_positive view.model.capacity;
-        Count.not_full view.model.capacity view.model.size view.model.deleted
-          (Read.I.reserve view.model.capacity);
         ()
       end else ())
 end

@@ -190,7 +190,6 @@ let rec (range_get @ total) : (values : int list) -> (bound : int) ->
       let next_index = (Bigint.sub index 1Z) in
       range_get tail bound lower next_first next_past
         next_index;
-      element_at tail next_index;
       element_def tail next_index;
       ()
 
@@ -217,8 +216,7 @@ let rec (range_grow @ total) : (values : int list) -> (bound : int) ->
       range_def tail bound lower zero zero;
       ()
     else
-      (element_at tail next_past;
-      element_def tail next_past;
+      (element_def tail next_past;
       range_grow tail bound lower next_first next_past;
       ())
 
@@ -725,20 +723,19 @@ let rec (sorted_count_extensional @ total) :
       {u : unit | count left target === count right target}) @ total ->
     {u : unit | if sorted left && sorted right then left === right else true} =
     fun left right same ->
-  let u = () in
   if sorted left && sorted right then
     (sorted_def left;
     sorted_def right;
     match left with
     | [] ->
       (match right with
-       | [] -> u
+       | [] -> ()
        | head :: tail ->
         same head;
         count_def left head;
         count_def right head;
         count_nonnegative tail head;
-        u)
+        ())
     | x :: xs ->
       match right with
       | [] ->
@@ -746,7 +743,7 @@ let rec (sorted_count_extensional @ total) :
         count_def left x;
         count_def right x;
         count_nonnegative xs x;
-        u
+        ()
       | y :: ys ->
         if x < y then
           (same x;
@@ -754,14 +751,14 @@ let rec (sorted_count_extensional @ total) :
           count_def right x;
           count_nonnegative xs x;
           count_below ys y x;
-          u)
+          ())
         else if y < x then
           (same y;
           count_def left y;
           count_def right y;
           count_nonnegative ys y;
           count_below xs x y;
-          u)
+          ())
         else
           let (same_tail @ total) : (target : int) ->
               {u : unit | count xs target === count ys target} = fun target ->
@@ -770,8 +767,8 @@ let rec (sorted_count_extensional @ total) :
             count_def right target;
             () in
           sorted_count_extensional xs ys same_tail;
-          u)
-  else u
+          ())
+  else ()
 
 let (count_extensional @ total) :
     (left : int list) -> (right : int list) ->

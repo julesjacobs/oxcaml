@@ -55,7 +55,6 @@ let (install @ total) : (program : Program.program) @ immutable -> (globals : Ma
       Table.address_def table_base table_count; Wasm_scalar.add32_def table_base (32 * table_count);
       let boundary = Table.address table_base table_count in
       let _ = Bounds.suffix before.Store.memory frame_end boundary () in
-      Bounds.covers_def before.Store.memory boundary;
       Hmc_heap_image_suffix.seek before.Store.memory memory boundary registers.Registers.frame ();
       Hmc_heap_image_suffix.seek before.Store.memory memory boundary frame_end ();
       Resources.valid_def program globals width stack_base frame_end abstract heap activation frames registers before.Store.memory;

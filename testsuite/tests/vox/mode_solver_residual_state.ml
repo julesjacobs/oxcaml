@@ -462,10 +462,7 @@ let (disjunctive_residual_exact @ total) :
   ghost_
     (assert_residual_exact [v; x; y] empty
        (Or (Le (Var 0, Var 1), Le (Var 0, Var 2))));
-  ghost_ (models_def [v; x; y] disjunctive_residual);
   ghost_ (models_def [v; x; y] empty);
-  ghost_ (assert_residual_def empty
-            (Or (Le (Var 0, Var 1), Le (Var 0, Var 2))));
   ghost_ (eval_qf_def [v; x; y] disjunctive_residual.residual);
   ghost_ (eval_qf_def [v; x; y]
             (Or (Le (Var 0, Var 1), Le (Var 0, Var 2))));
@@ -487,7 +484,6 @@ let (disjunctive_residual_exact @ total) :
   ghost_ (join_def x y);
   ghost_ (le_def v x);
   ghost_ (le_def v y);
-  ghost_ (le_def v (join x y));
   ghost_ (le_def x y);
   ghost_ (rank_def v);
   ghost_ (rank_def x);

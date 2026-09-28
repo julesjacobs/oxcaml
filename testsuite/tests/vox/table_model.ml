@@ -118,7 +118,6 @@ let () =
     Probe.valid_def Probe.One;
     Probe.groups_def Probe.One;
     Wrap.scale16_def 1;
-    M.initial_def 16 (None : (int * int) option);
     Initial.initial 16 None view;
     I.Map.empty_lookup 16 (None : (int * int) option) 42);
   let answer : {v : int option | v === None} =
@@ -133,7 +132,6 @@ let () =
   let alias = first.table in
   let cleared = Mutation.clear alias first.view first.state in
   ghost_ (
-    M.initial_def 16 (None : (int * int) option);
     Mutation.I.Map.empty_lookup 16 (None : (int * int) option) 42);
   let answer : {v : int option | v === None} =
     Mutation.Search.find_opt first.table cleared.#view 42 (borrow_ cleared.#state) in

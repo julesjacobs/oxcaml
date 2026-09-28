@@ -38,16 +38,16 @@ let run () =
   let frame : ((x : node Pref.t) @ immutable ->
       {u : unit | protected_at h middle 0 x}) @ total ghost = ghost_ (fun x ->
     let desc : desc = Var in cell_def desc 0; source_ok_def h x;
-    let u = () in let refine_ u = allocation_protected h q next_value 0 x (refine_ u) in refine_ u) in
-  ghost_ (let u = () in env_transport h middle 0 frame env ts (refine_ u));
+    let refine_ u = allocation_protected h q next_value 0 x (refine_ ()) in refine_ u) in
+  ghost_ (env_transport h middle 0 frame env ts (refine_ ()));
   let state : {t : node Pref.token | Pref.own t === middle && Generalize_spec.pool_scoped middle pool} = refine_ state in
   let refine_ state = Generalize.close middle 0 pool state in
   let after = ghost_ (Pref.own (borrow_ state)) in
   let closed_frame : ((x : node Pref.t) @ immutable ->
       {u : unit | protected_at middle after 0 x}) @ total ghost = ghost_ (fun x ->
-    let u = () in let refine_ u = close_protected middle 0 pool 0 x (refine_ u) in refine_ u) in
-  ghost_ (let u = () in env_transport middle after 0 closed_frame env ts (refine_ u);
-    frame p; closed_frame p; protected_trans h middle after 0 p (refine_ u);
+    let refine_ u = close_protected middle 0 pool 0 x (refine_ ()) in refine_ u) in
+  ghost_ (env_transport middle after 0 closed_frame env ts (refine_ ());
+    frame p; closed_frame p; protected_trans h middle after 0 p (refine_ ());
     protected_at_def h after 0 p);
   let state : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ state in
   let refine_ v = Pref.read p (borrow_ state) in

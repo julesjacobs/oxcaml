@@ -782,7 +782,7 @@ module Refined_key_constructor_preserves_access : sig end = struct
       ghost_ (compare_def x y; compare_def y x; ())
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (compare_def x y; compare_def y z; compare_def x z; ())
+          || compare x z <= 0} @ ghost = ghost_ (compare_def x z; ())
   end
   module M = Map.MakeTotal (Order)
   let singleton = M.Refined.singleton
@@ -951,7 +951,7 @@ module Refined_accepts_total_closures : sig end = struct
       ghost_ (compare_def x y; compare_def y x; ())
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (compare_def x y; compare_def y z; compare_def x z; ())
+          || compare x z <= 0} @ ghost = ghost_ (compare_def x z; ())
   end
   module M = Map.MakeTotal (Order)
   let total_key () = ()

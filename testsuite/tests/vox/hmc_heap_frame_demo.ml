@@ -31,7 +31,7 @@ let () =
     M.view_def heap; M.decode_environment_def M.No_values env; M.decode_environment_def M.No_values M.Empty;
     M.decode_value_def M.No_values (C.Boolean true); M.decode_value_def M.No_values (C.Boolean false);
     M.decode_value_def M.No_values C.Nil; M.decode_value_def M.No_values (C.Word {Hmc_word64.lo = 17; hi = 0});
-    M.decode_def heap (C.Boolean true); M.decode_def heap (C.Boolean false); M.decode_def heap C.Nil;
+    M.decode_def heap (C.Boolean false); M.decode_def heap C.Nil;
     M.decode_def heap (C.Word {Hmc_word64.lo = 17; hi = 0});
     F.decode_temporaries_def heap F.Empty;
     F.decode_temporaries_def heap (F.Environment (M.Empty, F.Empty));

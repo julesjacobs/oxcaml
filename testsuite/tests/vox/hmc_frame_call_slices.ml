@@ -26,7 +26,6 @@ let (correct @ total) : (signature : G.signature) @ immutable -> (activation : F
   fun signature activation cells padding context ty schema next premise ->
     let view = View.decode signature activation cells padding () in
     ghost_ (Codec.decode_temporaries_def signature.G.temporaries view.View.temporaries;
-      Seg.temporaries signature.G.temporaries view.View.temporaries activation.F.temporaries padding ();
       Codec.temporaries_size_def signature.G.temporaries);
     match view.View.temporaries with
     | H.Empty -> unreachable_ ()

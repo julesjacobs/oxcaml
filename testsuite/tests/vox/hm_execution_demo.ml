@@ -37,9 +37,9 @@ let run () =
     let desc : desc = Bool in cell_def desc 1;
     let old : ((y : node Pref.t) @ immutable ->
       {u : unit | if H.mem h1 y then source_ok h1 y else H.at h1 y === None}) @ total = fun y ->
-      source_ok_def h1 y; let u = () in refine_ u in
-    let u = () in let refine_ u = Generalize_scheme_proofs.closed_scope h1 old 0 child x (refine_ u) in refine_ u) in
-  ghost_ (let u = () in Generalize_proofs.closed_observe h1 0 child p (refine_ u);
+      source_ok_def h1 y; refine_ () in
+    let refine_ u = Generalize_scheme_proofs.closed_scope h1 old 0 child x (refine_ ()) in refine_ u) in
+  ghost_ (Generalize_proofs.closed_observe h1 0 child p (refine_ ());
     closed_at_def h1 h2 0 child p);
   let p : {p : node Pref.t | H.mem h2 p} = refine_ p in
   let state = closed.#state in
@@ -48,8 +48,8 @@ let run () =
   let clean : ((x : node Pref.t) @ immutable ->
     {u : unit | match H.at h2 x with None -> true | Some v -> v.memo === Empty_memo}) @ total ghost = ghost_ (fun x ->
     let desc : desc = Bool in cell_def desc 1;
-    let u = () in Generalize_proofs.closed_observe h1 0 child x (refine_ u);
-    closed_at_def h1 h2 0 child x; refine_ u) in
+    Generalize_proofs.closed_observe h1 0 child x (refine_ ());
+    closed_at_def h1 h2 0 child x; refine_ ()) in
   let saved_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h2)} in
   let clean_witness2 : (((x : node Pref.t) @ immutable ->
       {u : unit | match H.at saved_witness1.Ghost.ghost x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t = {Ghost.ghost = ghost_ (refine_ clean)} in
@@ -71,8 +71,8 @@ let run () =
     copy_heap_def h2 epoch 0 history; ran_def h2 0 parent next_env body after final_pool;
     result_def body; result_def execution;
     ran_def h0 0 empty env execution after final_pool;
-    let u = () in Hm_execution_proofs.run_result h0 0 empty env execution after final_pool q (refine_ u);
-    let refine_ _tree = Hm_forest_proofs.closed_forest execution after final_pool q (refine_ u) in ());
+    Hm_execution_proofs.run_result h0 0 empty env execution after final_pool q (refine_ ());
+    let refine_ _tree = Hm_forest_proofs.closed_forest execution after final_pool q (refine_ ()) in ());
   let state = copied.#state in
   let state : {t : node Pref.token | H.mem (Pref.own t) q} = refine_ state in
   let refine_ v = Pref.read q (borrow_ state) in

@@ -91,7 +91,7 @@ let () =
   let added = U.make_set input payment in
   let #{U.value = x0; state; refund} = added in
   let account0 = ghost_ (U.account (borrow_ state)) in
-  ghost_ (U.contents_def (borrow_ state); M.head_def (M.Stop x0);
+  ghost_ (M.head_def (M.Stop x0);
     F.size_def (M.Stop x0 :: old_paths);
     F.member_def x0 (M.Stop x0 :: old_paths); U.member_def x0 (borrow_ state);
     ());
@@ -102,7 +102,7 @@ let () =
   let added = U.make_set input payment in
   let #{U.value = x1; state; refund} = added in
   let account1 = ghost_ (U.account (borrow_ state)) in
-  ghost_ (U.contents_def (borrow_ state); M.head_def (M.Stop x1);
+  ghost_ (M.head_def (M.Stop x1);
     F.size_def (M.Stop x1 :: old_paths);
     F.member_def x0 (M.Stop x1 :: old_paths); U.member_def x0 (borrow_ state);
     F.member_def x1 (M.Stop x1 :: old_paths); U.member_def x1 (borrow_ state);
@@ -114,7 +114,7 @@ let () =
   let added = U.make_set input payment in
   let #{U.value = x2; state; refund} = added in
   let account2 = ghost_ (U.account (borrow_ state)) in
-  ghost_ (U.contents_def (borrow_ state); M.head_def (M.Stop x2);
+  ghost_ (M.head_def (M.Stop x2);
     F.size_def (M.Stop x2 :: old_paths);
     F.member_def x0 (M.Stop x2 :: old_paths); U.member_def x0 (borrow_ state);
     F.member_def x1 (M.Stop x2 :: old_paths); U.member_def x1 (borrow_ state);
@@ -127,7 +127,7 @@ let () =
   let added = U.make_set input payment in
   let #{U.value = x3; state; refund} = added in
   let account3 = ghost_ (U.account (borrow_ state)) in
-  ghost_ (U.contents_def (borrow_ state); M.head_def (M.Stop x3);
+  ghost_ (M.head_def (M.Stop x3);
     F.size_def (M.Stop x3 :: old_paths);
     F.member_def x0 (M.Stop x3 :: old_paths); U.member_def x0 (borrow_ state);
     F.member_def x1 (M.Stop x3 :: old_paths); U.member_def x1 (borrow_ state);
@@ -155,8 +155,8 @@ let () =
   let account4 = ghost_ (U.account (borrow_ state)) in
   let new_paths = ghost_ (U.contents (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state);
-    F.member_same old_paths new_paths x0; U.member_def x0 (borrow_ state);
-    F.member_same old_paths new_paths x1; U.member_def x1 (borrow_ state);
+    F.member_same old_paths new_paths x0;
+    F.member_same old_paths new_paths x1;
     F.member_same old_paths new_paths x2; U.member_def x2 (borrow_ state);
     F.member_same old_paths new_paths x3; U.member_def x3 (borrow_ state);
     ());
@@ -171,11 +171,11 @@ let () =
   let #{U.value = _; state; refund} = joined in
   let account5 = ghost_ (U.account (borrow_ state)) in
   let new_paths = ghost_ (U.contents (borrow_ state)) in
-  ghost_ (U.contents_def (borrow_ state);
+  ghost_ (
     F.member_same old_paths new_paths x0; U.member_def x0 (borrow_ state);
-    F.member_same old_paths new_paths x1; U.member_def x1 (borrow_ state);
+    F.member_same old_paths new_paths x1;
     F.member_same old_paths new_paths x2; U.member_def x2 (borrow_ state);
-    F.member_same old_paths new_paths x3; U.member_def x3 (borrow_ state);
+    F.member_same old_paths new_paths x3;
     ());
   let old_paths = ghost_ (U.contents (borrow_ state)) in
   let alpha = ghost_ (U.alpha (borrow_ state)) in
@@ -188,10 +188,10 @@ let () =
   let #{U.value = _; state; refund} = joined in
   let account6 = ghost_ (U.account (borrow_ state)) in
   let new_paths = ghost_ (U.contents (borrow_ state)) in
-  ghost_ (U.contents_def (borrow_ state);
-    F.member_same old_paths new_paths x0; U.member_def x0 (borrow_ state);
+  ghost_ (
+    F.member_same old_paths new_paths x0;
     F.member_same old_paths new_paths x1; U.member_def x1 (borrow_ state);
-    F.member_same old_paths new_paths x2; U.member_def x2 (borrow_ state);
+    F.member_same old_paths new_paths x2;
     F.member_same old_paths new_paths x3; U.member_def x3 (borrow_ state);
     ());
   let old_paths = ghost_ (U.contents (borrow_ state)) in
@@ -205,11 +205,11 @@ let () =
   let #{U.value = _; state; refund} = joined in
   let account7 = ghost_ (U.account (borrow_ state)) in
   let new_paths = ghost_ (U.contents (borrow_ state)) in
-  ghost_ (U.contents_def (borrow_ state);
+  ghost_ (
     F.member_same old_paths new_paths x0; U.member_def x0 (borrow_ state);
-    F.member_same old_paths new_paths x1; U.member_def x1 (borrow_ state);
-    F.member_same old_paths new_paths x2; U.member_def x2 (borrow_ state);
-    F.member_same old_paths new_paths x3; U.member_def x3 (borrow_ state);
+    F.member_same old_paths new_paths x1;
+    F.member_same old_paths new_paths x2;
+    F.member_same old_paths new_paths x3;
     ());
   let old_paths = ghost_ (U.contents (borrow_ state)) in
   let alpha = ghost_ (U.alpha (borrow_ state)) in
@@ -228,11 +228,11 @@ let () =
     ignore (u : {u : unit | U.representative x2 state === before_x2}));
   let account8 = ghost_ (U.account (borrow_ state)) in
   let new_paths = ghost_ (U.contents (borrow_ state)) in
-  ghost_ (U.contents_def (borrow_ state);
-    F.member_same old_paths new_paths x0; U.member_def x0 (borrow_ state);
+  ghost_ (
+    F.member_same old_paths new_paths x0;
     F.member_same old_paths new_paths x1; U.member_def x1 (borrow_ state);
-    F.member_same old_paths new_paths x2; U.member_def x2 (borrow_ state);
-    F.member_same old_paths new_paths x3; U.member_def x3 (borrow_ state);
+    F.member_same old_paths new_paths x2;
+    F.member_same old_paths new_paths x3;
     ());
   let old_paths = ghost_ (U.contents (borrow_ state)) in
   let alpha = ghost_ (U.alpha (borrow_ state)) in
@@ -245,16 +245,14 @@ let () =
   let #{U.value = r1; state; refund} = found in
   let account9 = ghost_ (U.account (borrow_ state)) in
   let new_paths = ghost_ (U.contents (borrow_ state)) in
-  ghost_ (U.contents_def (borrow_ state);
-    F.member_same old_paths new_paths x0; U.member_def x0 (borrow_ state);
-    F.member_same old_paths new_paths x1; U.member_def x1 (borrow_ state);
+  ghost_ (
+    F.member_same old_paths new_paths x0;
+    F.member_same old_paths new_paths x1;
     F.member_same old_paths new_paths x2; U.member_def x2 (borrow_ state);
-    F.member_same old_paths new_paths x3; U.member_def x3 (borrow_ state);
+    F.member_same old_paths new_paths x3;
     ());
   let old_paths = ghost_ (U.contents (borrow_ state)) in
-  let alpha = ghost_ (U.alpha (borrow_ state)) in
-  ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
-    A.find_fee_def alpha);
+  ghost_ (U.contents_def (borrow_ state));
   let input : {s : U.t | U.valid s && U.member x2 s} = state in
   let payment : {b : C.token | let input = input in
     C.credits b >= A.find_fee input.#U.alpha} = refund in
@@ -262,10 +260,10 @@ let () =
   let #{U.value = r2; state; refund} = found in
   let account10 = ghost_ (U.account (borrow_ state)) in
   let new_paths = ghost_ (U.contents (borrow_ state)) in
-  ghost_ (U.contents_def (borrow_ state);
-    F.member_same old_paths new_paths x0; U.member_def x0 (borrow_ state);
-    F.member_same old_paths new_paths x1; U.member_def x1 (borrow_ state);
-    F.member_same old_paths new_paths x2; U.member_def x2 (borrow_ state);
+  ghost_ (
+    F.member_same old_paths new_paths x0;
+    F.member_same old_paths new_paths x1;
+    F.member_same old_paths new_paths x2;
     F.member_same old_paths new_paths x3; U.member_def x3 (borrow_ state);
     ());
   let old_paths = ghost_ (U.contents (borrow_ state)) in
@@ -279,11 +277,11 @@ let () =
   let #{U.value = r3; state; refund} = found in
   let account11 = ghost_ (U.account (borrow_ state)) in
   let new_paths = ghost_ (U.contents (borrow_ state)) in
-  ghost_ (U.contents_def (borrow_ state);
-    F.member_same old_paths new_paths x0; U.member_def x0 (borrow_ state);
-    F.member_same old_paths new_paths x1; U.member_def x1 (borrow_ state);
-    F.member_same old_paths new_paths x2; U.member_def x2 (borrow_ state);
-    F.member_same old_paths new_paths x3; U.member_def x3 (borrow_ state);
+  ghost_ (
+    F.member_same old_paths new_paths x0;
+    F.member_same old_paths new_paths x1;
+    F.member_same old_paths new_paths x2;
+    F.member_same old_paths new_paths x3;
     ());
   assert (Pref.equal r0 r1); assert (Pref.equal r0 r2); assert (Pref.equal r0 r3);
   ghost_ (U.account_bounds (borrow_ state); C.nonnegative (borrow_ refund);

@@ -22,7 +22,6 @@ let () = ghost_ (
   M.root_def parents 1;
   M.parent_def parents 1;
   I.at_get parents (1);
-  M.root_def parents 0;
   M.parent_def parents 0;
   I.at_get parents (0);
   let _ : {u : unit | Q.same (O.observe nodes parents 3) 0 2} =

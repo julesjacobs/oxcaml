@@ -66,7 +66,7 @@
         "let[@def] good candidate budget",
         "Some e -> minimum_cost e.old_tail e.new_tail <= budget"
       ],
-      "lines": "259-288",
+      "lines": "255-284",
       "text": "The search keeps a frontier of `entry option`s, one slot per diagonal `k`. An entry is runtime state: `x`, the position in `old`, the two residual lists, and `rev`, the script so far in reverse. `valid` is the ghost invariant that ties them together: `rev` and the tails rebuild both inputs, `x` counts the consumed old elements and stays within the cap, the tails lie on diagonal `k`, and `cost e.rev = depth`. `settled` says the snake has consumed all equal heads, and `good candidate budget` says that the entry can still finish within `budget` more edits. `dominance`, below, shows that of two valid entries on one diagonal the one farther along `old` is at least as good, which is why `choose` may keep only that one."
     },
     {
@@ -74,7 +74,7 @@
       "path": "verification/library/vox_diff.ml",
       "from": "let (diff @ total) : (old : int list) -> (fresh : int list) ->",
       "to": "Error Input_too_large in result",
-      "lines": "813-846",
+      "lines": "805-838",
       "text": "`diff` checks both lengths with `bounded_length`, which gives up after the cap, runs `snake` from the empty script, and hands a one-slot frontier to `search`. The search's budget is `ghost_ (minimum_cost old fresh)`: the exact remaining distance, computed only in the logic. The arguments `snake` and `search` take `@ ghost`, `old`, `fresh`, `k`, `depth` and the budget, carry no computation, and every proof call is in `ghost_`. After the search, `M.lower_bound` shows that the script, which costs at most `minimum_cost old fresh`, costs at least that much, so the cost is exact."
     },
     {
@@ -82,7 +82,7 @@
       "path": "verification/library/vox_diff.ml",
       "from": "let rec (search @ total) :",
       "to": "[@@decreases budget]",
-      "lines": "756-792",
+      "lines": "749-785",
       "text": "`search` is `[@@decreases budget]` on a ghost `Bigint.t`, so the compiled search has no fuel, and its termination argument is that each new frontier brings some entry one edit closer to the end. The precondition says that the frontier is valid at `depth`, has width `depth + 1`, and contains an entry that is `good` within `budget`. If `finished` finds an entry with both tails empty, its script has cost `depth`. Otherwise `frontier_budget` shows that `budget` is positive, `advance` builds the next frontier with a good entry within `budget - 1`, and the recursive call is on the smaller budget. The result costs at most `depth + budget`, which is `minimum_cost old fresh` at the top."
     },
     {
@@ -90,7 +90,7 @@
       "path": "verification/library/vox_diff.ml",
       "from": "let rec (lower_bound @ total) (script : script) :",
       "to": "| Insert b -> neighbors (source rest) (target rest) b b);",
-      "lines": "181-197",
+      "lines": "180-196",
       "text": "`M.lower_bound` proves, by induction on an arbitrary script, that its cost is at least `minimum_cost` of its own source and target. A `Keep` step uses the recurrence at equal heads; a `Delete` or `Insert` step uses `neighbors`, which says that adding one element to either input changes the distance by at most one. `optimal_at`, near the end of the file, is two lemma calls: `apply_characterization` turns `apply old other === Some fresh` into facts about `source other` and `target other`, and `lower_bound other` concludes. The lower bound itself is private; clients see it only through `optimal_at`."
     },
     {

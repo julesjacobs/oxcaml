@@ -25,7 +25,7 @@ let rec (copy_forest_at @ total) : (saved : node Pref.heap) @ immutable ->
         (if H.mem mid x then finite mid t else observe mid x === None)} @ immutable) @ total = fun x ->
       let t = copy_forest_at saved heads trees epoch depth rest x () in t in
     ready_scoped saved heads epoch depth rest old.desc desc ();
-    let v = cell desc depth in cell_def desc depth; allocatable_def mid v;
+    let v = cell desc depth in allocatable_def mid v;
     payload_scoped_def mid v;
     let t = allocation_finite_at mid prior q v x () in
     let h1 = H.put mid q v in history_grows saved heads epoch depth rest p (); let t = mark_forest rest h1 p old epoch q t x () in t

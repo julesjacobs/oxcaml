@@ -212,7 +212,6 @@ module Make (C : Vox_big_credits.S) = struct
     S.find_heap_def middle first y;
     S.union_representative h paths x y q;
     F.refresh_representative h px paths y;
-    F.representative_def y paths;
     S.union_root_def h paths x y;
     M.winner_def (S.find_heap middle first y)
       (F.representative x paths) (F.representative y first);
@@ -233,7 +232,7 @@ module Make (C : Vox_big_credits.S) = struct
         union_fee state >= 36Z else true} @ ghost = fun state -> ghost_ (
     valid_def (borrow_ state); size_def (borrow_ state); contents_def (borrow_ state);
     U.contents_def (borrow_ state.#core); U.size_bounds (borrow_ state.#core);
-    U.alpha_bounds (borrow_ state.#core); U.alpha_def (borrow_ state.#core);
+    U.alpha_bounds (borrow_ state.#core);
     find_fee_def (borrow_ state); union_fee_def (borrow_ state);
     A.find_fee_def (U.alpha state.#core); A.union_fee_def (U.alpha state.#core);
     ())
@@ -280,7 +279,6 @@ module Make (C : Vox_big_credits.S) = struct
     ghost_ (valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
-      U.alpha_def (borrow_ state.#core);
       events_def (borrow_ state); U.events_def (borrow_ state.#core));
     let n = ghost_ (size (borrow_ state)) in
     let old_epoch = ghost_ state.#epoch in
@@ -316,13 +314,13 @@ module Make (C : Vox_big_credits.S) = struct
     let payment : {b : C.token | C.credits b >= 3Z} = deposit.C.right in
     let r = U.make_set input payment in
     let #{U.value; state = core; refund} = r in
-    ghost_ (C.nonnegative (borrow_ savings); C.nonnegative (borrow_ refund));
+    ghost_ (C.nonnegative (borrow_ savings));
     let right : {t : C.token | 0Z <= C.credits savings && 0Z <= C.credits t} =
       refund in
     let savings = C.merge savings right in
     let state = #{core; savings; epoch} in
-    ghost_ (valid_def (borrow_ state); contents_def (borrow_ state);
-      heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
+    ghost_ (valid_def (borrow_ state);
+      heap_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
       events_def (borrow_ state); U.events_def (borrow_ state.#core));
     ghost_ (size_def (borrow_ state); contents_def (borrow_ state);
@@ -366,7 +364,7 @@ module Make (C : Vox_big_credits.S) = struct
       C.credits b >= A.find_fee input.#U.alpha} = fee in
     let r = U.find x input payment in
     let #{U.value; state = core; refund} = r in
-    ghost_ (C.nonnegative (borrow_ savings); C.nonnegative (borrow_ refund));
+    ghost_ (C.nonnegative (borrow_ savings));
     let right : {t : C.token | 0Z <= C.credits savings && 0Z <= C.credits t} =
       refund in
     let savings = C.merge savings right in
@@ -406,8 +404,7 @@ module Make (C : Vox_big_credits.S) = struct
       U.alpha_def (borrow_ state.#core);
       events_def (borrow_ state); U.events_def (borrow_ state.#core));
     ghost_ (member_def x (borrow_ state); U.member_def x (borrow_ state.#core);
-      union_fee_def (borrow_ state); representative_def x (borrow_ state);
-      U.representative_def x (borrow_ state.#core);
+      union_fee_def (borrow_ state);
       member_def y (borrow_ state); U.member_def y (borrow_ state.#core));
     ghost_ (contains_def previous x; contains_def previous y);
     let epoch = ghost_ state.#epoch in
@@ -424,7 +421,7 @@ module Make (C : Vox_big_credits.S) = struct
     let savings = C.merge savings right in
     let state = #{core; savings; epoch} in
     ghost_ (valid_def (borrow_ state); contents_def (borrow_ state);
-      heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
+      size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
       events_def (borrow_ state); U.events_def (borrow_ state.#core));
     ghost_ (snapshot_def (borrow_ state);
@@ -441,19 +438,18 @@ module Make (C : Vox_big_credits.S) = struct
         then find_fee state <= Bigint.add (Bigint.mul 4Z a) 12Z &&
           union_fee state <= Bigint.add (Bigint.mul 12Z a) 36Z else true} @ ghost =
       fun state population a -> ghost_ (
-    valid_def (borrow_ state); size_def (borrow_ state); contents_def (borrow_ state);
+    valid_def (borrow_ state);
     U.alpha_bounds (borrow_ state.#core); U.size_bounds (borrow_ state.#core);
-    U.alpha_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
-    U.contents_def (borrow_ state.#core);
+    U.capacity_def (borrow_ state.#core);
     let cap = U.capacity (borrow_ state.#core) in
     let b = U.alpha (borrow_ state.#core) in
     K.minimum_def state.#epoch (Bigint.of_int max_int);
     if valid state && 1Z <= population && size state <= population &&
       1Z <= a && K.iter population a 1Z 1Z >= population && K.below population a then (
       if cap <= population then (
-        let u = () in K.inverse_order cap population b a (u))
+        K.inverse_order cap population b a ())
       else (
-        let u = () in K.inverse_doubling population cap a b (u));
+        K.inverse_doubling population cap a b ());
       find_fee_def (borrow_ state); union_fee_def (borrow_ state);
       A.find_fee_def b; A.union_fee_def b;
       ())

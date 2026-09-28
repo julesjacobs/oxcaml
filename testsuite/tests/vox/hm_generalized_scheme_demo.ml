@@ -29,7 +29,7 @@ let (mixed_boundary @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t
     let order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x}) @ total = fun x ->
       ordered_def h x; children_below_def h var 0; children_below_def h var 1; children_below_def h arrow 1;
       below_def h p 1; below_def h q 1; at_level_def h p; at_level_def h q;
-      let u = () in refine_ u in
+      refine_ () in
     let trees : ((x : node Pref.t) @ immutable ->
       {t : tree | tree_root t === x && (not (H.mem h x) || finite h t)} @ immutable) @ total = fun x ->
       if x === r then refine_ rhs else (
@@ -40,7 +40,7 @@ let (mixed_boundary @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t
       {u : unit | let refine_ t = trees x in rho x === readback t}) @ total = fun x ->
       rho_def x; let refine_ t = trees x in
       readback_def t; readback_def a; readback_def b;
-      let u = () in refine_ u in
+      refine_ () in
     let no = E.No_templates in let parameter = Parameter g in let boundary = Boundary p in
     let ts1 = E.Template_binding (parameter, no) in let ts = E.Template_binding (boundary, ts1) in
     let empty : E.env = E.Empty in let env1 = E.Bind (g, empty) in let env = E.Bind (p, env1) in

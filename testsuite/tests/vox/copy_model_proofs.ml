@@ -28,9 +28,9 @@ let rec (epoch_allocated @ total) : (saved : node Pref.heap) @ immutable -> (epo
   | Start -> let v = cell Bool depth in put_frame saved epoch v epoch; ()
   | Fresh (rest, p, q, old, desc) ->
     epoch_allocated saved epoch depth rest ();
-    let h = heap saved epoch depth rest in let v = cell desc depth in let h1 = H.put h q v in let w = session_mark rest old epoch q in session_mark_def rest old epoch q; put_frame h1 p w epoch; ()
+    let h = heap saved epoch depth rest in let v = cell desc depth in let h1 = H.put h q v in let w = session_mark rest old epoch q in put_frame h1 p w epoch; ()
   | Alias (rest, p, q, old) -> epoch_allocated saved epoch depth rest ();
-    let h = heap saved epoch depth rest in let w = session_mark rest old epoch q in session_mark_def rest old epoch q; put_frame h p w epoch; ())
+    let h = heap saved epoch depth rest in let w = session_mark rest old epoch q in put_frame h p w epoch; ())
 
 let (ready_scoped @ total) : (saved : node Pref.heap) @ immutable -> (epoch : node Pref.t) @ immutable ->
     (depth : int) -> (d : history) @ immutable -> (source : desc) @ immutable -> (dest : desc) @ immutable ->

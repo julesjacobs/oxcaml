@@ -117,7 +117,7 @@ let (correct @ total) : (lowered : Lower.program) @ immutable -> (locals : Emit.
     ghost_ (L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals frame_local ();
       L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals heap_local ();
       L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals limit_local ();
-      Status.scope_def local outer; Status.zero_def ();
+      Status.scope_def local outer;
       Continue.labels_def T.Empty outer;
       Continue.labels_def (Emit.status local (Status.zero ()) T.Empty) (Continue.labels T.Empty outer);
       Continue.labels_def T.Empty (Status.scope local outer);

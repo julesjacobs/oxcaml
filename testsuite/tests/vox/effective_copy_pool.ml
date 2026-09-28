@@ -25,13 +25,13 @@ let rec (registered_covers @ total) : (saved : node Pref.heap) @ immutable ->
       registered_covers saved heads base epoch depth rest cut x ();
       let mid = heap saved epoch depth rest in let prior = registered base epoch rest in
       covered_def mid cut prior x; at_level_def mid x;
-      let v = cell desc depth in let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
+      let v = cell desc depth in let w = session_mark rest old epoch q in
       let h1 = H.put mid q v in put_frame h1 p w x;
       ()
     | Alias (rest, p, q, old) ->
       registered_covers saved heads base epoch depth rest cut x ();
       let mid = heap saved epoch depth rest in let prior = registered base epoch rest in
-      covered_def mid cut prior x; at_level_def mid x; let v = session_mark rest old epoch q in session_mark_def rest old epoch q; put_frame mid p v x;
+      covered_def mid cut prior x; at_level_def mid x; let v = session_mark rest old epoch q in put_frame mid p v x;
       ())
 let rec (registered_member @ total) : (saved : node Pref.heap) @ immutable ->
     (heads : Effective_level.heads) @ total -> (base : pool) @ immutable ->
@@ -43,10 +43,10 @@ let rec (registered_member @ total) : (saved : node Pref.heap) @ immutable ->
   | Clean -> ()
   | Start -> let v = cell Bool depth in put_frame saved epoch v x; ()
   | Fresh (rest, p, q, old, desc) ->
-    let mid = heap saved epoch depth rest in let v = cell desc depth in let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
+    let mid = heap saved epoch depth rest in let v = cell desc depth in let w = session_mark rest old epoch q in
     let h1 = H.put mid q v in put_frame h1 p w x;
     if x === q then () else (registered_member saved heads base epoch depth rest x (); ())
-  | Alias (rest, p, q, old) -> let mid = heap saved epoch depth rest in let v = session_mark rest old epoch q in session_mark_def rest old epoch q;
+  | Alias (rest, p, q, old) -> let mid = heap saved epoch depth rest in let v = session_mark rest old epoch q in
     put_frame mid p v x; registered_member saved heads base epoch depth rest x (); ())
 let (registered_scoped @ total) : (saved : node Pref.heap) @ immutable ->
     (heads : Effective_level.heads) @ total ->

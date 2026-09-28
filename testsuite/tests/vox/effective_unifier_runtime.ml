@@ -84,7 +84,7 @@ let rec raw_work : (goal : goal) @ immutable -> (h : node Pref.heap Ghost.t) @ i
           let[@def] final_fn : E.heads @ ghost = ghost_ (fun x -> let out = final_raw x in out) in
           let final_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ final_fn} in
           let final_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head ah.Ghost.ghost final_heads.Ghost.ghost x})) Ghost.t =
-            {Ghost.ghost = ghost_ (fun x -> final_fn_def x; let _ = final_raw x in
+            {Ghost.ghost = ghost_ (fun x -> let _ = final_raw x in
               E.valid_head_def ah.Ghost.ghost final_heads.Ghost.ghost x; ())} in
           let final_order : (((x : node Pref.t) @ immutable -> {u : unit | E.effective_ordered ah.Ghost.ghost final_heads.Ghost.ghost x})) Ghost.t =
             {Ghost.ghost = ghost_ (fun x -> Effective_unifier_order.ordered h.Ghost.ghost r s ok ah.Ghost.ghost d heads.Ghost.ghost final_heads.Ghost.ghost valid.Ghost.ghost final_valid.Ghost.ghost order.Ghost.ghost x (); ())} in
@@ -126,7 +126,7 @@ let rec raw_work : (goal : goal) @ immutable -> (h : node Pref.heap Ghost.t) @ i
           let[@def] mid_fn : E.heads @ ghost = ghost_ (fun x -> let out = mid_raw x in out) in
           let mid_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ mid_fn} in
           let mid_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head mh.Ghost.ghost mid_heads.Ghost.ghost x})) Ghost.t =
-            {Ghost.ghost = ghost_ (fun x -> mid_fn_def x; let _ = mid_raw x in
+            {Ghost.ghost = ghost_ (fun x -> let _ = mid_raw x in
               E.valid_head_def mh.Ghost.ghost mid_heads.Ghost.ghost x; ())} in
           let mid_order : (((x : node Pref.t) @ immutable -> {u : unit | E.effective_ordered mh.Ghost.ghost mid_heads.Ghost.ghost x})) Ghost.t =
             {Ghost.ghost = ghost_ (fun x -> Effective_unifier_order.ordered h.Ghost.ghost a c left_ok mh.Ghost.ghost ld heads.Ghost.ghost mid_heads.Ghost.ghost valid.Ghost.ghost mid_valid.Ghost.ghost order.Ghost.ghost x (); ())} in
@@ -153,7 +153,7 @@ let rec raw_work : (goal : goal) @ immutable -> (h : node Pref.heap Ghost.t) @ i
           let[@def] final_fn : E.heads @ ghost = ghost_ (fun x -> let out = final_raw x in out) in
           let final_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ final_fn} in
           let final_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head ah.Ghost.ghost final_heads.Ghost.ghost x})) Ghost.t =
-            {Ghost.ghost = ghost_ (fun x -> final_fn_def x; let _ = final_raw x in
+            {Ghost.ghost = ghost_ (fun x -> let _ = final_raw x in
               E.valid_head_def ah.Ghost.ghost final_heads.Ghost.ghost x; ())} in
           let final_order : (((x : node Pref.t) @ immutable -> {u : unit | E.effective_ordered ah.Ghost.ghost final_heads.Ghost.ghost x})) Ghost.t =
             {Ghost.ghost = ghost_ (fun x -> Effective_unifier_order.ordered h.Ghost.ghost r s ok ah.Ghost.ghost d heads.Ghost.ghost final_heads.Ghost.ghost valid.Ghost.ghost final_valid.Ghost.ghost order.Ghost.ghost x (); ())} in
@@ -200,7 +200,7 @@ and work : (goal : goal) @ immutable -> (h : node Pref.heap Ghost.t) @ immutable
   let[@def] one_fn : E.heads @ ghost = ghost_ (fun x -> let r = one_raw x in r) in
   let one_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ one_fn} in
   let one_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1.Ghost.ghost one_heads.Ghost.ghost x})) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> one_fn_def x; let _ = one_raw x in E.valid_head_def h1.Ghost.ghost one_heads.Ghost.ghost x; ())} in
+    {Ghost.ghost = ghost_ (fun x -> let _ = one_raw x in E.valid_head_def h1.Ghost.ghost one_heads.Ghost.ghost x; ())} in
   let one_order : (((x : node Pref.t) @ immutable -> {u : unit | E.effective_ordered h1.Ghost.ghost one_heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> order.Ghost.ghost x; Effective_compression_metadata.ordered h.Ghost.ghost h1.Ghost.ghost edits1 heads.Ghost.ghost one_heads.Ghost.ghost valid.Ghost.ghost one_valid.Ghost.ghost x (); ())} in
   let one_source : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h1.Ghost.ghost x) || source_ok h1.Ghost.ghost x})) Ghost.t =
@@ -223,7 +223,7 @@ and work : (goal : goal) @ immutable -> (h : node Pref.heap Ghost.t) @ immutable
   let[@def] two_fn : E.heads @ ghost = ghost_ (fun x -> let r = two_raw x in r) in
   let two_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ two_fn} in
   let two_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h2.Ghost.ghost two_heads.Ghost.ghost x})) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> two_fn_def x; let _ = two_raw x in E.valid_head_def h2.Ghost.ghost two_heads.Ghost.ghost x; ())} in
+    {Ghost.ghost = ghost_ (fun x -> let _ = two_raw x in E.valid_head_def h2.Ghost.ghost two_heads.Ghost.ghost x; ())} in
   let two_order : (((x : node Pref.t) @ immutable -> {u : unit | E.effective_ordered h2.Ghost.ghost two_heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> one_order.Ghost.ghost x; Effective_compression_metadata.ordered h1.Ghost.ghost h2.Ghost.ghost edits2 one_heads.Ghost.ghost two_heads.Ghost.ghost one_valid.Ghost.ghost two_valid.Ghost.ghost x (); ())} in
   let two_source : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h2.Ghost.ghost x) || source_ok h2.Ghost.ghost x})) Ghost.t =
@@ -236,7 +236,7 @@ and work : (goal : goal) @ immutable -> (h : node Pref.heap Ghost.t) @ immutable
     {Ghost.ghost = ghost_ (fun x -> let t = one_trees.Ghost.ghost x in Effective_compression_proofs.frame h1.Ghost.ghost h2.Ghost.ghost edits2 x ();
       if H.mem h1.Ghost.ghost x then (let out = Effective_compression_proofs.finite h1.Ghost.ghost h2.Ghost.ghost edits2 t () in out)
       else (observe_def h1.Ghost.ghost x; observe_def h2.Ghost.ghost x; t))} in
-  ghost_ (valid.Ghost.ghost p; valid.Ghost.ghost q; one_valid.Ghost.ghost p; one_valid.Ghost.ghost q; two_valid.Ghost.ghost p; two_valid.Ghost.ghost q; Effective_compression_metadata.level h.Ghost.ghost h1.Ghost.ghost edits1 heads.Ghost.ghost one_heads.Ghost.ghost p ();
+  ghost_ (valid.Ghost.ghost p; one_valid.Ghost.ghost p; two_valid.Ghost.ghost p; two_valid.Ghost.ghost q; Effective_compression_metadata.level h.Ghost.ghost h1.Ghost.ghost edits1 heads.Ghost.ghost one_heads.Ghost.ghost p ();
     Effective_compression_metadata.level h.Ghost.ghost h1.Ghost.ghost edits1 heads.Ghost.ghost one_heads.Ghost.ghost q ();
     Effective_compression_metadata.level h1.Ghost.ghost h2.Ghost.ghost edits2 one_heads.Ghost.ghost two_heads.Ghost.ghost p ();
     Effective_compression_metadata.level h1.Ghost.ghost h2.Ghost.ghost edits2 one_heads.Ghost.ghost two_heads.Ghost.ghost q ();
@@ -266,8 +266,7 @@ and work : (goal : goal) @ immutable -> (h : node Pref.heap Ghost.t) @ immutable
     let path : {d : resolution | resolves h2.Ghost.ghost q root d} @ immutable ghost = ghost_ (
       let path = Effective_compression_proofs.resolution h1.Ghost.ghost h2.Ghost.ghost edits2 q root second.#path () in path) in
     ghost_ (Effective_compression_proofs.frame h1.Ghost.ghost h2.Ghost.ghost edits2 root ();
-      active_def h1.Ghost.ghost root; active_def h2.Ghost.ghost root;
-      Compression_path_proofs.resolution_terminal h2.Ghost.ghost q root path ());
+      active_def h1.Ghost.ghost root; active_def h2.Ghost.ghost root);
     let out = #{value = root; path} in out in
   raw_work goal h2 two_heads two_valid two_scope two_unmarked two_order two_trees p q rp sq (state) resume
 

@@ -37,10 +37,10 @@ let run generic word =
   let heads : E.heads Ghost.t = {Ghost.ghost = ghost_ (head p q)} in
   let scope : (((x : node Pref.t) @ immutable -> {u : unit |
       not (H.mem c.Effective_copy_spec.saved x) || source_ok c.Effective_copy_spec.saved x})) Ghost.t = {Ghost.ghost = ghost_ (fun x ->
-    source_ok_def c.Effective_copy_spec.saved x; let u = () in refine_ u)} in
+    source_ok_def c.Effective_copy_spec.saved x; refine_ ())} in
   let clean : (((x : node Pref.t) @ immutable -> {u : unit |
       match H.at c.Effective_copy_spec.saved x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let u = () in refine_ u)} in
+    {Ghost.ghost = ghost_ (fun x -> refine_ ())} in
   let witness : (((x : node Pref.t) @ immutable -> {u : unit |
       E.valid_head c.Effective_copy_spec.saved heads.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (fun x ->
     E.valid_head_def c.Effective_copy_spec.saved heads.Ghost.ghost x;
@@ -49,15 +49,15 @@ let run generic word =
     U.terminal_def c.Effective_copy_spec.saved x; U.observe_def c.Effective_copy_spec.saved x;
     let here = U.Here in U.resolves_def c.Effective_copy_spec.saved q q here;
     U.terminal_def c.Effective_copy_spec.saved q; U.observe_def c.Effective_copy_spec.saved q;
-    let u = () in refine_ u)} in
+    refine_ ())} in
   let state : {t : node Pref.token | Pref.own t === c.Effective_copy_spec.saved && H.mem c.Effective_copy_spec.saved root} = refine_ state in
   let refine_ state = state in
 
   let refine_ out = C.instantiate c heads scope clean witness (refine_ depth) base root (refine_ state) in
   let result = out.#value in let state = out.#state in let d = ghost_ out.#history in
   let after = ghost_ (Pref.own (borrow_ state)) in
-  ghost_ (let u = () in target_allocated c.Effective_copy_spec.saved heads.Ghost.ghost root depth d root result (refine_ u);
-    M.result_at c.Effective_copy_spec.saved heads.Ghost.ghost root depth d result (refine_ u);
+  ghost_ (target_allocated c.Effective_copy_spec.saved heads.Ghost.ghost root depth d root result (refine_ ());
+    M.result_at c.Effective_copy_spec.saved heads.Ghost.ghost root depth d result (refine_ ());
     let raw = heap c.Effective_copy_spec.saved root depth d in let trail = Pooled_spec.touched d in
     swept_at_def raw after trail result; ());
   let state : {t : node Pref.token | H.mem (Pref.own t) result} = refine_ state in
@@ -70,8 +70,8 @@ let run generic word =
    | Entry (_, Empty) -> assert (not generic)
    | Entry (_, Entry (_, Empty)) -> assert generic
    | _ -> failwith "unexpected allocation count");
-  ghost_ (let u = () in M.saved_observe c.Effective_copy_spec.saved heads.Ghost.ghost root depth d p (refine_ u);
-    M.saved_observe c.Effective_copy_spec.saved heads.Ghost.ghost root depth d q (refine_ u));
+  ghost_ (M.saved_observe c.Effective_copy_spec.saved heads.Ghost.ghost root depth d p (refine_ ());
+    M.saved_observe c.Effective_copy_spec.saved heads.Ghost.ghost root depth d q (refine_ ()));
   let state : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ state in
   let refine_ original = Pref.read p (borrow_ state) in let refine_ state = state in
   assert (original.level = Finite 7); assert (original.desc = Link q);

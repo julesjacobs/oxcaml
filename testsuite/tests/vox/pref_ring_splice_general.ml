@@ -158,8 +158,6 @@ let (partition_safety @ total) (s : node @ immutable) (prefix : node list @ immu
   | [] ->
   apart_lists_member a b s;
   safe_external b s;
-  apart_lists_member a c s;
-  safe_external c s;
   apart_lists_member a d s;
   safe_external d s;
   apart_lists_member a e s;
@@ -184,8 +182,6 @@ let (partition_safety @ total) (s : node @ immutable) (prefix : node list @ immu
   safe_external b t;
   apart_lists_right c d t;
   safe_external c t;
-  apart_lists_member d e t;
-  safe_external e t;
     safe_cell_def [] cuts.destination_right.prev; ()
   | n :: tail ->
     member_def n e; safe_head n tail;
@@ -386,49 +382,29 @@ let (partition_new_edges @ total) (h : node option Pref.heap @ immutable)
     partition_member destination_end a b c d e;
     partition_view h s prefix first rest suffix t destination_prefix destination_suffix destination_end;
     different_chunks a b s first;
-    different_chunks a b s cuts.final;
-    different_chunks a b cuts.left first;
     different_chunks a b cuts.left cuts.final;
     different_chunks a d s t;
-    different_chunks a d s cuts.destination_left;
-    different_chunks a d cuts.left t;
     different_chunks a d cuts.left cuts.destination_left;
     different_chunks b d first t;
-    different_chunks b d first cuts.destination_left;
-    different_chunks b d cuts.final t;
     different_chunks b d cuts.final cuts.destination_left;
     (match c with [] -> () | _ :: _ ->
     different_chunks a c s cuts.right;
-    different_chunks a c s source_end;
-    different_chunks a c cuts.left cuts.right;
     different_chunks a c cuts.left source_end;
     different_chunks b c first cuts.right;
-    different_chunks b c first source_end;
-    different_chunks b c cuts.final cuts.right;
     different_chunks b c cuts.final source_end;
     different_chunks c d cuts.right t;
-    different_chunks c d cuts.right cuts.destination_left;
-    different_chunks c d source_end t;
     different_chunks c d source_end cuts.destination_left;
       ());
     (match e with [] -> () | _ :: _ ->
     different_chunks a e s cuts.destination_right;
-    different_chunks a e s destination_end;
-    different_chunks a e cuts.left cuts.destination_right;
     different_chunks a e cuts.left destination_end;
     different_chunks b e first cuts.destination_right;
-    different_chunks b e first destination_end;
-    different_chunks b e cuts.final cuts.destination_right;
     different_chunks b e cuts.final destination_end;
     different_chunks d e t cuts.destination_right;
-    different_chunks d e t destination_end;
-    different_chunks d e cuts.destination_left cuts.destination_right;
     different_chunks d e cuts.destination_left destination_end;
       (match c with [] -> () | _ :: _ ->
-    different_chunks c e cuts.right cuts.destination_right;
     different_chunks c e cuts.right destination_end;
     different_chunks c e source_end cuts.destination_right;
-    different_chunks c e source_end destination_end;
         ()); ());
     last_nonempty s cuts.left c; last_nonempty s cuts.final c;
     last_nonempty t cuts.final e; last_nonempty t cuts.destination_left e;

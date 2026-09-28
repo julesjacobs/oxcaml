@@ -27,7 +27,7 @@ let (build @ total) : (entry : K.entry) @ immutable -> (capacity : Relayout.coun
       if target + count > capacity then None else
       let copies = Relayout.range 0 target count Plan.End (Codec.locals_size entry.K.captured) () in
       let fragment = {copies; recursive = entry.K.recursive} in
-      ghost_ (Geometry.size_represents (Codec.locals_size entry.K.captured) count (); matches_def entry capacity fragment);
+      ghost_ (matches_def entry capacity fragment);
       Some fragment
 let[@def] (emit @ total) (fragment : fragment @ immutable) (object_local : B.u32) (frame_local : B.u32) =
   Copy.emit fragment.copies object_local frame_local

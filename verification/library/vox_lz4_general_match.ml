@@ -91,7 +91,6 @@ let rec (copy_literals_preserves_source @ total) :
   fun heap block source used remaining -> ghost_ (
     Vox_lz4_spec_decode.literal_heap_def heap block used source used remaining;
     if remaining > 0 && R.output_matches heap block source used then begin
-      Vox_lz4_spec_bytes.source_at_def source used;
       let byte = Vox_lz4_spec_parse.byte_of_char
         (Vox_sequence.iarray_get source used) in
       let next = H.put heap (M.location block used) (Some byte) in

@@ -44,8 +44,6 @@ let write_pair : (loan : {s : int Slice.t | Model.length (Slice.current s) === 2
   let index : {i : int | 0 <= i
     && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} = zero in
   let s1 = Slice.set s index first in
-  let bzero = ghost_ 0Z in
-  ghost_ (Model.set_length before bzero first);
   let index : {i : int | 0 <= i
     && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s1)) < 0} = one in
   let s2 = Slice.set s1 index second in

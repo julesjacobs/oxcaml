@@ -18,8 +18,7 @@ let run e expected =
     let h = ghost_ (Pref.own (borrow_ result.#state)) in
     let _proof = ghost_ (
       if ok then (
-        let u = () in
-        let refine_ typing = inference_sound e result.#generated_heap result.#graph h result.#solving result.#tree (refine_ u) in
+        let refine_ typing = inference_sound e result.#generated_heap result.#graph h result.#solving result.#tree (refine_ ()) in
         ()) else ()) in
     let p = result.#value in let t = result.#state in
     let t : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ t in
@@ -47,10 +46,9 @@ let identity_instance () =
       let use : ((delta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
           {u : unit | target === Unifier_mgu_spec.substitute delta (readback result.#tree)} ->
           {u : unit | claim}) @ total = fun _delta factor ->
-        let refine_ factor = factor in let u = () in refine_ u in
-      let u = () in
+        let refine_ factor = factor in refine_ () in
       let refine_ u = with_typing_factor e result.#generated_heap result.#graph after result.#solving
-        result.#tree target d (refine_ u) claim use in ()) else ()) in
+        result.#tree target d (refine_ ()) claim use in ()) else ()) in
   ()
 
 let recursive_instance () =
@@ -72,10 +70,9 @@ let recursive_instance () =
         let use : ((delta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
             {u : unit | target === Unifier_mgu_spec.substitute delta (readback result.#tree)} ->
             {u : unit | claim}) @ total = fun _delta factor ->
-          let refine_ factor = factor in let u = () in refine_ u in
-        let u = () in
+          let refine_ factor = factor in refine_ () in
         let refine_ u = with_typing_factor e result.#generated_heap result.#graph after result.#solving
-          result.#tree target d (refine_ u) claim use in ()) else ()) in
+          result.#tree target d (refine_ ()) claim use in ()) else ()) in
     ()) else assert false
 
 let () =

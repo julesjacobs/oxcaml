@@ -135,11 +135,11 @@ module Make (C : Vox_big_credits.S) = struct
     let cap = capacity (borrow_ state) in
     contents_def (borrow_ state); capacity_def (borrow_ state);
     let px = F.lookup x paths in
-    F.lookup_valid h x paths; R.lookup_ordered cap h paths x; R.bounds cap h px;
-    M.terminal h px; M.is_root_def h (M.root px);
+    R.lookup_ordered cap h paths x; R.bounds cap h px;
+    M.is_root_def h (M.root px);
     R.weight_def h (M.root px); M.rank_def h (M.root px);
     F.representative_def x paths;
-    S.find_paths_def paths x; S.find_heap_def h paths x;
+    S.find_heap_def h paths x;
     let first = S.find_paths paths x in let middle = S.find_heap h paths x in
     let py = F.lookup y first in
     M.compressed_rank h px (M.root px);
@@ -170,7 +170,7 @@ module Make (C : Vox_big_credits.S) = struct
     let memory = P.empty () in
     let bank = C.empty () in
     let raw = {W.memory; bank} in
-    ghost_ (W.heap_def (borrow_ raw); W.balance_def (borrow_ raw));
+    ghost_ (W.balance_def (borrow_ raw));
     let events = ghost_ [E.Initialize] in
     ghost_ (E.total_def events; E.total_def []; E.weight_def E.Initialize);
     let state = #{raw; paths = []; capacity; alpha; spent = ghost_ 1Z; events} in
@@ -211,10 +211,10 @@ module Make (C : Vox_big_credits.S) = struct
     let input : {n : Bigint.t | n >= 1Z} = capacity in
     let alpha = ghost_ (K.inverse input) in
     ghost_ (
-      let u = () in K.inverse_order old_cap capacity old_a alpha (u);
-      let u = () in K.inverse_doubling old_cap capacity old_a alpha (u);
+      K.inverse_order old_cap capacity old_a alpha ();
+      K.inverse_doubling old_cap capacity old_a alpha ();
       if capacity = old_cap then (
-        let u = () in K.inverse_order capacity old_cap alpha old_a (u));
+        K.inverse_order capacity old_cap alpha old_a ());
       D.population_bounds old_cap before paths);
     let needed = ghost_ (Bigint.mul 4Z (Bigint.mul (Bigint.sub alpha old_a)
       (D.mass before paths))) in
@@ -265,7 +265,7 @@ module Make (C : Vox_big_credits.S) = struct
     let target = ghost_ (W.balance (borrow_ state.#raw)) in
     ghost_ (valid_def (borrow_ state); state_observations (borrow_ state);
       W.heap_def (borrow_ state.#raw); W.balance_def (borrow_ state.#raw);
-      C.nonnegative (borrow_ state.#raw.W.bank); C.nonnegative (borrow_ fee));
+      C.nonnegative (borrow_ state.#raw.W.bank));
     let raw = state.#raw in
     let memory = raw.W.memory in let bank = raw.W.bank in
     let right : {t : C.token | 0Z <= C.credits bank && 0Z <= C.credits t} =
@@ -515,7 +515,7 @@ module Make (C : Vox_big_credits.S) = struct
         member_def x (borrow_ state);
       member_def y (borrow_ state); representative_def x (borrow_ state);
       A.find_fee_def alpha; A.link_fee_def alpha; A.union_fee_def alpha;
-      F.lookup_valid before x paths; F.lookup_closed paths paths x;
+      F.lookup_valid before x paths;
       F.refresh_member before (F.lookup x paths) paths y;
       S.find_root before paths x;
       S.find_paths_def paths x; S.find_heap_def before paths x);
@@ -528,7 +528,7 @@ module Make (C : Vox_big_credits.S) = struct
     let #{value = root_x; state; refund} = first in
     let middle = ghost_ (heap (borrow_ state)) in
     let first_paths = ghost_ (S.find_paths paths x) in
-    ghost_ (valid_def (borrow_ state); state_observations (borrow_ state);
+    ghost_ (valid_def (borrow_ state);
         member_def y (borrow_ state);
       representative_def y (borrow_ state);
       F.lookup_valid middle y first_paths;
@@ -541,7 +541,7 @@ module Make (C : Vox_big_credits.S) = struct
       C.credits b >= A.find_fee input.#alpha} = refund in
     let second = find y input payment in
     let #{value = root_y; state; refund} = second in
-    ghost_ (valid_def (borrow_ state); state_observations (borrow_ state);
+    ghost_ (valid_def (borrow_ state);
         member_def root_x (borrow_ state);
       member_def root_y (borrow_ state));
     let input : {s : t | valid s && member root_x s && member root_y s &&

@@ -15,13 +15,13 @@ let (one_commutes @ total) : (h : node Pref.heap) @ immutable -> (cut : int) ->
     let hp = close_one h cut p in let hq = close_one h cut q in
     close_one_def hp cut q; close_one_def hq cut p;
     (match H.at h p with None -> () | Some a ->
-      needs_close_def cut a.level; close_cell_def cut a;
+      needs_close_def cut a.level;
       close_level_def cut a.level;
       let next = close_cell cut a in
       needs_close_def cut next.level;
       Copy_heap_proofs.put_frame h p next q; ());
     (match H.at h q with None -> () | Some b ->
-      needs_close_def cut b.level; close_cell_def cut b;
+      needs_close_def cut b.level;
       close_level_def cut b.level;
       let next = close_cell cut b in
       needs_close_def cut next.level;

@@ -149,7 +149,7 @@ let (correct @ total) : (lowered : Program_lower.program) @ immutable -> (locals
       Capture.word_slot_def state.X.machine.E.locals slots.Capture.head_payload; Capture.word_slot_def prepared.X.machine.E.locals slots.Capture.head_payload;
       Capture.word_slot_def state.X.machine.E.locals slots.Capture.tail_tag; Capture.word_slot_def prepared.X.machine.E.locals slots.Capture.tail_tag;
       Capture.word_slot_def state.X.machine.E.locals slots.Capture.tail_payload; Capture.word_slot_def prepared.X.machine.E.locals slots.Capture.tail_payload;
-      Status.scope_def local outer; Status.zero_def ();
+      Status.scope_def local outer;
       Continue.labels_def T.Empty outer;
       Continue.labels_def (Emit.status local (Status.zero ()) T.Empty) (Continue.labels T.Empty outer);
       Continue.labels_def T.Empty (Status.scope local outer);

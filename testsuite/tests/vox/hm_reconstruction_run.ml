@@ -131,7 +131,7 @@ let rec (run @ total) : (heap : Ty.node Pref.heap) @ immutable -> (heads : E.hea
         let child_env = Env.Bind (argument, env) in
         let schema = Ty.Boundary argument in
         let child_schemas = Env.Template_binding (schema, schemas) in
-        Run.allocated_def heap depth argument Ty.Var; Ty.cell_def Ty.Var depth;
+        Run.allocated_def heap depth argument Ty.Var;
         let allocated = Forest.allocated_forest heap trees depth argument Ty.Var () in
         let child_trees : ((q : Ty.node Pref.t) @ immutable ->
           {t : F.tree | F.tree_root t === q &&
@@ -407,7 +407,6 @@ let rec (run @ total) : (heap : Ty.node Pref.heap) @ immutable -> (heads : E.hea
         let self_env = Env.Bind (self, env) in let env3 = Env.Bind (argument, self_env) in
         Run.allocated_def heap depth argument Ty.Var; Run.allocated_def h1 depth result Ty.Var;
         Run.allocated_def h2 depth self desc;
-        Ty.cell_def Ty.Var depth; Ty.cell_def desc depth;
         let allocated1 = Forest.allocated_forest heap trees depth argument Ty.Var () in
         let trees1 : ((q : Ty.node Pref.t) @ immutable ->
           {t : F.tree | F.tree_root t === q &&
@@ -558,7 +557,6 @@ let rec (run @ total) : (heap : Ty.node Pref.heap) @ immutable -> (heads : E.hea
         middle_facts original;
         Hm_effective_result.result_below heap trees child_depth empty env rhs middle child_pool middle_heads original ();
         let finite_tree = middle_trees original in
-        Forest_transport.unfolding_valid middle finite_tree (); Forest_transport.unfolding_root finite_tree;
         let schema = Effective_template.scheme middle middle_heads depth finite_tree in
         let coverage : ((q : Ty.node Pref.t) @ immutable -> {u : unit | R.representative_covered middle depth child_pool q}) @ total = fun q ->
           middle_facts q; Runtime.runtime_at_def middle middle_heads child_depth child_pool q in

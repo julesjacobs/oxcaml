@@ -199,7 +199,7 @@ let fixture : bool -> (program : Program.program) @ immutable -> (globals : Mach
                 Wasm_locals.get_def locals 2; Wasm_locals.get_def locals 3; Wasm_locals.get_def rest 1; Wasm_locals.get_def rest 2;
                 Wasm_locals.get_def l2 0; Wasm_locals.get_def l2 1; Wasm_locals.get_def l3 0;
                 Hmc_wasm_call_header_layout.width_def fragment.Copy.recursive;
-                Copy.matches_def entry 80 fragment; Copy.position_def entry.Hmc_closure_ir.recursive;
+                Copy.matches_def entry 80 fragment;
                 Hmc_wasm_relayout_geometry.size_represents (Heap.length captures) count ();
                 Words.size prefix_cells prefix_count offset ());
               let _read = Hmc_wasm_closure_read.correct table heap memory address id captures count () in

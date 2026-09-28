@@ -308,7 +308,7 @@
         "title": "Splitting a loan for a callback",
         "from": "let (split_at @ stateless) : ('a : immutable_data) ('r : immutable_data).",
         "to": "      result)",
-        "lines": "126-161",
+        "lines": "125-160",
         "kind": "what",
         "text": "The body gets two loans whose current models are the two slices and must return a result satisfying `post` on their final models. After `Raw.recombine`, the whole loan's current model is the concatenation of those finals, so `post` is restated on slices of it and the final model is unchanged. It is not `total`: `Raw.split` creates the two loans' final models."
       },
@@ -316,7 +316,7 @@
         "title": "Two slices in parallel",
         "from": "let parallel : ('a : immutable_data).",
         "to": "    ()",
-        "lines": "245-273",
+        "lines": "244-272",
         "kind": "what",
         "text": "`Raw.transfer` turns the local left loan into a global one so the spawned domain can own it. The join goes through `await_both`, which joins the domain even if the right callback raises. `parallel` is not declared `total`."
       }
@@ -407,14 +407,14 @@
         "title": "Lifting a predicate over a list",
         "from": "module For_all (P : Predicate) = struct",
         "to": "      ()",
-        "lines": "404-420",
+        "lines": "402-418",
         "kind": "what",
         "text": "`holds` is defined by recursion on the list, and `get` specializes it to one index; `intro` (below) builds it from a total pointwise proof. `filter` and its laws live in the same functor."
       },
       {
         "title": "List extensionality, proved",
         "from": "let rec (extensional @ total) : ('a : immutable_data).",
-        "lines": "637-664",
+        "lines": "635-662",
         "kind": "what",
         "text": "Two lists with equal length and equal `at` at every nonnegative index are logically equal. The proof recurses on both lists and shifts the index proof by one; `Vox_iarray` states the corresponding fact for iarrays as a trusted `external`.",
         "span": 28
@@ -441,7 +441,7 @@
       {
         "title": "Gluing sorted partitions",
         "from": "let (sorted_glue @ total) : (values : int iarray) -> (pivot : int) ->",
-        "lines": "699-752",
+        "lines": "698-751",
         "kind": "what",
         "text": "If the elements left of `index` are sorted and at most the pivot, those right of it are sorted and at least the pivot, and the pivot sits at `index`, the whole array is sorted. The proof goes through `sorted_intro` with a case split on where each adjacent pair falls; `quicksort_iarray_model.ml` uses it to recombine partitions.",
         "span": 54
@@ -472,7 +472,7 @@
           "permutation_def left right;",
           "  ()"
         ],
-        "lines": "722-793",
+        "lines": "720-790",
         "kind": "what",
         "text": "Two sorted lists with equal counts of every integer are equal: compare heads, and if they differ the smaller one has count zero on the other side (`count_below`). `count_extensional` applies this to the bags, which are sorted by `bag_sorted`, so a client proves a permutation by proving equal counts pointwise."
       }
@@ -638,7 +638,7 @@
         "title": "The probe recurrence is a triangle sum",
         "from": "let rec (probe_triangle @ total)",
         "to": "[@@decreases rank]",
-        "lines": "27-64",
+        "lines": "27-63",
         "kind": "what",
         "text": "Induction on `rank`. The step case needs `W.wrap_add` (masking equals `addmod`), `W.scale_addmod` (scaling by 16 commutes with `addmod`) and associativity of `addmod`."
       },
@@ -646,7 +646,7 @@
         "title": "Coverage",
         "from": "let (cover @ total)",
         "to": "(rank, lane))",
-        "lines": "94-122",
+        "lines": "93-121",
         "kind": "what",
         "text": "The distance from the key's start slot to `index` splits into a block number `distance lsr 4` and a lane `distance land 15`; the rank is the inverse of the block under the triangle map. The result is a ghost pair, returned as a witness."
       }
@@ -730,7 +730,7 @@
         "title": "Absence from a proof per index",
         "from": "let rec (absent_intro @ total)",
         "span": 19,
-        "lines": "237-255",
+        "lines": "231-249",
         "kind": "what",
         "text": "`absent_intro` concludes `absent slots query` from a ghost function proving, for each index, that the slot there does not hold a key equal to `query`. The search's stop proofs build this function from the probe invariant."
       },
@@ -738,7 +738,7 @@
         "title": "Extensional sameness",
         "from": "let (same_intro @ total)",
         "to": "end else ())",
-        "lines": "376-396",
+        "lines": "369-389",
         "kind": "what",
         "text": "Two distinct slot lists with equal `lookup` at every query are `same`. The premise is a higher-order ghost proof; the update, insertion and migration proofs discharge their map equations through this lemma."
       }
@@ -811,7 +811,7 @@
         "title": "A matched lane is a live slot",
         "from": "let (initialized @ total)",
         "to": "end else ())",
-        "lines": "104-128",
+        "lines": "103-127",
         "kind": "what",
         "text": "EMPTY (128) and DELETED (254) are above 127, so a lane whose byte equals a fingerprint cannot be a hole. `Vox_table_search.candidates` uses this to meet `read_key`'s precondition."
       }
@@ -887,7 +887,7 @@
         "title": "The EMPTY-stop argument",
         "from": "let (stored_misses @ total)",
         "to": "end else ())",
-        "lines": "63-99",
+        "lines": "63-98",
         "kind": "what",
         "text": "Assume a stored key equal to the query. Its route gives a rank on the query's sequence. If the rank is at most the stop rank, `visited_misses` shows the search already compared it; otherwise `Spec.empty_free_at` says the stop group has no EMPTY byte, contradicting the search's observation."
       },
@@ -895,7 +895,7 @@
         "title": "A full scan",
         "from": "let (exhausted @ total)",
         "to": "end else ())",
-        "lines": "123-150",
+        "lines": "122-149",
         "kind": "what",
         "text": "Every route has rank below `capacity / 16`, so once the search has visited that many groups every stored entry has been compared. The per-index proof passed to `Map.absent_intro` is a ghost closure over the stored entry."
       }
@@ -922,7 +922,7 @@
         "title": "Removal",
         "from": "let remove :",
         "to": "(#{view = result.#view; state = result.#state} : 'a result)",
-        "lines": "150-186",
+        "lines": "150-185",
         "kind": "what",
         "text": "The stored key may differ from `query` while being `Key.equal` to it; `erase_congruent` shows erasing either gives the same map. The ghost `key` and `value` are extracted with `unreachable_ ()` on the impossible branch, which the verifier proves unreachable."
       }
@@ -976,7 +976,7 @@
         "title": "The initial view is valid",
         "from": "let (initial @ total)",
         "to": "empty_distinct capacity entry;",
-        "lines": "140-158",
+        "lines": "139-157",
         "kind": "what",
         "text": "`entry` is a ghost `None` obtained from `Mutation.empty_entry`, so the lemma is stated for the same instance the allocation contract mentions."
       }
@@ -1085,10 +1085,10 @@
         "title": "The scan is never exhausted",
         "from": "let (not_exhausted @ total)",
         "to": [
-          "Count.not_full",
+          "Count.reserve_positive",
           "end else ())"
         ],
-        "lines": "57-79",
+        "lines": "57-77",
         "kind": "what",
         "text": "Three steps: coverage (every slot is on the sequence), occupancy (every slot is live or a tombstone), and counting against the reserve. The per-index proof passed to `full_count` is a ghost closure."
       }
@@ -1118,7 +1118,7 @@
           "if byte = 128 || byte = 254 then begin"
         ],
         "to": "#{complete = false; view = inserted.#view; state = inserted.#state}",
-        "lines": "89-113",
+        "lines": "87-111",
         "kind": "what",
         "text": "`Proof.destination_absent` shows the key is not yet in the destination, which `try_insert` requires: source keys are distinct, so a key cannot occur in the prefix already copied."
       }
@@ -1566,7 +1566,7 @@
         "title": "A match copy reproduces the source",
         "from": "let rec (copy_match_preserves_source @ total)",
         "to": "[@@decreases remaining]",
-        "lines": "105-132",
+        "lines": "104-131",
         "kind": "what",
         "text": "The key step of the round trip: if the output holds the source up to `used` and the source repeats at `distance` for `remaining` bytes, the overlapping heap copy yields the source up to `used + remaining`. Each copied byte comes from an already-correct cell, found by `output_matches_get`."
       }
@@ -1715,7 +1715,7 @@
         "title": "Heap model to wire relation",
         "from": "let rec (model_wire @ total)",
         "to": "|| Vox_lz4_spec_wire.wire_matches_plan source wire anchor used plan} @ ghost",
-        "lines": "310-324",
+        "lines": "307-321",
         "kind": "what",
         "text": "The statement used by the public compressor: a string whose bytes are the encoder model's heap prefix, of exactly the model's length, satisfies the wire layout of the plan. It is proved by induction over the plan, with `end_model_wire` for the last run."
       }
@@ -1815,7 +1815,7 @@
         "title": "scan: contract against the scanner model",
         "from": "let rec scan :",
         "to": "encoded.E.state} @ unique",
-        "lines": "99-116",
+        "lines": "97-114",
         "kind": "what",
         "text": "The precondition ties the owned table to the ghost `entries` (`T.agrees`) and requires capacity for the rest of the model's plan; the postcondition says the buffer ends exactly as `encode_model` of `Vox_lz4_spec_scan.scan` from this state. This is where the implementation is bound to the compressor model's positions, hashes and match choices."
       }
@@ -1918,7 +1918,7 @@
         "title": "append",
         "from": "let append : (s : {s : t | s.used < M.length s.block}) @ unique ->",
         "to": "{ block; permission; used = used + 1 }",
-        "lines": "92-106",
+        "lines": "92-105",
         "kind": "what",
         "text": "The only write path. Its postcondition is an exact `Heap.put`, which is what the heap models `literal_heap` and `copy_heap` are built from."
       }
@@ -2067,7 +2067,7 @@
         "title": "decode_plan: the induction",
         "from": "let rec (decode_plan @ total) :",
         "to": "&& S.matches_bytes source result.S.count result.S.reversed} @ ghost",
-        "lines": "265-281",
+        "lines": "263-279",
         "kind": "what",
         "text": "The invariant pairs a position in the plan with a position in the wire and a decoded prefix of the source. The theorem is stated for every plan satisfying `wire_matches_plan`, so it does not depend on how the compressor chose its matches."
       },
@@ -2075,7 +2075,7 @@
         "title": "roundtrip: the public theorem",
         "from": "let (roundtrip @ total) :",
         "to": "capacity decoded;",
-        "lines": "389-405",
+        "lines": "387-403",
         "kind": "what",
         "text": "This is the statement exported as `Vox_lz4.roundtrip`. Unfolding `compresses` gives `wire_matches_plan` for the plan `Vox_lz4_spec_scan.from_source`, and `wire_roundtrip` does the rest."
       }
@@ -2121,7 +2121,7 @@
         "title": "output_matches",
         "from": "let[@def] rec (output_matches @ total)",
         "to": "[@@decreases count]",
-        "lines": "939-949",
+        "lines": "937-947",
         "kind": "what",
         "text": "The heap-level statement that a buffer's first `count` bytes are the source's; the older round-trip proofs end here, where the public proof ends with byte-list equality in `Vox_lz4_decode_bytes_roundtrip`."
       },
@@ -2129,7 +2129,7 @@
         "title": "The early executable round trip",
         "from": "let roundtrip : (source : char iarray) ->",
         "to": "match D.decode wire capacity with",
-        "lines": "970-993",
+        "lines": "968-991",
         "kind": "what",
         "text": "Encodes, snapshots, and decodes with the iarray decoder, all at run time; the ghost block after decoding picks the layout lemma for the plan `plan_of_source` chose. None of this is on the path of `Vox_lz4`."
       }
@@ -2331,7 +2331,7 @@
         "title": "Linking raises it by at most alpha",
         "from": "let rec (link_potential @ total)",
         "to": "then alpha else 0Z) else true} @ ghost =",
-        "lines": "281-291",
+        "lines": "279-289",
         "kind": "what",
         "text": "Only the winner's rank can grow, by one, which adds `alpha` to its root potential; the loser's potential drops from `alpha · r` to a nonroot's, and nodes whose parent's rank grew lose potential by `Vox_union_find_potential.compression`. The link fee `4a + 7` covers the 7 charged plus four times this increase."
       }
@@ -2366,7 +2366,7 @@
         "title": "Rescaling for a larger capacity",
         "from": "let (reparameterize @ total)",
         "to": "(node_phi small a rank parent) (Bigint.mul (Bigint.sub b a) rank)} =",
-        "lines": "305-311",
+        "lines": "298-304",
         "kind": "what",
         "text": "With ranks below the smaller cap, moving to a larger cap and to `alpha` b ≤ a + 1 adds exactly `(b − a) · rank`. Summed over the forest this is `Vox_union_find_bank.reparameterize`, which fixes the credits the online layer must deposit when its epoch doubles."
       }
@@ -2385,7 +2385,7 @@
         "title": "Counting levels",
         "from": "let rec (counting @ total)",
         "to": "else ()",
-        "lines": "52-78",
+        "lines": "50-75",
         "kind": "what",
         "text": "By induction along the edges: each edge either adds a new level to the set, or its level is already present higher up and `release` gives it a potential drop of at least one. Hence `length edges <= loss + size (levels ...)`, and `range` keeps the levels in [0, alpha)."
       }
@@ -2576,7 +2576,7 @@
         "title": "Doubling the ghost capacity",
         "from": "let epoch = ghost_ (if n = old_cap then Bigint.mul 2Z old_epoch else old_epoch) in",
         "to": "let r = U.make_set input payment in",
-        "lines": "288-317",
+        "lines": "286-315",
         "kind": "what",
         "text": "All of this is ghost: the epoch, the capacity, the credit splits and the call to `U.reparameterize` are erased, leaving the core's `make_set`. When the structure is not full the capacity is unchanged and `U.reparameterize` receives 0 credits."
       },
@@ -2584,7 +2584,7 @@
         "title": "Fee bounds for any population",
         "from": "let (fee_bounds @ total) :",
         "to": "union_fee state <= Bigint.add (Bigint.mul 12Z a) 36Z else true} @ ghost =",
-        "lines": "436-442",
+        "lines": "433-439",
         "kind": "what",
         "text": "The client names any population P at least the current size and its inverse a; the fees are then at most `4a + 12` and `12a + 36`. The extra 4 over the core's `4a + 8` covers a capacity that may exceed P by up to a factor of two."
       }
@@ -2660,7 +2660,7 @@
         "title": "Fees at the fixed capacity",
         "from": "let (fee_bounds @ total) :",
         "to": "else true} @ ghost = fun state a -> ghost_ (",
-        "lines": "203-208",
+        "lines": "201-206",
         "kind": "what",
         "text": "Because the inverse is unique (`inverse_order` in both directions), any a with the inverse's specification equals the core's `alpha`, so the fees are exactly `4a + 8` and `12a + 24`."
       }
@@ -2770,7 +2770,7 @@
         "title": "The reachable-state invariant",
         "from": "let[@def] valid_core core",
         "to": "&& (if observed state.core then core_wire state.core === prefix",
-        "lines": "396-433",
+        "lines": "394-431",
         "kind": "what",
         "text": "`reachable state prefix` says the budget accounts for exactly `prefix`, the accumulated lines and headers are valid, and, while no error has occurred, `core_wire` of the state is the consumed prefix itself. `feed_reachable` preserves it, and `reachable_completion` turns it into `well_formed request && serialize request === prefix` for a completed state."
       },
@@ -2778,7 +2778,7 @@
         "title": "Chunking invariance in the model",
         "from": "let rec (chunking_invariance @ total)",
         "to": "chunking_invariance (advance state b) bs right;",
-        "lines": "255-276",
+        "lines": "253-274",
         "kind": "what",
         "text": "Feeding `left @ right` equals feeding `left` and then the leftover followed by `right`, proved by induction on `left` for every state, including terminal and budget-exhausted ones. The public `chunking_invariance` transfers this to driver states through `feed_machine` and `machine_injective`."
       },
@@ -2789,7 +2789,7 @@
           "let (roundtrip @ total)"
         ],
         "to": "  else ())",
-        "lines": "366-387",
+        "lines": "364-385",
         "kind": "what",
         "text": "For a `well_formed` request, `serializer_core_roundtrip` shows the unbudgeted `drain` reaches `Complete request` on `serialize request`; `feed_matches_drain` shows the budgeted `feed` agrees because the request fits the budget; `chunking_invariance` and terminal preservation then add an arbitrary suffix, which is returned unconsumed."
       },
@@ -2797,7 +2797,7 @@
         "title": "Soundness for arbitrary input",
         "from": "let (accepted_input @ total)",
         "to": "initial_def (); suffix_preservation start input;",
-        "lines": "854-872",
+        "lines": "849-867",
         "kind": "what",
         "text": "From `initial ()` and any input, the reached state is `reachable` for the consumed prefix, so a completed request is `well_formed`, its serialization is exactly the consumed bytes, and it followed by the returned rest is the input. No assumption about where the input came from is involved."
       },
@@ -2805,7 +2805,7 @@
         "title": "Driver: the executable machine",
         "from": "let[@def] push (c : core @ immutable total)",
         "to": "else consume {core = push state.core b",
-        "lines": "1214-1236",
+        "lines": "1209-1231",
         "kind": "what",
         "text": "`push` mirrors `Internal.step` with accumulators consed at the head and `Reverse.rev` applied once when a line or body completes; `consume` mirrors `Internal.feed`. The public `feed` runs `consume`, so this is the parser's running code."
       },
@@ -2813,7 +2813,7 @@
         "title": "Simulation of the model by the driver",
         "from": "let rec (simulation @ total)",
         "to": "simulation next bs; ()))",
-        "lines": "1266-1286",
+        "lines": "1261-1281",
         "kind": "what",
         "text": "For every driver state and input, `model` of the state `consume` reaches equals the state `Internal.feed` reaches from `model s`, and the leftover inputs are equal; the per-byte step is `step_simulation`. This lemma connects every model theorem to the code that runs."
       },
@@ -2821,7 +2821,7 @@
         "title": "The public feed",
         "from": "let (run @ total) (state : state)",
         "to": "  run state input",
-        "lines": "1478-1498",
+        "lines": "1473-1493",
         "kind": "what",
         "text": "`run` executes `Driver.consume` and packs the result into the refined `state` type, whose invariant `good` follows from `feed_good`; the proof calls are all in `ghost_`. Its result satisfies `transition`, the relation whose equation `transition_def` in the interface states accounting, the returned suffix, `processed` and completion soundness."
       }
@@ -2982,7 +2982,7 @@
         "title": "The round-trip theorem and its executable use",
         "from": "let (roundtrip_correct @ total)",
         "to": "  plaintext",
-        "lines": "53-77",
+        "lines": "53-74",
         "kind": "what",
         "text": "`roundtrip_correct` is a ghost lemma stated for any integers under `valid_key` and `0 <= m < p * q`. `roundtrip` runs the real `encrypt` and `decrypt` and calls the lemma inside `ghost_`, so its result type `{r : t | r = message}` is proved about the values computed; no power is evaluated at run time for the proof."
       },
@@ -2990,7 +2990,7 @@
         "title": "CRT decryption",
         "from": "let (decrypt_crt @ total)",
         "to": "ghost_ (decrypt_crt_correct ciphertext d p q r);",
-        "lines": "140-156",
+        "lines": "137-153",
         "kind": "what",
         "text": "Uses the full exponent modulo each prime, without reducing it modulo `p - 1` and `q - 1`. The inverse of `p` modulo `q` comes from `modexp` with exponent `q - 2`, and `decrypt_crt_correct` proves the recombined value equals `power ciphertext d mod (p * q)` for every `d >= 0`."
       }
@@ -3065,7 +3065,7 @@
         "title": "The script lower bound",
         "from": "let rec (lower_bound @ total)",
         "to": "| Insert b -> neighbors (source rest) (target rest) b b);",
-        "lines": "181-197",
+        "lines": "180-196",
         "kind": "what",
         "text": "Every script costs at least the distance between its source and target, by induction on the script: `Keep` uses the recurrence directly, and `neighbors` shows a one-element change moves the distance by at most one. This is the whole optimality argument for `optimal_at`, independent of the search."
       },
@@ -3073,7 +3073,7 @@
         "title": "The entry invariant",
         "from": "let[@def] valid (old : int list)",
         "to": "&& cost e.rev = depth)",
-        "lines": "262-272",
+        "lines": "258-268",
         "kind": "what",
         "text": "An entry's reversed script `rev` rebuilds `old` and `fresh` from its tails, the tails are suffixes, `x` counts consumed old elements and stays within the 1,000,000 cap, the length difference fixes the diagonal `k`, and `rev` costs exactly `depth`. The predicate is ghost; the runtime entry holds only `x`, the tails and `rev`."
       },
@@ -3081,7 +3081,7 @@
         "title": "snake",
         "from": "let rec (snake @ total)",
         "to": "[@@decreases remaining]",
-        "lines": "401-425",
+        "lines": "397-420",
         "kind": "what",
         "text": "Follows a diagonal while heads are equal, adding `Keep`. The termination measure `remaining` is a ghost argument equal to the old tail's size, so no counter runs. The result is `settled` and has the same remaining distance, by the `a = b` case of the recurrence."
       },
@@ -3089,7 +3089,7 @@
         "title": "Choosing between deletion and insertion",
         "from": "let (choose @ total)",
         "span": 27,
-        "lines": "574-600",
+        "lines": "567-593",
         "kind": "what",
         "text": "Of the two candidates for a slot, the one with larger `x` is kept and insertion wins ties; `Choice_proof.selected` uses `dominance` to show a candidate within budget survives. The choice is then snaked, so every frontier slot is settled."
       },
@@ -3097,7 +3097,7 @@
         "title": "search and its ghost budget",
         "from": "let rec (search @ total)",
         "to": "[@@decreases budget]",
-        "lines": "756-792",
+        "lines": "749-785",
         "kind": "what",
         "text": "Invariant: the frontier at depth `depth` is valid, has `depth + 1` slots, and some slot's remaining distance is at most `budget`. If no slot is finished, `frontier_budget` shows `budget > 0`, and `advance` keeps the invariant with `budget - 1` at `depth + 1`. The returned script costs at most `depth + budget`, which is `minimum_cost old fresh` from the initial call."
       },
@@ -3105,7 +3105,7 @@
         "title": "diff",
         "from": "let (diff @ total)",
         "to": "let result : (script, error) result = Error Input_too_large",
-        "lines": "813-846",
+        "lines": "805-838",
         "kind": "what",
         "text": "`bounded_length` checks both inputs against 1,000,000, stopping after at most 1,000,001 cells; the initial entry is snaked and `search` starts with the ghost budget `minimum_cost old fresh`. `M.lower_bound`, `apply_source` and `script_bounds` run in `ghost_` and give the exact cost, `apply old s === Some fresh`, and the length bound."
       }

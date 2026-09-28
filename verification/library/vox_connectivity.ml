@@ -58,9 +58,7 @@ module Make (C : Vox_big_credits.S) = struct
     ghost_ (added_def before after x;
       contains_def before x;
       contains_def before q;
-      contains_def after x;
       contains_def after q;
-      root_def before x;
       root_def before q;
       root_def after x;
       root_def after q;
@@ -75,13 +73,9 @@ module Make (C : Vox_big_credits.S) = struct
         else true} @ ghost =
     fun before after x q ->
     ghost_ (found_def before after x;
-      contains_def before x;
       contains_def before q;
-      contains_def after x;
       contains_def after q;
-      root_def before x;
       root_def before q;
-      root_def after x;
       root_def after q;
       U.found_law before after x q;
       ())
@@ -98,21 +92,11 @@ module Make (C : Vox_big_credits.S) = struct
            then r else root before q) else true) else true} @ ghost =
     fun before after x y r q ->
     ghost_ (joined_def before after x y r;
-      contains_def before x;
-      contains_def before y;
-      contains_def before r;
       contains_def before q;
-      contains_def after x;
-      contains_def after y;
-      contains_def after r;
       contains_def after q;
       root_def before x;
       root_def before y;
-      root_def before r;
       root_def before q;
-      root_def after x;
-      root_def after y;
-      root_def after r;
       root_def after q;
       U.joined_law before after x y r q;
       ())

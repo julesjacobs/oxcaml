@@ -28,14 +28,14 @@ let run (depth : {n : int | n >= 0}) =
   let scope : ((x : node Pref.t) @ immutable -> {u : unit |
       if H.mem saved x then source_ok saved x else H.at saved x === None}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; source_ok_def saved x;
-    let u = () in refine_ u) in
+    refine_ ()) in
   let bounds : ((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem saved x) || not (finite_node saved x) || below saved x depth}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; finite_node_def saved x;
-    below_def saved x depth; at_level_def saved x; let u = () in refine_ u) in
+    below_def saved x depth; at_level_def saved x; refine_ ()) in
   let order : ((x : node Pref.t) @ immutable -> {u : unit | ordered saved x}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; ordered_def saved x; children_below_def saved desc 0;
-    let u = () in refine_ u) in
+    refine_ ()) in
   let base = Empty in ghost_ (pool_scoped_def saved base);
   let link : {p : node Pref.t | H.mem saved p} = refine_ link in
   let state : {t : node Pref.token | Pref.own t === saved && pool_scoped saved base && depth >= 0} = refine_ state in
@@ -45,10 +45,10 @@ let run (depth : {n : int | n >= 0}) =
   let h = ghost_ (Pref.own (borrow_ state)) in
   let history = ghost_ out.#history in let epoch = ghost_ out.#epoch in
   let next_order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x}) @ total ghost = ghost_ (fun x ->
-    let u = () in let refine_ u = copy_ordered saved depth bounds order epoch history x (refine_ u) in refine_ u) in
+    let refine_ u = copy_ordered saved depth bounds order epoch history x (refine_ ()) in refine_ u) in
   let next_bounds : ((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h x) || not (finite_node h x) || below h x depth}) @ total ghost = ghost_ (fun x ->
-    let u = () in let refine_ u = copy_bounds saved depth bounds epoch history x (refine_ u) in refine_ u) in
+    let refine_ u = copy_bounds saved depth bounds epoch history x (refine_ ()) in refine_ u) in
   ghost_ (next_bounds result; next_bounds boundary; next_order result; next_order boundary; below_def h result depth);
   let state : {t : node Pref.token | H.mem (Pref.own t) result} = refine_ state in
   let refine_ value = Pref.read result (borrow_ state) in let refine_ state = state in

@@ -31,14 +31,14 @@ let (swap_partition @ total) : (values : int list) -> (pivot : int) ->
   range_grow swapped pivot low_side zero lower;
   if lower = scan then
     (range_empty swapped pivot high_side next_lower next_scan;
-    let u = () in refine_ u)
+    refine_ ())
   else
     (range_get values pivot high_side lower scan lower;
     range_shrink values pivot high_side lower scan next_lower scan;
     range_set values pivot high_side next_lower scan lower y;
     range_set intermediate pivot high_side next_lower scan scan x;
     range_grow swapped pivot high_side next_lower scan;
-    let u = () in refine_ u)
+    refine_ ())
 
 let (scan_left @ total) (values : int list) (pivot : int)
     (lower : Bigint.t) (scan : Bigint.t) (last : Bigint.t) :
@@ -114,7 +114,7 @@ let (partition_bounds @ total) : (values : int list) -> (pivot : int) -> (index 
   sub_prefix values index;
   range_sub values pivot high_side next size;
   sub_suffix values next;
-  let u = () in refine_ u
+  refine_ ()
 
 (* The pivot sits at [index]: no element before it is larger and no element
    after it is smaller. *)
@@ -142,7 +142,6 @@ let (glue_partition @ total) : (before : int list) -> (index : Bigint.t) ->
   let old_right = drop next before in
   let old_rest = append old_middle old_right in
   let new_rest = append middle right in
-  let new_values = append left new_rest in
   let nil = [] in
   let low_side = true in
   let high_side = false in
@@ -152,10 +151,9 @@ let (glue_partition @ total) : (before : int list) -> (index : Bigint.t) ->
   permutation_refl old_middle;
   permutation_append old_middle old_right middle right;
   permutation_append old_left old_rest left new_rest;
-  permutation_def before new_values;
   all_permutation old_left left pivot low_side;
   all_permutation old_right right pivot high_side;
   append_def middle right;
   append_def nil right;
   sorted_glue left pivot right;
-  let u = () in refine_ u
+  refine_ ()

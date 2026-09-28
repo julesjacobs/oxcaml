@@ -223,9 +223,8 @@ let (count_model_preserved @ total) :
   let result = next_count x acc in
   next_count_def x acc;
   increment_relation_def x acc result;
-  let u = () in
-  count_preserved x tail acc result (u);
-  u
+  count_preserved x tail acc result ();
+  ()
 
 let count_by_model (xs : int list) : {n : Bigint.t | n === length xs} =
   let initial = 0Z in

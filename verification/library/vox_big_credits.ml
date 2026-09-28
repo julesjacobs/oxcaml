@@ -82,7 +82,7 @@ module Make () = struct
       let a = left.balance in
       let b = right.balance in
       let n = Bigint.add a b in (n : amount)) } in
-    ghost_ (credits_def left; credits_def right; credits_def (borrow_ result));
+    ghost_ (credits_def (borrow_ result));
     result
 
   module Budget = struct

@@ -55,7 +55,6 @@ let (correct @ total) : (program : Program.program) @ immutable -> (globals : Ma
         Heap.length_def after_cells; Heap.length_def (Heap.Cell (value, body)); Heap.length_def full;
         Hmc_wasm_relayout_finish.closure old_pc cells before_frame tail ();
         Hmc_wasm_relayout_finish.closure pc after_cells after_frame tail ();
-        Lower.emit_def pc value base_local;
         Hmc_wasm_literal_step.correct signature next_signature activation frames padding body (Heap.length body)
           atom ty derivation next old_pc pc value
           state after tail base_local base before_frame after_frame ());

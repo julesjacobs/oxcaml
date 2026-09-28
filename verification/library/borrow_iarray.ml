@@ -117,7 +117,6 @@ module Slice = struct
       let x = get (borrow_ s) first in
       let y = get (borrow_ s) second in
       let middle = set s first y in
-      ghost_ (Vox_iarray.updated_length before i y);
       let second : {k : int | 0 <= k && k < Iarray.length (current middle)} =
         j in
       let result = set middle second x in

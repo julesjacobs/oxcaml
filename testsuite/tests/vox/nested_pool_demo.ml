@@ -61,8 +61,8 @@ let () =
   let after = ghost_ (Pref.own (borrow_ r.#state)) in
   let parent = r.#parent in let state = r.#state in
   assert (count parent = 2);
-  ghost_ (let u = () in
-    Generalize_proofs.closed_observe h3 1 child p3 (refine_ u);
+  ghost_ (
+    Generalize_proofs.closed_observe h3 1 child p3 (refine_ ());
     closed_at_def h3 after 1 child p3);
   let state : {t : node Pref.token | H.mem (Pref.own t) p3} = refine_ state in
   let refine_ v = Pref.read p3 (borrow_ state) in

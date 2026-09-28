@@ -91,7 +91,6 @@ module Proof = struct
     suffix_def whole shorter;
     suffix_def whole longer;
     suffix_def longer shorter;
-    suffix_bounds whole shorter;
     suffix_bounds whole longer;
     (match whole with
      | [] -> ()
@@ -211,8 +210,6 @@ module M = struct
     suffix_def fresh new_tail;
     size_def old;
     size_def fresh;
-    size_nonnegative old_tail;
-    size_nonnegative new_tail;
     (match old, fresh with
      | a :: ats, b :: bts ->
        crop ats bts old_tail new_tail;
@@ -237,7 +234,6 @@ module M = struct
       size_zero fresh;
       (match old, fresh with
        | a :: ats, b :: bts ->
-         size_nonnegative ats;
          size_nonnegative bts;
          properties_aux (Bigint.sub fuel 2Z) ats bts;
          properties_aux (Bigint.sub fuel 1Z) ats fresh;
@@ -407,7 +403,6 @@ let rec (snake @ total) : (remaining : Bigint.t) @ ghost ->
       && minimum_cost r.old_tail r.new_tail = minimum_cost e.old_tail e.new_tail} =
     fun remaining old fresh k depth candidate ->
   let e = candidate in
-  ghost_ (valid_def old fresh k depth e);
   ghost_ (size_def e.old_tail);
   ghost_ (size_def e.new_tail);
   ghost_ (size_nonnegative e.old_tail);
@@ -453,7 +448,6 @@ let (step_delete @ total) :
   let result = match candidate with
     | None -> None
     | Some e ->
-      ghost_ (valid_def old fresh k depth e);
       ghost_ (size_def e.old_tail);
       match e.old_tail with
       | [] -> None
@@ -479,7 +473,6 @@ let (step_insert @ total) :
   let result = match candidate with
     | None -> None
     | Some e ->
-      ghost_ (valid_def old fresh k depth e);
       ghost_ (size_def e.new_tail);
       match e.new_tail with
       | [] -> None
@@ -797,7 +790,6 @@ let rec (bounded_length @ total) : (bound : int) -> (values : int list) ->
       | Some n -> 0 <= n && n <= bound && Bigint.of_int n = size values} =
     fun bound values ->
   ghost_ (size_def values);
-  ghost_ (size_nonnegative values);
   match values with
   | [] -> if bound < 0 then None else (Some 0)
   | _ :: rest ->

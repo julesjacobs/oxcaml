@@ -63,7 +63,7 @@ let (union_representative @ total) : (h : Vox_union_find_model.node P.heap) @ im
   let first = find_paths paths x in let middle = find_heap h paths x in
   find_root h paths x;
   let py = F.lookup y first in
-  F.lookup_valid middle y first; F.lookup_closed first first y;
+  F.lookup_valid middle y first;
   F.refresh_valid middle py first; F.refresh_member middle py first q;
   F.refresh_representative middle py first q;
   find_paths_def first y; find_heap_def middle first y;

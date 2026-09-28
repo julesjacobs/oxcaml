@@ -118,7 +118,6 @@ let () =
   let past = 3 in
   let index = 1 in
   let value = 9 in
-  let u = () in
   let result = slice_and_update values first past index value
-    (u) in
+    () in
   assert (same_list (A.to_list result) [1; 9])

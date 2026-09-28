@@ -35,7 +35,7 @@ let rec (scheme_names @ total) : (h : node Pref.heap) @ immutable -> (heads : E.
     E.effective_below_def h heads p depth; E.effective_below_def h heads p cut; let level = E.level h heads p in G.close_level_def cut level;
     let schema = Effective_template.scheme h heads cut tree in F.template_names_def schema;
     if E.effective_below h heads p cut then (low_names h heads cut order tree (); ()) else (
-      EF.generalized_names_def h heads cut tree; E.level_def h heads p; Level_unifier_spec.observe_def h p;
+      EF.generalized_names_def h heads cut tree; Level_unifier_spec.observe_def h p;
       match tree with
       | Free _ | Constant_tree _ | Word_tree _ -> ()
       | Alias_tree (_, child) | List_tree (_, child) -> let q = tree_root child in edge_def h p q;
@@ -98,7 +98,7 @@ let rec (scheme_boundaries @ total) : (h : node Pref.heap) @ immutable -> (heads
     if E.effective_below h heads p cut then (
       canonical_value h trees rho values tree ();
       EF.readback_avoids h heads cut order names high tree (); ())
-    else (E.level_def h heads p; Level_unifier_spec.observe_def h p;
+    else (Level_unifier_spec.observe_def h p;
       match tree with
       | Free _ | Constant_tree _ | Word_tree _ -> ()
       | Alias_tree (_, child) | List_tree (_, child) -> let q = tree_root child in edge_def h p q;

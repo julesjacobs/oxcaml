@@ -35,7 +35,7 @@ let rec (mapped_instance @ total) : (saved : node Pref.heap) @ immutable ->
         history_grows saved heads epoch depth rest p ();
         history_grows saved heads epoch depth rest q ();
         heap_def saved epoch depth d; let h = heap saved epoch depth rest in
-        let v = cell desc depth in let w = session_mark rest old epoch q in session_mark_def rest old epoch q; cell_def desc depth;
+        let v = cell desc depth in let w = session_mark rest old epoch q in cell_def desc depth;
         let h1 = H.put h q v in put_frame h1 p w q;
         fresh_frame saved heads epoch depth d final q ();
         mapping_preserved saved heads epoch depth d final p q ();

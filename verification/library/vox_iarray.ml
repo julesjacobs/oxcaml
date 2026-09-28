@@ -381,7 +381,6 @@ module For_all (P : Vox_sequence.Predicate) = struct
     if holds values && 0 <= first && first <= past
       && past <= Iarray.length values then
       let part = slice values first past in
-      slice_length values first past;
       intro part (fun index ->
         let shifted = first + index in
         slice_read values first past index;

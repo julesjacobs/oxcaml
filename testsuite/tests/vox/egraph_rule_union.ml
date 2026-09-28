@@ -34,8 +34,6 @@ let () =
     R.subst_valid_def [] [];
     R.instantiate_def rule.lhs [];
     R.instantiate_def rule.rhs [];
-    G.valid_def initial;
-    G.valid_def first;
     Vox_iarray.updated_read first.origins 1 (L.Int_lit 1) 0;
     G.S.origin_def state.origins 0;
     G.S.origin_def first.origins 0;

@@ -54,10 +54,10 @@ let rec close : (h : node Pref.heap Ghost.t) @ immutable -> (cut : int) ->
       let refine_ state = state in
       let next = if change then parent else match old.level with
         | Generic -> parent | Finite _ -> Entry (p, parent) in
-      ghost_ (let u = () in
+      ghost_ (
         if change then (
-          Generalize_proofs.pool_write h.Ghost.ghost p old cut rest (refine_ u);
-          Generalize_proofs.pool_write h.Ghost.ghost p old cut parent (refine_ u); ());
+          Generalize_proofs.pool_write h.Ghost.ghost p old cut rest (refine_ ());
+          Generalize_proofs.pool_write h.Ghost.ghost p old cut parent (refine_ ()); ());
         needs_close_def cut old.level; close_cell_def cut old; close_level_def cut old.level;
         let v = close_cell cut old in Copy_heap_proofs.put_frame h.Ghost.ghost p v p;
         at_level_def mid p; retained_def mid p; pool_scoped_def mid next;
@@ -67,7 +67,7 @@ let rec close : (h : node Pref.heap Ghost.t) @ immutable -> (cut : int) ->
       let heap_witness : node Pref.heap Ghost.t = {Ghost.ghost = mid} in
       let refine_ state = state in
       let after = ghost_ (closed_heap mid cut rest) in
-      ghost_ (let u = () in closed_retained mid cut rest p (refine_ u);
+      ghost_ (closed_retained mid cut rest p (refine_ ());
         transfer_def after child parent; ());
       let refine_ out = close heap_witness cut rest next (refine_ state) in
       refine_ out

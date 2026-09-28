@@ -19,6 +19,6 @@ let rec close : (h : node Pref.heap) @ immutable ghost -> (cut : int) -> (pool :
     let v = close_cell cut old in
     let t : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ t in
     let refine_ t = Pref.write p v t in let mid = ghost_ (Pref.own (borrow_ t)) in
-    ghost_ (let u = () in pool_write h p old cut rest (refine_ u));
+    ghost_ (pool_write h p old cut rest (refine_ ()));
     let t : {t : node Pref.token | Pref.own t === mid && pool_scoped mid rest} = refine_ t in
     let refine_ t = close mid cut rest t in refine_ t)

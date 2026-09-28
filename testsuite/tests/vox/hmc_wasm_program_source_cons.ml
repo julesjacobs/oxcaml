@@ -178,7 +178,7 @@ let (correct @ total) : (lowered : Program_lower.program) @ immutable -> (module
         LP.correct (Success.emit plan 0 1 14 15 16 17) body.New.source.Entry.captured body.New.source.Entry.result.Guarded.state 13 ();
         L.other_local body.New.source.Entry.result.Guarded.state.X.machine.E.locals 11 (S.I32 (Status.zero ())) body.New.state.X.machine.E.locals 13 ());
     let registers = Step.complete lowered (fragment plan) module_ table_base stack_base before memory bytes cells tail host_capacity old_pc function_index body.New.fuel body.New.state () in
-    ghost_ (Registers.exports_def body.New.state.X.machine.E.locals registers; Status.zero_def (); New.failure_def ());
+    ghost_ (Registers.exports_def body.New.state.X.machine.E.locals registers; Status.zero_def ());
     let failed_guard = ghost_ (match body.New.source.Entry.result.Guarded.allocation with
       | A.Allocated _ -> Guard.Absent
       | A.Exhausted ->

@@ -368,7 +368,6 @@ module Arrays = struct
       ~len:(Iarray.length source - position) in
     let result = Iarray.append (Iarray.append prefix [: value :]) suffix in
     ghost_ (
-      range_spec_def source value position past;
       let stop = Iarray.length result in
       let zero = 0 in
       let inserting = true in

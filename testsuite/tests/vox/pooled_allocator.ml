@@ -21,6 +21,6 @@ let allocate : (h : node Pref.heap Ghost.t) @ immutable -> (depth : int) -> (des
     pool_scoped_def after pool_next; put_frame h.Ghost.ghost p v p;
     let proof : {u : unit | pool_scoped (H.put h.Ghost.ghost p v) pool_next} = refine_ u in proof);
   let after = ghost_ (H.put h.Ghost.ghost p v) in
-  ghost_ (let u = () in allocation_children h.Ghost.ghost p v desc depth (refine_ u);
-    cell_def desc depth; below_def after p depth; at_level_def after p; ordered_def after p; put_frame h.Ghost.ghost p v p);
+  ghost_ (allocation_children h.Ghost.ghost p v desc depth (refine_ ());
+    cell_def desc depth; below_def after p depth; at_level_def after p; ordered_def after p);
   let r = #{value = p; state = step.state; pool = pool_next} in refine_ r

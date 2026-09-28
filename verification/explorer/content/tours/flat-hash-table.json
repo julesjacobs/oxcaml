@@ -74,7 +74,7 @@
       "path": "verification/library/vox_table_stop_proof.ml",
       "from": "let (stored_misses @ total)",
       "to": "end else ())",
-      "lines": "63-99",
+      "lines": "63-98",
       "text": "`groups` in [`vox_table_search.ml`](src:verification/library/vox_table_search.ml) scans the probe sequence with `match16_empty`. When a group has an EMPTY lane and none of its candidates matched, it calls `empty_stop`, which proves the key absent by applying `Map.absent_intro` to this lemma at every index. `stored_misses` assumes a stored key equal to the query and derives a contradiction: by `Key.hash_equal` the two keys have the same hash, hence the same probe sequence. If the stored entry's route rank is at most `stop`, the entry was among the candidates already rejected (`visited_misses`); otherwise `empty_free` on its route says group `stop` has no EMPTY byte (`Spec.empty_free_at`), contradicting the observed bit. The lemma is an ordinary total ghost function: its implication is written `not premise || conclusion`, and its body is plain control flow over ghost values."
     },
     {

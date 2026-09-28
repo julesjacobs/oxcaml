@@ -69,7 +69,6 @@ let prepare : (program : I.program) @ immutable -> (globals : Machine.globals) @
           (match Hmc_memory_stack_capacity.reserve lowered.Lower.width (D.S (D.S (D.S D.Z))) 1024 2048 () with
           | None -> failwith "shared stack reservation"
           | Some stack_limit ->
-          let _ = ghost_ (Hmc_memory_stack_capacity.ordered lowered.Lower.width (D.S (D.S (D.S D.Z))) 1024 stack_limit ()) in
           let wire_count : B.u32 = count + 1 in
           let frame_end : B.u32 = base + 16 * wire_count in
           if frame_end > 1024 || H.used heap < 2048 || not (above heap frame_end && above heap stack_limit)
@@ -91,7 +90,6 @@ let prepare : (program : I.program) @ immutable -> (globals : Machine.globals) @
             | Some stack ->
             let memory = stack.Hmc_memory_stack.memory in
             ghost_ (let _ = Bounds.suffix heap_memory 8192 stack.Hmc_memory_stack.top () in
-              Bounds.covers_def heap_memory stack.Hmc_memory_stack.top;
               Hmc_wasm_program_step_caller.objects_below heap stack_limit stack.Hmc_memory_stack.top ();
               Hmc_heap_image_suffix.preserve heap_memory memory heap stack.Hmc_memory_stack.top ();
               Bounds.same_length heap_memory memory 8192 ());
@@ -99,7 +97,7 @@ let prepare : (program : I.program) @ immutable -> (globals : Machine.globals) @
               status = 99; tag = Hmc_wasm_header_update.number 123; payload = Hmc_wasm_header_update.number 456} in
             ghost_ (let _ = Bounds.suffix memory 8192 frame_end () in
               let _ = Bounds.suffix memory 8192 stack_limit () in
-              Bounds.covers_def memory frame_end; Bounds.covers_def memory stack_limit;
+              Bounds.covers_def memory frame_end;
               Resources.valid_def program globals lowered.Lower.width 1024 frame_end abstract heap activation frames registers memory;
               Index.represents_def (D.S (H.length cells)) wire_count);
             let stored = Store.store program globals lowered.Lower.width 1024 frame_end abstract heap activation frames registers memory
@@ -388,7 +386,7 @@ let rec collect : (program : I.program) @ immutable -> (globals : Machine.global
           if audit program globals prepared.lowered prepared.context prepared.state 100 () < 3 then failwith "shared closure segment";
           match Table.lookup prepared.lowered.Lower.blocks prepared.state.State.pc with
           | Some (Block.Structured (Structured.Closure plan)) ->
-            ghost_ (State.configuration_def prepared.state;
+            ghost_ (
               Hmc_wasm_program_source_closure.fragment_def plan.Hmc_wasm_closure_lower.object_ plan.Hmc_wasm_closure_lower.pc);
             let needed = plan.Hmc_wasm_closure_lower.object_.Hmc_wasm_closure_write.bytes in
             List.iter (fun available ->
@@ -408,7 +406,7 @@ let rec collect : (program : I.program) @ immutable -> (globals : Machine.global
           if audit program globals prepared.lowered prepared.context prepared.state 100 () < 3 then failwith "shared cons segment";
           match Table.lookup prepared.lowered.Lower.blocks prepared.state.State.pc with
           | Some (Block.Structured (Structured.Cons plan)) ->
-            ghost_ (State.configuration_def prepared.state; Hmc_wasm_program_source_cons.fragment_def plan);
+            ghost_ (Hmc_wasm_program_source_cons.fragment_def plan);
             let needed = 32 in
             List.iter (fun available ->
               let used = prepared.state.State.registers.Registers.heap in
@@ -593,7 +591,6 @@ let rec caller_collect : (program : I.program) @ immutable -> (globals : Machine
           if audit program globals prepared.lowered prepared.context prepared.state 1000 () < 3 then failwith "shared ordinary-call segment";
           match Table.lookup prepared.lowered.Lower.blocks prepared.state.State.pc with
           | Some (Block.Call call) ->
-            ghost_ (State.configuration_def prepared.state);
             call_without_stack program globals prepared.lowered prepared.context prepared.state next call ();
             call_one_frame program globals prepared.lowered prepared.context prepared.state next call ()
           | _ -> failwith "shared ordinary-call fragment") [256; 263];
@@ -604,7 +601,6 @@ let rec caller_collect : (program : I.program) @ immutable -> (globals : Machine
           if audit program globals prepared.lowered prepared.context prepared.state 1000 () < 2 then failwith "shared tail segment";
           match Table.lookup prepared.lowered.Lower.blocks prepared.state.State.pc with
           | Some (Block.Tail_call env_count) ->
-            ghost_ (State.configuration_def prepared.state);
             tail_without_stack program globals prepared.lowered prepared.context prepared.state env_count ()
           | _ -> failwith "shared tail fragment") [256; 263];
         2
@@ -685,7 +681,6 @@ let binary_prefixes () =
     let compilation = Hmc_compiler.compile source layout memory pages () in
     match compilation with
     | Hmc_compiler.Compiled artifact ->
-      ghost_ (Hmc_compiler.correct_def source layout memory pages artifact);
       let program : I.program = match Hmc_specialization.compile source with
         | Hmc_specialization.Compiled monomorphic ->
           I.build (Hmc_cfg_program.build (Hmc_closure_program.build monomorphic))
@@ -699,8 +694,6 @@ let binary_prefixes () =
       ghost_ (Binary.accepted_def program layout memory pages compiled);
       let start = compiled.Binary.start in
       let prepared = compiled.Binary.prepared in
-      let _ = ghost_ (Hmc_wasm_program_static.dispatcher_typed program prepared.Init.lowered prepared.Init.context
-        prepared.Init.state.State.registers) in
       let compiled_again = Binary.sufficient program layout memory pages () in
       if compiled_again.Binary.bytes <> compiled.Binary.bytes then failwith "binary acceptance completeness";
       ghost_ (Binary.built_def program layout memory start prepared pages compiled.Binary.bytes;

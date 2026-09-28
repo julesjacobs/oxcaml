@@ -45,7 +45,7 @@ let rec walk_loop : (goal : walk_goal) @ immutable -> (h : (node Pref.heap) Ghos
         let middle = ghost_ (Pref.own (borrow_ state)) in
         let next_scope : ((x : node Pref.t) @ immutable ->
           {u : unit | not (H.mem middle x) || source_ok middle x}) @ total ghost = ghost_ (fun x ->
-            scope.Ghost.ghost x; Effective_compression_proofs.redirect_source h.Ghost.ghost scope.Ghost.ghost p root x (); ()) in
+            Effective_compression_proofs.redirect_source h.Ghost.ghost scope.Ghost.ghost p root x (); ()) in
         ghost_ (Effective_compression_proofs.redirect_levels h.Ghost.ghost p root root (); active_def h.Ghost.ghost root; active_def middle root; Copy_heap_proofs.put_frame h.Ghost.ghost p link q);
         let state : {t : node Pref.token | Pref.own t === middle && H.mem middle q && active middle root && resolves middle q root next_path} = state in
         let h_witness5 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (middle)} in

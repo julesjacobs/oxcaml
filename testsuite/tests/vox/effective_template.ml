@@ -46,7 +46,7 @@ let rec (unique @ total) : (h : node Pref.heap) @ immutable ->
     valid_template_def h heads a; valid_template_def h heads b;
     let pa = root a in let pb = root b in
     finite_def h heads pa; finite_def h heads pb;
-    generic_def h heads pa; generic_def h heads pb;
+    generic_def h heads pb;
     root_def a; root_def b; head_desc_def a; head_desc_def b;
     head_generic_def a; head_generic_def b;
     interpret_def rho choices a; interpret_def rho choices b;

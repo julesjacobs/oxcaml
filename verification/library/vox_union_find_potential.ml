@@ -50,7 +50,7 @@ let rec (level_bounds @ total) : (cap : Bigint.t) -> (rank : Bigint.t) ->
     (())
   else (
     let next = Bigint.sub bound 1Z in
-    let u = () in level_bounds cap rank parent next (u);
+    level_bounds cap rank parent next ();
     ())
 [@@decreases let bound : Bigint.t = bound in bound]
 
@@ -70,7 +70,7 @@ let rec (index_bounds @ total) : (cap : Bigint.t) -> (lev : Bigint.t) ->
     (())
   else (
     let next = Bigint.sub bound 1Z in
-    let u = () in index_bounds cap lev rank parent next (u);
+    index_bounds cap lev rank parent next ();
     ())
 [@@decreases let bound : Bigint.t = bound in bound]
 
@@ -118,7 +118,7 @@ let rec (level_at_least @ total) : (cap : Bigint.t) -> (rank : Bigint.t) ->
     (())
   else (
     let next = Bigint.sub bound 1Z in
-    let u = () in level_at_least cap rank parent next witness (u);
+    level_at_least cap rank parent next witness ();
     ())
 [@@decreases let bound : Bigint.t = bound in bound]
 
@@ -135,7 +135,7 @@ let rec (index_at_least @ total) : (cap : Bigint.t) -> (lev : Bigint.t) ->
     (())
   else (
     let next = Bigint.sub bound 1Z in
-    let u = () in index_at_least cap lev rank parent next witness (u);
+    index_at_least cap lev rank parent next witness ();
     ())
 [@@decreases let bound : Bigint.t = bound in bound]
 
@@ -173,14 +173,14 @@ let (analyze @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     u in
   A.monotone cap alpha one one one rank monotone;
   let bound = Bigint.sub alpha 1Z in
-  let u = () in level_bounds cap rank parent bound (u);
+  level_bounds cap rank parent bound ();
   node_level_def cap alpha rank parent;
   let lev = node_level cap alpha rank parent in
-  let u = () in next_level cap lev rank (u);
-  let u = () in index_bounds cap lev rank parent rank (u);
+  next_level cap lev rank ();
+  index_bounds cap lev rank parent rank ();
   node_index_def cap alpha rank parent;
   let idx = node_index cap alpha rank parent in
-  let u = () in nonnegative alpha rank lev idx (u);
+  nonnegative alpha rank lev idx ();
   node_phi_def cap alpha rank parent;
   ()
 
@@ -197,38 +197,31 @@ let (compression @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
          node_phi cap alpha rank old_parent else true)} =
     fun cap alpha rank old_parent new_parent premise ->
   let _ = premise in
-  let u = () in analyze cap alpha rank old_parent (u);
-  let u = () in analyze cap alpha rank new_parent (u);
+  analyze cap alpha rank old_parent ();
+  analyze cap alpha rank new_parent ();
   let old_level = node_level cap alpha rank old_parent in
   let old_index = node_index cap alpha rank old_parent in
   let new_level = node_level cap alpha rank new_parent in
   let new_index = node_index cap alpha rank new_parent in
-  node_level_def cap alpha rank old_parent;
   node_level_def cap alpha rank new_parent;
-  node_index_def cap alpha rank old_parent;
   node_index_def cap alpha rank new_parent;
   node_phi_def cap alpha rank old_parent;
   node_phi_def cap alpha rank new_parent;
   let bound = Bigint.sub alpha 1Z in
-  let u = () in level_at_least cap rank new_parent bound old_level (u);
+  level_at_least cap rank new_parent bound old_level ();
   if old_level < new_level then (
-    let u = () in
-    decrease alpha rank old_level old_index new_level new_index (u);
+    decrease alpha rank old_level old_index new_level new_index ();
     ())
   else (
-    let u = () in
-    index_at_least cap old_level rank new_parent rank old_index (u);
+    index_at_least cap old_level rank new_parent rank old_index ();
     if A.iter cap old_level (Bigint.add old_index 1Z) rank <= new_parent then (
-      let u = () in next_level cap old_level rank (u);
+      next_level cap old_level rank ();
       let next = Bigint.add old_index 1Z in
-      let u = () in
-      index_at_least cap old_level rank new_parent rank next (u);
-      let u = () in
-      decrease alpha rank old_level old_index new_level new_index (u);
+      index_at_least cap old_level rank new_parent rank next ();
+      decrease alpha rank old_level old_index new_level new_index ();
       ())
     else (
-      let u = () in
-      decrease alpha rank old_level old_index new_level new_index (u);
+      decrease alpha rank old_level old_index new_level new_index ();
       ()))
 
 let (repeated_level @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
@@ -244,8 +237,8 @@ let (repeated_level @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
       node_phi cap alpha rank parent} =
     fun cap alpha rank parent later_rank later_parent root premise ->
   let _ = premise in
-  let u = () in analyze cap alpha rank parent (u);
-  let u = () in analyze cap alpha later_rank later_parent (u);
+  analyze cap alpha rank parent ();
+  analyze cap alpha later_rank later_parent ();
   let lev = node_level cap alpha rank parent in
   let idx = node_index cap alpha rank parent in
   let one = 1Z in
@@ -261,7 +254,7 @@ let (repeated_level @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     0Z <= idx && 0Z <= one && Bigint.add idx one <= cap &&
     0Z <= rank && rank <= cap} = u in
   A.compose cap lev idx one rank composition;
-  let u = () in compression cap alpha rank parent root (u);
+  compression cap alpha rank parent root ();
   ()
 
 let rec (level_cap @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
@@ -274,11 +267,11 @@ let rec (level_cap @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
   level_def small rank parent bound; level_def large rank parent bound;
   if bound > 0Z then (
     let one = 1Z in
-    let u = () in A.coherent small large bound one rank (u);
+    A.coherent small large bound one rank ();
     A.minimum_def small (A.iter large bound 1Z rank);
     if A.iter small bound 1Z rank > parent then (
       let next = Bigint.sub bound 1Z in
-      let u = () in level_cap small large rank parent next (u));
+      level_cap small large rank parent next ());
     ())
   else ()
 [@@decreases let bound : Bigint.t = bound in bound]
@@ -293,11 +286,11 @@ let rec (index_cap @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
   let _ = premise in
   index_def small lev rank parent bound; index_def large lev rank parent bound;
   if bound > 1Z then (
-    let u = () in A.coherent small large lev bound rank (u);
+    A.coherent small large lev bound rank ();
     A.minimum_def small (A.iter large lev bound rank);
     if A.iter small lev bound rank > parent then (
       let next = Bigint.sub bound 1Z in
-      let u = () in index_cap small large lev rank parent next (u));
+      index_cap small large lev rank parent next ());
     ())
   else ()
 [@@decreases let bound : Bigint.t = bound in bound]
@@ -314,16 +307,16 @@ let (reparameterize @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
   node_phi_def small a rank parent; node_phi_def large b rank parent;
   if rank > 0Z then (
     let one = 1Z in
-    let u = () in analyze small a rank parent (u);
-    let u = () in A.monotone small a one one one rank (u);
-    let u = () in A.coherent small large a one rank (u);
+    analyze small a rank parent ();
+    A.monotone small a one one one rank ();
+    A.coherent small large a one rank ();
     A.minimum_def small (A.iter large a 1Z rank);
     let old_bound = Bigint.sub a 1Z in
-    let u = () in level_cap small large rank parent old_bound (u);
+    level_cap small large rank parent old_bound ();
     node_level_def small a rank parent; node_level_def large b rank parent;
     if b > a then level_def large rank parent a;
     let lev = node_level small a rank parent in
-    let u = () in index_cap small large lev rank parent rank (u);
+    index_cap small large lev rank parent rank ();
     node_index_def small a rank parent; node_index_def large b rank parent;
     phi_def a rank lev (node_index small a rank parent);
     phi_def b rank lev (node_index large b rank parent);

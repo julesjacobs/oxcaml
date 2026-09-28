@@ -56,7 +56,7 @@
       "path": "verification/library/vox_rsa.ml",
       "from": "let (rsa_power @ total) (p : t) (q : t) (e : t) (d : t) (m : t) :",
       "to": "rsa_power p q e d m;",
-      "lines": "31-62",
+      "lines": "31-61",
       "text": "The round trip reduces to `rsa_power`. With `k = e * d - 1`, `k` is a multiple of `lambda p q`, hence of `p - 1` and of `q - 1` (`lambda_lcm`, `divides_transitive`). `fermat_period` gives `m^(1 + kp * (p - 1)) mod p = m mod p` for every `m`, multiples of `p` included, and the same for `q`; `crt_unique` then concludes that two numbers below `p * q` with the same residues are equal. `roundtrip_correct` adds `reduce_power` and `power_multiply` to get from `(m^e mod n)^d mod n` to `m^(e*d) mod n`. Each lemma is an ordinary total ghost function, and its implication is written `if premise then conclusion else true`."
     },
     {
@@ -72,7 +72,7 @@
       "path": "verification/library/vox_rsa.ml",
       "from": "let (recombine @ total) (p : t) (q : t) (rp : t) (rq : t) (inverse : t) :",
       "to": "  r",
-      "lines": "130-138",
+      "lines": "127-135",
       "text": "`decrypt_crt`, below, computes the residues modulo each prime with `modexp` and recombines them here with Garner's formula `rp + p * (((rq - rp) * inverse) mod q)`. The inverse of `p` modulo `q` is `p^(q-2) mod q`, computed by `modexp` itself, and `computed_inverse_correct` proves it is an inverse by Fermat's little theorem. `recombine` returns `r` with both residues proved, and `decrypt_crt_correct` uses `crt_unique` to conclude that `r = c^d mod (p * q)`. Each residue uses the full exponent `d`; the usual reduction of `d` modulo `p - 1` and `q - 1` is left out."
     },
     {

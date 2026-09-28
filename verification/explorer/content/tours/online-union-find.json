@@ -32,7 +32,7 @@
       "path": "testsuite/tests/vox/connectivity.ml",
       "from": "let find : (x : U.elem) @ immutable ->",
       "to": "let r = #{value; owned} in r",
-      "lines": "111-137",
+      "lines": "110-136",
       "text": "The public client keeps a ghost `wallet` next to the state in the unboxed record `funded`, and every wrapper conserves its `budget`, the account plus the wallet. `find` requires at most 8 elements and 44 credits in the wallet: the client's `fee_bounds` obtains 44 from the interface's 4a + 12 with a ≤ 8, the bound that `Vox_ackermann.inverse` gives for a population of 8. The wrapper splits exactly `find_fee` credits off the wallet with `C.split`, pays them to `U.find`, and packs the new state with the rest of the wallet. Its last conjunct, a cost of 2 + 4·depth ticks, follows from the `Find` event `U.find` appends, `event_cost` before and after the call, and the definitions of `total` and `weight`."
     },
     {
@@ -40,7 +40,7 @@
       "path": "testsuite/tests/vox/connectivity.ml",
       "from": "(* The whole run:",
       "to": "U.ticks owned.#state <= initial} = () in",
-      "lines": "322-338",
+      "lines": "311-327",
       "text": "`run` makes five elements, performs four unions and three finds, and before each call names, through the abstract `depth`, the parent links it will follow: `work6` to `work9` for the two finds inside each union, `work10` and `work11` for the first two finds. The third find is of `root0`, the root the first find returned; `root_law` shows that it is a member at depth 0, so that find costs exactly 2 ticks. From the recorded events the client proves that the run costs 70 ticks plus four per link followed, and that the ticks are covered by the 1,000 credits it minted. A final ghost block records the account after each step as a trace for `Vox_union_find_online_cost.sequence`, which bounds 70 + 4·`work` by the budget paid, 1 + 11·5 + 44·3 + 132·4 = 716."
     },
     {

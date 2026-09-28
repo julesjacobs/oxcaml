@@ -19,19 +19,19 @@ let run (b : ty @ immutable ghost) =
   let e : {e : D.term | D.scoped_term D.Z e} = refine_ e in
   let refine_ out = Hm_infer.closed_hm e in let refine_ e = e in
   let after = ghost_ (Pref.own (borrow_ out.#state)) in
-  ghost_ (let u = () in P.id_id_completes out.#execution after out.#pool (refine_ u));
+  ghost_ (P.id_id_completes out.#execution after out.#pool (refine_ ()));
   match out.#value with None ->
     ghost_ (let _impossible : {u : unit | false} = refine_ () in ()); assert false
   | Some p ->
-    ghost_ (let u = () in
-      let refine_ tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (refine_ u) in
+    ghost_ (
+      let refine_ tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (refine_ ()) in
       let h = H.empty () in let pool : Generalize_spec.pool = Generalize_spec.Empty in
       let env : Hm_environment_spec.env = Hm_environment_spec.Empty in
-      Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (refine_ u);
+      Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (refine_ ());
       let use : ((delta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
         {u : unit | Function (b, b) === Level_mgu_spec.substitute delta (Level_finite_spec.readback tree)} ->
-        {u : unit | true}) @ total = fun _delta _factor -> let u = () in refine_ u in
-      P.id_id_factor out.#execution after out.#pool p tree b (refine_ u) true use; ()); ()
+        {u : unit | true}) @ total = fun _delta _factor -> refine_ () in
+      P.id_id_factor out.#execution after out.#pool p tree b (refine_ ()) true use; ()); ()
 
 let () =
   run (ghost_ Boolean);

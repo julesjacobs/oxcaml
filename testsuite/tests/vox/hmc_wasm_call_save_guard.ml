@@ -135,7 +135,7 @@ let (correct @ total) : (frames : Q.frames) @ immutable -> (stack_base : B.u32) 
       let out = Body.correct frames stack_base width stack_stop blocks block stored_capacity table heap runtime table_base table_count frame_count frame_stop signature activation cells old_padding context ty schema next env_count count old_pc fragment capacity
         padding padding_count padding_length state source base limit bytes suffix source_local base_local () in
       let after = {X.memory = out.Body.save.Loaded.saved.Source.written.Finish.memory; machine = {E.locals = out.Body.locals; stack = S.Empty}} in
-      ghost_ (S.add32_def base width;
+      ghost_ (
         Guard.correct blocks width stack_base base stack_limit stack_capacity frames (body fragment padding source_local base_local width)
           base_local limit_local depth tail outer state after ());
       Some out)

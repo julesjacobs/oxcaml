@@ -118,10 +118,9 @@ let rec (trace_invariant @ total) :
     match trace with
     | [] -> ()
     | acc :: rest ->
-      let u = () in
-      trace_invariant r inv preserve tail initial acc rest (u);
-      preserve x tail acc result (u);
-      u)
+      trace_invariant r inv preserve tail initial acc rest ();
+      preserve x tail acc result ();
+      ())
 
 let rec (model_invariant @ total) :
     (model : (('a : immutable_data) @ immutable total ->
@@ -141,12 +140,11 @@ let rec (model_invariant @ total) :
   match xs with
   | [] -> ()
   | x :: tail ->
-    let u = () in
     model_invariant model inv preserve tail initial
-      (u);
+      ();
     let acc = model_fold model tail initial in
-    preserve x tail acc (u);
-    u
+    preserve x tail acc ();
+    ()
 
 type ('a : immutable_data) control = Stop of 'a | Continue of 'a
 
@@ -279,9 +277,8 @@ let rec map_pre :
     ghost_ (Vox_traversal.map_rel_def r xs ys);
     ys
   | x :: tail ->
-    let u = () in
-    let y = f x (u) in
-    let ys = map_pre p r f tail (u) in
+    let y = f x () in
+    let ys = map_pre p r f tail () in
     let result = y :: ys in
     ghost_ (Vox_traversal.map_rel_def r xs result);
     result

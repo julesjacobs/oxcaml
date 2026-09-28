@@ -271,7 +271,7 @@ let (correct @ total) : (lowered : Lower.program) @ immutable -> (locals : Emit.
       let body_fuel = Guarded.cost fragment padding source_local base_local width limit_local base stack_limit in
       let tail = ghost_ (Call_Loaded.emit env_count capture plans table_base code_local address_local slots object_local source_local) in
       let after = T.stack prepared S.Empty in
-      ghost_ (Status.scope_def local outer; Status.zero_def ();
+      ghost_ (Status.scope_def local outer;
         Continue.labels_def T.Empty outer;
         Continue.labels_def (Emit.status local (Status.zero ()) T.Empty) (Continue.labels T.Empty outer);
         Continue.labels_def tail (Status.scope local outer);

@@ -100,13 +100,13 @@ let bind_searched :
       let refine_ lowered = Level_lower.lower h scope bound q t in
       let levels = ghost_ lowered.#edits in
       let middle = ghost_ (Pref.own (borrow_ lowered.#state)) in
-      ghost_ (let u = () in let flag = false in
-        lower_searched h bound levels p q flag search (refine_ u);
-        lower_observe h bound levels p (refine_ u); lower_observe h bound levels q (refine_ u);
-        lowering_at h bound levels p (refine_ u); frame_active h middle p (refine_ u);
-        lowering_at h bound levels q (refine_ u); frame_active h middle q (refine_ u);
-        below_def h p bound; lower_fixed h bound levels p (refine_ u); at_level_def middle p;
-        let tree = lowered.#tree in lower_bounded_at middle bound tree q (refine_ u));
+      ghost_ (let flag = false in
+        lower_searched h bound levels p q flag search (refine_ ());
+        lower_observe h bound levels p (refine_ ()); lower_observe h bound levels q (refine_ ());
+        lowering_at h bound levels p (refine_ ()); frame_active h middle p (refine_ ());
+        lowering_at h bound levels q (refine_ ()); frame_active h middle q (refine_ ());
+        below_def h p bound; lower_fixed h bound levels p (refine_ ()); at_level_def middle p;
+        let tree = lowered.#tree in lower_bounded_at middle bound tree q (refine_ ()));
       let t = lowered.#state in
       let t : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ t in
       let refine_ current = Pref.read p (borrow_ t) in let refine_ t = t in
@@ -146,11 +146,11 @@ let bind :
     let found = checked.#found in let mid = ghost_ (scan_heap h marks) in
     let scope_mid : ((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem mid x) || finite_scope mid x}) @ total ghost = ghost_ (fun x ->
-      let u = () in let refine_ u = scan_scope h scope p marks x (refine_ u) in refine_ u) in
-    ghost_ (let u = () in scan_heap_def h marks;
-      scan_observe h p marks p (refine_ u); scan_observe h p marks q (refine_ u);
+      let refine_ u = scan_scope h scope p marks x (refine_ ()) in refine_ u) in
+    ghost_ (scan_heap_def h marks;
+      scan_observe h p marks p (refine_ ()); scan_observe h p marks q (refine_ ());
       terminal_def h q; terminal_def mid q;
-      scan_searched h p marks p q found search (refine_ u));
+      scan_searched h p marks p q found search (refine_ ()));
     let t = checked.#state in
     let t : {t : node Pref.token | Pref.own t === mid && H.mem mid p && H.mem mid q
       && active mid p && active mid q && observe mid p === Some Var
@@ -268,10 +268,8 @@ let rec unify :
           let scope_middle : ((x : node Pref.t) @ immutable ->
               {u : unit | not (H.mem middle x) || finite_scope middle x}) @ total ghost =
             ghost_ (fun x ->
-              scope x;
-              let u = () in
-              unified_scope h scope a c left_ok middle ld x (refine_ u);
-              refine_ u) in
+              unified_scope h scope a c left_ok middle ld x (refine_ ());
+              refine_ ()) in
           let proof = ghost_ (
             let u = () in
             unified_frame h a c left_ok middle ld b (refine_ u);
@@ -283,8 +281,8 @@ let rec unify :
           let t : {t : node Pref.token | Pref.own t === middle && H.mem middle b && H.mem middle e && active middle b && active middle e} = refine_ t in
           let unmarked_middle : ((x : node Pref.t) @ immutable ->
             {u : unit | match H.at middle x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
-            unmarked x; let u = () in unified_scratch h a c left_ok middle ld x (refine_ u);
-            scratch_frame_def h middle x; refine_ u) in
+            unmarked x; unified_scratch h a c left_ok middle ld x (refine_ ());
+            scratch_frame_def h middle x; refine_ ()) in
           let refine_ right = unify middle scope_middle unmarked_middle b e t in
           let ok = right.#ok in
           let t = right.#state in

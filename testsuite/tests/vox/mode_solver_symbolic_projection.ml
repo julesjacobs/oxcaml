@@ -44,7 +44,6 @@ let (join_above_left @ total) :
     {u : unit | le a (join a b)} =
  fun a b ->
   ghost_ (join_def a b);
-  ghost_ (le_def a b);
   ghost_ (le_def a (join a b));
   ghost_ (rank_def a);
   ghost_ (rank_def b);
@@ -70,10 +69,6 @@ let (join_below_upper @ total) :
       || le (join a b) upper} =
  fun a b upper ->
   ghost_ (join_def a b);
-  ghost_ (le_def a b);
-  ghost_ (le_def a upper);
-  ghost_ (le_def b upper);
-  ghost_ (le_def (join a b) upper);
   ghost_ (rank_def a);
   ghost_ (rank_def b);
   ghost_ (rank_def upper);

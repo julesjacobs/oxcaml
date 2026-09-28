@@ -59,7 +59,7 @@ let (id_id @ total) : (a : mono) @ immutable ->
 let () =
   ghost_ (
     let a = Boolean in let z = Z in mono_wf_def z a;
-    let u = () in let _ = id_id a (refine_ u) in ());
+    let _ = id_id a (refine_ ()) in ());
   let zero = Z in let one = S zero in let two = S one in
   let s = Forall (one, Function (Parameter zero, Parameter one)) in
   assert (weaken_scheme one s = Forall (one, Function (Parameter zero, Parameter two)));

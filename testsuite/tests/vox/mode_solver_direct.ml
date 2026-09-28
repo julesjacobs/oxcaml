@@ -77,7 +77,6 @@ let (close_exact @ total) :
   ghost_ (le_def s.lower_y v.y);
   ghost_ (le_def v.y s.upper_y);
   ghost_ (le_def v.x v.y);
-  ghost_ (le_def (s.lower_y || s.lower_x) v.y);
   ghost_ (le_def v.x (s.upper_x && s.upper_y));
   ()
 
@@ -98,14 +97,11 @@ let (raw_add_exact @ total) :
   ghost_ (le_def v.x v.y);
   (match a with
    | Lower_x c ->
-     ghost_ (le_def c v.x);
-     ghost_ (le_def (s.lower_x || c) v.x)
+     ghost_ (le_def c v.x)
    | Upper_x c ->
-     ghost_ (le_def v.x c);
-     ghost_ (le_def v.x (s.upper_x && c))
+     ghost_ (le_def v.x c)
    | Lower_y c ->
-     ghost_ (le_def c v.y);
-     ghost_ (le_def (s.lower_y || c) v.y)
+     ghost_ (le_def c v.y)
    | Upper_y c ->
      ghost_ (le_def v.y c);
      ghost_ (le_def v.y (s.upper_y && c))
@@ -120,9 +116,6 @@ let (inconsistent_refutes @ total) :
   ghost_ (represents_def s v);
   ghost_ (le_def s.lower_x s.upper_x);
   ghost_ (le_def s.lower_y s.upper_y);
-  ghost_ (le_def s.lower_x v.x);
-  ghost_ (le_def v.x s.upper_x);
-  ghost_ (le_def s.lower_y v.y);
   ghost_ (le_def v.y s.upper_y);
   ()
 
@@ -180,7 +173,6 @@ let (greatest_model @ total) :
   ghost_ (normalized_def s);
   ghost_ (greatest_def s);
   ghost_ (represents_def s (greatest s));
-  ghost_ (le_def s.lower_x s.upper_x);
   ghost_ (le_def s.lower_y s.upper_y);
   ghost_ (le_def s.upper_x s.upper_y);
   ghost_ (le_def s.upper_x s.upper_x);
@@ -194,9 +186,7 @@ let (greatest_dominates @ total) :
  fun s v ->
   ghost_ (greatest_def s);
   ghost_ (represents_def s v);
-  ghost_ (le_def v.x s.upper_x);
   ghost_ (le_def v.y s.upper_y);
-  ghost_ (le_def v.x (greatest s).x);
   ghost_ (le_def v.y (greatest s).y);
   ()
 
@@ -307,10 +297,7 @@ let (project_complete @ total) :
   ghost_ (lift_def s y);
   ghost_ (represents_def s (lift s y));
   ghost_ (le_def s.lower_x s.lower_x);
-  ghost_ (le_def s.lower_x s.upper_x);
-  ghost_ (le_def s.lower_y y);
   ghost_ (le_def y s.upper_y);
-  ghost_ (le_def s.lower_x s.lower_y);
   ghost_ (le_def s.lower_x y);
   ()
 

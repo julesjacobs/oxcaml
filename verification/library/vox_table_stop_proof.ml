@@ -88,7 +88,6 @@ module Make (Key : Vox_table_map.Key) = struct
           let (_ : {u : unit | I.route model index (Some (key, value))
             (rank, lane)}) = () in
           R.route_info model index key value rank lane;
-          R.route_equal_key model index key query value rank lane;
           if rank <= stop then begin
             visited_misses view query (stop + 1) index key value rank lane;
             ()

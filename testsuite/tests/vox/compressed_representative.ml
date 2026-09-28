@@ -16,8 +16,8 @@ let rec walk_loop : (goal : walk_goal) @ immutable -> (h : (node Pref.heap) Ghos
       && resolves goal.heap goal.start root r.#path && active (Pref.own r.#state) root
       && H.mem (Pref.own r.#state) root && terminal (Pref.own r.#state) root} @ unique = fun goal h scope p root path state lift ->
     let refine_ state = state in
-    ghost_ (let u = () in Compression_path_proofs.resolution_terminal h.Ghost.ghost p root path.Ghost.ghost (refine_ u);
-      Level_unifier_metadata.resolution_active h.Ghost.ghost scope.Ghost.ghost p root path.Ghost.ghost (refine_ u); ());
+    ghost_ (Compression_path_proofs.resolution_terminal h.Ghost.ghost p root path.Ghost.ghost (refine_ ());
+      Level_unifier_metadata.resolution_active h.Ghost.ghost scope.Ghost.ghost p root path.Ghost.ghost (refine_ ()); ());
     let refine_ equal = Pref.equal p root in
     if equal then (
       let edits = ghost_ Done in ghost_ (rewritten_def h.Ghost.ghost h.Ghost.ghost edits);
@@ -41,18 +41,18 @@ let rec walk_loop : (goal : walk_goal) @ immutable -> (h : (node Pref.heap) Ghos
       let r = #{value = root; state; edits; path = goal.path} in refine_ r
         ) else (
         let rest = ghost_ (Compression_path_proofs.tail path.Ghost.ghost) in
-        ghost_ (let u = () in Compression_path_proofs.tail_resolves h.Ghost.ghost p q root path.Ghost.ghost (refine_ u);
+        ghost_ (Compression_path_proofs.tail_resolves h.Ghost.ghost p q root path.Ghost.ghost (refine_ ());
           scope.Ghost.ghost p; finite_scope_def h.Ghost.ghost p; source_ok_def h.Ghost.ghost p; ());
-        let next_path : {d : resolution | resolves (H.put h.Ghost.ghost p (redirect h.Ghost.ghost p root)) q root d} @ immutable ghost = ghost_ (let u = () in
-          let refine_ d = Compression_path_proofs.redirect_resolution h.Ghost.ghost p root q rest (refine_ u) in refine_ d) in
+        let next_path : {d : resolution | resolves (H.put h.Ghost.ghost p (redirect h.Ghost.ghost p root)) q root d} @ immutable ghost = ghost_ (
+          let refine_ d = Compression_path_proofs.redirect_resolution h.Ghost.ghost p root q rest (refine_ ()) in refine_ d) in
         let link = {old with desc = Link root} in ghost_ (redirect_def h.Ghost.ghost p root);
         let state : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ state in
         let refine_ state = Pref.write p link state in
         let middle = ghost_ (Pref.own (borrow_ state)) in
         let next_scope : ((x : node Pref.t) @ immutable ->
           {u : unit | not (H.mem middle x) || finite_scope middle x}) @ total ghost = ghost_ (fun x ->
-            scope.Ghost.ghost x; let u = () in Level_unifier_metadata.redirect_scope h.Ghost.ghost p root x (refine_ u); refine_ u) in
-        ghost_ (let u = () in Level_unifier_metadata.redirect_active h.Ghost.ghost p root q (refine_ u));
+            scope.Ghost.ghost x; Level_unifier_metadata.redirect_scope h.Ghost.ghost p root x (refine_ ()); refine_ ()) in
+        ghost_ (Level_unifier_metadata.redirect_active h.Ghost.ghost p root q (refine_ ()));
         let refine_ next_path = next_path in
         let state : {t : node Pref.token | Pref.own t === middle && active middle q && resolves middle q root next_path} = refine_ state in
         let h_witness5 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (middle)} in

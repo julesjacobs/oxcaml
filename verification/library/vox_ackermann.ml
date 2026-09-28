@@ -57,14 +57,12 @@ let rec (monotone @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
   else (
     let lower = Bigint.sub level 1Z in
     let xt = Bigint.add x 1Z in let yt = Bigint.add y 1Z in
-    let u = () in
-    monotone cap lower xt yt x y (u);
+    monotone cap lower xt yt x y ();
     let next_x = iter cap lower xt x in
     let next_y = iter cap lower yt y in
     bounds cap lower xt x; bounds cap lower yt y;
     let s = Bigint.sub small 1Z in let l = Bigint.sub large 1Z in
-    let u = () in
-    monotone cap level s l next_x next_y (u);
+    monotone cap level s l next_x next_y ();
     ())
 [@@decreases (level, small)]
 
@@ -112,7 +110,6 @@ let rec (compose @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
   else if level <= 0Z then (
     minimum_def cap (Bigint.add start sum);
     minimum_def cap (Bigint.add start first);
-    minimum_def cap (Bigint.add middle second);
     ())
   else (
     let lower = Bigint.sub level 1Z in
@@ -120,8 +117,7 @@ let rec (compose @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
     let next = iter cap lower repetitions start in
     bounds cap lower repetitions start;
     let rest = Bigint.sub first 1Z in
-    let u = () in
-    compose cap level rest second next (u);
+    compose cap level rest second next ();
     ())
 [@@decreases let first : Bigint.t = first in first]
 
@@ -137,7 +133,7 @@ let rec (level_growth @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
     minimum_def cap 2Z; ())
   else (
     let lower = Bigint.sub level 1Z in
-    let u = () in level_growth cap lower (u);
+    level_growth cap lower ();
     minimum_def cap (Bigint.add lower 2Z);
     let one = 1Z in
     let u = () in
@@ -169,12 +165,11 @@ let rec (search @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
   let value = iter cap level 1Z 1Z in
   if value >= cap then level
   else (
-    let u = () in level_growth cap level (u);
+    level_growth cap level ();
     minimum_def cap (Bigint.add level 2Z);
     let next = Bigint.add level 1Z in
     below_def cap next;
-    let u = () in
-    let result = search cap next (u) in
+    let result = search cap next () in
     result)
 [@@decreases let cap : Bigint.t = cap in
   let level : Bigint.t = level in Bigint.sub cap level]
@@ -212,7 +207,7 @@ let rec (coherent @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
   else (
     let lower = Bigint.sub level 1Z in
     let repetitions = Bigint.add start 1Z in
-    let u = () in coherent small large lower repetitions start (u);
+    coherent small large lower repetitions start ();
     let a = iter small lower repetitions start in
     let b = iter large lower repetitions start in
     bounds small lower repetitions start; bounds large lower repetitions start;
@@ -223,7 +218,7 @@ let rec (coherent @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
       iter_def small level rest a;
       ())
     else (
-      let u = () in coherent small large level rest b (u);
+      coherent small large level rest b ();
       minimum_def small (iter large level rest b);
       ()))
 [@@decreases (level, count)]
@@ -246,7 +241,7 @@ let (inverse_order @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
     {u : unit | a <= b} = fun small large a b premise ->
   let _ = premise in
   let one = 1Z in
-  let u = () in coherent small large b one one (u);
+  coherent small large b one one ();
   minimum_def small (iter large b 1Z 1Z);
   below_elim small a b;
   ()
@@ -276,12 +271,12 @@ let (inverse_doubling @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
   let _ = premise in
   let one = 1Z in
   if large > 1Z then (
-    let u = () in coherent small large a one one (u);
+    coherent small large a one one ();
     let z = iter large a 1Z 1Z in
     minimum_def small z; bounds large a 1Z 1Z;
-    let u = () in double_growth large a z (u);
+    double_growth large a z ();
     minimum_def large (Bigint.add (Bigint.mul 2Z z) 1Z);
-    let u = () in compose large a one one one (u);
+    compose large a one one one ();
     let next = Bigint.add a 1Z in
     iter_def large next 1Z 1Z;
     bounds large a 2Z 1Z;

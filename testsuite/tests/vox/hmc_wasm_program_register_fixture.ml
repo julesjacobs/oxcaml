@@ -27,7 +27,6 @@ let fixture (base : B.u32) (status : B.u32) =
   if R.load config.Assembly.loads {GE.globals; execution = {X.memory; machine = {E.locals = F.zero_locals config.Assembly.local_types; stack = S.Empty}}}
     <> Some {GE.globals; execution = imported} then failwith "canonical register import";
   let after = {before with Registers.heap = 4096; top = 9216; status; tag = {W.lo = 3; hi = 0}; payload = maximum} in
-  ghost_ (Registers.local_values after);
   let locals = Registers.locals after in
   let locals = List.fold_left (fun locals index -> set locals index (S.I32 4294967295)) locals [0; 2; 3; 5; 6; 7; 8; 9; 10] in
   let locals = List.fold_left (fun locals index -> set locals index (S.I64 maximum)) locals [14; 15; 16; 17] in

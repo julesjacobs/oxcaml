@@ -62,7 +62,7 @@ let differential : (p : C.program) @ immutable -> unit = fun p ->
       if not (Hmc_word64.equal a b) then failwith "source/manifest result differs"
     | _ -> failwith "source/manifest did not return a word") [0; 1; 9]
 let checked : D.term @ immutable -> C.program @ immutable = fun source ->
-  let p = build source in ghost_ (C.ready_def p; Hmc_monomorphic_typing.program_typed p);
+  let p = build source in ghost_ (C.ready_def p);
   checked_references p (C.links p.C.entry) (); check (C.manifest p.C.definitions) p.C.definitions; differential p; p
 let () =
   let p = checked (D.Lambda (var 0)) in

@@ -26,7 +26,6 @@ let (in_classes @ total) :
     else (
       ghost_ (
         O.observe_def nodes parents count;
-        O.labels_length parents count;
         Q.class_id_def (O.observe nodes parents count) id);
       false)
 
@@ -148,17 +147,13 @@ let rec (classes @ total) :
            ghost_ (O.class_at nodes parents count id ());
            [M.root parents id])
          else (
-           ghost_ (
-             O.observe_def nodes parents count;
-             O.labels_length parents count;
-             Q.class_id_def graph id);
+           ghost_ (Q.class_id_def graph id);
            []))
     | R.Add (left, right) | R.Eq_int (left, right) ->
       let first = classes nodes parents count left bindings in
       let second = classes nodes parents count right bindings in
       let result = collect nodes parents count pat first second [] count in
-      ghost_ (O.observe_def nodes parents count;
-      Q.classes_def graph pat bindings);
+      ghost_ (Q.classes_def graph pat bindings);
       result
     | R.Int_if (condition, yes, no) | R.Bool_if (condition, yes, no) ->
       let first = classes nodes parents count condition bindings in

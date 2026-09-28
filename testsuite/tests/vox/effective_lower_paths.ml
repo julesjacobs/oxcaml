@@ -14,19 +14,19 @@ let rec (bounded_path @ total) : (h : node Pref.heap) @ immutable -> (heads : E.
     let refine_ premise = premise in effective_bounded_def h heads bound tree;
     contains_def tree x; bound_root_def tree; let root = bound_root tree in
     if root === x then (let p = Stop in reaches_def h root x p; refine_ p)
-    else let u = () in match tree with
+    else match tree with
     | Tip _ -> let p = Stop in reaches_def h root x p; refine_ p
     | Through (_, child) ->
       let next = bound_root child in edge_def h root next;
-      let refine_ rest = bounded_path h heads bound child x (refine_ u) in
+      let refine_ rest = bounded_path h heads bound child x (refine_ ()) in
       let p = Step (next, rest) in reaches_def h root x p; refine_ p
     | Fork (_, a, b) -> if contains a x then (
       let next = bound_root a in edge_def h root next;
-      let refine_ rest = bounded_path h heads bound a x (refine_ u) in
+      let refine_ rest = bounded_path h heads bound a x (refine_ ()) in
       let p = Step (next, rest) in reaches_def h root x p; refine_ p)
       else (
       let next = bound_root b in edge_def h root next;
-      let refine_ rest = bounded_path h heads bound b x (refine_ u) in
+      let refine_ rest = bounded_path h heads bound b x (refine_ ()) in
       let p = Step (next, rest) in reaches_def h root x p; refine_ p))
 
 let rec (lower_path @ total) : (h : node Pref.heap) @ immutable -> (heads : E.heads) @ total ->
@@ -38,8 +38,8 @@ let rec (lower_path @ total) : (h : node Pref.heap) @ immutable -> (heads : E.he
   fun h heads bound edits p q path premise -> ghost_ (
     let refine_ premise = premise in let after = lower_heap h bound edits in
     reaches_def h p q path; reaches_def after p q path;
-    let u = () in match path with Stop -> refine_ u
-    | Step (next, rest) -> lowering_at h heads bound edits p (refine_ u);
+    match path with Stop -> refine_ ()
+    | Step (next, rest) -> lowering_at h heads bound edits p (refine_ ());
       lower_frame_def h after p; edge_def h p next; edge_def after p next;
-      lower_path h heads bound edits next q rest (refine_ u); refine_ u)
+      lower_path h heads bound edits next q rest (refine_ ()); refine_ ())
 

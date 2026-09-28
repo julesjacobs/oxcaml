@@ -987,7 +987,6 @@ module Validity_proofs : sig
             let left_height = height left in
             let right_height = height right in
             height_nonnegative left;
-            height_nonnegative right;
             maximum_def left_height right_height;
             ())
         else ()
@@ -1271,10 +1270,6 @@ module Validity_proofs : sig
         all_greater_def left_value middle;
         height_def left;
         height_def middle;
-        height_nonnegative left_left;
-        height_nonnegative middle_left;
-        height_nonnegative middle_right;
-        height_nonnegative right;
         left_right_heights left_left_height middle_left_height
             middle_right_height right_height middle_height left_height;
         all_less_weaken left_value middle_value left_left;
@@ -1343,14 +1338,9 @@ module Validity_proofs : sig
         all_less_def right_value middle;
         height_def right;
         height_def middle;
-        height_nonnegative left;
-        height_nonnegative middle_left;
-        height_nonnegative middle_right;
-        height_nonnegative right_right;
         right_left_heights left_height middle_left_height
             middle_right_height right_right_height middle_height right_height;
         all_less_weaken value middle_value left;
-        all_greater_weaken middle_value right_value right_right;
         make_left_child middle_value left value middle_left;
         make_right_child middle_value middle_right right_value right_right;
         make_node_valid new_left middle_value new_right;
@@ -1478,7 +1468,6 @@ module Validity_proofs : sig
       then
         (balance_def left value right;
         maximum_def old_left_height right_height;
-        height_nonnegative left;
         height_nonnegative right;
         if Bigint.compare left_height (Bigint.add right_height 1Z) > 0 then
           match left with
@@ -1562,7 +1551,6 @@ module Validity_proofs : sig
         (balance_def left value right;
         maximum_def left_height old_right_height;
         height_nonnegative left;
-        height_nonnegative right;
         if Bigint.compare left_height (Bigint.add right_height 1Z) > 0 then
           ()
         else if Bigint.compare right_height (Bigint.add left_height 1Z) > 0
@@ -2451,7 +2439,7 @@ module Validity_proofs : sig
                 induction;
             ()
           else
-            (Element_proofs.elements_all_less value left;
+            (
             let induction = add_tree_elements element right in
             add_right_step element left value right cached_height
                 induction;
@@ -2683,9 +2671,6 @@ module Validity_proofs : sig
         let result = add added_element set in
         add_def added_element set;
         let result_tree = result in
-        let expected = List_set.add_repr added_element (elements tree) in
-        let result_elements = elements result_tree in
-        List_proofs.same_repr_equal result_elements expected;
         Element_proofs.lookup_tree_elements element tree ();
         Element_proofs.lookup_tree_elements element result_tree
             ();
@@ -2713,9 +2698,6 @@ module Validity_proofs : sig
         let result_tree = result in
         let left_elements = elements left_tree in
         let right_elements = elements right_tree in
-        let expected = List_set.union_repr left_elements right_elements in
-        let result_elements = elements result_tree in
-        List_proofs.same_repr_equal result_elements expected;
         Element_proofs.lookup_tree_elements element left_tree ();
         Element_proofs.lookup_tree_elements element right_tree ();
         Element_proofs.lookup_tree_elements element result_tree

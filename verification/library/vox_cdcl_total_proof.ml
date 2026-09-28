@@ -585,12 +585,10 @@ let (reason_semantics_set @ total) : (formula : formula) ->
     bindings;
   reason_slots_set formula database learned next 0Z bindings index entry)
 
-let rec (sequence_length_nonnegative @ total) :
+let (sequence_length_nonnegative @ total) :
     (values : ('a : immutable_data) list) @ immutable ->
     {u : unit | Bigint.compare (Vox_sequence.length values) 0Z >= 0} @ ghost =
-  fun values -> ghost_ (
-  Vox_sequence.length_def values;
-  match values with [] -> () | _ :: rest -> sequence_length_nonnegative rest)
+  fun values -> ghost_ (Vox_sequence.length_def values)
 
 let rec (unassigned_reason_sources @ total) : (formula : formula) ->
     (database : proof_result list) -> (learned : int) ->
@@ -871,7 +869,6 @@ let rec (consistent_set @ total) : (bindings : binding option list) ->
   | [] -> ()
   | literal :: rest ->
     let query = variable literal in
-    at_def bindings v;
     at_def bindings query;
     at_def next query;
     binding_at_set bindings (Bigint.of_int v) (Some binding)
@@ -924,7 +921,6 @@ let rec (trail_levels_set @ total) : (bindings : binding option list) ->
   | [] -> ()
   | literal :: rest ->
     let query = variable literal in
-    at_def bindings v;
     at_def bindings query;
     at_def next query;
     binding_at_set bindings (Bigint.of_int v) (Some binding)
@@ -979,7 +975,6 @@ let rec (ordered_set @ total) : (bindings : binding option list) ->
   | [] -> ()
   | literal :: rest ->
     let query = variable literal in
-    at_def bindings v;
     at_def bindings query;
     at_def next query;
     binding_at_set bindings (Bigint.of_int v) (Some binding)
@@ -1217,7 +1212,6 @@ let rec (trail_antecedent_rank @ total) : (trail : literal list) ->
   | [] -> trail_has_def query []
   | literal :: rest ->
     trail_rank_bounds rest query;
-    trail_rank_bounds rest pivot;
     if Bigint.equal (Bigint.of_int (variable literal)) pivot then ()
     else (
       trail_after_subset rest pivot query;
@@ -1444,7 +1438,6 @@ let rec (reason_order_set @ total) : (formula : formula) ->
   | [] -> ()
   | literal :: rest ->
     let v = variable literal in
-    at_def bindings index;
     at_def bindings v;
     at_def next v;
     binding_at_set bindings (Bigint.of_int index) (Some entry) (Bigint.of_int
@@ -2401,7 +2394,6 @@ let (backtrack @ total) (formula : formula @ ghost)
   let bindings = retain_bindings target state.bindings in
   let trail = retain_trail target state.bindings state.trail in
   ghost_ (
-    trail_levels_bound state.bindings state.trail state.level;
     retained_trail_levels target state.bindings state.trail state.level;
     prefix_backtrack formula database state.bindings state.level target;
     prefix_stable_backtrack formula database state.bindings state.level target;
@@ -3148,7 +3140,6 @@ let (resolution_step_correct @ total) : (n : {n : int | 0 <= n}) ->
   fun n level trail bindings current variables value pivot reason resolved ->
   ghost_ (
   let partial = binding_values bindings in
-  current_variables_covered bindings trail level variables;
   earlier_clause_rank trail (Bigint.of_int pivot) reason;
   conflict_earlier_clause n bindings trail level pivot variables current;
   earlier_clause_rank trail (Bigint.of_int pivot) current;
@@ -3632,7 +3623,6 @@ let rec (propagate @ total) : (n : int) @ ghost ->
             else true)
         && false_clause (binding_values next.bindings) entry.clause} =
   fun n formula database state remaining ->
-  ghost_ (unassigned_bounds state.bindings);
   let partial = partial_of_bindings state.bindings in
   ghost_ (scan_formula_source partial formula);
   match scan_formula partial formula with
@@ -4338,7 +4328,6 @@ let rec (search @ total) :
         | Some remaining -> r.statistics.steps = state.steps + remaining} =
   fun n formula scores database state fuel ->
   let initial_bindings = ghost_ state.bindings in
-  ghost_ (progress_nonnegative n database state.bindings);
   match fuel with
   | Some 0 -> {answer = Unknown; statistics = statistics state}
   | Some _ | None ->
@@ -4367,8 +4356,6 @@ let rec (search @ total) :
               at_def state.bindings v);
             ghost_ (variable_def (Positive v));
             ghost_ (levels_weaken state.bindings state.level (state.level + 1));
-            ghost_ (ordered_weaken state.bindings state.trail state.level
-              (state.level + 1));
             let state = {state with
               level = state.level + 1;
               decisions = state.decisions + 1} in
@@ -4401,7 +4388,6 @@ let rec (search @ total) :
       ghost_ (result_clause_valid n formula learned);
       if state.level = 0 then (
         ghost_ (
-          result_clause_valid n formula learned;
           let _ = partial_of_bindings state.bindings in
           root_conflict_empty n state.bindings learned.clause);
         {answer = Unsat learned; statistics = statistics state})

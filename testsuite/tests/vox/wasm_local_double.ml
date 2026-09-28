@@ -14,7 +14,7 @@ let (correct @ total) : (source : B.u32) -> (destination : B.u32) -> (cursor : B
       && L.get out destination === Some (S.I32 (S.add32 cursor cursor)) && L.same_types state.X.machine.E.locals out
       && X.run (emit source destination) state === X.Done {X.memory = state.X.memory; machine = {E.locals = out; stack = state.X.machine.E.stack}}} @ immutable =
   fun source destination cursor state premise ->
-    ghost_ (S.add32_def cursor cursor; L.can_set_def state.X.machine.E.locals destination (S.I32 (S.add32 cursor cursor)); S.same_type_def (S.I32 cursor) (S.I32 (S.add32 cursor cursor)));
+    ghost_ (L.can_set_def state.X.machine.E.locals destination (S.I32 (S.add32 cursor cursor)); S.same_type_def (S.I32 cursor) (S.I32 (S.add32 cursor cursor)));
     match L.set state.X.machine.E.locals destination (S.I32 (S.add32 cursor cursor)) with
     | None -> unreachable_ ()
     | Some out ->

@@ -42,7 +42,6 @@ let (observe @ total) :
   let refine_ token = token in
   let first = ghost_ (C.credits (borrow_ token)) in
   let second = ghost_ (C.credits (borrow_ token)) in
-  ghost_ (C.nonnegative (borrow_ token));
   let available : {t : C.token | C.credits t > 0} = refine_ token in
   let refine_ result = C.tick available in
   ghost_ (let u = () in
@@ -59,7 +58,7 @@ let (roundtrip @ total) : (amount : {n : int | n >= 0}) ->
   ghost_ (let refine_ expected = amount in
     let expected : int = expected in let u = () in
     (refine_ u : {u : unit | C.credits result = expected}));
-  let u = () in refine_ u
+  refine_ ()
 
 let () =
   let limit = max_int in

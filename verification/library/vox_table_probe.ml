@@ -163,7 +163,7 @@ let rec (inverse_at @ total) :
       triangle (groups plan) (inverse plan offset) = offset} =
   fun plan offset ->
   if valid plan && 0 <= offset && offset < groups plan then begin
-  valid_def plan; groups_def plan; groups_range plan;
+  valid_def plan; groups_def plan;
   inverse_def plan offset;
   match plan with
   | One -> triangle_def 1 0; ()
@@ -186,7 +186,7 @@ let rec (inverse_rank @ total) :
       inverse plan (triangle (groups plan) rank) = rank} =
   fun plan rank ->
   if valid plan && 0 <= rank && rank < groups plan then begin
-  valid_def plan; groups_def plan; groups_range plan;
+  valid_def plan; groups_def plan;
   inverse_def plan (triangle (groups plan) rank);
   match plan with
   | One -> ()

@@ -65,7 +65,6 @@ let run () =
   let before = ghost_ (Pref.own (borrow_ token)) in
   let token = connect n n token in
   ghost_ (connected_def before n n;
-    Vox_pref_semantics.put before n.next (Some n) n.next;
     Vox_pref_semantics.put (H.put before n.next (Some n))
       n.prev (Some n) n.next);
   let next = n.next in

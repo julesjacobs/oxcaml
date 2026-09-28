@@ -19,10 +19,10 @@ let finish : (saved : node Pref.heap) @ immutable ghost -> (epoch : node Pref.t)
   fun saved epoch depth d base pool trail p dest t ->
     let refine_ p = p in let refine_ t = t in
     let h = ghost_ (heap saved epoch depth d) in
-    ghost_ (let u = () in history_at saved epoch depth d p (refine_ u));
+    ghost_ (history_at saved epoch depth d p (refine_ ()));
     let t : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ t in
     let refine_ old = Pref.read p (borrow_ t) in let refine_ t = t in
-    ghost_ (let u = () in memo_lookup saved epoch depth d p old (refine_ u));
+    ghost_ (memo_lookup saved epoch depth d p old (refine_ ()));
     let hit = match old.memo with Empty_memo | Forward _ -> None | Memo (stamp, q) ->
       let refine_ equal = Pref.equal stamp epoch in if equal then Some q else None in
     match hit with
@@ -69,7 +69,7 @@ let rec copy : (saved : node Pref.heap) @ immutable ghost ->
       && extends d r.#history && target_for saved r.#history p r.#value} @ unique =
   fun saved scope epoch depth d base pool trail p t ->
     let refine_ p = p in let refine_ t = t in
-    ghost_ (scope p; let u = () in history_at saved epoch depth d p (refine_ u));
+    ghost_ (scope p; history_at saved epoch depth d p (refine_ ()));
     let t : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ t in
     let refine_ old = Pref.read p (borrow_ t) in let refine_ t = t in
     match old.level with
@@ -77,7 +77,7 @@ let rec copy : (saved : node Pref.heap) @ immutable ghost ->
       ghost_ (target_for_def saved d p p; extends_def d d);
       let r = #{value = p; state = t; pool; trail; history = d} in refine_ r
     | Generic ->
-      ghost_ (let u = () in memo_lookup saved epoch depth d p old (refine_ u));
+      ghost_ (memo_lookup saved epoch depth d p old (refine_ ()));
       let hit = match old.memo with Empty_memo | Forward _ -> None | Memo (stamp, q) ->
         let refine_ equal = Pref.equal stamp epoch in if equal then Some q else None in
       match hit with
@@ -106,7 +106,7 @@ let rec copy : (saved : node Pref.heap) @ immutable ghost ->
             && match H.at saved p with None -> false | Some v ->
               v.level === Generic && prepared saved history v.desc dest} = refine_ t in
           let refine_ out = finish saved epoch depth history base pool trail p dest t in
-          ghost_ (let u = () in extension_trans d history out.#history (refine_ u));
+          ghost_ (extension_trans d history out.#history (refine_ ()));
           let r = #{value = out.#value; state = out.#state; pool = out.#pool; trail = out.#trail; history = out.#history} in refine_ r
         | List child ->
           let child : {p : node Pref.t | H.mem saved p} = refine_ child in
@@ -119,7 +119,7 @@ let rec copy : (saved : node Pref.heap) @ immutable ghost ->
             && match H.at saved p with None -> false | Some v ->
               v.level === Generic && prepared saved history v.desc dest} = refine_ t in
           let refine_ out = finish saved epoch depth history base pool trail p dest t in
-          ghost_ (let u = () in extension_trans d history out.#history (refine_ u));
+          ghost_ (extension_trans d history out.#history (refine_ ()));
           let r = #{value = out.#value; state = out.#state; pool = out.#pool; trail = out.#trail; history = out.#history} in refine_ r
         | Arrow (a, b) ->
           let a : {p : node Pref.t | H.mem saved p} = refine_ a in
@@ -139,8 +139,8 @@ let rec copy : (saved : node Pref.heap) @ immutable ghost ->
             && match H.at saved p with None -> false | Some v ->
               v.level === Generic && prepared saved d2 v.desc dest} = refine_ t in
           let refine_ out = finish saved epoch depth d2 base pool trail p dest t in
-          ghost_ (let u = () in extension_trans d d1 d2 (refine_ u);
-            extension_trans d d2 out.#history (refine_ u));
+          ghost_ (extension_trans d d1 d2 (refine_ ());
+            extension_trans d d2 out.#history (refine_ ()));
           let r = #{value = out.#value; state = out.#state; pool = out.#pool; trail = out.#trail; history = out.#history} in refine_ r
 
 let instantiate : (saved : node Pref.heap) @ immutable ghost ->
@@ -158,5 +158,5 @@ let instantiate : (saved : node Pref.heap) @ immutable ghost ->
   let t = step.state in
   let t : {t : node Pref.token | let refine_ p = p in valid saved epoch depth d && not (clean_session d) && Pref.own t === heap saved epoch depth d && pool === registered base epoch d && trail === touched d} = refine_ t in
   let refine_ r = copy saved scope epoch depth d base pool trail p t in let refine_ p = p in
-  ghost_ (let u = () in registered_scoped saved scope base epoch depth r.#history (refine_ u));
+  ghost_ (registered_scoped saved scope base epoch depth r.#history (refine_ ()));
   let out = #{value = r.#value; state = r.#state; pool = r.#pool; trail = r.#trail; epoch; history = r.#history} in refine_ out

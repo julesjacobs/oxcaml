@@ -55,7 +55,6 @@ let (roundtrip_correct @ total) (p : t) (q : t) (e : t) (d : t) (m : t) :
       power (power m e mod (p * q)) d mod (p * q) = m else true}
     @ ghost = ghost_ (
   valid_key_def p q e d;
-  prime_def p; prime_def q;
   let n = p * q in
   reduce_power (power m e) d n;
   power_multiply m e d;
@@ -68,8 +67,6 @@ let (roundtrip @ total) : (p : t) -> (q : t) -> (e : t) -> (d : t) ->
   fun p q e d message ->
   let m = message in
   ghost_ (valid_key_def p q e d);
-  ghost_ (prime_def p);
-  ghost_ (prime_def q);
   let n = p * q in
   let ciphertext = encrypt m e n in
   let plaintext = decrypt ciphertext d n in

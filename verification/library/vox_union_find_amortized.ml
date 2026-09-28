@@ -62,8 +62,8 @@ let (find_bound @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     let root = R.weight h (M.root p) in
     let lower = R.weight h (M.head p) in
     let path = edges h p in
-    let u = () in C.counting cap alpha lower root path (u);
-    let u = () in C.bound cap alpha lower root path (u);
+    C.counting cap alpha lower root path ();
+    C.bound cap alpha lower root path ();
     release_def cap alpha h p;
     Vox_union_find_worker.cost_def (M.depth p); find_fee_def alpha;
     ())

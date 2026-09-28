@@ -61,14 +61,12 @@ let run_pair spawn a left_body right_body =
           right_body ();
           let u = write_first s (Domain.self () :> int) in
           u) in
-      let u = () in
-      ghost_ (split_post_def u left_end right_end);
-      u) in
+      ghost_ (split_post_def () left_end right_end);
+      ()) in
     let {state; _} = result in
     Slice.finish state;
-    let u = () in
-    ghost_ (root_post_def u eventual);
-    u) in
+    ghost_ (root_post_def () eventual);
+    ()) in
   let {state; _} = result in
   let values = Owned_array.into_iarray state in
   values

@@ -21,13 +21,13 @@ let (equal_roots @ total) : (before : node Pref.heap) @ immutable ->
       let refine_ t = trees x in if H.mem h x then readback t else Variable x in
     let normal : ((x : node Pref.t) @ immutable ->
       {u : unit | let refine_ t = trees x in Level_mgu_spec.normalizes h sigma x t}) @ total = fun x ->
-      sigma_def x; let refine_ t = trees x in Level_mgu_spec.normalizes_def h sigma x t; let u = () in refine_ u in
+      sigma_def x; let refine_ t = trees x in Level_mgu_spec.normalizes_def h sigma x t; refine_ () in
     let model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h sigma x}) @ total = fun x ->
       let refine_ u = Level_mgu_proofs.normal_model_at h trees sigma normal x in refine_ u in
-    let u = () in Optimized_model_proofs.success_forward_at before sigma old_p old_q h d model old_p (refine_ u);
-    Level_unifier_proofs.resolution_model h sigma model old_p p rp (refine_ u);
-    Level_unifier_proofs.resolution_model h sigma model old_q q rq (refine_ u);
+    Optimized_model_proofs.success_forward_at before sigma old_p old_q h d model old_p (refine_ ());
+    Level_unifier_proofs.resolution_model h sigma model old_p p rp (refine_ ());
+    Level_unifier_proofs.resolution_model h sigma model old_q q rq (refine_ ());
     finite_def h source; finite_def h target; sigma_def p; sigma_def q;
     let refine_ a = trees p in let refine_ b = trees q in
-    Level_finite_proofs.finite_unique h a source (refine_ u);
-    Level_finite_proofs.finite_unique h b target (refine_ u); refine_ u)
+    Level_finite_proofs.finite_unique h a source (refine_ ());
+    Level_finite_proofs.finite_unique h b target (refine_ ()); refine_ ())

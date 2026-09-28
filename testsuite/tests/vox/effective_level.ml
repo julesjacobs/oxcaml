@@ -126,8 +126,6 @@ let (closed_ordered @ total) : (h : node Pref.heap) @ immutable ->
     Generalize_proofs.closed_observe h cut filtered p ();
     G.closed_at_def h after cut filtered p;
     effective_ordered_def h heads p; effective_ordered_def after heads p;
-    representative_covered_def h cut pool p;
-    representatives_member h pool p;
     terminal_def h p; observe_def h p; G.covered_def h cut pool p;
     at_level_def h p;
     match H.at h p with None -> () | Some v ->

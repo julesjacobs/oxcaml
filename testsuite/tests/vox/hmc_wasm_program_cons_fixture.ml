@@ -72,7 +72,6 @@ let fixture : (program : Program.program) @ immutable -> (globals : Machine.glob
         Hmc_pointer_frame_shape.size signature) in
       let length = Capacity.remaining (Capacity.capacity program.Program.origin.Hmc_cfg_program.blocks) (Codec.size signature) () in
       let padding = Pad.cells length in
-      ghost_ (Pad.length length);
       let cells = Codec.encode signature activation padding () in
       (match Hmc_u32_index.encode 1000 (Heap.length cells), Hmc_u32_index.encode 1000 activation.Frame.pc,
           Hmc_u32_index.encode 1000 (Codec.locals_size signature.G.locals) with
@@ -111,7 +110,6 @@ let fixture : (program : Program.program) @ immutable -> (globals : Machine.glob
               ghost_ (Hmc_wasm_program_block.corresponds_def globals signature (Program.Keep (G.Cons next)) capacity 1000 (Hmc_wasm_program_block.Structured lowered);
                 Block.corresponds_def globals signature (G.Cons next) capacity 1000 lowered;
                 Hmc_wasm_value_pop.matches_def signature next capacity 1000 fragment;
-                Hmc_wasm_relayout_geometry.size_represents (Codec.locals_size signature.G.locals) env_count ();
                 Bounds.covers_def memory limit;
                 Hmc_heap_step.request_def program configuration.Machine.state;
                 Hmc_heap_allocating.request_def (G.Cons next) activation;
@@ -119,7 +117,6 @@ let fixture : (program : Program.program) @ immutable -> (globals : Machine.glob
                 Wasm_locals.get_def (S.Push (S.I32 cursor, S.Push (S.I32 limit, scratch))) 0;
                 Wasm_locals.get_def (S.Push (S.I32 cursor, S.Push (S.I32 limit, scratch))) 1;
                 Wasm_locals.get_def (S.Push (S.I32 limit, scratch)) 0;
-                Wasm_control_branch_continue.labels_def T.Empty outer;
                 Wasm_control_branch_target.valid_def 1 (Wasm_control_branch_continue.labels T.Empty outer);
                 Wasm_control_branch_target.valid_def 0 outer);
               let structured = Entry.locals 0 1 2 slots in

@@ -44,7 +44,6 @@ let fixture (base : B.u32) (pc : W.limb) =
     | T.Running selected -> if selected <> Dispatch.selection table pc 0 T.No_labels state then failwith "selection mismatch"
     | _ -> failwith "selection did not reach block");
     if not (Wasm_nesting.structured code) then failwith "dispatcher structure" else
-    ghost_ (Wasm_control_codec.roundtrip code ());
     if pc = 3 then (
       (match Table.lookup table pc with
       | Some _ -> failwith "unknown PC found"

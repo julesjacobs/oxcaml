@@ -41,7 +41,7 @@ let run mode =
   let scope : ((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h x) || finite_scope h x}) @ total ghost = ghost_ (fun x ->
     cell_def d_a 0; cell_def d_w 4; cell_def d_b 4; cell_def d_la 4; cell_def d_lw 4; cell_def d_nested 4;
-    active_all a; active_all w; active_all b; active_all la; active_all lw; active_all nested;
+    active_all a; active_all w; active_all b; active_all la;
     finite_scope_def h x; source_ok_def h x; ()) in
   let unmarked : ((x : node Pref.t) @ immutable ->
       {u : unit | match H.at h x with None -> true | Some v -> not v.visited})

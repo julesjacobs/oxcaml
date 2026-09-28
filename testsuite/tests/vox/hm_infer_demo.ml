@@ -33,7 +33,7 @@ let (scoped_fixture @ total) : (s : sample) ->
   term_let_free_def id; term_let_free_def applied; term_let_free_def bad;
   term_let_free_def call; term_let_free_def loop; term_let_free_def self_return;
   term_let_free_def omega_body; term_let_free_def omega;
-  let u = () in refine_ u)
+  refine_ ())
 
 
 let rec pool_size = function Generalize_spec.Empty -> 0
@@ -52,9 +52,9 @@ let run sample expected =
     let after = ghost_ (Pref.own (borrow_ out.#state)) in
     ghost_ (let h = H.empty () in let pool : Generalize_spec.pool = Generalize_spec.Empty in
       let env : Hm_environment_spec.env = Hm_environment_spec.Empty in
-      let u = () in Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (refine_ u);
-      let refine_ tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (refine_ u) in
-      let refine_ _typing = Hm_sound_proofs.closed_sound out.#execution after out.#pool p tree (refine_ u) in ());
+      Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (refine_ ());
+      let refine_ tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (refine_ ()) in
+      let refine_ _typing = Hm_sound_proofs.closed_sound out.#execution after out.#pool p tree (refine_ ()) in ());
     let state = out.#state in let state : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ state in
     let refine_ v = Pref.read p (borrow_ state) in
     assert (v.level = Finite 0 && not v.visited)

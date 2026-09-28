@@ -48,7 +48,7 @@
       "path": "testsuite/tests/vox/pref_ring_general.ml",
       "from": "module Owned = struct",
       "to": "adopt {sentinel; nodes = ghost_ []; state = made.state}",
-      "lines": "838-873",
+      "lines": "834-869",
       "text": "`Owned.t` is an unboxed record whose one field refines `payload` by `ring` and `separated`; its layout is `value & void & void`, so at run time it is the sentinel alone. `adopt` proves the invariant once, and each operation of `Owned` assumes it on entry and proves it again for the value it builds. `empty` makes a sentinel whose two cells point at itself and proves it a ring with no other nodes. Clients see `model`, `sentinel` and `heap` without their definitions: they can state the exact heap after an operation but cannot reach the representation."
     },
     {
@@ -56,7 +56,7 @@
       "path": "testsuite/tests/vox/pref_ring_general.ml",
       "from": "let insert : (sentinel : node) @ immutable ghost ->",
       "to": "{node = n; state = t}",
-      "lines": "788-816",
+      "lines": "784-812",
       "text": "`insert` reads the node after `left` with `read_node`, whose `None` branch ends in `unreachable_ ()`, a branch the checker proves dead from the precondition. `make_node` allocates the new node's two cells and points both at the node, and `insert_between` performs the four link writes. The resulting heap is the old one with eight `put`s, where the contract promises `inserted`, which has four: `allocation_inserted` proves the two equal, since the insertion overwrites both of the new node's cells, and `insert_law` proves the result a separated ring whose model is `append prefix (n :: suffix)`. `Pref_ring_proofs.allocation_frame` records that the allocation leaves the neighbors' cells unchanged."
     },
     {
@@ -80,7 +80,7 @@
       "path": "testsuite/tests/vox/pref_ring_general.ml",
       "from": "let (allocation_overwrite @ total)",
       "to": "else ())",
-      "lines": "735-756",
+      "lines": "731-752",
       "text": "Beyond the shared `Pref` base, the C primitives behind `alloc`, `read` and `write` and the checker's encoding of heap terms, the ring proofs call two heap laws, in this lemma only. `commute_law` reorders writes to distinct cells and `put_law` drops a write that a later write to the same cell overrides; `insert` needs them, through `allocation_inserted`, to show that the allocation's writes disappear under the insertion's. `put_law` is an `external`, so each call adds an assumed instance; `commute_law` is proved in `pref.ml`. The other ring proofs rely only on the encoding of `put`, `at` and `mem` and on the contracts of the `Pref` operations."
     },
     {

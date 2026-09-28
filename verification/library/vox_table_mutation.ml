@@ -176,7 +176,6 @@ module Make (Key : Vox_table_map.Key) = struct
       let result = erase_existing table before index key value token in
       ghost_ (
         I.valid_def before; I.valid_def result.#view;
-        M.slot_def before.model index;
         I.Map.absent_at before.model.slots (Bigint.of_int index) query;
         I.Map.erase_congruent before.model.slots key query;
         I.Map.erase_distinct before.model.slots query;

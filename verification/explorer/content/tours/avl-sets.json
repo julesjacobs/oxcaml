@@ -64,7 +64,7 @@
       "path": "testsuite/tests/vox/avl_sets.ml",
       "from": "(* The public module. [t] is a tree refined by [valid]",
       "to": "List_set.same_repr (elements left_tree) (elements right_tree)",
-      "lines": "2614-2657",
+      "lines": "2602-2645",
       "text": "`Set` is the public module: `Model_proofs` is sealed with `Int_set_intf.Extensional` and the file ends with `include Model_proofs.Set`, so `t` is abstract outside. Inside, `t` is `{tree : tree | valid tree}`. Every function that returns a `t`, such as `add`, must prove its tree valid, and every function that receives one may assume it; that assumption discharges the `()` validity arguments passed to `Operations.add` and `Operations.union`. `equal` runs `List_set.same_repr` on the two element lists, so it holds between trees of any shapes with the same contents."
     },
     {
@@ -72,7 +72,7 @@
       "path": "testsuite/tests/vox/avl_sets.ml",
       "from": "(* The induction on the tree. For an insertion into [left], the",
       "to": "balance_right_height left value new_right right_height;",
-      "lines": "1823-1868",
+      "lines": "1811-1856",
       "text": "`add_valid_height` is proved by induction on the tree: its recursive calls are the induction hypotheses, which is sound because totality allows only structural recursion here. The height bound is part of the statement because `balance` repairs a node only when its children differ in height by at most two, and that holds because the changed child grew by at most one. Each case combines the hypothesis with `add_all_less` or `add_all_greater` (the new subtree stays on its side of `value`), `balance_valid` and a `balance_*_height` lemma; those rest on four rotation-height lemmas over plain `Bigint` heights, proved by unfolding `maximum`. `Validity_proofs` is about 1,200 lines, the bulk of the demo, and its signature exports only this theorem."
     },
     {
@@ -80,7 +80,7 @@
       "path": "testsuite/tests/vox/avl_sets.ml",
       "from": "(* Both element lists are strictly increasing ([elements_valid])",
       "to": "List_proofs.same_repr_reflexive left_elements;",
-      "lines": "2753-2787",
+      "lines": "2735-2769",
       "text": "`extensional` is where the list model pays off. `elements_valid` shows that both element lists are strictly increasing, and the local total function `model_premise` turns the client's premise about `lookup` into one about `List_set.lookup_repr`, through `lookup_tree_elements`. `List_proofs.extensional_repr` then makes the two lists equal, and `same_repr_reflexive` shows that `equal`, which compares those lists, returns `true`. The proof is a chain of explicit lemma calls; the solver's part is to combine the ground facts those calls produce."
     },
     {

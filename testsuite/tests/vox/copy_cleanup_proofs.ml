@@ -24,7 +24,7 @@ let rec (sweep_at @ total) : (h : node Pref.heap) @ immutable ->
         sweep_at h rest tail x;
         let after = swept h rest in swept_at_def h after rest x;
         let after = swept h trail in swept_at_def h after trail x;
-        members x; ()
+        ()
       | Some old ->
         let v = clear_memo old in clear_memo_def old;
         let mid = H.put h p v in let tail : ((y : node Pref.t) @ immutable ->
@@ -155,9 +155,9 @@ let rec (history_clean @ total) : (saved : node Pref.heap) @ immutable ->
     | Fresh (rest, p, q, old, desc) ->
       history_clean saved epoch depth rest x ();
       let h = heap saved epoch depth rest in let v = cell desc depth in
-      cell_def desc depth; let mid = H.put h q v in let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
+      cell_def desc depth; let mid = H.put h q v in let w = session_mark rest old epoch q in
       put_frame mid p w x; ()
     | Alias (rest, p, q, old) ->
       history_clean saved epoch depth rest x ();
-      let h = heap saved epoch depth rest in let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
+      let h = heap saved epoch depth rest in let w = session_mark rest old epoch q in
       put_frame h p w x; ())

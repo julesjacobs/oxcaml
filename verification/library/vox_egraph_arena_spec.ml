@@ -37,7 +37,6 @@ let (append_preserves @ total) :
       allocated values count} ->
     {u : unit | allocated (I.updated values count (Some key)) (count + 1)}
     @ ghost = fun values count key premise -> ghost_ (
-  I.updated_length values count (Some key);
   I.updated_read values count (Some key) count;
   append_frame values count count key ();
   allocated_def (I.updated values count (Some key)) (count + 1);

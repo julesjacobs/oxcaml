@@ -39,7 +39,6 @@ type ('a : immutable_data) t = {front : 'a list; rear : 'a list}
 let[@def] contents (q : 'a t @ immutable) : 'a list @ total =
   let nil : 'a list = [] in
   let reversed = reverse_append q.rear nil in
-  ghost_ (reverse_append_correct q.rear nil; append_nil (reverse q.rear));
   append q.front reversed
 
 let (contents_model @ total) (q : 'a t @ immutable) :

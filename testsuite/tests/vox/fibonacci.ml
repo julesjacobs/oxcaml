@@ -80,8 +80,6 @@ module Fibonacci = struct
       let one = 1 in
       ghost_ (fib_def zero);
       ghost_ (fib_def one);
-      mul_identity zero;
-      mul_identity one;
       doubling_step zero one;
       u
     else

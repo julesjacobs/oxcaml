@@ -188,7 +188,6 @@ let rec (indexed_frame @ total) :
     match I.at arena (count - 1) with
     | Some (Some stored) ->
       M.lookup_congruent slots key stored;
-      K.symmetric key stored;
       M.put_get slots key index stored;
       indexed_frame slots arena (count - 1) index key ();
       ()

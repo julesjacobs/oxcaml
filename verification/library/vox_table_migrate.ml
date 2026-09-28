@@ -75,9 +75,7 @@ module Make (Key : Vox_table_map.Key) = struct
       I.valid_def before);
     if index = capacity then begin
       ghost_ (
-        S.take_all source_view.model.slots;
-        H.put_law (P.own (borrow_ token)) (T.location destination)
-          before.model before.model);
+        S.take_all source_view.model.slots);
       #{complete = true; view = before; state = token}
     end else begin
       let snapshot = {T.model = source_view.model} in

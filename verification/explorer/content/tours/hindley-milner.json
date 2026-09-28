@@ -64,7 +64,7 @@
       "path": "testsuite/tests/vox/hm_routed_infer.ml",
       "from": "| T.Let (runtime_rhs, runtime_body) ->",
       "to": "let child_pool : pool = Empty in",
-      "lines": "1042-1053",
+      "lines": "1030-1041",
       "text": "`work`, most of this 1,241-line file, is the inference itself: continuation-passing code that mutates real `Pref` cells through a unique token and builds the ghost `execution` alongside. Its postcondition is `ran` on that execution. At `let` it raises `Failure` through the `raise_any` external if the level would overflow, saves the current pool in the per-level array (`Rp.save`) and starts the child with an empty pool. After the right-hand side, `Rp.close_and_route` generalizes the child's pool and routes the surviving nodes to their levels' pools. Universally quantified invariants such as `facts` and `trees` are passed as ghost functions over nodes, because the logic has no quantifiers."
     },
     {

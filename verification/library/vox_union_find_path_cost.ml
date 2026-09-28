@@ -41,12 +41,10 @@ let rec (release @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     let current = P.node_level cap alpha e.rank e.parent in
     L.insert_mem current (levels cap alpha tail) lev;
     if Bigint.equal current lev then (
-      let u = () in
-      P.repeated_level cap alpha rank parent e.rank e.parent root (u);
+      P.repeated_level cap alpha rank parent e.rank e.parent root ();
       ())
     else (
-      let u = () in
-      release cap alpha rank parent e.parent root tail (u);
+      release cap alpha rank parent e.parent root tail ();
       ())
 
 let rec (counting @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
@@ -64,16 +62,15 @@ let rec (counting @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
   match edges with
   | [] -> L.range_def 0Z alpha []; L.size_def []; ()
   | e :: tail ->
-    let u = () in counting cap alpha e.parent root tail (u);
-    let u = () in P.analyze cap alpha e.rank e.parent (u);
-    let u = () in P.compression cap alpha e.rank e.parent root (u);
+    counting cap alpha e.parent root tail ();
+    P.analyze cap alpha e.rank e.parent ();
+    P.compression cap alpha e.rank e.parent root ();
     let lev = P.node_level cap alpha e.rank e.parent in
     let suffix = levels cap alpha tail in
     L.insert_range 0Z alpha suffix lev;
     L.insert_size 0Z alpha lev suffix;
     if L.mem lev suffix then (
-      let u = () in
-      release cap alpha e.rank e.parent e.parent root tail (u);
+      release cap alpha e.rank e.parent e.parent root tail ();
       ())
     else ()
 

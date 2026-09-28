@@ -161,7 +161,6 @@ let (available @ total) : (module_ : F.module_) @ immutable -> (before : M.confi
       (match F.element module_.F.table slot with
       | Some index -> (match F.lookup module_.F.functions index with
         | Some function_ ->
-          M.with_stack_def before.M.current rest;
           M.enter_def function_ tail {before with M.current = M.with_stack before.M.current rest}
         | None -> ())
       | None -> ())

@@ -78,7 +78,6 @@ let (evaluate @ total) : (p : C.program) @ immutable ->
       H.source_control_def control; H.target_control_def control; H.control_valid_def table control;
       (match control with
       | Evaluate (catalog, env, code) ->
-        H.environment_valid_def table env; H.source_environment_def catalog env;
         W.source_def env;
         W.target_def env;
         W.valid_def table env;
@@ -95,7 +94,6 @@ let (evaluate @ total) : (p : C.program) @ immutable ->
       | Apply_function (catalog, env, _, _) | Let_body (catalog, env, _, _)
       | Cons_head (catalog, env, _, _) | List_cases (catalog, env, _, _, _)
       | Conditional (catalog, env, _, _, _) | Primitive_left (_, catalog, env, _, _) ->
-        H.environment_valid_def table env; H.source_environment_def catalog env;
         W.source_def env;
         W.target_def env;
         W.valid_def table env;
@@ -126,7 +124,6 @@ let (return_value @ total) : (p : C.program) @ immutable ->
       && H.target out === Q.step definitions (H.target (Running (Return v, k)))} @ immutable =
   fun p definitions v k premise ->
   let state = Running (Return v, k) in
-  ghost_ (C.ready_def p);
   let table = C.manifest definitions in
   ghost_ (H.source_def state; H.target_def state; H.valid_def table state;
     let control = Return v in
@@ -148,16 +145,13 @@ let (return_value @ total) : (p : C.program) @ immutable ->
     | Apply_argument (f, rest) -> (match f with
       | W.Closure (catalog, body, env) -> Running (Evaluate (catalog, W.Bind (v, env), body), rest)
       | W.Recursive_closure (catalog, body, env) ->
-        ghost_ (H.environment_valid_def table (env);
-          H.source_environment_def catalog (env);
+        ghost_ (
           W.source_def (env);
           W.target_def (env);
           W.valid_def table (env);
           W.environment_def (env);
           W.length_def (env);
           E.append_def (W.source (env)) (E.environment catalog);
-          H.environment_valid_def table (W.Bind (f, env));
-          H.source_environment_def catalog (W.Bind (f, env));
           W.source_def (W.Bind (f, env));
           W.target_def (W.Bind (f, env));
           W.valid_def table (W.Bind (f, env));
@@ -172,8 +166,7 @@ let (return_value @ total) : (p : C.program) @ immutable ->
     | List_cases (catalog, env, empty, nonempty, rest) -> (match v with
       | W.Nil -> Running (Evaluate (catalog, env, empty), rest)
       | W.Cons (head, tail) ->
-        ghost_ (H.environment_valid_def table (W.Bind (tail, env));
-          H.source_environment_def catalog (W.Bind (tail, env));
+        ghost_ (
           W.source_def (W.Bind (tail, env));
           W.target_def (W.Bind (tail, env));
           W.valid_def table (W.Bind (tail, env));
@@ -214,7 +207,6 @@ let (return_value @ total) : (p : C.program) @ immutable ->
       | Apply_function (catalog, env, _, _) | Let_body (catalog, env, _, _)
       | Cons_head (catalog, env, _, _) | List_cases (catalog, env, _, _, _)
       | Conditional (catalog, env, _, _, _) | Primitive_left (_, catalog, env, _, _) ->
-        H.environment_valid_def table env; H.source_environment_def catalog env;
         W.source_def env;
         W.target_def env;
         W.valid_def table env;

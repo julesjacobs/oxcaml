@@ -93,10 +93,9 @@ module Make (Key : Vox_table_map.Key) = struct
       {u : unit | not (I.shape model && 0 <= index && index < model.capacity)
         || (match M.slot model index with Some _ -> true | None -> false)}
       @ ghost = fun model index -> ghost_ (
-    I.shape_def model; I.power_of_two_def model.capacity; M.slot_def model
+    I.shape_def model; M.slot_def model
       index;
     if I.shape model && 0 <= index && index < model.capacity then begin
-      Vox_table_model_proofs.index_bounds model.capacity index;
       Vox_table_model_proofs.at_present model.slots (Bigint.of_int index);
       ()
     end else ())

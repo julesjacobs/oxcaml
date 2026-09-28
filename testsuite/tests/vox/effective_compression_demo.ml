@@ -26,12 +26,12 @@ let run stale =
       && H.at h.Ghost.ghost link === Some link_node
       && H.at h.Ghost.ghost root === Some root_node
       && (H.mem h.Ghost.ghost x === (x === leaf || x === link || x === root))})) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let u = () in refine_ u)} in
+    {Ghost.ghost = ghost_ (fun x -> refine_ ())} in
   let scope : (((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h.Ghost.ghost x) || source_ok h.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> values.Ghost.ghost x;
       source_ok_def h.Ghost.ghost x; let var = Var in cell_def var 3;
-      let u = () in refine_ u)} in
+      refine_ ())} in
   let path = {Ghost.ghost = ghost_ (Via (link, Via (leaf, Here)))} in
   ghost_ (
     values.Ghost.ghost root; let var = Var in cell_def var 3;
@@ -48,9 +48,9 @@ let run stale =
   let refine_ equal = Pref.equal result.#value leaf in assert equal;
   let after = ghost_ (Pref.own (borrow_ result.#state)) in
   let edits = ghost_ result.#edits in
-  ghost_ (let u = () in
-    Effective_compression_proofs.frame h.Ghost.ghost after edits root (refine_ u);
-    Effective_compression_proofs.frame h.Ghost.ghost after edits link (refine_ u));
+  ghost_ (
+    Effective_compression_proofs.frame h.Ghost.ghost after edits root (refine_ ());
+    Effective_compression_proofs.frame h.Ghost.ghost after edits link (refine_ ()));
   let state = result.#state in
   let state : {t : node Pref.token | H.mem (Pref.own t) root} = refine_ state in
   let refine_ stored = Pref.read root (borrow_ state) in

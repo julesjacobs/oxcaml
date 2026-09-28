@@ -229,9 +229,7 @@ let (decode_sequence_step @ total) :
         () in
       let distance = Vox_lz4_spec_token.split_distance step.distance in
       Vox_lz4_spec_bytes.wire_byte_def wire distance_pos distance.low;
-      Vox_lz4_spec_bytes.source_at_def wire distance_pos;
       Vox_lz4_spec_bytes.wire_byte_def wire (distance_pos + 1) distance.high;
-      Vox_lz4_spec_bytes.source_at_def wire (distance_pos + 1);
       R.wire_byte_get wire distance_pos distance.low;
       R.wire_byte_get wire (distance_pos + 1) distance.high;
       let low = Vox_lz4_spec_parse.byte_of_char

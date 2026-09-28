@@ -29,12 +29,12 @@ let run hit =
     active_def h needle; active_def h leaf; active_def h pair; active_def h right;
     at_level_def h needle; at_level_def h leaf; at_level_def h pair; at_level_def h right;
     active_def h x; at_level_def h x; source_ok_def h x; finite_scope_def h x;
-    let u = () in refine_ u) in
+    refine_ ()) in
   let unmarked : ((x : node Pref.t) @ immutable ->
     {u : unit | match H.at h x with
       None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
     let desc : desc = Var in cell_def desc 0; cell_def pair_desc 0; cell_def root_desc 0;
-    active_def h x; at_level_def h x; let u = () in refine_ u) in
+    active_def h x; at_level_def h x; refine_ ()) in
   ghost_ (active_def h root; at_level_def h root; cell_def root_desc 0);
   let state : {t : node Pref.token | Pref.own t === h && H.mem h root && active h root} = refine_ state in
   let h_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h)} in
@@ -50,7 +50,7 @@ let run hit =
   let after = ghost_ (Pref.own (borrow_ state)) in
   let frame : ((x : node Pref.t) @ immutable ->
     {u : unit | H.mem h x === H.mem after x && H.at h x === H.at after x}) @ total ghost = ghost_ (fun x ->
-    let u = () in let refine_ u = restored_at h needle d x (refine_ u) in refine_ u) in
+    let refine_ u = restored_at h needle d x (refine_ ()) in refine_ u) in
   ghost_ (frame leaf; frame pair; frame root);
   let state : {t : node Pref.token | H.mem (Pref.own t) leaf} = refine_ state in
   let refine_ a = Pref.read leaf (borrow_ state) in let refine_ state = state in

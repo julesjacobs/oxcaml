@@ -40,7 +40,6 @@ let rec into_slice : (h : node Pref.heap Ghost.t) @ immutable ->
         ghost_ (bucket_def before i; insert_def before i p);
         let next_pool = Entry (p, old_pool) in
         let next = Slice.set s index next_pool in
-        ghost_ (insert_length before i p);
         let next : {s : pool Slice.t |
           routable h.Ghost.ghost (Iarray.length (Slice.current s)) rest} =
           next in

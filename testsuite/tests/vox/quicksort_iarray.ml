@@ -31,7 +31,7 @@ let (sequential_runner @ portable total) : runner =
     && Slice.final s === Slice.final right} = right in
   let _ = lf left_arg in
   let _ = rf right_arg in
-  let u = () in u
+  ()
 
 let rec (partition @ total) : (pivot : int) -> (size : int) ->
     (lower : int) -> (scan : int) ->
@@ -81,7 +81,6 @@ let rec (partition @ total) : (pivot : int) -> (size : int) ->
       else (
         ghost_ (Spec.accepts_def value pivot high_side);
         ghost_ (Spec.range_grow before pivot high_side lower scan);
-        ghost_ (Spec.permutation_refl before);
         lower, s) in
     let intermediate = ghost_ (Slice.current (borrow_ s2)) in
     let next : {s : int Slice.t |
@@ -132,7 +131,7 @@ let rec (sort_sized @ portable) : (run : runner) @ portable ->
     ghost_ (Spec.sorted_short before);
     ghost_ (Spec.permutation_refl before);
     Slice.finish s;
-    let u = () in u)
+    ())
   else (
     let zero = 0 in
     let last = size - 1 in
@@ -212,8 +211,7 @@ let rec (sort_sized @ portable) : (run : runner) @ portable ->
           let u = sort_sized run right_domains cutoff right_size sized in
           u) in
       Slice.finish middle;
-      let u = () in
-      u) in
+      ()) in
     let {value = u; state} = result in
     let after = ghost_ (Slice.current (borrow_ state)) in
     let premise = () in

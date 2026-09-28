@@ -51,7 +51,7 @@ let (correct @ total) : (fragment : Save.fragment) @ immutable -> (tail_plan : P
     let width : B.u32 = 48 + 16 * count in
     ghost_ (Memory.zero_def ();
       Hmc_wasm_cross_range_words.correct rest tail_plan Plan.End position 2 count state.X.memory source ();
-      Range.tag_def position; Range.tag_def 2;
+      Range.tag_def 2;
       Scatter.matches_def Plan.End width Q.End state.X.memory source;
       W.size rest count (16 * count) ();
       Wasm_scatter_range.correct tail_plan Plan.End (Range.tag position) 48 (W.words rest) Q.End state.X.memory source (16 * count) width ());

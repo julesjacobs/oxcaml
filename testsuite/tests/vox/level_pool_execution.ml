@@ -74,12 +74,12 @@ let rec (copy_new_level @ total) : (h : node Pref.heap) @ immutable ->
       let mid = heap h epoch depth rest in Level_spec.at_level_def mid x;
       let v = cell desc depth in cell_def desc depth;
       let first = H.put mid q v in
-      let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
+      let w = session_mark rest old epoch q in
       Copy_heap_proofs.put_frame first p w x; ()
     | Alias (rest, p, q, old) ->
       copy_new_level h certificate epoch depth rest x ();
       let mid = heap h epoch depth rest in Level_spec.at_level_def mid x;
-      let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
+      let w = session_mark rest old epoch q in
       Copy_heap_proofs.put_frame mid p w x; ())
 
 let rec (preserves_location @ total) : (h : node Pref.heap) @ immutable ->
@@ -106,7 +106,6 @@ let rec (preserves_location @ total) : (h : node Pref.heap) @ immutable ->
       let raw = heap h epoch s.depth history in let trail = Pooled_spec.touched history in
       Hm_effective_registration.result_at h certificate epoch s.depth history x ();
       Copy_cleanup_spec.swept_at_def raw after trail x;
-      E.copy_heap_def h epoch s.depth history;
       copy_new_level h certificate epoch s.depth history x ();
       Level_spec.at_level_def raw x; Level_spec.at_level_def after x;
       located_at_def after next x j;
@@ -181,7 +180,7 @@ let rec (preserves_members @ total) : (h : node Pref.heap) @ immutable ->
         Hm_effective_registration.result_at h certificate epoch s.depth history x ();
         let raw = heap h epoch s.depth history in let trail = Pooled_spec.touched history in
         Copy_cleanup_spec.swept_at_def raw after trail x;
-        E.copy_heap_def h epoch s.depth history; ()) else ();
+        ()) else ();
       ()
     | Enter ->
       let values = Vox_iarray.updated s.buckets s.depth s.pending in

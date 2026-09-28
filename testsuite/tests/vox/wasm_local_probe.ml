@@ -15,7 +15,7 @@ let (correct @ total) : (label : W.limb) -> (pc : W.limb) -> (code_local : B.u32
     {u : unit | X.run (emit label code_local) state === X.Done {X.memory = state.X.memory;
       machine = {E.locals = state.X.machine.E.locals; stack = S.Push (S.I32 (S.boolean (pc = label)), state.X.machine.E.stack)}}} @ ghost =
   fun label pc code_local state premise -> ghost_ (
-    emit_def label code_local; Hmc_wasm_pc_update.offset_def (); Header.number_def pc; Header.number_def label; W.equal_def (Header.number pc) (Header.number label);
+    emit_def label code_local;
     let s2 = {state with X.machine = {state.X.machine with E.stack = S.Push (S.I32 pc, state.X.machine.E.stack)}} in
     let s3 = {state with X.machine = {state.X.machine with E.stack = S.Push (S.I32 label, s2.X.machine.E.stack)}} in
     let s4 = {state with X.machine = {state.X.machine with E.stack = S.Push (S.I32 (S.boolean (pc = label)), state.X.machine.E.stack)}} in

@@ -63,7 +63,7 @@
       "path": "verification/library/vox_http.ml",
       "from": "let[@def] good (machine : Internal.state) = ghost_ (",
       "to": "| Internal.Limit resource -> Limit resource",
-      "lines": "1302-1330",
+      "lines": "1297-1325",
       "text": "The public `state` refines the machine state by `good`: the budget is in range, `valid_core` holds (the lines absorbed so far are valid, and a body is within its framed length), and, unless the core is an error, the bytes it has absorbed (`core_wire`) are exactly as many as the budget spent. `good` is stated of `Driver.model machine`, the machine with its lists put back in order, because the executable parser keeps them reversed. `state` is abstract in the interface, so every state a client holds was built by `initial` or `feed`, which prove `good`, and `state_sound` follows from it. `status` maps the `Line` and `Body` cores to `Incomplete` and passes terminal cores through."
     },
     {
@@ -71,7 +71,7 @@
       "path": "verification/library/vox_http.ml",
       "from": ["let (suffix_preservation @ total)", "let (roundtrip @ total) (request : request) (suffix : bytes) :"],
       "to": "  else ())",
-      "lines": "366-387",
+      "lines": "364-385",
       "text": "Completeness is proved on the machine in three steps. `serializer_core_roundtrip` shows that draining the serialization of a `well_formed` request from the initial core ends in `Complete request` with no input left; `feed_matches_drain` shows that `feed` agrees with the budget-free `drain` on input that fits the budget; and `chunking_invariance` splits the input after the serialization, so the suffix meets a terminal state and comes back untouched. `chunking_invariance`, above, is an induction on the first chunk. The public law `roundtrip` restates this lemma through `Driver.model` and the observations."
     },
     {
@@ -79,7 +79,7 @@
       "path": "verification/library/vox_http.ml",
       "from": "let (run @ total) (state : state) (input : bytes) :",
       "to": "  run state input",
-      "lines": "1478-1498",
+      "lines": "1473-1493",
       "text": "The executable parser is `Driver.consume`, a copy of the machine that keeps the current line, the header lines and the body as reversed lists, so each byte costs one cons, and `Driver.simulation` proves by induction that it computes `Internal.feed` up to `Driver.model`. `run` calls it and discharges the public contract with `driver_result_facts` in erased code; `feed` is `run`. The demo trusts nothing beyond the base shared by all demos; the built-in meaning it relies on most is that `Vox_sequence.length` is the length of a list. Input is an OCaml list of integers, one per byte, and no cost theorem is stated."
     },
     {

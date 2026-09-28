@@ -161,11 +161,10 @@ let (byte_clone @ total) : ('k : immutable_data) ('v : immutable_data).
     byte_write s index byte (s.capacity + lane);
     ())
 
-let rec (length_nonnegative @ total) : ('a : immutable_data).
+let (length_nonnegative @ total) : ('a : immutable_data).
     (values : 'a list) @ immutable ->
     {u : unit | 0Z <= S.length values} @ ghost = fun values -> ghost_ (
-  S.length_def values;
-  match values with [] -> () | _ :: tail -> length_nonnegative tail)
+  S.length_def values)
 
 let (byte_at @ total) : ('k : immutable_data) ('v : immutable_data).
     (s : ('k, 'v) M.state) @ immutable ->

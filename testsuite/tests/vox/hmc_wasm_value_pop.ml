@@ -53,9 +53,7 @@ let (build @ total) : (signature : G.signature) @ immutable -> (next : D.index) 
       let tail = Relayout.range (3 + env + saved) (2 + saved) rest Copy.End (Codec.temporaries_size schema) () in
       let copies = Relayout.range (3 + env) 2 saved tail (Codec.locals_size context) () in
       let fragment = {head_tag = 48 + 16 * env; head_payload = 56 + 16 * env; copies; pc; required} in
-      ghost_ (Geometry.size_represents (Codec.locals_size signature.G.locals) env ();
-        Geometry.size_represents (Codec.locals_size context) saved ();
-        Geometry.size_represents (Codec.temporaries_size schema) rest ();
+      ghost_ (
         Geometry.two_def copies (3 + env) 2 (Codec.locals_size context) (3 + env + saved) (2 + saved) (Codec.temporaries_size schema);
         matches_def signature next capacity max_pc fragment);
       Some fragment

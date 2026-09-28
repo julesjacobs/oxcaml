@@ -18,7 +18,7 @@ let () =
   let refine_ b = Pref.alloc value t in
   let q = b.value in let t = b.state in
   let refine_ different = Pref.equal p q in
-  let proof : {u : unit | not different} = let u = () in refine_ u in
+  let proof : {u : unit | not different} = refine_ () in
   let refine_ proof = proof in
   assert (not different);
   let refine_ same = equal_alias p in

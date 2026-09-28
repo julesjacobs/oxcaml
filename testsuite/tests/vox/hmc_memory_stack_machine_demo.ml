@@ -105,8 +105,7 @@ let check source input frame_limit (heap_limit : W.limb) expected =
             | Q.Running (a, Q.Halt) ->
               let concrete = {Machine.memory = bytes; frontier = M.used start.A.configuration.X.heap; top = base; state = Machine.Running a} in
               ghost_ (Stack.related_def program.I.origin.C.blocks width bytes base base Q.Halt;
-                Machine.related_def program.I.origin.C.blocks width base concrete start.A.configuration;
-                Capacity.ordered width frame_limit base stack_limit ());
+                Machine.related_def program.I.origin.C.blocks width base concrete start.A.configuration);
               let fuel = index 5000 in
               let bounded = Hmc_memory_stack_runs.run program start.A.globals code_capacity width heap_limit base stack_limit fuel
                 concrete start.A.configuration (U.initial program input) frame_limit () in

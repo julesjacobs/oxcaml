@@ -17,15 +17,15 @@ let (lost_origin @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t) @
       let after = H.put (H.put (H.put (H.empty ()) p (cell (Link r) 0)) q (cell (Link r) 0)) r (cell Bool 0) in
       not (originates saved after 0 q o)} @ ghost = fun p q r o premise -> ghost_ (
     let refine_ premise = premise in let var : desc = Var in let link = Link r in let boolean : desc = Bool in
-    cell_def var 0; cell_def link 0; cell_def boolean 0;
+    cell_def link 0; cell_def boolean 0;
     let h = H.empty () in let saved = H.put h p (cell var 0) in
     let after = H.put (H.put (H.put h p (cell link 0)) q (cell link 0)) r (cell boolean 0) in
     originates_def saved after 0 q o;
-    let u = () in match o with Origin (root, path) ->
+    match o with Origin (root, path) ->
       below_def saved root 0; reaches_def after root q path;
-      match path with Stop -> refine_ u | Step (next, rest) ->
+      match path with Stop -> refine_ () | Step (next, rest) ->
         edge_def after root next; reaches_def after next q rest;
-        match rest with Stop -> refine_ u | Step (last, _) -> edge_def after next last; refine_ u)
+        match rest with Stop -> refine_ () | Step (last, _) -> edge_def after next last; refine_ ())
 
 let (prior_origin @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
     (r : node Pref.t) @ immutable ->
@@ -34,13 +34,13 @@ let (prior_origin @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t) 
       let before = H.put (H.put (H.put (H.empty ()) p (cell (Link q) 0)) q (cell (Link r) 0)) r (cell Bool 0) in
       originates saved before 0 q (Origin (p, Step (q, Stop))) && below before q 0} @ ghost = fun p q r premise -> ghost_ (
     let refine_ premise = premise in let var : desc = Var in let first = Link q in let second = Link r in let boolean : desc = Bool in
-    cell_def var 0; cell_def first 0; cell_def second 0; cell_def boolean 0;
+    cell_def var 0; cell_def first 0; cell_def second 0;
     let h = H.empty () in let saved = H.put h p (cell var 0) in
     let before = H.put (H.put (H.put h p (cell first 0)) q (cell second 0)) r (cell boolean 0) in
     let stop = Stop in let path = Step (q, stop) in let origin = Origin (p, path) in
     originates_def saved before 0 q origin; below_def saved p 0; at_level_def saved p;
     reaches_def before p q path; edge_def before p q; reaches_def before q q stop;
-    below_def before q 0; at_level_def before q; let u = () in refine_ u)
+    below_def before q 0; at_level_def before q; refine_ ())
 
 let (finite_readback @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
     (r : node Pref.t) @ immutable ->
@@ -57,8 +57,8 @@ let (finite_readback @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.
     let path = Level_unifier_spec.Via (q, tail) in
     Level_unifier_spec.resolves_def h p r path; Level_unifier_spec.resolves_def h q r tail;
     Level_unifier_spec.resolves_def h r r here; Level_unifier_spec.terminal_def h r;
-    let u = () in Compression_finite_proofs.finite_compress h p q r path tree (refine_ u);
-    Compression_finite_proofs.compress_readback p tree; refine_ u)
+    Compression_finite_proofs.finite_compress h p q r path tree (refine_ ());
+    refine_ ())
 
 let (stranded_low_constant @ total) : (p : node Pref.t) @ immutable ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
@@ -75,8 +75,8 @@ let (stranded_low_constant @ total) : (p : node Pref.t) @ immutable ->
       Leaf_provenance_spec.low_var_def h x 0; Level_unifier_spec.observe_def h x;
       let o = Origin (x, Stop) in refine_ o in
     let order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x}) @ total = fun x ->
-      ordered_def h x; children_below_def h boolean 0; let u = () in refine_ u in
+      ordered_def h x; children_below_def h boolean 0; refine_ () in
     let equal : ((x : node Pref.t) @ immutable -> {u : unit | not (below saved x 0) || rho x === eta x}) @ total = fun x ->
-      below_def saved x 0; let u = () in refine_ u in
+      below_def saved x 0; refine_ () in
     let tree = Tip p in unfolded_def h tree; bound_root_def tree; below_def h p 0; at_level_def h p;
-    let u = () in Leaf_agreement_proofs.low_unfolded_agreement saved h 0 prior order rho (refine_ rho_model) eta (refine_ eta_model) equal tree (refine_ u); refine_ u)
+    Leaf_agreement_proofs.low_unfolded_agreement saved h 0 prior order rho (refine_ rho_model) eta (refine_ eta_model) equal tree (refine_ ()); refine_ ())

@@ -41,7 +41,7 @@ let rec (bounded @ total) : ('k : immutable_data) ('v : immutable_data).
       prefix_step (count - 1);
       lane_bounds (count - 1);
       ()
-    end else begin prefix_def count; () end)
+    end else ())
   [@@decreases count]
 
 let rec (get @ total) : ('k : immutable_data) ('v : immutable_data).

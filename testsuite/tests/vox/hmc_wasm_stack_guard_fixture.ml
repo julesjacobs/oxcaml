@@ -46,9 +46,8 @@ let fixture (cursor : B.u32) available =
     Hmc_memory_stack_capacity.region_def 48 Hm_declarative.Z cursor cursor;
     Hmc_memory_stack.related_def blocks 48 B.End cursor cursor Hmc_heap_state.Halt;
     Hmc_wasm_stack_guard.correct blocks 48 cursor cursor limit capacity Hmc_heap_state.Halt C.Empty 0 1 3 normal inner_label state state ();
-    Continue.labels_def normal inner_label;
     T.branch_def 3 (Continue.labels normal inner_label) state;
-    T.branch_def 2 inner_label state; T.branch_def 1 loop_label state; T.branch_def 0 exit_label state; T.stack_def state S.Empty);
+    T.branch_def 2 inner_label state; T.branch_def 1 loop_label state; T.branch_def 0 exit_label state);
   (match T.run (fuel 100) {T.code; labels = T.No_labels; state} with
   | T.Finished final ->
     if final.X.memory <> B.End || final.X.machine.E.stack <> S.Push (S.I32 expected, S.Empty)

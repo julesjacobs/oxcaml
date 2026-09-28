@@ -30,14 +30,14 @@ let run (depth : {n : int | n >= 0}) =
   let scope : ((x : node Pref.t) @ immutable -> {u : unit |
       if H.mem saved x then source_ok saved x else H.at saved x === None}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; source_ok_def saved x;
-    let u = () in refine_ u) in
+    refine_ ()) in
   let bounds : ((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem saved x) || not (finite_node saved x) || below saved x depth}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; finite_node_def saved x;
-    below_def saved x depth; at_level_def saved x; let u = () in refine_ u) in
+    below_def saved x depth; at_level_def saved x; refine_ ()) in
   let order : ((x : node Pref.t) @ immutable -> {u : unit | ordered saved x}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; ordered_def saved x; children_below_def saved desc 0;
-    let u = () in refine_ u) in
+    refine_ ()) in
   let base = Empty in ghost_ (pool_scoped_def saved base);
   let link : {p : node Pref.t | H.mem saved p} = refine_ link in
   let state : {t : node Pref.token | Pref.own t === saved && pool_scoped saved base && depth >= 0} = refine_ state in
@@ -47,20 +47,20 @@ let run (depth : {n : int | n >= 0}) =
   let h = ghost_ (Pref.own (borrow_ state)) in
   let history = ghost_ out.#history in let epoch = ghost_ out.#epoch in
   let next_order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x}) @ total ghost = ghost_ (fun x ->
-    let u = () in let refine_ u = copy_ordered saved depth bounds order epoch history x (refine_ u) in refine_ u) in
+    let refine_ u = copy_ordered saved depth bounds order epoch history x (refine_ ()) in refine_ u) in
   let next_bounds : ((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h x) || not (finite_node h x) || below h x depth}) @ total ghost = ghost_ (fun x ->
-    let u = () in let refine_ u = copy_bounds saved depth bounds epoch history x (refine_ u) in refine_ u) in
+    let refine_ u = copy_bounds saved depth bounds epoch history x (refine_ ()) in refine_ u) in
   ghost_ (next_bounds result; next_bounds boundary; next_order result; next_order boundary; below_def h result depth);
-  ghost_ (let u = () in touched_distinct saved epoch depth history (refine_ u);
-    history_grows saved epoch depth history a (refine_ u);
-    history_grows saved epoch depth history link (refine_ u);
-    Clean_copy.memo_released saved epoch depth history link (refine_ u));
+  ghost_ (
+    history_grows saved epoch depth history a (refine_ ());
+    history_grows saved epoch depth history link (refine_ ());
+    Clean_copy.memo_released saved epoch depth history link (refine_ ()));
   let trail = out.#trail in
   let members : ((x : node Pref.t) @ immutable ->
     {u : unit | not (listed trail x) || H.mem h x}) @ total ghost = ghost_ (fun x ->
-    let u = () in touched_saved saved epoch depth history x (refine_ u);
-    history_grows saved epoch depth history x (refine_ u); refine_ u) in
+    touched_saved saved epoch depth history x (refine_ ());
+    history_grows saved epoch depth history x (refine_ ()); refine_ ()) in
   let state : {t : node Pref.token | Pref.own t === h} = refine_ state in
   let heap_witness : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (h)} in
   let members_witness : (((x : node Pref.t) @ immutable ->
@@ -75,8 +75,8 @@ let run (depth : {n : int | n >= 0}) =
   let same_model : ((rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (x : node Pref.t) @ immutable ->
     {u : unit | equation h rho x === equation after rho x}) @ total ghost = ghost_ (fun rho x ->
-    framing x; let u = () in
-    let refine_ u = sweep_model h after trail rho x (refine_ u) in refine_ u) in
+    framing x; 
+    let refine_ u = sweep_model h after trail rho x (refine_ ()) in refine_ u) in
   ghost_ (let (rho @ total) (_ : node Pref.t @ immutable) = Boolean in
     same_model rho result; ());
   ghost_ (framing result; swept_at_def h after trail result;
@@ -96,8 +96,8 @@ let run (depth : {n : int | n >= 0}) =
   | _ -> failwith "expected arrow");
   let next_scope : ((x : node Pref.t) @ immutable ->
     {u : unit | if H.mem after x then source_ok after x else H.at after x === None}) @ total ghost = ghost_ (fun x ->
-    let u = () in Copy_model_proofs.history_scope saved scope epoch depth history x (refine_ u);
-    let refine_ u = sweep_scope h after trail framing x (refine_ u) in refine_ u) in
+    Copy_model_proofs.history_scope saved scope epoch depth history x (refine_ ());
+    let refine_ u = sweep_scope h after trail framing x (refine_ ()) in refine_ u) in
   let base = Empty in ghost_ (pool_scoped_def after base);
   let state : {t : node Pref.token | Pref.own t === after && pool_scoped after base} = refine_ state in
   let link : {p : node Pref.t | H.mem after p} = refine_ link in
@@ -106,8 +106,8 @@ let run (depth : {n : int | n >= 0}) =
     {u : unit | match H.at after x with None -> true | Some v -> v.memo === Empty_memo}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0;
     let refine_ depth = depth in
-    let u = () in Clean_copy.clean_result saved epoch depth history x (refine_ u);
-    refine_ u) in
+    Clean_copy.clean_result saved epoch depth history x (refine_ ());
+    refine_ ()) in
   let saved_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (after)} in
   let clean_witness2 : (((x : node Pref.t) @ immutable ->
       {u : unit | match H.at saved_witness1.Ghost.ghost x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t = {Ghost.ghost = ghost_ (refine_ clean)} in
@@ -124,11 +124,11 @@ let run (depth : {n : int | n >= 0}) =
   let state = second.#state in
   let d2 = ghost_ second.#history in let e2 = ghost_ second.#epoch in
   let h2 = ghost_ (Pref.own (borrow_ state)) in
-  ghost_ (let u = () in Clean_copy.memo_released after e2 depth d2 link (refine_ u);
-    Clean_copy.result_at after e2 depth d2 link (refine_ u);
+  ghost_ (Clean_copy.memo_released after e2 depth d2 link (refine_ ());
+    Clean_copy.result_at after e2 depth d2 link (refine_ ());
     let raw = heap after e2 depth d2 in let trail = Pooled_spec.touched d2 in
     swept_at_def raw h2 trail link;
-    history_grows after e2 depth d2 link (refine_ u));
+    history_grows after e2 depth d2 link (refine_ ()));
   let state : {t : node Pref.token | H.mem (Pref.own t) link} = refine_ state in
   let refine_ source = Pref.read link (borrow_ state) in
   assert (source.memo = Empty_memo);

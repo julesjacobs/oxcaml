@@ -44,11 +44,9 @@ let check : D.term @ immutable -> Hmc_word64.limb -> int option -> unit = fun so
   let fuel = index 400 in
   let run = P.run p definitions input fuel () in
   if H.source run <> H.source out || H.target run <> H.target out then failwith "iteration mismatch";
-  ghost_ (Hmc_monomorphic_safety.safe p definitions input fuel ());
   (match expected, out with
   | Some expected, H.Done (W.Word actual) ->
     if actual.Hmc_word64.lo <> expected || actual.Hmc_word64.hi <> 0 then failwith "wrong result";
-    ghost_ (P.normal_return_at_offsets p definitions input actual fuel ());
     let source_result = S.advance (D.add (P.source_offset p) fuel) (P.source_start p input) in
     let target_result = Q.advance definitions (D.S fuel) (P.target_start p input) in
     (match source_result, target_result with
