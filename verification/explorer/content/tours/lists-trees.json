@@ -1,0 +1,95 @@
+{
+  "_about": "Demo tour. Sources: verification/catalogue/pages/lists-trees.md (its sources: list is the backbone), research/mastery-20260927/heap-ownership.md (sections 2, 3.2-3.6, 5.4), runtime/pref.c; every claim re-checked against the code at 8479634adc.",
+  "_checks": "Heap laws called by name: pref_list.ml partition_law, put_law, put_union_law, union_law; pref_tree.ml adds commute_law, domain_law, union_domain_law. caml_pref_split and caml_pref_join are empty C functions natively (runtime/pref.c). pref_list_client.ml and pref_owned_client.ml run { bytecode; } and { native; }; check runs lists of up to 1,000 nodes. Owned.model has no exported _def (pref_list_rejected.ml expects 'Unbound value Pref_list.Owned.model_def').",
+  "id": "lists-trees",
+  "title": "Mutable lists and trees",
+  "kind": "demo",
+  "demo": "lists-trees",
+  "order": 11,
+  "summary": [
+    "`Pref_list.reverse` reverses a linked list in place and `Pref_tree.mirror_with_frame` swaps the children of every tree node in place. Their links are `Pref` cells, and each structure is described by an erased model built from its own node records; the contracts give the exact heap after the call, which also serves as the frame. The tour goes from the model and the contracts to two clients, a rejected program, the abstract `Owned` interface, the proofs, the trusted `Pref` base and the check that no proof reaches the emitted code.",
+    "The [catalogue page](demo:lists-trees) states the claim, the trusted base and the scope."
+  ],
+  "stops": [
+    {
+      "title": "A list is a model of its own node records",
+      "path": "testsuite/tests/vox/pref_list.mli",
+      "from": "type node = { value : int; next : node option Pref.t; }",
+      "to": ["val valid_def", "@@ total"],
+      "lines": "2-33",
+      "text": "A node is an immutable record of an `int` and a cell handle `next : node option Pref.t`; what changes is the cell's contents, which only a token can read or write. The erased model is an `[@@inductive]` list of the node records themselves, so `root xs` is the first node and `heap xs` is the union of the one-cell maps `link n (root rest)`: exactly the list's link cells, each holding the next node. `valid xs` makes those one-cell maps pairwise disjoint, so no two nodes share a link cell. Each model function comes with a `_def` equation that a proof calls to unfold it."
+    },
+    {
+      "title": "Reversal states the final heap exactly",
+      "path": "testsuite/tests/vox/pref_list.mli",
+      "from": "val reverse : (pointer : node option) @ immutable ->",
+      "to": "&& valid (rev_append xs Nil)} @ unique",
+      "lines": "49-58",
+      "text": "`reverse` takes the root pointer, two erased arguments, the model `xs` and a `frame` heap of other cells, and a unique token whose heap is exactly `heap xs` united with the frame. On normal return the pointer is the root of `rev_append xs Nil`, and the new token owns exactly the reversed list's link cells, with their new contents, plus the unchanged frame. Nodes in the model are compared as values, by their `int` and their cell, so the contract says the reversed list is made of nodes equal to the original ones. That they are the original records is checked with `==` at run time by the list client."
+    },
+    {
+      "title": "A client proves what it observes",
+      "path": "testsuite/tests/vox/pref_owned_client.ml",
+      "from": "let () =",
+      "to": "  ()",
+      "lines": "12-54",
+      "text": "This client uses only the `Owned` interfaces, whose values pack the root pointer, the erased model and the token. It reverses the list `[1; 2; 3]` and, with `nodes_rev_append` and `nodes_def`, proves that the nodes it observes afterwards are the ones it observed before, in reverse order (`rev_onto nodes []`). It mirrors a three-node tree and, with `shape_flipped` and the `shape_of_def` and `mirror_shape_def` equations, proves the exact shape it then observes. `borrow_` lends a value to `observe` for the duration of the call, and `release` and `adopt` convert between an `Owned.t` and the raw `built` record with its invariant stated."
+    },
+    {
+      "title": "Framing: cells the call never sees",
+      "path": "testsuite/tests/vox/pref_list_client.ml",
+      "from": "(* A typed token owns cells of one payload type.",
+      "to": "assert (untouched = None);",
+      "lines": "26-60",
+      "text": "A token owns cells of one payload type, so the client keeps an `int` cell under a separate token that `reverse` never receives; at the end it proves from `alloc`'s contract alone that the cell still holds 42. It also allocates a spare `node option` cell, joins it to the list's token as the `frame`, and after `reverse` splits the reversed list's heap off again with `partition_law` and reads `None` back from the frame. The same function then proves the reversed values and node lists and checks with `==` that the nodes are the original records. It runs as bytecode and native code on lists of up to 1,000 nodes."
+    },
+    {
+      "title": "A rejected client: returning the list unchanged",
+      "path": "testsuite/tests/vox/pref_list_rejected.ml",
+      "from": "module No_reversal = struct",
+      "to": "The refinement is stated here.",
+      "lines": "16-35",
+      "text": "`No_reversal` claims `reverse`'s postcondition and returns its input; the checker finds a counterexample to `r.pointer === root (rev_append xs Nil)`. The `Principal` expectation that follows records a different failure: under `-principal` the compiler cannot show that `node option` has kind `immutable_data`, so these interfaces do not type-check there. The list and tree rejection tests also cover a function that loses a node, a tree whose two subtrees share a node, a mirror that changes nothing, uses of private helpers, reuse of a consumed `Owned.t` or a released raw record, and false claims about the lemmas, such as that reversal leaves the values unchanged or that `Pref_tree.observe` returns a token that owns nothing."
+    },
+    {
+      "title": "Owned: the invariant on a hidden field",
+      "path": "testsuite/tests/vox/pref_list.ml",
+      "from": "module Owned = struct",
+      "to": "{pointer = b.#pointer; model = b.#model; state = b.#state}",
+      "lines": "302-324",
+      "text": "`Owned.t` is an unboxed record with one field, whose type refines `payload` by the representation invariant: the pointer is the model's root, the model is `valid`, and the token owns exactly `heap model`. Its layout is `value & void & void`, so at run time it is the root pointer alone. Every `Owned.t` is built by `adopt` or by an operation of `Owned`, each of which must prove the refinement, and every function that opens one may assume it. The interface exports `model` without its definition, so a client reasons with the contracts of `Owned` only."
+    },
+    {
+      "title": "The core proof: one cell per step",
+      "path": "testsuite/tests/vox/pref_list.ml",
+      "from": "let rec reverse_into :",
+      "to": "let r = reverse_into next pointer rest extended rest_token a in",
+      "lines": "97-134",
+      "text": "`reverse_into` threads two tokens: `t` owns the rest of the input list `xs`, and `a` owns the part already reversed, `ys`. At each node it splits the node's link cell off `t` with `Pref.split`, reads the old successor, writes the accumulator into the cell, and joins the cell into `a`. Two ghost lemmas carry the proof: `reverse_partition` shows, with `partition_law`, that the selected heap is exactly the node's link and that what remains is `heap rest`, and `reverse_rebuild` shows, with `put_law`, that the rewritten cell extends `ys` to the valid list `Cons (n, ys)`. `reverse` itself splits the frame off before the loop and joins it back afterwards."
+    },
+    {
+      "title": "Trees: split, recurse, rewrite, rejoin",
+      "path": "testsuite/tests/vox/pref_tree.ml",
+      "from": ["let rec mirror :", "| Some n ->"],
+      "to": "ghost_ (mirror_rebuild model n new_nh new_lh new_rh after);",
+      "lines": "184-225",
+      "text": "A tree node has two link cells, and the tree's `valid` requires them to be distinct and requires each node's links, its left subtree and its right subtree to own pairwise disjoint heaps. `mirror` splits off the node's two cells, reads both children, splits the rest between the two subtrees and recurses on each with its own token. `set_links` then writes the children back exchanged, and after the joins `mirror_rebuild` proves the token's heap equal to `heap (flipped model)`. The recursion follows the tree, so its stack depth is the tree's depth; `mirror_with_frame` adds a frame around it as `reverse` does."
+    },
+    {
+      "title": "The trusted base: Pref",
+      "path": "verification/library/pref.mli",
+      "from": "(** Allocate a fresh cell and extend the token.",
+      "to": ["external join", "&& Heap.disjoint (own left) (own right)} @ unique"],
+      "lines": "130-173",
+      "text": "What the proofs know about cells comes from these declarations. `alloc`, `read` and `write` are C primitives in [`runtime/pref.c`](src:runtime/pref.c), trusted to meet their contracts; they are partial, so every list and tree operation that touches a cell is partial and only normal return is specified. `split` and `join` move ownership between tokens and are empty C functions in native code; `join`'s disjointness is a postcondition, sound because distinct live unique tokens own disjoint cells. Six heap laws earlier in the file are `external`s too, so each call of one adds an assumed instance; `put_union_law`, `commute_law`, `exclude_put_law` and `exclude_union_law` are `val`s proved in `pref.ml`. The list proofs use `partition_law`, `put_law`, `put_union_law` and `union_law`, and the tree proofs also `commute_law`, `domain_law` and `union_domain_law`."
+    },
+    {
+      "title": "Emitted code: no proof survives",
+      "path": "testsuite/tests/vox/structures_erasure_check.ml",
+      "from": "(* A body that calls no model or proof function",
+      "to": "(what ^ \" neither splits nor joins tokens\"))",
+      "lines": "48-80",
+      "text": "[`structures_erasure.ml`](src:testsuite/tests/vox/structures_erasure.ml) compiles the list, tree and ring modules natively with `-dlambda`, and this program checks the dumps. For each audited function, such as `reverse`, `mirror` and the observers, and every function of the same module that it reaches by name, a body is `clean` when it calls none of the model functions in `proofs`, calls by name only functions on the `runtime` list, and mentions no `Proofs` submodule and no heap-law stub; it must also refer to no model module. The observers may not split or join tokens. Calls into other modules are not followed, so this is a check of these modules' Lambda."
+    }
+  ]
+}

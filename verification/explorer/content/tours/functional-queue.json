@@ -1,0 +1,88 @@
+{
+  "_about": "Demo tour of the functional queue. Sources: verification/catalogue/pages/functional-queue.md (its sources: list is the backbone), research/mastery-20260927/demos-data-structures.md §6.2, definitions-lemmas.md §1-2, INDEX.md on unreachable_; every claim re-checked against the code at 8479634adc.",
+  "_notes": "contents is runtime code (reverse_append then append) and is not in collections_boundary_check.ml's audit list; only enqueue and dequeue are. The interface exports contents but not contents_def, so clients learn contents only through the three operations' refinements.",
+  "id": "functional-queue",
+  "title": "The functional queue",
+  "kind": "demo",
+  "demo": "functional-queue",
+  "order": 10,
+  "summary": [
+    "`Functional_queue` is the two-list persistent queue: a front list and a reversed rear list. Its interface describes every queue by `contents`, the list of its elements, so a client reasons about a queue as a list. The tour is short: the interface and the list vocabulary it uses, a client and a rejected client, then the representation, the reversal lemma, the proof of `dequeue` and the check that the compiled operations run no proof code.",
+    "The [catalogue page](demo:functional-queue) states the claim, the trusted base and the scope, including what is not proved: running time."
+  ],
+  "stops": [
+    {
+      "title": "The interface: a queue is its contents",
+      "path": "testsuite/tests/vox/functional_queue.mli",
+      "from": "type ('a : immutable_data) t : immutable_data",
+      "to": [
+        "val dequeue",
+        "@@ total"
+      ],
+      "lines": "3-18",
+      "text": "`t` is abstract, and `contents` is its only observation, declared `@@ total` so that refinements may mention it. The refinement of `empty` says its contents are `[]`, and `enqueue` appends `[value]` at the end. `dequeue` takes a queue refined by `(contents q === []) === false`, a nonempty queue, and returns a pair whose head and tail's contents rebuild `contents q`. The interface exports no equation for `contents` itself: a client knows the contents of a queue only through these three refinements, which determine it for every queue a client can build. Elements must be `immutable_data`, which excludes closures and records with mutable fields."
+    },
+    {
+      "title": "The list vocabulary: append and its equation",
+      "path": "verification/library/vox_sequence.mli",
+      "from": "val append : ('a : immutable_data).",
+      "to": [
+        "val append_def",
+        "@@ total"
+      ],
+      "lines": "12-19",
+      "text": "`Vox_sequence.t` is `'a list`, and `append` is list concatenation, declared total. The solver sees `append` as an uninterpreted function: it knows nothing about it until a proof calls `append_def`, just below, whose type is the defining equation, generated from `let[@def] rec append` in the implementation. `append_associative` and `append_nil` are exported the same way, as total functions whose result types are the laws. This is the whole of the logic the queue's contract uses beyond OCaml lists and `===`."
+    },
+    {
+      "title": "A client proof: first in, first out",
+      "path": "testsuite/tests/vox/queue_client.ml",
+      "from": "let (fifo @ total) :",
+      "to": "a, b, q4",
+      "lines": "13-28",
+      "text": "`fifo` enqueues two values, dequeues twice and proves that they come out in order and that the queue is empty again. The refinements of `enqueue`'s results are facts about `q1` and `q2`, from which the checker proves each `dequeue`'s precondition and the result type. It does not evaluate `append` on its own: the three `append_def` calls in `ghost_` unfold it once each, so that `append [] [first]` is known to be `[first]`. The `let () =` below instantiates `fifo` at `int`, at a record type and at `int list`, and runs as bytecode and native code."
+    },
+    {
+      "title": "A rejected client: dequeue from the empty queue",
+      "path": "testsuite/tests/vox/queue_rejected.ml",
+      "from": "let () =",
+      "to": "  ()",
+      "lines": "17-19",
+      "text": "Passing `empty` to `dequeue` is a type error. The test compiles only the two interfaces, with `-principal`, and requires the error in [`queue_rejected.compilers.reference`](src:testsuite/tests/vox/queue_rejected.compilers.reference): the refinement could not be proved, with a counterexample, and the refinement is the one stated in `functional_queue.mli` on `dequeue`'s argument. `collections_boundary.ml` rejects a variant that first ascribes the nonempty type to `empty`, and one that reads the hidden field `front`."
+    },
+    {
+      "title": "Inside: two lists and what they mean",
+      "path": "testsuite/tests/vox/functional_queue.ml",
+      "from": "type ('a : immutable_data) t = {front : 'a list; rear : 'a list}",
+      "to": [
+        "let (contents_model @ total)",
+        "  ()"
+      ],
+      "lines": "37-51",
+      "text": "The representation is a record of two lists, and there is no representation invariant: every `{front; rear}` is a valid queue, including one with an empty front and a nonempty rear. `contents` is both the specification and runtime code. It computes `reverse_append q.rear []` and appends it to the front, and its `ghost_` call relates that to the naive `reverse`. `contents_model` states the model the proofs use, `contents q === append q.front (reverse q.rear)`, by unfolding `contents` with `contents_def`. `contents` takes time linear in the queue, and it is the only way a client can test emptiness at run time."
+    },
+    {
+      "title": "The key lemma: the fast reverse is the naive one",
+      "path": "testsuite/tests/vox/functional_queue.ml",
+      "from": "let[@def] rec reverse (xs",
+      "to": "append_def nil acc",
+      "lines": "3-35",
+      "text": "The specification uses the quadratic `reverse`, whose equation is easy to reason about; the code uses the accumulator loop `reverse_append`. `reverse_append_correct` bridges them, `reverse_append xs acc === append (reverse xs) acc`, by induction on `xs`: the recursive call is the hypothesis for `tail` with `head :: acc`, and `append_associative` regroups `append (append rest [head]) acc`. Each `_def` call unfolds one definition at one argument; nothing is unfolded automatically. `reverse` itself never runs: it appears only in `ghost_` code and refinements."
+    },
+    {
+      "title": "The core proof: dequeue, and an unreachable branch",
+      "path": "testsuite/tests/vox/functional_queue.ml",
+      "from": "let (dequeue @ total) :",
+      "to": "      result",
+      "lines": "74-105",
+      "text": "`dequeue` assumes its argument's refinement, that `contents q` is not `[]`. When the front is nonempty the proof is `contents_model` for the old and the new queue. When it is empty, the code reverses the rear with `reverse_append`, and the `ghost_` block relates the result to `reverse original.rear`, which is `contents q` when the front is empty. The branch where that reversal is `[]` ends in `unreachable_ ()`, a proof obligation: the checker must show that the branch is dead, here because the contents are nonempty, and the compiled code keeps a trap there. `let reversed = ghost_ (reverse original.rear)` binds a ghost value, available to proofs and erased from the code."
+    },
+    {
+      "title": "Erasure: the operations run no proof code",
+      "path": "testsuite/tests/vox/collections_boundary_check.ml",
+      "from": "audit \"functional_queue\" [ \"enqueue\"; \"dequeue\" ]",
+      "to": "~to_line_end:true;",
+      "lines": "65-67",
+      "text": "[`collections_boundary.ml`](src:testsuite/tests/vox/collections_boundary.ml) compiles `functional_queue.ml` with `-dlambda` under both compilers, with and without `-principal`, and this check requires that the bodies of `enqueue` and `dequeue` call no `_def` equation and none of `contents`, `reverse` and `reverse_append_correct`. The demo trusts nothing beyond the shared base: the implementation contains no `assume_` or `external`, and the one `unreachable_ ()` is proved. What is not proved is cost: when a version is dequeued more than once, the rear list can be reversed more than once, and no amortized bound is stated."
+    }
+  ]
+}

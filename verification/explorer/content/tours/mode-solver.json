@@ -1,0 +1,100 @@
+{
+  "_about": "Demo tour. Sources: verification/catalogue/pages/mode-solver.md (its sources: list is the backbone), research/mastery-20260927/demos-algorithms.md §3.13; every claim re-checked against the code at HEAD 8479634adc. The comparison with OxCaml was checked against typing/mode.ml (Regionality, Locality_morph, including Regional_to_local_regionality and Regional_to_global_regionality, whose right_adjoint pairing is in the same module) and typing/solver.ml (var with lower, upper and vlower).",
+  "_note_morphisms": "demos-algorithms.md §3.13 says Regional_to_local/Regional_to_global go from Regionality to Locality. They do, but typing/mode.ml also has the endomorphisms Regional_to_local_regionality and Regional_to_global_regionality on Regionality, which are what the demo's regional_to_local and regional_to_global correspond to.",
+  "id": "mode-solver",
+  "title": "Quantifier elimination over the regionality chain",
+  "kind": "demo",
+  "demo": "mode-solver",
+  "order": 21,
+  "summary": [
+    "The demo decides first-order formulas over the three-element chain Global < Regional < Local, the values of OxCaml's regionality axis, by quantifier elimination. `Mode_solver_public.eliminate` turns a formula into a quantifier-free one, and `eliminate_exact` proves that the two have the same truth value in every environment; projection of inequality graphs, subsumption residuals and guarded quantifier prefixes are built on it, each with an exact theorem.",
+    "This demo is not OxCaml's mode solver. Nothing in the compiler calls it, no theorem relates it to `typing/solver.ml`, it handles one axis, and it eliminates quantifiers by enumeration, so its output grows exponentially with the nesting depth of quantifiers. The [catalogue page](demo:mode-solver) states the scope."
+  ],
+  "stops": [
+    {
+      "title": "The interface: every operation has an exact theorem",
+      "path": "testsuite/tests/vox/mode_solver_public.mli",
+      "from": "val regionality_adjunction : (a : elt) -> (b : elt) ->",
+      "to": [
+        "val decide_checked",
+        "@@ total"
+      ],
+      "lines": "22-41",
+      "text": "Each operation is declared `@@ total`, which lets the specifications apply it, and comes with an `_exact` theorem giving its result's truth value in every environment; most also have a `_scoped` theorem bounding the variables the result mentions. `eliminate_exact` is the central one: `eval_qf env (eliminate f) = eval env f` for every `env`. `decide_checked` decides a closed formula and returns `None` for one with a free variable. `regionality_adjunction` is a fact about the chain: `regional_to_local` is left adjoint to `regional_to_global`."
+    },
+    {
+      "title": "The specification: evaluation over three values",
+      "path": "testsuite/tests/vox/mode_solver_semantics.ml",
+      "from": "let[@def] rec (lookup @ total) env i =",
+      "to": [
+        "let[@def] rec (eval @ total)",
+        "&& eval (Local :: env) a"
+      ],
+      "lines": "53-87",
+      "text": "Terms are constants, de Bruijn variables, join, meet, `Regional_to_global` and arbitrary lookup tables from the chain to itself; the tables need not be monotone, so terms are more general than mode morphisms. Atoms are `≤` between terms. `eval` reads `Exists a` as the disjunction of `a` with `Global`, `Regional` and `Local` pushed on the environment, and `Forall a` as the conjunction. An unbound variable evaluates to `Global`."
+    },
+    {
+      "title": "A client",
+      "path": "testsuite/tests/vox/mode_solver_public_client.ml",
+      "from": "let (residual_value @ total) env gamma guard obligation :",
+      "to": "assert (not (guarded_value",
+      "lines": "12-35",
+      "text": "The client uses only the public interface and the three semantics modules. Each function returns a `bool` refined to equal the truth value of a formula from the semantics, and its proof is one erased call to the matching `_exact` theorem. The assertions run as native code: with `equality` saying that the two innermost variables are equal, `∀∃ equality` holds and `∃∀ equality` does not, a formula with a free variable gives `None`, and the guarded game with prefix `[Universal; Existential]` is won while the reversed one is lost."
+    },
+    {
+      "title": "The public module hides the definitions",
+      "path": "testsuite/tests/vox/mode_solver_public.ml",
+      "from": "let[@def] (eliminate @ total) f = Mode_solver_three_qe_proof.eliminate f",
+      "to": "  end else None",
+      "lines": "11-37",
+      "text": "The public module defines each operation from the proof modules: `eliminate` is `Mode_solver_three_qe_proof.eliminate`, and `eliminate_exact` unfolds it once and applies the proof module's theorem. The definition is `[@def]` here, but the interface declares only `val eliminate : formula -> qf`, so its equation lemma is not exported and a client knows the result only through the theorems. The demo has no rejection test: nothing checks that a false claim about these operations fails to check."
+    },
+    {
+      "title": "Guarded prefixes read as a game",
+      "path": "testsuite/tests/vox/mode_solver_guarded_semantics.ml",
+      "from": "let[@def] rec (admissible @ total)",
+      "to": "admissible prefix env guard && game prefix env guard witness",
+      "lines": "5-37",
+      "text": "`admissible prefix env guard` says that some values of the prefix's variables satisfy `guard`. `game` reads the prefix as a two-player game in which each move must leave `guard` satisfiable for the rest of the prefix: the existential player must find such a value, the universal player ranges over such values only, and at the end the values must satisfy `witness`. `normalized_game` conjoins the two, and `project_admissible_exact` states that `project_admissible` computes it. Like `eval`, these are ordinary total functions that enumerate the chain."
+    },
+    {
+      "title": "The algorithm: elimination by enumeration",
+      "path": "testsuite/tests/vox/mode_solver_three_qe_proof.ml",
+      "from": "let[@def] rec (subst_term @ total) value t =",
+      "to": [
+        "let[@def] rec (eliminate @ total)",
+        "And (subst_qf Regional q, subst_qf Local q))"
+      ],
+      "lines": "18-53",
+      "text": "`subst_term` replaces variable 0 by a constant and shifts the other variables down. `eliminate` works bottom-up: a quantifier over an already eliminated body becomes three copies of it, with the bound variable replaced by each value of the chain, joined by `Or` for `Exists` and `And` for `Forall`. Nothing simplifies the result, so its size grows as 3 to the power of the quantifier nesting depth, and no running time is stated."
+    },
+    {
+      "title": "The core proof",
+      "path": "testsuite/tests/vox/mode_solver_three_qe_proof.ml",
+      "from": "let rec (eliminate_exact @ total) :",
+      "to": [
+        "let rec (eliminate_exact @ total) :",
+        "| Forall a ->",
+        "    ())"
+      ],
+      "lines": "121-158",
+      "text": "`eliminate_exact` is structural induction on the formula. For a quantifier it applies the induction hypothesis in each of the three extended environments and the substitution lemma `subst_qf_exact`, `eval_qf env (subst_qf v q) = eval_qf (v :: env) q`, proved above through `subst_term_exact` and `lookup_shift`. The `_def` calls unfold `eliminate`, `eval` and `eval_qf` one level each, since the checker does not unfold definitions on its own. The demo trusts nothing beyond the shared base: the checker, Z3 and the compiler."
+    },
+    {
+      "title": "Everything else reduces to eliminate",
+      "path": "testsuite/tests/vox/mode_solver_retained_symbolic.ml",
+      "from": "let[@def] rec (project @ total) prefix guard witness =",
+      "to": "winning = eliminate winning }",
+      "lines": "15-25",
+      "text": "Guarded projection walks the prefix from the inside out, keeping two quantifier-free formulas: `domain` (the guard is satisfiable) and `winning`. At each quantifier it eliminates `∃x. domain`, and either `∃x. domain ∧ winning` or `∀x. ¬domain ∨ winning`. Graph projection in [`mode_solver_graph_qe_proof.ml`](src:testsuite/tests/vox/mode_solver_graph_qe_proof.ml) compiles the inequalities to a conjunction and eliminates the existential quantifiers over it. `project_scopes_compose` proves that projecting a prefix in two parts gives the same formulas, as syntax trees, as projecting it at once."
+    },
+    {
+      "title": "What OxCaml has instead",
+      "path": "typing/mode.ml",
+      "from": "module Locality_morph = struct",
+      "to": "(** Maps regional to global, identity otherwise. *)",
+      "lines": "1896-1918",
+      "text": "OxCaml's regionality axis is the same chain, and its morphisms include `Regional_to_local_regionality` and `Regional_to_global_regionality`, the adjoint pair that `regionality_adjunction` states. The mode solver in [`typing/solver.ml`](src:typing/solver.ml) works differently: it keeps mutable variables with lower and upper bounds and morphism edges (`vlower`), and propagates constraints incrementally over products of axes. The demo is not that solver. Nothing in the compiler calls the demo, and no theorem relates the two; it is a verified reference procedure for one axis."
+    }
+  ]
+}

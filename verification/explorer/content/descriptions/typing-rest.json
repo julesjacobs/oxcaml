@@ -1,0 +1,1095 @@
+{
+  "_about": "The typing/ files Vox changed that typing-lambda.json does not cover: interfaces of described files, the new files' interfaces, and the smaller Vox-modified implementations. Sources: git diff f42b1a9726 HEAD per file, read at 8479634adc; research/mastery-20260927 (refinement-types, ghost-erasure, totality, interfaces-modularity), re-checked against the code. American spelling.",
+
+  "typing/axis_lattice.mli": {
+    "what": {
+      "short": "Interface of the packed bit-vector encoding of mode-crossing bounds used by ikinds: create, per-axis accessors, meet and join."
+    },
+    "vox": {
+      "short": "create takes a totality bound and totality has an accessor; ghostliness is not a parameter, because create always sets it to the non-crossing end.",
+      "long": "The implementation has a ghostliness field (axis 11), but `create` pins it to `Ghost`, the top of the `Real -> Ghost` chain, so no ikind bound ever crosses ghostliness. Only totality is exposed."
+    },
+    "notes": [
+      {
+        "title": "Totality in the crossing bounds",
+        "from": "totality:Mode.Totality.Const.t ->",
+        "kind": "vox",
+        "text": "The new totality bound sits between `yielding` and `statefulness`, mirroring the order of the comonadic axes. There is no `ghostliness` argument: `Axis_lattice.create` always sets it to `Ghost`."
+      }
+    ]
+  },
+
+  "typing/btype.mli": {
+    "what": {
+      "short": "Interface of Btype: iterators, marks, snapshots and backtracking over the type graph, and the Jkind0 kind helpers."
+    },
+    "vox": {
+      "short": "Exports Mod_bounds.min_crossable and the field-level with-bounds functions that keep a ghost field out of its record's externality.",
+      "long": "The implementation is described at [btype.ml](src:typing/btype.ml)."
+    },
+    "notes": [
+      {
+        "title": "A minimum that does not cross ghostliness",
+        "from": "val min_crossable : t",
+        "kind": "vox",
+        "text": "`min` is the identity for joins and so crosses every axis, ghostliness included. Bounds stored as an actual kind use `min_crossable`, which pins ghostliness to no crossing: no type crosses ghostliness."
+      },
+      {
+        "title": "Ghost fields in a record's with-bounds",
+        "from": "val add_field_with_bounds :",
+        "span": 5,
+        "kind": "vox",
+        "text": "A ghost field has no slot, so its type bounds every modal axis of the record's kind except externality. `relevant_axes_of_field` and `add_modality ?ghost` are the same rule at the level of axis sets."
+      }
+    ]
+  },
+
+  "typing/ctype.mli": {
+    "what": {
+      "short": "Interface of Ctype: levels, instantiation, expansion, unification, moregen, equality, filtering of arrows and nondep."
+    },
+    "vox": {
+      "short": "Exposes scope tracking for term dependencies, the totality tests on types, the dependent binder of filtered arrows, and substitution into dependent types.",
+      "long": "The implementation is described at [ctype.ml](src:typing/ctype.ml). `Typeclass`, `Typecore` and `Typemod` use the scope functions to register the values they bind; `Typecore` uses the substitution functions when it applies a dependent function."
+    },
+    "notes": [
+      {
+        "title": "A predicate names a value that is going out of scope",
+        "from": "exception Refinement_scope_escape of Ident.t",
+        "kind": "vox",
+        "text": "The term-level counterpart of `Escape`: raised when a type leaving a level contains a refinement whose predicate depends on a value registered at a deeper level. `Typeclass.class_expr` turns it into an error on the class expression."
+      },
+      {
+        "title": "Scopes of term dependencies",
+        "from": "(** Register term identifiers whose refinement dependencies are valid down to",
+        "to": "val check_refinement_class_level_escape : int -> class_type -> unit",
+        "kind": "vox",
+        "text": "Binders register the identifiers they introduce at the current level. `with_refinement_predicate_scope` marks code that types a predicate, where no new scopes are tracked; `check_refinement_class_level_escape` walks a class type for escaping dependencies."
+      },
+      {
+        "title": "Types on which a match may be total",
+        "from": "val is_inductive: Env.t -> type_expr -> bool",
+        "span": 2,
+        "kind": "vox",
+        "text": "`is_inductive` tests for an `[@@inductive]` type; `can_pattern_match_total` decides whether a match on the type can stay total. Since the hidden-types fix (`09dfd7e2fa`) it rejects existentials and negatively reached abstract or open types whose jkind allows pointers; `can_unpack_total`, added by that fix, does the same for the abstract types of an unpacked first-class module."
+      },
+      {
+        "title": "The dependent binder of an arrow",
+        "from": "binder : Ident.t option",
+        "kind": "vox",
+        "text": "`filter_arrow` returns the arrow's binder, `Some x` for `(x : a) -> b`, so the caller can substitute the argument into the result type."
+      },
+      {
+        "title": "Substitution into dependent types",
+        "from": "val refinement_ident_occurs : Ident.t -> type_expr -> bool",
+        "span": 7,
+        "kind": "vox",
+        "text": "`substitute_refinement_expression` puts an argument, as a predicate expression, in place of a binder; `Typecore` uses it when applying a dependent function. `substitute_refinement_ident` renames a binder. `apply_dependent_type` (a binder to a value path, through `Subst.add_value`) has no caller at this revision. `refinement_ident_occurs` decides whether an arrow is dependent at all: `Typetexp` keeps a binder only if the codomain mentions it."
+      }
+    ]
+  },
+
+  "typing/data_types.ml": {
+    "what": {
+      "short": "Constructor and label descriptions, the per-use views of variant constructors and record fields stored in the environment."
+    },
+    "vox": {
+      "short": "Label descriptions gain lbl_ghost, copied from the declaration's ld_ghost.",
+      "long": "`Translcore` and `Matching` read `lbl_ghost`: the field has no slot, and reading it fabricates a placeholder at mode ghost."
+    },
+    "notes": [
+      {
+        "title": "The ghost flag on a label",
+        "from": "lbl_ghost: bool;",
+        "span": 2,
+        "kind": "vox",
+        "text": "Set for a field declared with `@@ ghost`. `Translcore` and `Matching` test it wherever a field's slot would be read or written."
+      },
+      {
+        "title": "Back to a declaration",
+        "from": "ld_ghost = lbl.lbl_ghost;",
+        "kind": "vox",
+        "text": "`label_declaration_of_label_description` keeps the flag, so a declaration rebuilt from a description is still ghost."
+      }
+    ]
+  },
+
+  "typing/data_types.mli": {
+    "what": {
+      "short": "Interface of Data_types: constructor and label descriptions."
+    },
+    "vox": {
+      "short": "Adds the lbl_ghost field to label descriptions.",
+      "long": "See [data_types.ml](src:typing/data_types.ml)."
+    }
+  },
+
+  "typing/datarepr.ml": {
+    "what": {
+      "short": "Computes constructor and label descriptions from type declarations, including the declarations of inline records."
+    },
+    "vox": {
+      "short": "Copies ld_ghost into lbl_ghost, and gives inline-record declarations the new flags type_inductive and type_phantom_parameters, both false."
+    },
+    "notes": [
+      {
+        "title": "Ghostliness reaches the label description",
+        "from": "lbl_ghost = l.ld_ghost;",
+        "kind": "vox",
+        "text": "`label_descrs` is where every record field's description is built, so this is the one place the flag has to be copied."
+      },
+      {
+        "title": "Inline records are never inductive",
+        "from": "type_inductive = false;",
+        "span": 2,
+        "kind": "vox",
+        "text": "The synthesized declaration of an inline record carries no `[@@inductive]` or `[@@phantom_parameters]` guarantee."
+      }
+    ]
+  },
+
+  "typing/env.mli": {
+    "what": {
+      "short": "Interface of the typing environment: lookups, additions, locks and walk_locks, persistent signatures."
+    },
+    "vox": {
+      "short": "Declares the partial-construct lock walk, path-based lookups for stored predicates, the total closure lock, and the ghost-context flag.",
+      "long": "The implementation is described at [env.ml](src:typing/env.ml)."
+    },
+    "notes": [
+      {
+        "title": "Partial constructs make closures partial",
+        "from": "val walk_locks_for_partial_construct",
+        "kind": "vox",
+        "text": "`Typecore` calls this for partial constructs, among them loops, field assignment, reading a mutable field, method calls, and matches that are non-exhaustive or on a type that `Ctype.can_pattern_match_total` rejects. Every enclosing closure is constrained to be partial on the totality axis, and no other axis is touched."
+      },
+      {
+        "title": "Lookups by resolved path",
+        "from": "val lookup_value_path :",
+        "span": 6,
+        "kind": "vox",
+        "text": "A stored predicate names values and constructors by `Path.t`. Re-elaborating it must resolve exactly those paths; resolving the printed name could pick up a shadowing binding."
+      },
+      {
+        "title": "Total closure lock",
+        "from": "val add_total_closure_lock",
+        "kind": "vox",
+        "text": "Used for `[@@decreases]` measures: the measure may capture only values usable by a total, stateless and portable computation."
+      },
+      {
+        "title": "Ghost context",
+        "from": "val enter_ghost_context : t -> t",
+        "span": 3,
+        "kind": "vox",
+        "text": "Predicates and `ghost_` bodies are erased, so inside them nothing is checked on the ghostliness axis. `Typecore.enter_total_ghost_context` enters this context together with a total, stateless, portable closure lock, for both."
+      }
+    ]
+  },
+
+  "typing/gprinttyp.ml": {
+    "what": {
+      "short": "Debug printer that renders type graphs in Graphviz dot format."
+    },
+    "vox": {
+      "short": "Draws a Trefine node as {...} with one edge to its payload; arrow nodes match the four-component arrow_desc."
+    },
+    "notes": [
+      {
+        "title": "Refinement nodes",
+        "from": "| Types.Trefine r ->",
+        "span": 2,
+        "kind": "vox",
+        "text": "Only the payload is followed. The binder in the arrow pattern above is ignored."
+      }
+    ]
+  },
+
+  "typing/ident.ml": {
+    "what": {
+      "short": "Identifiers: local, scoped, global and predefined, with stamps, scopes and the identifier tables."
+    },
+    "vox": {
+      "short": "Adds rename_preserving_scope_with_stamp, which Subst uses to give bound identifiers deterministic stamps in a .cmi without losing their scope."
+    },
+    "notes": [
+      {
+        "title": "Renaming a scoped identifier",
+        "from": "let rename_preserving_scope_with_stamp stamp = function",
+        "span": 5,
+        "kind": "vox",
+        "text": "Upstream `rename_with_stamp` turns a `Scoped` identifier into a `Local` one, whose `scope` is `highest_scope`. Refinement and arrow binders are scoped at `lowest_scope`, and `Ctype`'s refinement scope tracking reads `Ident.scope`, so a binder saved as `Local` would look like a dependency on a value that is out of scope everywhere."
+      }
+    ]
+  },
+
+  "typing/ident.mli": {
+    "what": {
+      "short": "Interface of Ident."
+    },
+    "vox": {
+      "short": "Declares rename_preserving_scope_with_stamp.",
+      "long": "See [ident.ml](src:typing/ident.ml)."
+    }
+  },
+
+  "typing/ikind.mli": {
+    "what": {
+      "short": "Interface of Ikind: kinds as lattice polynomials, crossing of types and jkinds."
+    },
+    "vox": {
+      "short": "Exports enforce_refinement_crossings, which Ctype applies to a refined type's kind.",
+      "long": "The implementation is described at [ikind.ml](src:typing/ikind.ml)."
+    },
+    "notes": [
+      {
+        "title": "The kind of a refined type",
+        "from": "val enforce_refinement_crossings",
+        "kind": "vox",
+        "text": "Meets a payload's crossing bounds with `refinement_crossings`: the refined type crosses portability, totality and statefulness. That is sound because every introduction of a refinement checks the value at total, stateless and portable modes."
+      }
+    ]
+  },
+
+  "typing/includecore.mli": {
+    "what": {
+      "short": "Interface of Includecore: inclusion of values and type declarations, and the mismatch types behind signature errors."
+    },
+    "vox": {
+      "short": "Adds the partial_recursion table and mismatch cases for [@@inductive], phantom parameters and ghost fields.",
+      "long": "The implementation is described at [includecore.ml](src:typing/includecore.ml)."
+    },
+    "notes": [
+      {
+        "title": "Why a recursive function is partial",
+        "from": "val partial_recursion : (Location.t * string) Types.Uid.Tbl.t",
+        "kind": "vox",
+        "text": "`Typecore` fills this when a `let rec` fails the structural check. `Includemod_errorprinter.show_partial_recursion` reads it when an interface requires `total`, and points at the offending call."
+      },
+      {
+        "title": "Ghostliness of a field must match",
+        "from": "| Ghostliness of position",
+        "kind": "vox",
+        "text": "A field cannot be ghost on one side and real on the other: the two records would have different representations."
+      },
+      {
+        "title": "Inductiveness and phantom parameters must match",
+        "from": "| Inductiveness",
+        "span": 2,
+        "kind": "vox",
+        "text": "An interface may only state `[@@inductive]` or `[@@phantom_parameters]` if the implementation does. An implementation can hide `[@@inductive]` only by making the type abstract."
+      }
+    ]
+  },
+
+  "typing/includemod.ml": {
+    "what": {
+      "short": "Module inclusion: signatures, functors and module types, pairing the components of two signatures and checking each pair."
+    },
+    "vox": {
+      "short": "Values are now substituted while pairing signatures, and both sides' predicates are prefixed with the module's path, so contracts that name values compare correctly.",
+      "long": [
+        "A predicate in a signature can name another value of the same signature (`val under : unit -> {r : int | r <= limit}`). Pairing maps the interface's `limit` to the implementation's, just as it maps types; extension constructors go through the same value substitution, because a predicate can construct them.",
+        "When a signature is reached through a path, `strengthened_modtypes` rewrites each side's free value references to go through that path, using `Mtype.prefix_refinement_paths_lazy`. After that the predicates are compared by `Includecore`, which requires alpha-equality; inclusion emits no proof obligation."
+      ]
+    },
+    "notes": [
+      {
+        "title": "Pairing values substitutes them",
+        "from": "| Sig_value _ | Sig_typext _ ->",
+        "span": 2,
+        "kind": "vox",
+        "text": "Upstream left the substitution unchanged for values and extension constructors, since they could not occur in types. Here they can occur in predicates, so the interface's identifier is replaced by the implementation's."
+      },
+      {
+        "title": "Prefixing predicates with the module path",
+        "from": "Mtype.prefix_refinement_paths_lazy env Subst.identity mty1 path1",
+        "to": "let mty2 = Mtype.prefix_refinement_paths_lazy env subst mty2 path1 in",
+        "kind": "vox",
+        "text": "Inside `M` a predicate says `f x`; compared from outside it must say `M.f x` on both sides. The expected side goes through the pairing substitution first."
+      }
+    ]
+  },
+
+  "typing/includemod_errorprinter.ml": {
+    "what": {
+      "short": "Formats module inclusion errors, including the diff of functor arguments and the per-item symptoms."
+    },
+    "vox": {
+      "short": "When an interface requires total and the value is partial only because its recursion is not structural, the error points at the recursive call."
+    },
+    "notes": [
+      {
+        "title": "Explaining a partial recursive function",
+        "from": "let show_partial_recursion is_modal ppf",
+        "to": "| _ -> ()",
+        "kind": "vox",
+        "text": "Fires only when the mismatched axis is totality, and looks the value's uid up in `Includecore.partial_recursion`. The message gives the reason recorded by `Structural_recursion.check`, at the call's location."
+      },
+      {
+        "title": "Appended to the value mismatch",
+        "from": "(show_partial_recursion is_modal) diff.got",
+        "kind": "vox",
+        "text": "One extra `%a` in the \"Values do not match\" report; it prints nothing for other axes."
+      }
+    ]
+  },
+
+  "typing/jkind_axis.ml": {
+    "what": {
+      "short": "The axes of a jkind's bounds: modal axes by reference to Mode, plus the non-modal externality axis, and Axis_set as a bit set of them."
+    },
+    "vox": {
+      "short": "Adds the totality and ghostliness modal axes, as indices 10 and 11; externality moves to 12.",
+      "long": "Every enumeration of axes in kinds, including error printing and `Axis_set.all`, now includes the two Vox axes."
+    },
+    "notes": [
+      {
+        "title": "The two new axes in the list of all axes",
+        "from": "Pack (Modal (Comonadic Totality));",
+        "span": 2,
+        "kind": "vox",
+        "text": "Both are comonadic: totality (`total < partial`) and ghostliness (`real < ghost`)."
+      },
+      {
+        "title": "Bit positions",
+        "from": "| Modal (Comonadic Totality) -> 10",
+        "to": "| Nonmodal Externality -> 12",
+        "kind": "vox",
+        "text": "`Axis_set` is a bit mask indexed by these numbers; externality is renumbered to stay last."
+      }
+    ]
+  },
+
+  "typing/jkind_intf.ml": {
+    "what": {
+      "short": "Shared signatures and types for jkinds, including the History of creation reasons printed when a kind is explained."
+    },
+    "vox": {
+      "short": "Gives void its first creation reason, Ghost_record: a record all of whose fields are ghost."
+    },
+    "notes": [
+      {
+        "title": "Why a record is void",
+        "from": "type void_creation_reason = Ghost_record",
+        "span": 3,
+        "kind": "vox",
+        "text": "Upstream `void_creation_reason` was empty. `Typedecl` gives an all-ghost record (such as `'a Ghost.t`) kind `void`, and this reason is what an error message cites."
+      }
+    ]
+  },
+
+  "typing/mtype.mli": {
+    "what": {
+      "short": "Interface of Mtype: scraping, strengthening, nondep and freshening of module types."
+    },
+    "vox": {
+      "short": "Declares prefix_refinement_paths_lazy.",
+      "long": "The implementation is described at [mtype.ml](src:typing/mtype.ml); `Includemod.strengthened_modtypes` is the caller."
+    },
+    "notes": [
+      {
+        "title": "Prefixing value paths in predicates",
+        "from": "val prefix_refinement_paths_lazy:",
+        "span": 3,
+        "kind": "vox",
+        "text": "Next to `strengthen_lazy`, and used alongside it: strengthening relates a signature's types to a module path, this relates the values named in its predicates to the same path."
+      }
+    ]
+  },
+
+  "typing/oprint.ml": {
+    "what": {
+      "short": "Prints Outcometree values: the concrete syntax of types, signatures and values in the toplevel and in error messages."
+    },
+    "vox": {
+      "short": "Prints dependent arrows as (x : t) -> ... and refinement types as {x : t | p}, with the predicate printed by Pprintast.",
+      "long": "The predicate arrives as a Parsetree expression, so it prints as source. Type constraints inside it are `_` placeholders paired with already-printed types, which `Pprintast.expression_with_type_overrides` substitutes."
+    },
+    "notes": [
+      {
+        "title": "Dependent arrows",
+        "from": "| Otyp_arrow (lab, am, ty1, ty2, binder) ->",
+        "to": "end;",
+        "kind": "vox",
+        "text": "With a binder the argument prints as `(x : t)`. The modes `total`, `stateless` and `portable` are dropped, since `Typetexp` requires every dependent argument to have them."
+      },
+      {
+        "title": "Refinement types",
+        "from": "| Otyp_refine (binder, payload, predicate, type_overrides) ->",
+        "span": 11,
+        "kind": "vox",
+        "text": "Prints `{x : t | p}`. Each type constraint in the predicate is a placeholder that is printed as the corresponding `out_type`, so type names follow the same naming context as the rest of the message."
+      }
+    ]
+  },
+
+  "typing/out_type.mli": {
+    "what": {
+      "short": "Interface of Out_type: conversion of types, modes and signatures to Outcometree."
+    },
+    "vox": {
+      "short": "Adds the Type_constraint printing mode, used for explicit type constraints inside predicates.",
+      "long": "The implementation is described at [out_type.ml](src:typing/out_type.ml)."
+    },
+    "notes": [
+      {
+        "title": "Printing types written inside a predicate",
+        "from": "type type_or_scheme = Type | Type_scheme | Type_constraint",
+        "span": 3,
+        "kind": "vox",
+        "text": "A constraint `(e : _ list)` inside a stored predicate has anonymous generalized variables. `Type_constraint` prints them as `_`, so the printed predicate reads as it was written."
+      }
+    ]
+  },
+
+  "typing/outcometree.mli": {
+    "what": {
+      "short": "The printable representation of types, values and signatures that Out_type builds and Oprint prints."
+    },
+    "vox": {
+      "short": "Otyp_arrow carries an optional binder name, and Otyp_refine represents {x : t | p} with the predicate as surface syntax."
+    },
+    "notes": [
+      {
+        "title": "Arrow binders and refinements",
+        "from": "| Otyp_arrow of arg_label * out_arg_mode * out_type * out_type * string option",
+        "to": "syntax, produced by [Out_type], and printed with [Pprintast]. *)",
+        "kind": "vox",
+        "text": "`Otyp_refine` holds the binder name, the payload, the predicate as a `Parsetree.expression`, and pairs of placeholder `core_type`s and printed types for the constraints inside the predicate. Carrying Parsetree here makes Outcometree depend on the parser's types."
+      }
+    ]
+  },
+
+  "typing/primitive.ml": {
+    "what": {
+      "short": "External primitive descriptions: parsing of external declarations, native representations of arguments, and the layout checks on %-primitives."
+    },
+    "vox": {
+      "short": "Lets the raise primitives be declared [@layout_poly] with a result of any layout, and threads the arrow binder through the printed type of externals.",
+      "long": "`Stdlib.raise` and `raise_notrace` are declared `('a : any). exn -> 'a` with `[@layout_poly]`, so a function returning an unboxed product can raise. `prim_has_valid_reprs` needs an entry for each such primitive: the exception is a scannable value and the result may have any layout. This is independent of totality: `raise` stays partial."
+    },
+    "notes": [
+      {
+        "title": "Representation checks for raise",
+        "from": "| \"%raise\" | \"%reraise\" | \"%raise_notrace\" ->",
+        "span": 5,
+        "kind": "vox",
+        "text": "The last element of each list is the result, allowed at any layout. `testsuite/tests/vox/unboxed_exceptions.ml` raises from a function returning `#{left : int; right : int}` and checks that `raise` still cannot be used in total code."
+      },
+      {
+        "title": "Native-repr attributes on dependent arrows",
+        "from": "| Otyp_arrow (label, am, a, Otyp_ret (rm, r), binder), attr_l :: rest ->",
+        "span": 4,
+        "kind": "vox",
+        "text": "Only the new fifth component of `Otyp_arrow`; the binder is passed through unchanged."
+      }
+    ]
+  },
+
+  "typing/printpat.ml": {
+    "what": {
+      "short": "Prints typed patterns, for exhaustiveness and unused-case warnings."
+    },
+    "vox": {
+      "short": "Tpat_refinement is transparent: the pattern prints as its payload pattern."
+    },
+    "notes": [
+      {
+        "from": "| Tpat_refinement _ | Tpat_inspected_type _ ->",
+        "kind": "vox",
+        "text": "`Tpat_refinement` only records that the scrutinee's refinements were exposed before matching; it has no syntax of its own."
+      }
+    ]
+  },
+
+  "typing/printtyped.ml": {
+    "what": {
+      "short": "The -dtypedtree printer: an indented dump of every Typedtree node."
+    },
+    "vox": {
+      "short": "Prints the new Typedtree forms: arrow binders, Ttyp_refine with its typed predicate, the Vox expression extras, Texp_assume, Texp_logical_equal and ghost fields."
+    },
+    "notes": [
+      {
+        "title": "Types",
+        "from": "| Ttyp_refine (_, binder, ct, pred) ->",
+        "span": 6,
+        "kind": "vox",
+        "text": "The predicate is printed as the typed expression that `Typecore` produced for it. The resolved `refinement_expression` stored in the type graph is not printed."
+      },
+      {
+        "title": "Expression extras",
+        "from": "| Texp_refine ->",
+        "span": 10,
+        "kind": "vox",
+        "text": "`Texp_refinement` prints without its `source` and `target` types, so `-dtypedtree` shows only where refinements are eliminated and introduced."
+      },
+      {
+        "title": "assume_ and ===",
+        "from": "| Texp_assume (binding, predicate, body) ->",
+        "span": 10,
+        "kind": "vox",
+        "text": "`Texp_assume` has the bound operand, the predicate checked at run time, and the body that returns the payload. `Texp_logical_equal` is `a === b`."
+      }
+    ]
+  },
+
+  "typing/rawprinttyp.ml": {
+    "what": {
+      "short": "A raw printer of type_expr for debugging, showing constructors, levels and ids without naming or sharing analysis."
+    },
+    "vox": {
+      "short": "Prints the arrow binder by its unique name and Trefine as its payload; the predicate is not printed."
+    },
+    "notes": [
+      {
+        "title": "Arrow binders and refinements",
+        "from": "| Tarrow((l,arg,ret,binder),t1,t2,c) ->",
+        "span": 16,
+        "kind": "vox",
+        "text": "The binder prints as `Some x_42` or `None`. A refinement prints as `Trefine` of its payload."
+      }
+    ]
+  },
+
+  "typing/recursive_function.mli": {
+    "what": {
+      "short": "Interface of Recursive_function: the shared restrictions on a let rec that may be total."
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "The implementation is described at [recursive_function.ml](src:typing/recursive_function.ml)."
+    },
+    "notes": [
+      {
+        "title": "Contract of check_uses",
+        "from": "val check_uses : Ident.t -> Typedtree.expression -> unit",
+        "kind": "what",
+        "text": "Must run before the descent check, whether structural or `[@@decreases]`: those checks assume every occurrence of the function is a direct, full, unlabelled call. `parameters` returns the function's parameters and body, and `Invalid` carries the reason for rejection."
+      }
+    ]
+  },
+
+  "typing/refinement_predicate.mli": {
+    "what": {
+      "short": "Interface of Refinement_predicate: map, folds, alpha-equality, untyping and dependency queries on stored predicates."
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "The implementation is described at [refinement_predicate.ml](src:typing/refinement_predicate.ml)."
+    },
+    "notes": [
+      {
+        "title": "One map for every rewrite of a predicate",
+        "from": "val map :",
+        "to": "refinement_expression -> refinement_expression",
+        "kind": "what",
+        "text": "`Subst`, `Ctype` and `Mtype` all rewrite predicates through this. The optional arguments separate the cases that matter for scoping: renaming bound identifiers, renaming free ones, and turning free value paths into bound variables or back."
+      },
+      {
+        "title": "Equality ignores types",
+        "from": "val equal :",
+        "span": 3,
+        "kind": "what",
+        "text": "Syntactic alpha-equivalence, with `pairs` giving the correspondence between binders on the two sides. It does not compare the types stored at each node. Because of this, a law about `Q.empty : int Q.t` is equal to the same law at `bool Q.t`; this is the open issue W1, which the subsumption branch will close."
+      },
+      {
+        "title": "Printing",
+        "from": "val untype :",
+        "span": 10,
+        "kind": "what",
+        "text": "Converts back to a Parsetree expression. The callbacks let `Out_type` choose names for binders and render resolved paths through the printer's short-path machinery."
+      }
+    ]
+  },
+
+  "typing/shape.ml": {
+    "what": {
+      "short": "Shapes: an abstract description of modules and their components, used for uids, go-to-definition and separate compilation of occurrences."
+    },
+    "vox": {
+      "short": "can_appear_in_types now answers true for values and extension constructors, because refinement predicates can name them.",
+      "long": "`Typemod`'s signature simplification uses this predicate to decide whether hiding an item can leave a dangling reference in a type. With the change, a value named in an exported contract gets the same \"illegal shadowing\" check as a type, and a functor result whose predicate mentions the parameter's values is subject to upstream's nondep error. That one-line change is how upstream's scoping rules came to cover values."
+    },
+    "notes": [
+      {
+        "title": "Values can appear in types",
+        "from": "let can_appear_in_types = function",
+        "to": "| Jkind -> true",
+        "kind": "vox",
+        "text": "Upstream returned `false` for `Value` and `Extension_constructor`. Every kind of component now returns `true`."
+      }
+    ]
+  },
+
+  "typing/structural_recursion.mli": {
+    "what": {
+      "short": "Interface of Structural_recursion: one function, check, which decides whether a let rec descends structurally."
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "The implementation is described at [structural_recursion.ml](src:typing/structural_recursion.ml)."
+    },
+    "notes": [
+      {
+        "title": "Failure is a result",
+        "from": "val check :",
+        "span": 2,
+        "kind": "what",
+        "text": "`Error (loc, reason)` means the function is not structurally recursive; the caller then makes it partial and reports nothing. `Typecore` stores the location and reason in `Includecore.partial_recursion` for later interface errors."
+      }
+    ]
+  },
+
+  "typing/subst.mli": {
+    "what": {
+      "short": "Interface of Subst: substitutions on paths, types, signatures and declarations."
+    },
+    "vox": {
+      "short": "Declares add_value and add_bound_value, which extend substitutions to term identifiers.",
+      "long": "The implementation is described at [subst.ml](src:typing/subst.ml)."
+    },
+    "notes": [
+      {
+        "title": "Substituting values",
+        "from": "val add_value: Ident.t -> Path.t -> 'k subst -> 'k subst",
+        "span": 3,
+        "kind": "vox",
+        "text": "`add_value` maps a free value identifier to a path; `Includemod` and dependent application use it. `add_bound_value` renames a binder of a dependent arrow or refinement, which `Ctype` uses to align the binders of two arrows before comparing their codomains."
+      }
+    ]
+  },
+
+  "typing/tast_iterator.ml": {
+    "what": {
+      "short": "The open-recursion iterator over the Typedtree, used by many passes and tools."
+    },
+    "vox": {
+      "short": "Visits the new nodes: a Ttyp_refine's payload and typed predicate, the operands of Texp_assume and Texp_logical_equal.",
+      "long": "The extras `Texp_refinement` and `Tpat_refinement` carry types, which the iterator does not visit, as it does not visit other `type_expr`s."
+    },
+    "notes": [
+      {
+        "title": "Refinement types are visited through their typed predicate",
+        "from": "| Ttyp_refine (_, _, payload, pred) ->",
+        "span": 3,
+        "kind": "vox",
+        "text": "A pass that iterates over a structure will see the expressions inside refinement annotations, which live under `Env.enter_ghost_context`. Such a pass must not treat them as run-time code."
+      },
+      {
+        "title": "assume_ and ===",
+        "from": "| Texp_assume (binding, predicate, body) ->",
+        "span": 7,
+        "kind": "vox",
+        "text": "The predicate of `assume_` is an ordinary expression here, since it is checked at run time."
+      }
+    ]
+  },
+
+  "typing/tast_mapper.ml": {
+    "what": {
+      "short": "The open-recursion mapper over the Typedtree."
+    },
+    "vox": {
+      "short": "Maps the new nodes; Texp_refinement and Tpat_refinement are copied unchanged, and a Ttyp_refine keeps its binder.",
+      "long": "Mapping the typed predicate of a `Ttyp_refine` leaves the resolved predicate in its `ctyp_type` unchanged; the mapper leaves types alone throughout."
+    },
+    "notes": [
+      {
+        "title": "Refinement types",
+        "from": "| Ttyp_refine (binder, name, payload, pred) ->",
+        "span": 3,
+        "kind": "vox",
+        "text": "The payload and the typed predicate are mapped; the binder identifier and its name are kept."
+      },
+      {
+        "title": "assume_ and ===",
+        "from": "| Texp_assume (binding, predicate, body) ->",
+        "span": 6,
+        "kind": "vox",
+        "text": "Mapped like `Texp_assert` and a binary application."
+      }
+    ]
+  },
+
+  "typing/type_shape.ml": {
+    "what": {
+      "short": "Type shapes: a structural description of types used for debugging information."
+    },
+    "vox": {
+      "short": "A refined type has its payload's shape.",
+      "long": "Refinements do not affect representation, so the debugger sees the payload."
+    },
+    "notes": [
+      {
+        "from": "| Trefine { ref_payload; _ } ->",
+        "span": 2,
+        "kind": "vox",
+        "text": "The predicate is dropped."
+      }
+    ]
+  },
+
+  "typing/typeclass.ml": {
+    "what": {
+      "short": "Type checking of classes and class types: class expressions, class structures, self types, and the class declarations added to the environment."
+    },
+    "vox": {
+      "short": "Class parameters, class-level lets, opens, self and instance variables are registered as term scopes, and a class type may not mention them in a refinement once they go out of scope.",
+      "long": [
+        "A method's type may contain a predicate that names a class parameter or instance variable. That is fine inside the class but meaningless outside it. Each class form that binds values now enters a level (only when refinement types may exist, via `with_local_level_generalize_if (may_track_refinement_scopes ())`), registers the bound identifiers with `Ctype.register_refinement_value_scope`, and on exit calls `Ctype.check_refinement_class_level_escape` on the resulting class type.",
+        "The other changes follow from type definitions: arrow descriptions gain a `None` binder, the class's type abbreviations have `type_inductive` and `type_phantom_parameters` set to false, and unused-variable warnings carry the new `refined_unit` field."
+      ]
+    },
+    "notes": [
+      {
+        "title": "Self and instance variables are term scopes",
+        "from": [
+          "and class_structure cl_num virt self_scope final val_env met_env loc",
+          "Ctype.register_refinement_value_scope ~level:(Ctype.get_current_level ())"
+        ],
+        "span": 2,
+        "kind": "vox",
+        "text": "The identifiers of the self pattern are registered at the current level; the instance variables are registered the same way after the first pass over the fields."
+      },
+      {
+        "title": "Escapes become class errors",
+        "from": "and class_expr cl_num val_env met_env virt self_scope scl =",
+        "to": "Misc.Style.inline_code (Ident.name id)))",
+        "kind": "vox",
+        "text": "`Ctype.Refinement_scope_escape` from anywhere inside a class expression is reported at that expression: \"the refinement type of this class expression escapes the scope of binding\"."
+      },
+      {
+        "title": "Class parameters",
+        "from": [
+          "| Pcl_fun (l, None, spat, scl') ->",
+          "let ids ="
+        ],
+        "to": "Ctype.check_refinement_class_level_escape outer_level cl.cl_type)",
+        "kind": "vox",
+        "text": "The identifiers bound by the parameter's pattern, and the identifiers through which the class body sees them, are registered in a fresh level. Before generalization, the body's class type is checked against the outer level."
+      },
+      {
+        "title": "let and open in a class expression",
+        "from": [
+          "| Pcl_let (rec_flag, sdefs, scl') ->",
+          "Ctype.register_refinement_value_scope"
+        ],
+        "span": 3,
+        "kind": "vox",
+        "text": "Values bound by `let ... in` are registered; `Pcl_open` below does the same for the items an `open` brings into scope. Both check the class type against the outer level before returning it."
+      }
+    ]
+  },
+
+  "typing/typecore.mli": {
+    "what": {
+      "short": "Interface of Typecore: expression and pattern typing entry points, the error type, and forward references used by Typemod and Typeclass."
+    },
+    "vox": {
+      "short": "Adds submode reasons that pick hints for totality and ghostliness errors.",
+      "long": "The implementation is described at [typecore.ml](src:typing/typecore.ml)."
+    },
+    "notes": [
+      {
+        "title": "Reasons for a failed submode check",
+        "from": "| Function_value",
+        "to": "an annotation. *)",
+        "kind": "vox",
+        "text": "`Function_value`, used when the value is a function with a total result mode, adds a hint to annotate the callback itself, since `total` after the arrow constrains only the result. `Ghost_expression`, `Assume_check` and `Real_result` select the ghostliness hints: move `ghost_` outward, state an `assume_` fact as a static refinement, or no hint when the context asked for a real value by annotation."
+      }
+    ]
+  },
+
+  "typing/typedecl.mli": {
+    "what": {
+      "short": "Interface of Typedecl: translation of type declarations and its error type."
+    },
+    "vox": {
+      "short": "Adds the Ghost_mutable_label error: a ghost field has no slot, so it cannot be mutable.",
+      "long": "The implementation is described at [typedecl.ml](src:typing/typedecl.ml)."
+    },
+    "notes": [
+      {
+        "from": "| Ghost_mutable_label of string",
+        "kind": "vox",
+        "text": "Reported as \"The field ... cannot be both mutable and ghost\"."
+      }
+    ]
+  },
+
+  "typing/typedecl_separability.ml": {
+    "what": {
+      "short": "Separability of type declarations: whether a type's values can mix float and non-float representations, which decides the float-array optimization."
+    },
+    "vox": {
+      "short": "A refined type is separable exactly when its payload is.",
+      "long": "The predicate has no bearing on representation."
+    },
+    "notes": [
+      {
+        "title": "Immediate subterms",
+        "from": "| Trefine { ref_payload; _ } -> [ref_payload]",
+        "kind": "vox",
+        "text": "The predicate's types are not subterms for separability."
+      },
+      {
+        "title": "The check",
+        "from": "| (Trefine r          , m      ) ->",
+        "span": 2,
+        "kind": "vox",
+        "text": "Recurses into the payload with the same mode, as for `Tpoly`."
+      }
+    ]
+  },
+
+  "typing/typedtree.ml": {
+    "what": {
+      "short": "Implementation of the typed AST types and their helpers (pattern classification, bound identifiers, and so on)."
+    },
+    "vox": {
+      "short": "Defines the new constructors declared in typedtree.mli: Vox's pattern and expression extras, Texp_assume, Texp_logical_equal, Ttyp_refine, the arrow binder and ld_ghost.",
+      "long": "What the constructors mean is described at [typedtree.mli](src:typing/typedtree.mli)."
+    },
+    "notes": [
+      {
+        "title": "Exposed refinements on a pattern",
+        "from": "| Tpat_refinement of Types.type_expr",
+        "kind": "vox",
+        "text": "Records the refined type of a scrutinee that is matched structurally: the pattern is typed at the payload, and the verifier assumes the refinements."
+      },
+      {
+        "title": "Expression extras",
+        "from": "| Texp_refinement of { source : Types.type_expr; target : Types.type_expr }",
+        "span": 3,
+        "kind": "vox",
+        "text": "`Texp_refinement` marks where an outer refinement is eliminated (`source` refined) or introduced (`target` refined). `Texp_refine` marks an explicit `refine_`, `Texp_value_name` names an evaluated argument for a dependent parameter, and `Texp_let_refine` marks `let refine_ x = e in b`. `Texp_ghost`, above, marks `ghost_ e`."
+      },
+      {
+        "title": "New expression forms",
+        "from": "| Texp_assume of value_binding * expression * expression",
+        "span": 2,
+        "kind": "vox",
+        "text": "`assume_` binds its operand, checks the predicate at run time and returns the payload. `Texp_logical_equal` is `a === b`."
+      },
+      {
+        "title": "Refinement types and dependent arrows",
+        "from": "| Ttyp_refine of Ident.t * string loc * core_type * expression",
+        "span": 2,
+        "kind": "vox",
+        "text": "The typed predicate is kept for tools and printing; the type graph holds the resolved `refinement_expression`. `Ttyp_arrow` gains the binder of a dependent arrow."
+      }
+    ]
+  },
+
+  "typing/typemod.mli": {
+    "what": {
+      "short": "Interface of Typemod: typing of structures, signatures and compilation units, and its error type."
+    },
+    "vox": {
+      "short": "Adds three errors that stop a recursive module group from certifying its own totality.",
+      "long": "The implementation is described at [typemod.ml](src:typing/typemod.ml)."
+    },
+    "notes": [
+      {
+        "title": "Restrictions on recursive module signatures",
+        "from": "| Inductive_type_in_recursive_module of string",
+        "span": 3,
+        "kind": "vox",
+        "text": "A recursive module signature may not declare an `[@@inductive]` type, expose a total value whose type depends on the group, or contain another item that depends on the group in an unsupported form. `find_forbidden_recursive_signature` in `typemod.ml` finds the offending item; it also rejects `[@@phantom_parameters]` in such a signature directly."
+      }
+    ]
+  },
+
+  "typing/typemode.mli": {
+    "what": {
+      "short": "Interface of Typemode: translation of mode and modality syntax."
+    },
+    "vox": {
+      "short": "Exports dependent_argument_mode: legacy with total, stateless and portable.",
+      "long": "The implementation is described at [typemode.ml](src:typing/typemode.ml)."
+    },
+    "notes": [
+      {
+        "title": "The mode of a dependent argument",
+        "from": "val dependent_argument_mode : Mode.Alloc.Const.t",
+        "kind": "vox",
+        "text": "`Typetexp` rejects a dependent argument annotated with other totality, statefulness or portability (\"Dependent arguments must be total, stateless, portable\"); `Typecore` uses the same constant when it types an application. `Oprint` omits these modes when printing a dependent arrow."
+      }
+    ]
+  },
+
+  "typing/types.ml": {
+    "what": {
+      "short": "Implementation of the type graph and declarations: type_expr nodes, the transient operations on them, and the wrapped signature types."
+    },
+    "vox": {
+      "short": "Defines Trefine and the predicate language, the arrow binder and the new declaration flags, and notifies an observer whenever a refinement node is created or changed.",
+      "long": [
+        "The types are documented at [types.mli](src:typing/types.mli).",
+        "`Transient_expr.create`, `set_desc` and `set_stub_desc` now call `observe_type_desc`. `Ctype` installs the observer to recompute the greatest term dependency of each refinement node's predicate, which feeds the scope check. The observer runs only once a `Trefine` has been created in the current compilation state, so code without refinements pays one test per node."
+      ]
+    },
+    "notes": [
+      {
+        "title": "The refinement node",
+        "from": "| Trefine of refinement_desc",
+        "to": "ref_pred : refinement_expression }",
+        "kind": "vox",
+        "text": "`ref_structural_scope` is the node's ordinary type scope; the scope of its term dependencies is kept separately in `Ctype`, because substitution can lower it."
+      },
+      {
+        "title": "The predicate language",
+        "from": "and refinement_expression_desc =",
+        "to": "| Rexp_match of refinement_expression * refinement_case list",
+        "kind": "vox",
+        "text": "A resolved, typed expression language. `Rexp_var` is a bound name and `Rexp_ident` a free value path that substitution rewrites; `Rexp_refinement` records an elimination inside the predicate; `Rexp_ghost` marks a `ghost_` subterm."
+      },
+      {
+        "title": "Dependent arrows",
+        "from": "arg_label * Mode.Alloc.lr * Mode.Alloc.lr * Ident.t option",
+        "kind": "vox",
+        "text": "The fourth component is the binder of `(x : a) -> b`. `Typetexp` keeps it only if the codomain mentions it."
+      },
+      {
+        "title": "Observing refinement nodes",
+        "from": "let type_desc_observer : (transient_expr -> unit) ref = ref ignore",
+        "to": "| _ -> ()",
+        "kind": "vox",
+        "text": "`refinement_types_created` is a `Local_store` flag, so it is reset per compilation state. Once set, every created or updated node is reported, because a node that stops being a `Trefine` must drop its cached dependency."
+      },
+      {
+        "title": "New declaration flags",
+        "from": "type_inductive: bool;",
+        "span": 2,
+        "kind": "vox",
+        "text": "Set by `[@@inductive]` and `[@@phantom_parameters]`. Upstream code that builds declarations sets both to false."
+      },
+      {
+        "title": "Ghost fields",
+        "from": [
+          "and label_declaration =",
+          "ld_ghost: bool;"
+        ],
+        "span": 3,
+        "kind": "vox",
+        "text": "Written `@@ ghost` on a field, and represented as a flag, since ghost is not a modality."
+      },
+      {
+        "title": "Wrapped signature types without a recursive module",
+        "from": "module Wrapped_types (Wrap : Wrap) = struct",
+        "kind": "vox",
+        "text": "Upstream defined `Make_wrapped` with `module rec M : Wrapped with type 'a wrapped = 'a Wrap.t = M` to avoid repeating the type definitions. Vox's commit that restricted total values in recursive modules replaced it with this functor, which both the `Wrapped` signature and `Make_wrapped` include."
+      },
+      {
+        "title": "A one-field ghost record is not unboxed",
+        "from": "([{ld_type = arg; ld_modalities = ms; ld_ghost = false; _ }],",
+        "kind": "vox",
+        "text": "`find_unboxed_type` treats a one-field unboxed record as its field only if the field is real; a ghost field has no slot, and the record is void."
+      },
+      {
+        "title": "Every creation and update is observed",
+        "from": "let create desc ~level ~scope ~id =",
+        "span": 15,
+        "kind": "vox",
+        "text": "The three entry points that set a node's `desc` all notify the observer."
+      }
+    ]
+  },
+
+  "typing/typetexp.mli": {
+    "what": {
+      "short": "Interface of Typetexp: translation of core types, the type-variable environment, and forward references filled by Typecore."
+    },
+    "vox": {
+      "short": "Adds the forward references through which Typecore types predicates and binds dependent binders, and two TyVarEnv functions for predicates inside types.",
+      "long": "The implementation is described at [typetexp.ml](src:typing/typetexp.ml)."
+    },
+    "notes": [
+      {
+        "title": "Type variables across a predicate",
+        "from": "val protect_reentrant : (unit -> 'a) -> 'a",
+        "to": "that belongs to a polymorphic type. *)",
+        "kind": "vox",
+        "text": "Typing a predicate calls back into `Typecore` in the middle of translating a type. `protect_reentrant` saves and restores the type-variable state around that call, and `current_univars` gives a predicate access to the universal variables of an enclosing polymorphic type."
+      },
+      {
+        "title": "Forward references to Typecore",
+        "from": "val type_refinement_predicate:",
+        "to": "(Env.t -> Ident.t -> Types.type_expr -> Location.t -> Env.t) ref",
+        "kind": "vox",
+        "text": "`type_refinement_predicate` returns both the typed expression, kept in `Ttyp_refine`, and the resolved `refinement_expression` stored in the type. `add_dependent_binder` adds an arrow's binder to the environment of the rest of the arrow."
+      }
+    ]
+  },
+
+  "typing/verification.mli": {
+    "what": {
+      "short": "Interface of the verifier hooks: install and run for refinement obligations, install_termination and check_termination for [@@decreases] measures."
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "The implementation is described at [verification.ml](src:typing/verification.ml)."
+    },
+    "notes": [
+      {
+        "title": "When the verifier runs",
+        "from": "(** Run after delayed typing checks and before emitting artifacts.",
+        "to": "val run_unit : Typedtree.structure -> unit",
+        "kind": "what",
+        "text": "The default implementations fail closed: without an installed verifier, a static refinement introduction is rejected. `whole_unit` tells the verifier whether it sees a compilation unit or a toplevel phrase."
+      },
+      {
+        "title": "Termination measures",
+        "from": "val check_termination :",
+        "span": 3,
+        "kind": "what",
+        "text": "Called while typing a `[@@decreases]` function, before generalization. The default rejects the measure, since only the verifier can prove it decreases."
+      }
+    ]
+  },
+
+  "typing/vicuna_traverse_typed_tree.ml": {
+    "what": {
+      "short": "Walks the typed tree to extract external declarations and their value shapes for .cms files, skipping features the Vicuna tool does not support."
+    },
+    "vox": {
+      "short": "Looks through refinements to their payloads when classifying types, and keeps scraping when an unboxed type's approximation is itself a synonym or refinement.",
+      "long": "After `scrape_ty` a `Trefine` should never be seen; `classify` reports one as unsupported and `value_kind` treats it as a fatal error."
+    },
+    "notes": [
+      {
+        "title": "Scraping through refinements",
+        "from": "let rec scrape_ty env ty =",
+        "to": "| None -> ty'",
+        "kind": "vox",
+        "text": "A refinement is replaced by its payload, before and after expanding the head. The recursion on the unboxed approximation stops when the approximation is the type itself."
+      },
+      {
+        "title": "Refinements after scraping",
+        "from": "\"Vicuna_traverse_typed_tree.value_kind: Trefine after scrape_ty\"",
+        "kind": "vox",
+        "text": "An invariant check: `scrape_ty` has removed every outer refinement."
+      }
+    ]
+  },
+
+  "typing/vox_type.mli": {
+    "what": {
+      "short": "Interface of Vox_type: classifies a type as int, bool or Bigint.t, the types with an exact SMT meaning, and decides which declarations carry a C primitive's built-in meaning."
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "The implementation is described at [vox_type.ml](src:typing/vox_type.ml)."
+    },
+    "notes": [
+      {
+        "title": "Two classifiers",
+        "from": "val classify : Env.t -> Types.type_expr -> t option",
+        "span": 4,
+        "kind": "what",
+        "text": "`classify` expands aliases but leaves a `Tpoly` or `Trefine` wrapper for the caller to accept or reject; `classify_payload` unwraps empty polymorphic and refinement wrappers too. `Translcore` uses `classify_payload` to decide how `===` is compiled."
+      }
+    ]
+  }
+}

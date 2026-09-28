@@ -1,0 +1,203 @@
+{
+  "_about": "Vox tour through the compiler, front end to runtime. Sources: research/mastery-20260927/INDEX.md (Part A) and the topic reports (refinement-types, totality, ghost-erasure, verifier, smt-encoding, heap-ownership, trust-builtins, tooling); every claim re-checked against the code at a0b99ddfeb, including the shift-encoding, call-congruence and ghost-field-locality fixes merged since the reports.",
+  "id": "vox-inside-oxcaml",
+  "title": "Vox inside OxCaml",
+  "kind": "vox",
+  "order": 1,
+  "summary": [
+    "What Vox adds to OxCaml, in the order a compilation meets it: two new mode axes and refinement types in the type checker, the elaboration of `ghost_`, `assume_` and `[@def]`, and the totality check. Then the verifier, which runs between typing and Lambda and turns the Typedtree into Z3 queries, the erasure of ghost code on the way to Lambda, and the runtime and library that typed heaps rest on.",
+    "Each stop names the functions to read next. The demo tours, starting with [the flat hash table](tour:flat-hash-table), show the same machinery from the user's side."
+  ],
+  "stops": [
+    {
+      "title": "Two new comonadic axes",
+      "path": "typing/mode_intf.mli",
+      "from": "(** ('p, 'r) t represents a projection from a product",
+      "to": "| Staticity : (monadic, Staticity.Const.t) t",
+      "lines": "653-669",
+      "text": [
+        "Vox adds two axes to the mode lattice, declared as the `Totality` and `Ghostliness` modules above and implemented in [mode.ml](src:typing/mode.ml)'s `Lattices`: `Total < Partial` and `Real < Ghost`, both comonadic. With upstream's axes there are twelve, eight comonadic and four monadic; the legacy values are `Partial` and `Real`, so unannotated code keeps its meaning. The constructors are listed in order of implication, which is why `Totality` sits before `Statefulness` and `Portability`.",
+        "`is_total`, `is_stateless` and `is_ghost` read a mode's bound without committing solver changes; the verifier uses them to decide which calls are functions in the logic. No type crosses ghostliness, `unit` included, because a ghost value may be a fabricated placeholder (`everything_modality` in [typemode.ml](src:typing/typemode.ml))."
+      ]
+    },
+    {
+      "title": "total implies stateless implies portable",
+      "path": "typing/typemode.ml",
+      "from": "(* [total] implies [stateless] unless statefulness is explicit. *)",
+      "to": "{ annots with forkable; yielding; contention; portability }",
+      "lines": "250-269",
+      "text": "Totality and statefulness are separate axes, but an annotation `@ total` defaults statefulness to `stateless`, which in turn defaults portability to `portable`. Writing `total stateful` gives a total function that may touch state; the verifier gives each call of such a function a fresh result ([stop 16](tour:vox-inside-oxcaml/16)). The modality `@@ total` gets the same transitive implication from `implied_modalities` above. Both axes matter to the verifier: a call is a logical function only at total and stateless modes."
+    },
+    {
+      "title": "Refinement types in the type algebra",
+      "path": "typing/types.mli",
+      "from": "| Trefine of refinement_desc",
+      "to": "rexp_loc : Location.t }",
+      "lines": "306-340",
+      "text": [
+        "`Trefine` is a new `type_desc` for `{x : t | p}`, whose payload alone decides layout and representation; refinements are rigid, never inferred and never solved for. The predicate is a second expression language, `refinement_expression`, checked first as an ordinary expression under a total closure lock and then stored with its names resolved: `Rexp_var` for bound names, `Rexp_ident` paths that module substitution rewrites.",
+        "A refinement's scope combines `ref_structural_scope`, the ordinary type and GADT contribution, with the scope of the term variables its predicate mentions, so the usual escape checks cover both. The other type-level change is just below: `arrow_desc` gains an `Ident.t option` binder, so a dependent arrow `(x : a) -> b` can mention `x`. Every pass that walks types had to learn `Trefine`: copy, generalization, `Subst`, variance, printing, ikinds and `Typeopt`."
+      ]
+    },
+    {
+      "title": "Unification: rigid refinements, dependent arrows",
+      "path": "typing/ctype.ml",
+      "from": [
+        "and unify3 uenv t1 t1' t2 t2' =",
+        "(Tarrow ((l1,a1,r1,binder1), t1, u1, c1),"
+      ],
+      "to": "then raise_unexplained_for Unify",
+      "lines": "5757-5782",
+      "text": "Two arrows unify only if both or neither are dependent; `align_arrow_codomains` renames one binder to the other before the codomains are unified. Two refinements unify when their payloads unify and `refinement_predicates_equal` finds the predicates alpha-equivalent after normalizing paths. A refined type never unifies with an unrefined one, and `moregen` and `eqtype` follow the same rules, so there is no subsumption on trunk: an implementation that proves `r > c` does not match an interface that states `r >= c`. `build_subtype` has no rule for `Trefine` yet, so `:>` does not help either. The comparison is syntactic and ignores the types inside predicates; comparing predicates with their types is an open item."
+    },
+    {
+      "title": "Elimination and introduction as Typedtree extras",
+      "path": "typing/typecore.ml",
+      "from": "let rec eliminate_refinement_to env target exp =",
+      "to": "{ exp with exp_type = instance target; exp_extra }",
+      "lines": "7659-7691",
+      "text": [
+        "Every refinement boundary is recorded as a `Texp_refinement { source; target }` extra, and these extras are all the verifier needs from the typer. `eliminate_refinement`, just above, peels the outer refinement off an inferred type; `type_expect_`'s `rue` applies it to every result, so each elimination is an assumption. `introduce_refinement` records the opposite step, from a payload to an expected refined type, and each introduction is a proof obligation. It cancels against an elimination from the same type on the same expression, so passing a refined value where the same refinement is expected costs nothing.",
+        "`type_expect` introduces whenever the expected type has an outer refinement, after coercing the expected mode to total, stateless and portable (`refinement_operand_mode`); that every introduced value has those modes is what makes it sound for a refined type to cross those axes even when its payload does not."
+      ]
+    },
+    {
+      "title": "assume_: a run-time check that becomes a fact",
+      "path": "typing/typecore.ml",
+      "from": "| Pexp_assume operand -> begin",
+      "to": [
+        "requires a known refinement type from its context",
+        "end"
+      ],
+      "lines": "8415-8444",
+      "text": "`assume_ x` needs a refinement type from its context. The operand is typed at the payload, at total, stateless, portable and real modes, and must be a plain local variable. `walk_locks_for_partial_construct` makes every enclosing function partial, so no `ghost_` can erase the check. `type_assume` builds a `Texp_assume` whose predicate is compiled as real code: [translcore.ml](src:lambda/translcore.ml) evaluates it and raises `Assert_failure` if it is false, and `-noassert` keeps it. The verifier assumes the refinement afterwards; just below, `refine_ e` asks for the same refinement to be proved instead, at no run-time cost except the adapter closure built for a function."
+    },
+    {
+      "title": "ghost_: the one construct that erases",
+      "path": "typing/typecore.ml",
+      "from": "| Pexp_ghost e ->",
+      "to": "{exp with exp_extra}",
+      "lines": "10583-10604",
+      "text": "`@ ghost` only restricts; `ghost_ e` is what removes code. Its context must accept a ghost value, and `e` is typed under `enter_total_ghost_context`: a constant closure lock at total, stateless and portable, plus a flag that switches off ghostliness checks inside. `e` itself must be total, which is what makes erasure sound: a diverging call of type `{u : unit | false}` would otherwise prove anything and then vanish. Because the lock is a constant closure lock, a unique value captured by `ghost_` is seen as aliased, so ghost code cannot consume a token. The `Texp_ghost` extra tells translation to emit a placeholder instead."
+    },
+    {
+      "title": "[@def]: definitions as assumed equations",
+      "path": "typing/typecore.ml",
+      "from": "let make_definition_lemma_at_level env binding =",
+      "to": "let constant = params = [] in",
+      "lines": "16770-16802",
+      "text": "`let[@def] f x = e` is elaborated in two places. `type_let` adds the `total` mode to the binding and turns pattern parameters into variables. After typing, `make_definition_lemma_at_level` checks the shape shown here (unlabelled variable parameters; a constant `c` gets `c_def : unit -> ...`), converts the body to a predicate with `refinement_expression_of_typed`, and binds `f_def : (x : t) -> {u : unit | f x === e}`. The equation is assumed; it is sound because `f` is a total, stateless function whose body is `e`. Verified code unfolds a definition only by calling `f_def`, except for non-recursive `[@def transparent]` definitions, which the verifier unfolds itself."
+    },
+    {
+      "title": "Totality: the lock walk and a denylist",
+      "path": "typing/env.ml",
+      "from": "(** Registers a use of a construct that is at legacy comonadic modes,",
+      "to": [
+        "let walk_locks_for_partial_construct",
+        ": Mode.Value.l)"
+      ],
+      "lines": "3872-3892",
+      "text": "Totality is checked the way portability is. A total closure cannot close over a partial value, so it cannot call a partial function from its environment; its own parameters are exempt, which is why totality is relative to the arguments. Constructs that are partial in themselves call `walk_locks_for_partial_construct`, a copy of upstream's `walk_locks_for_legacy_construct` just above that walks every closure lock between the use and the root as if a `Partial` value were used there. The callers in [typecore.ml](src:typing/typecore.ml) form a denylist: `try`, `while`, `for`, `assert`, `lazy`, `let exception`, reads and writes of mutable fields, objects and method sends, non-exhaustive matches, and `assume_`. It is a denylist, so completeness rests on the list."
+    },
+    {
+      "title": "Matching on a type that may hide a knot",
+      "path": "typing/ctype.ml",
+      "from": "let can_pattern_match_total env ty =",
+      "to": "check Path.Set.empty ty",
+      "lines": "4115-4138",
+      "text": "A negative datatype such as `type t = Roll of (t -> int)` gives a fixpoint without `let rec`, so destructuring can itself diverge. A constructor, record or variant pattern, and a field projection, is therefore partial unless `can_pattern_match_total` holds for the scrutinee's type. It expands abbreviations and asks `declaration_can_pattern_match_total`, above, whether the declaration is definitely non-recursive, allowing direct recursion only in a checked `[@@inductive]` type. Abstract and open types are rejected at the top; inside a declaration, since the hidden-types fix, the walk tracks polarity and rejects a matched constructor's existentials and any abstract or open type reached in negative position unless its jkind rules out pointers, and `can_unpack_total` applies the same test to unpacked modules. One route remains open: an abstract type equal to a function type, consumed by an exported total function."
+    },
+    {
+      "title": "Recursion: structural descent or a proved measure",
+      "path": "typing/typecore.ml",
+      "from": "let partial ?uid loc reason =",
+      "to": "partial (List.hd spat_sexp_list).pvb_loc",
+      "lines": "13914-13953",
+      "text": "A single recursive function binding is total only if Vox can see why it terminates. With `[@@decreases m]`, `type_decreases` types the measure in a total, stateless context (an `int`, a `Bigint`, or a tuple of them, ordered lexicographically), and `Verification.check_termination` has Z3 prove that every recursive call decreases it, during typing, before generalization. Without a measure, `Structural_recursion.check` looks for descent on an `[@@inductive]` parameter. If neither works, `partial` makes the function partial, or reports why it cannot be total when its mode is already required to be; the reason is kept in `Includecore.partial_recursion` for an interface that demands `@@ total` later. A group of several recursive bindings is made partial before typing, so mutual recursion is never total."
+    },
+    {
+      "title": "Structural descent on an inductive parameter",
+      "path": "typing/structural_recursion.ml",
+      "from": "let check_parameter self body index root",
+      "to": "let it = iterator (Ident.Map.singleton root Root) in",
+      "lines": "105-144",
+      "text": "`check`, below, tries each parameter whose type is `[@@inductive]`. `check_parameter` walks the body with a map from variables to `Root` or `Smaller`, and every recursive call must pass a `Smaller` value in that position. Descent is learnt only by matching: `bind_pattern` marks the variables under a constructor of the same inductive type, through tuples, and through or-patterns by intersection, and `let` and `match` carry the facts into their bodies. `[@@inductive]` itself is checked by `check_inductive_decl` in [typedecl.ml](src:typing/typedecl.ml): a single type whose recursive occurrences are direct fields or tuple components with unchanged parameters."
+    },
+    {
+      "title": "The verifier plugs into the typer",
+      "path": "verification/runtime/vox_verify.enabled.ml",
+      "from": "Verification.install (fun ~whole_unit structure ->",
+      "to": "~measure ()));",
+      "lines": "913-950",
+      "text": [
+        "The typer knows only the hooks in [verification.ml](src:typing/verification.ml): `Typemod` calls `Verification.run_unit` after the delayed checks and the interface inclusion check and before writing the `.cmt` and `.cmi`, and without an installed verifier any refinement introduction is an error. The `ocamlc` and `ocamlopt` drivers call `Vox_verify.install`, which installs this function.",
+        "It first looks for the unit in the cache under `VOX_VERIFY_CACHE`, keyed by the compiler's digest, the solver's name, version and platform, the source, `OCAMLPARAM`, the settings that change typing, the flags and the imported CRCs. Otherwise it runs `Vox_vc.generate` against one Z3 process from [`Vox_smt_solver.with_session`](src:verification/vox_smt_solver.ml), which resets the solver before each query. `prove`, above, refuses a solver that does not report Z3 4.16.0 unless `-smt-solver-any-version` is given, and bounds queries by Z3's resource count, with a wall-clock deadline only as a backstop; `-smt-assume-verified` skips verification, and the compiled unit records that it did."
+      ]
+    },
+    {
+      "title": "generate: one symbolic pass per unit",
+      "path": "verification/vox_vc.ml",
+      "from": [
+        "let generate ?(poll",
+        "match scan.structure scan str with"
+      ],
+      "to": "with_warnings warnings (fun () -> verify_steps ctx prove result.code)",
+      "lines": "4683-4701",
+      "text": "`generate` first runs `check_total_shift` on every primitive declaration, then scans for a refinement introduction, a refined parameter or a proof step; a unit with none generates no query. Otherwise `structure` executes the Typedtree once, forward, into a list of commands: `Define`s of SSA symbols, `Assume`s for path conditions and eliminated refinements, `Assert`s for obligations, and a `Choice` for each branch, whose values are joined rather than enumerated. Each function body becomes one batch in `ctx.batches`. `verify_steps` hands each batch to `verify_batch`, which proves it as one quantifier-free query and, only if that fails, proves each refinement and then each conjunct alone, so the error names the conjunct that fails."
+    },
+    {
+      "title": "Where obligations come from",
+      "path": "verification/vox_vc.ml",
+      "from": "and expression_extras ?deferred ctx s e ty = function",
+      "to": "| None | Some _ -> introduce ctx e.exp_env s target value loc",
+      "lines": "3151-3180",
+      "text": "Here the typer's extras become verification commands. `expression_extras` handles an expression's extras from the inside out: the value is exposed with `expose_outer`, which assumes its outer refinement, and each `Texp_refinement` whose target is refined calls `introduce`, at once or deferred to the end of a function body. `introduce`, just below, splits the predicate at top-level `&&`, and each conjunct becomes an `Assert` proved under the ones before it, as `&&` evaluates. Besides `introduce`, the only obligations are shift counts and `[@@decreases]` measures; everything else, including the declared types of callees, is assumed. The meaning is partial correctness on normal return: a raise or `assert false` ends a path, and `@@ total` adds termination."
+    },
+    {
+      "title": "When a call is a function in the logic",
+      "path": "verification/vox_vc.ml",
+      "from": "(* Totality is relative to the arguments: a total, stateless [apply f x = f x]",
+      "to": "(fun () -> Ctype.cross_left e.exp_env e.exp_type mode))",
+      "lines": "316-355",
+      "text": "A call becomes an uninterpreted function of its arguments only if repeating it must give the same result. The head must be total and stateless at its use site (`logical_function_mode`), and since the call-congruence fix every argument must be too: by crossing both axes, as a function value already known total, through its use-site mode, or by filling a dependent parameter. Any other call gets a fresh result symbol, so only its declared type is known about it. A callee's body is never inspected, except for ghost lambdas and `[@def transparent]` definitions. A recursive call uses the function's declared type, which is induction when the function is total."
+    },
+    {
+      "title": "Primitives as SMT operations",
+      "path": "verification/vox_encoding.ml",
+      "from": "| \"%addint\" -> binary Int63 Add",
+      "to": "| \"%geint\" -> binary Int63 Ge",
+      "lines": "824-863",
+      "text": [
+        "`Vox_encoding.operation` maps a primitive's name to its built-in meaning, part of the trusted base; `primitive`, above, supplies that name for every declaration of a `%` primitive, for a C primitive only when the declaration is the library's own (`Vox_type.carries_builtin_meaning`), and for a few `Iarray` and `Stdlib` values recognized by identity. `int` is the `Int63` sort, exact signed 63-bit wrapping arithmetic: [vox_smt.ml](src:verification/vox_smt.ml) renders it as SMT `Int` with range facts and wrapping macros such as `int63_add`, or as `(_ BitVec 63)` in a query with a bitwise operator, which the verifier first tries with those operators abstracted. `=` and `compare` are interpreted only at `int`, `bool` and `Bigint`, and `Bigint` is unbounded `Int`.",
+        "Shifts are exact for counts in [0, 63], and since the shift-encoding fix `require_shift_count` in `Vox_vc` makes that range an obligation at every shift that verified code performs. The SMT term type has no binder, so no quantifier ever reaches Z3."
+      ]
+    },
+    {
+      "title": "Erasure: a placeholder of the right layout",
+      "path": "lambda/lambda.ml",
+      "from": "let dummy_constant = tagged_immediate (0xBBBB / 2)",
+      "to": "\"Ghost erasure is not supported for this layout\"",
+      "lines": "1470-1501",
+      "text": "After verification, ghost code is dropped on the way to Lambda. `transl_exp0` in [translcore.ml](src:lambda/translcore.ml) checks for a `Texp_ghost` extra and emits `placeholder_of_layout` instead of translating the expression, and a sequence whose first part is ghost drops that part. For a value layout the placeholder is upstream's `dummy_constant`, whose word is `0xBBBB`, under `Pobj_magic` so that Flambda cannot use its shape; unboxed layouts get zero, and a void product is empty. A `@@ ghost` field has void layout, so reading one evaluates the record and yields a placeholder, and an all-ghost record has kind `void`. Refinements need no pass of their own: `Typeopt.scrape_ty` looks through `Trefine` to the payload."
+    },
+    {
+      "title": "The runtime under typed heaps",
+      "path": "runtime/pref.c",
+      "from": "CAMLprim value caml_pref_alloc(value initial)",
+      "to": [
+        "CAMLprim value caml_pref_write_bytecode",
+        "}"
+      ],
+      "lines": "36-65",
+      "text": "Ownership in Vox is a library over upstream modes, and its C side is small. A `Pref` cell is an `Object_tag` block holding a fresh id and the payload, so polymorphic comparison and hashing use identity while the GC scans the payload; `read` and `write` are a field load and `caml_modify`. Each primitive has two entry points: the bytecode one takes the token argument, the native one does not, because a token has layout `void`. The heap functions further down, such as `caml_pref_heap_put`, return `Val_unit`; they exist to be named, and their meaning comes from the verifier's heap encoding and the heap laws in `pref.mli`, six assumed and four proved. [borrow.c](src:runtime/borrow.c) does the same for loans, and [cmm_builtins.ml](src:backend/cmm_builtins.ml) lowers some `[@@builtin]` primitives, such as `caml_borrow_int_get`, to inline Cmm without a bounds check, relying on a contract that proves the index in range."
+    },
+    {
+      "title": "A verified-library interface",
+      "path": "verification/library/pref.mli",
+      "from": "val empty : ('a : immutable_data). unit -> {t : 'a token",
+      "to": "= \"caml_pref_write_bytecode\" \"caml_pref_write\"",
+      "lines": "126-151",
+      "text": "The verified library is ordinary Vox, and `Pref` shows the pattern the heap code builds on: the handle `'a t` is copyable, and the right to use it is a token `'a token : void mod total contended`, affine through uniqueness, whose meaning is the ghost finite map `own t`. `alloc` and `write` consume a unique token and return a new one with an equation such as `own u === Heap.put (own t) p v`; `read` borrows the token locally. Live tokens are disjoint by uniqueness, so the solver needs no separation logic, and a cell outside a callee's arguments is framed because its heap term never changed. `Pref`'s reads, writes and allocation are partial, so code over `Pref` cells is partial; a total function can still write storage it owns uniquely through total externals, as `Quicksort.sort` does through `Borrow.Slice`. The demo tours, starting with [the flat hash table](tour:flat-hash-table), and the [quicksort](demo:quicksort) page show what is built on these pieces."
+    }
+  ]
+}

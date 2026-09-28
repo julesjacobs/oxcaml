@@ -3,6 +3,7 @@
 #
 #   index.html    the landing page (verification/site/index.html)
 #   catalogue/    the demo catalogue (verification/catalogue/build.py)
+#   source/       the source explorer (verification/explorer/build.py)
 #   playground/   the in-browser checker (verification/playground/build.sh)
 #
 #   verification/site/build-site.sh [--revision REV] [--prefix PREFIX]
@@ -15,7 +16,8 @@
 # differ from REV only in verification/site; the build stops otherwise.
 #
 # PREFIX is a compiler installed from a commit whose compiler-libs parse the
-# demos (the catalogue's line counts need it); default _install. It also
+# demos (the catalogue's line counts and the explorer's demo files need it);
+# default _install. It also
 # needs what verification/playground/build.sh needs (the oxcaml-5.4.0+oxcaml
 # opam switch, node and npm).
 #
@@ -60,6 +62,10 @@ mkdir -p "$out"
 echo "== catalogue"
 python3 verification/catalogue/build.py --revision "$revision" --prefix "$prefix" \
   --output "$out/catalogue" --home-url /vox/
+
+echo "== source explorer"
+python3 verification/explorer/build.py --revision "$revision" --prefix "$prefix" \
+  --output "$out/source" --catalogue "$out/catalogue" --catalogue-url ../catalogue/
 
 echo "== playground"
 verification/playground/build.sh --out "$out/playground" --catalogue-url /vox/catalogue/ \

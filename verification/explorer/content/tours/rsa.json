@@ -1,0 +1,95 @@
+{
+  "_about": "Demo tour of Vox_rsa. Sources: verification/catalogue/pages/rsa.md (its sources: list is the backbone), verification/library/vox_rsa.md, research/mastery-20260927/trust-builtins.md section 2.2 (Bigint meanings, name keying), research/mastery-20260927/runtime-checks-testing.md sections 2 and 8 (assume_), and the code at HEAD (8479634adc).",
+  "_status": "Built-in meanings of C primitives are keyed by declaration since trust hardening merged (a187b9ab9c, Vox_type.carries_builtin_meaning); stop 9 says so.",
+  "id": "rsa",
+  "title": "Textbook RSA",
+  "kind": "demo",
+  "demo": "rsa",
+  "order": 22,
+  "summary": [
+    "`Vox_rsa` computes modular powers of unbounded integers by repeated squaring, proved to return `a^e mod n`, and proves the RSA round trip for any two distinct primes and any message below their product, with Fermat's little theorem, Bézout's identity and the uniqueness half of the Chinese remainder theorem proved in the library. Its conditions are preconditions in argument types, checked at every call.",
+    "The [catalogue page](demo:rsa) states the claim and the scope: this is the arithmetic of textbook RSA, with no claim about security."
+  ],
+  "stops": [
+    {
+      "title": "Exact contracts with preconditions",
+      "path": "verification/library/vox_rsa.mli",
+      "from": "val modexp : (a : t) -> (exponent : {e : t | e >= 0Z}) ->",
+      "to": "0Z <= r && r < p * q && r = power ciphertext d mod (p * q)} @@ total",
+      "lines": "6-32",
+      "text": "`modexp`'s contract is exact: for every integer `a`, every exponent `e >= 0` and every modulus `n > 0`, the result is `power a e mod n`, where `power` is repeated multiplication. The conditions are preconditions in the argument types, so every call must prove `exponent >= 0Z` and `modulus > 0Z`, and there are no error results. `encrypt` and `decrypt` are `modexp` under other names. `roundtrip_correct` is the theorem, an erased total function over any five integers whose result states the implication; `roundtrip` runs encryption and decryption, and its type alone would also be met by returning the message. `decrypt_crt` requires two distinct primes and returns the same value as ordinary decryption."
+    },
+    {
+      "title": "The specification: five definitions",
+      "path": "verification/library/vox_rsa_spec.ml",
+      "from": "let[@def] rec power a e =",
+      "to": "&& (e * d - 1Z) mod lambda p q = 0Z",
+      "lines": "3-25",
+      "text": "The specification is five definitions over unbounded integers. `power` is repeated multiplication, `prime` is trial division, and `lambda p q`, the lcm of `p - 1` and `q - 1`, is Carmichael's function of `p * q`; `valid_key` is the textbook condition that `e * d - 1` is a multiple of it. Each `[@@decreases ...]` gives the termination measure of a recursive definition, which must be total to appear in refinements. `let[@def]` also generates the lemmas `power_def`, `prime_def` and so on, which a proof calls to unfold a definition one step. `Bigint`'s `/` and `mod` are Euclidean, so `mod` by a positive number is never negative."
+    },
+    {
+      "title": "A client proof of the round trip",
+      "path": "testsuite/tests/vox/rsa_public_client.ml",
+      "from": "let (roundtrip @ total) p q e d",
+      "span": 11,
+      "lines": "59-69",
+      "text": "The client proves the round trip with only `vox_rsa.cmi` and `vox_rsa_spec.cmi` available. `encrypt` requires `n > 0Z`, which follows from `valid_key` because both primes exceed 1, but the checker sees that only after `valid_key_def` and `prime_def` unfold the definitions. `roundtrip_correct`, called under `ghost_`, then states that the decrypted value equals `m`, and the result type `{r : t | r = message}` follows. The theorem's proof is erased, so `power m (e * d)` is never computed at run time. Below it, `crt_equivalence` proves that `decrypt_crt` agrees with ordinary decryption, which it runs only in ghost code."
+    },
+    {
+      "title": "Rejected: a key with p = q",
+      "path": "testsuite/tests/vox/rsa_rejected.ml",
+      "from": "(* p = q: every other conjunct of [valid_key] holds",
+      "to": ["let distinct_primes () =", "|}]"],
+      "lines": "131-154",
+      "text": "`repeated_prime` calls `roundtrip` with `p = q = 5`, a key for which every other conjunct of `valid_key` holds, and the checker rejects the message argument, pointing at `valid_key` in the interface. `distinct_primes` changes only `q`, to 7, and is accepted, so that input alone causes the rejection; the `Facts` module above supplies the unfoldings of `prime` and `lambda` that both cases need. The file repeats the pattern for a key whose `e * d - 1` is not a multiple of `lambda p q`, a message equal to `p * q` and a composite `p`. It also rejects a negative exponent, a zero modulus and a reference to a proof helper that the interface does not export."
+    },
+    {
+      "title": "Repeated squaring, proved",
+      "path": "verification/library/vox_rsa_arithmetic.ml",
+      "from": "let rec (modexp @ total) : (a : t) ->",
+      "to": "[@@decreases exponent]",
+      "lines": "37-68",
+      "text": "`modexp` squares the result for the halved exponent, and it is `@ total` with `[@@decreases exponent]`, so the checker proves that `e / 2Z` is smaller than a positive `e`. After the recursive call, the ghost block applies `power_add`, `a^(k+k) = a^k * a^k`, and `reduce_product`, which says that reducing the factors modulo `n` before multiplying leaves the product modulo `n` unchanged. `(() : {u : unit | ...})` asks the checker to prove the stated fact at that point, and later goals can use it. The odd case adds one more factor of `a` the same way. The number of squarings is logarithmic in the exponent, and no running-time theorem is stated."
+    },
+    {
+      "title": "The key lemma: m^(e*d) is m modulo p*q",
+      "path": "verification/library/vox_rsa.ml",
+      "from": "let (rsa_power @ total) (p : t) (q : t) (e : t) (d : t) (m : t) :",
+      "to": "rsa_power p q e d m;",
+      "lines": "31-62",
+      "text": "The round trip reduces to `rsa_power`. With `k = e * d - 1`, `k` is a multiple of `lambda p q`, hence of `p - 1` and of `q - 1` (`lambda_lcm`, `divides_transitive`). `fermat_period` gives `m^(1 + kp * (p - 1)) mod p = m mod p` for every `m`, multiples of `p` included, and the same for `q`; `crt_unique` then concludes that two numbers below `p * q` with the same residues are equal. `roundtrip_correct` adds `reduce_power` and `power_multiply` to get from `(m^e mod n)^d mod n` to `m^(e*d) mod n`. Each lemma is an ordinary total ghost function, and its implication is written `if premise then conclusion else true`."
+    },
+    {
+      "title": "Fermat's little theorem, from the definitions",
+      "path": "verification/library/vox_rsa_fermat.ml",
+      "from": "let (fermat_little @ total) (a : t) (p : t) :",
+      "to": "  end)",
+      "lines": "210-228",
+      "text": "The proof is the classical one: multiplication by an `a` coprime to `p` permutes the residues `1, ..., p - 1`. `prime_coprime` returns Bézout coefficients for `a` and `p`, computed by the ghost function `extended_gcd`; `multiples_permute` uses the inverse they give to show, by counting occurrences, that the products of the multiples and of the interval agree, and `multiples_product` shows that the first is `a^(p-1)` times the second modulo `p`. `prime_cancel` then cancels the product, which is nonzero modulo `p`. `prime_cancel`, in [`vox_rsa_number_theory.ml`](src:verification/library/vox_rsa_number_theory.ml), suppresses the slow-refinement warning: its nonlinear arithmetic takes about 16 million solver resource units on macOS arm64, against a warning threshold of 1 million and a limit of 40 million. The RSA modules declare no `external`, so the proofs assume nothing beyond the shared base."
+    },
+    {
+      "title": "Decryption by the Chinese remainder theorem",
+      "path": "verification/library/vox_rsa.ml",
+      "from": "let (recombine @ total) (p : t) (q : t) (rp : t) (rq : t) (inverse : t) :",
+      "to": "  r",
+      "lines": "130-138",
+      "text": "`decrypt_crt`, below, computes the residues modulo each prime with `modexp` and recombines them here with Garner's formula `rp + p * (((rq - rp) * inverse) mod q)`. The inverse of `p` modulo `q` is `p^(q-2) mod q`, computed by `modexp` itself, and `computed_inverse_correct` proves it is an inverse by Fermat's little theorem. `recombine` returns `r` with both residues proved, and `decrypt_crt_correct` uses `crt_unique` to conclude that `r = c^d mod (p * q)`. Each residue uses the full exponent `d`; the usual reduction of `d` modulo `p - 1` and `q - 1` is left out."
+    },
+    {
+      "title": "Trusted: what Bigint arithmetic means",
+      "path": "verification/vox_encoding.ml",
+      "from": "| \"caml_bigint_neg\" -> unary Int Int_neg",
+      "to": "| \"caml_bigint_modulo\" -> bigint_division Int_mod",
+      "lines": "883-888",
+      "text": "The demo trusts nothing beyond the base every demo trusts, and the part it leans on is here: the verifier gives `Bigint`'s C primitives the meaning of SMT integer arithmetic. Addition, subtraction and multiplication are exact, and `div` and `modulo` are SMT's Euclidean `div` and `mod`, with division by zero defined as in [`bigint.mli`](src:stdlib/bigint.mli): quotient 0, remainder the dividend. `runtime/bigint.c` implements them over base-10^9 digits and is assumed to agree. The meaning belongs to `Bigint`'s own declarations: `Vox_type.carries_builtin_meaning` gives it only to an `external` of `Stdlib__Bigint` with the library's native name, so a user `external` that names `caml_bigint_add` gets none ([builtin_declaration_identity.ml](src:testsuite/tests/vox/builtin_declaration_identity.ml))."
+    },
+    {
+      "title": "Tests: preconditions checked at run time",
+      "path": "testsuite/tests/vox/rsa.ml",
+      "from": "let primes = [2; 3; 5; 7; 11; 13] in",
+      "to": "end) primes) primes;",
+      "lines": "63-83",
+      "text": "`rsa.ml` runs differential tests as bytecode: round trips of every message for each pair of distinct primes up to 13 and every valid `e` and `d` up to 24, then exponents of more than 100 digits, messages sharing a factor with the modulus, and `decrypt_crt` against `decrypt`. Integers built in a loop carry no refinement, so each call establishes its precondition with `(assume_ m : {m : Bigint.t | ...})`, which checks the predicate at run time, raises if it fails, and gives the checker the fact from then on. `assume_` makes the enclosing code partial, so a fact checked this way can never reach erased proof code. [`rsa_public_client.ml`](src:testsuite/tests/vox/rsa_public_client.ml) links and runs the public client with both compilers; the client only defines functions, so that checks compilation and linking."
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "_about": "Demo tour. Sources: verification/catalogue/pages/reference-locks.md (its sources: list is the backbone), research/mastery-20260927/concurrency.md (sections 2.2-2.4, 2.6, 2.8, 4.3), verification/library/concurrency-boundary.md, runtime/pref.c; every claim re-checked against the code at 8479634adc.",
+  "_checks": "concurrency_boundary.ml has 15 rejected fixtures: 11 for the locks (unique-release-empty plus ten more) and 4 for channels. caml_vox_atomic_cas ignores its post and transition arguments (runtime/pref.c). reference_lock_parallel.ml and unique_lock_parallel.ml are { bytecode; } tests with the multicore predicate: 4 domains x 1,000 increments, Gc.full_major every 100, total 4,000 asserted. atomic_lock.ml runs bytecode and native.",
+  "id": "reference-locks",
+  "title": "Reference and unique-payload locks",
+  "kind": "demo",
+  "demo": "reference-locks",
+  "order": 15,
+  "summary": [
+    "Two spin locks on one atomic flag, both instances of `Spin_lock.Make`: holding the lock means holding an erased `Ghost_pref` token that owns exactly the guarded cell. The interfaces prove that a successful acquire hands out exactly that ownership, a failed one hands out nothing, and release takes it back; nothing is proved about executions, such as mutual exclusion over a trace, progress or fairness. The tour reads both interfaces, a client and a rejected program, then the functor's invariant and proofs, the trusted atomic contract, and the tests.",
+    "The [catalogue page](demo:reference-locks) states the claim, the trusted base and the scope."
+  ],
+  "stops": [
+    {
+      "title": "The reference lock's interface",
+      "path": "verification/library/reference_lock.mli",
+      "from": "type t : immutable_data",
+      "to": "val try_increment : t -> bool",
+      "lines": "6-29",
+      "text": "A `Reference_lock.t` guards one `int` cell. `owned a h` holds when `h` is exactly the lock's cell holding a nonnegative integer, and `owned_def` exports that definition. A successful `try_acquire` returns a ghost token that owns exactly that, and a failed one a token that owns nothing; `release` requires and consumes such a token, and `read_owned` borrows it to read the value. `try_increment` has only the type `t -> bool`, so what it does is checked by run-time assertions in the tests. Nothing here relates `make`'s argument to a later reading, and a lock whose `try_acquire` always fails would also meet this interface."
+    },
+    {
+      "title": "The unique lock: take and put",
+      "path": "verification/library/unique_lock.mli",
+      "from": "val make : V.t @ unique total -> t",
+      "to": ["val put", "(location a) (Some (V.snapshot value))} @ unique ghost"],
+      "lines": "21-45",
+      "text": "`Unique_lock.Make (V)` guards a cell holding a unique payload of type `V.t`, which must be `value mod portable contended`. The token's heap maps the lock's location to `Some m` while the cell holds a payload whose ghost `snapshot` is `m`, and to `None` after `take`. `take` moves the payload out and `put` moves one back; `owned`, and so `release`, requires the cell to be full again. The client [`unique_lock_demo.ml`](src:testsuite/tests/vox/unique_lock_demo.ml) increments an `int` payload with acquire, `take`, `put` and release, calling `put_law` and `owned_def` to re-establish `owned` before `release`."
+    },
+    {
+      "title": "A client of the reference lock",
+      "path": "testsuite/tests/vox/atomic_lock.ml",
+      "from": "let () =",
+      "to": ["end;", "assert (try_increment a)"],
+      "lines": "12-28",
+      "text": "`atomic_lock.ml` uses only `reference_lock.mli` and runs in bytecode and native code. Inside `if r.P.value` the checker knows `owned a (P.own t)` from `try_acquire`'s contract, which is what `read_owned` and `release` require; `borrow_ t` lends the token to the read without consuming it. The assertions that the value is 10 and that a second `try_acquire` fails are run-time checks: `try_increment` exports no contract, and the interface allows `try_acquire` to fail or succeed at any time."
+    },
+    {
+      "title": "A rejected client: release after take",
+      "path": "testsuite/tests/vox/concurrency_boundary.ml",
+      "from": "(* unique-release-empty *)",
+      "to": ["(* unique-release-empty *)", "|}]"],
+      "lines": "564-579",
+      "text": "This fixture is compiled against the public `.cmi` files, with `module L = Unique_lock.Make (Unique_lock_demo.Data)` defined earlier in the file. It acquires the lock, takes the payload and releases without putting it back; the token's heap then maps the cell to `None`, so `release`'s precondition fails, and the error points at it in `unique_lock.mli`. The test requires ten more lock programs to fail with their exact errors: releasing with an empty permission or with another lock's, reading after a failed acquire or after `release` consumed the permission, claiming a negative value, taking with an empty permission, taking twice with one permission, passing one payload to `make` twice, and reaching either lock's hidden `Spin_lock.Make` instance."
+    },
+    {
+      "title": "One functor, two instances",
+      "path": "verification/library/reference_lock.ml",
+      "from": "(* The guarded cell is an integer reference",
+      "to": "fun a t -> L.release a t",
+      "lines": "3-36",
+      "text": "`Reference_lock` applies `Spin_lock.Make` to a `Cell` whose payload is `int`, whose location is the cell handle itself and whose `full` predicate is `0 <= x`; `Unique_lock` applies it to a `Unique_cell` whose `full` is `Some _`. `owned` is the functor's, and `owned_def` restates its definition in this module's terms, proved from the functor's lemma. `try_acquire` and `release` are wrapped only to restate their contracts, because signature matching compares refinements syntactically and the functor's contracts mention `L.owned`. The `.mli` does not mention `L`, so the atomic and the flag invariant are hidden."
+    },
+    {
+      "title": "The flag protocol as an atomic invariant",
+      "path": "verification/library/spin_lock.ml",
+      "from": "(* [good c h]: [h] owns exactly the cell [c]",
+      "to": "ghost_ (success && h === P.Heap.empty ())",
+      "lines": "12-36",
+      "text": "`Spin_lock.Make` proves the protocol once, for any cell with a ghost location and a `full` predicate. `Invariant.holds` says what the atomic owns at each flag value: at 0, exactly the cell with a full payload (`good`); at 1, nothing. `Verified_atomic.Make (Invariant)` gives an integer atomic whose every operation must preserve this invariant. `acquire_post` is what a compare-and-set from 0 to 1 hands its caller: the full cell on success, nothing on failure. `release_post` includes `success`, so establishing it proves that the compare-and-set from 1 back to 0 always succeeds."
+    },
+    {
+      "title": "The ghost step at each compare-and-set",
+      "path": "verification/library/spin_lock.ml",
+      "from": "(* The ghost steps at each compare-and-set",
+      "to": ["let (release_transfer @ total)", "{ A.restored = outside; outgoing = inside }"],
+      "lines": "38-76",
+      "text": "At its atomic event a compare-and-set hands the invariant's token (`inside`) and the caller's (`outside`) to a total ghost transition, which must return `restored` for the invariant at the new flag value and `outgoing` for the caller. Both transitions swap the two: on acquire the caller gives up an empty token and receives the cell, and on release it gives up the cell and receives what the invariant held. In `release_transfer` the invariant's token is disjoint from the caller's, which owns the cell, so the flag cannot be 0 and must be 1; that is why `release_post (before = 1)` holds. The transitions are ordinary total ghost functions, checked like any other code."
+    },
+    {
+      "title": "Acquire and release: one compare-and-set each",
+      "path": "verification/library/spin_lock.ml",
+      "from": "let try_acquire (a : t) :",
+      "span": 32,
+      "lines": "102-133",
+      "text": "`try_acquire` makes one `A.compare_and_set` from 0 to 1, starting from an empty token and passing `acquire_post` and `acquire_transfer` as erased arguments; the atomic's contract gives `acquire_post c success` of the returned token, which `owned_def` turns into the exported postcondition. `release` passes the caller's token, whose heap `good` describes, to a compare-and-set from 1 to 0, and the returned token satisfies `release_post`, so it is empty. That `release` resets the flag is proved here, against the invariant, and is not exported: the lock interfaces do not mention the flag."
+    },
+    {
+      "title": "Trusted: the atomic's contract",
+      "path": "verification/library/verified_atomic.mli",
+      "from": "external compare_and_set :",
+      "to": "[@@noalloc]",
+      "lines": "53-72",
+      "text": "`Verified_atomic` is trusted: its operations are C externals in [`runtime/pref.c`](src:runtime/pref.c), whose contracts the checker assumes, and the C code ignores the `post` and transition arguments. The contract is an invariant-opening rule: at one sequentially consistent event the operation observes `before`, and the transition receives the invariant's resource at `before` and the caller's, disjoint from it. The transition is `@ immutable total ghost`: it is erased and never runs, and because every atomic operation is partial, it cannot perform another one. The locks add one assumption, stated in `concurrency-boundary.md`: the guarded cell is accessed with ordinary non-atomic reads and writes, and the compare-and-set on the flag is assumed to order them between domains, which is not derived from a memory model."
+    },
+    {
+      "title": "Tests: erasure, rejections and four domains",
+      "path": "testsuite/tests/vox/concurrency_boundary_check.ml",
+      "from": "let primitives =",
+      "to": "finish ()",
+      "lines": "6-22",
+      "text": "[`concurrency_boundary.ml`](src:testsuite/tests/vox/concurrency_boundary.ml) compiles the channel and lock libraries with both compilers, compiles the public clients against the libraries' interfaces, and requires each of its 15 rejected programs to fail with its exact error. This program then checks that none of the ghost primitives in `primitives` (`own` and the heap operations, token split and join, an atomic's invariant key, a cell's location) occurs in the Lambda, and natively the Cmm, of `spin_lock`, `unique_lock`, `reference_lock` and the two channel units. The parallel tests run four domains of 1,000 increments each against each lock in bytecode, with forced major collections, and check the total of 4,000. They need a multicore runtime, and they test behavior: nothing about progress or fairness is proved."
+    }
+  ]
+}

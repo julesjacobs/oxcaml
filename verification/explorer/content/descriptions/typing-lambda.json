@@ -1,0 +1,873 @@
+{
+  "_about": "Main files of typing/ and lambda/, and the files Vox changed or added in parsing/, driver/, utils/ and stdlib/. Sources: git diff f42b1a9726 HEAD per file, read at a0b99ddfeb; research/mastery-20260927 reports, re-checked against the code. American spelling.",
+  "typing/types.mli": {
+    "what": {
+      "short": "The type graph: type_expr and type_desc, arrows with modes, jkinds, and the declarations stored in the environment and in .cmi files.",
+      "long": "`type_desc` is the mutable node of the type graph; `type_declaration`, `label_declaration`, `constructor_declaration` and `value_description` are what `Env` stores and `.cmi` files serialize. OxCaml's additions (modes on arrows, jkinds and ikinds, modalities) are defined or referenced here."
+    },
+    "vox": {
+      "short": "Adds Trefine with a resolved predicate language, a dependent binder on arrows, and the type_inductive, type_phantom_parameters and ld_ghost flags.",
+      "long": [
+        "`Trefine { ref_binder; ref_payload; ref_pred; ref_structural_scope }` is `{x : t | p}`. The payload alone decides layout and representation. `ref_pred` is a `refinement_expression`: a small, name-resolved expression language (`Rexp_var` for bound names, `Rexp_ident` for free value paths that module substitution rewrites, plus application, `===`, constructors, records, `let`, `fun`, `match`). Each node keeps its instantiated type.",
+        "`arrow_desc` gains an `Ident.t option`: `Some x` is the dependent arrow `(x : a) -> b`. `type_inductive` is set by `[@@inductive]`, `type_phantom_parameters` by `[@@phantom_parameters]`, and `ld_ghost` by the `@@ ghost` field modality. `set_type_desc_observer` lets `Ctype` track the scope of refinement dependencies."
+      ]
+    }
+  },
+  "typing/typedtree.mli": {
+    "what": {
+      "short": "The typed AST produced by the type checker and consumed by Lambda translation, .cmt files and tools.",
+      "long": "Expressions carry their type, environment and `exp_extra` annotations (coercions, constraints, `stack_`, and so on)."
+    },
+    "vox": {
+      "short": "Adds the extras Texp_refinement, Texp_refine, Texp_ghost, Texp_value_name and Texp_let_refine, the nodes Texp_assume and Texp_logical_equal, and Ttyp_refine.",
+      "long": [
+        "`Texp_refinement { source; target }` is the verifier's interface to the typer: it marks an outer refinement being eliminated from an expression's type (`source` refined, an assumption) or introduced into it (`target` refined, an obligation). Nested refinements are unchanged.",
+        "`Texp_assume` binds its operand, checks the predicate at run time and returns the payload. `Tpat_refinement` exposes a scrutinee's refinements before its payload is matched. `Ttyp_arrow` carries the dependent binder and `label_declaration` has `ld_ghost`."
+      ]
+    }
+  },
+  "typing/ctype.ml": {
+    "what": {
+      "short": "The core type algorithms: levels and generalization, instantiation, expansion of abbreviations, unification, moregen, equality, subtyping and nondep.",
+      "long": "`unify`, `moregen` and `eqtype` are the three structural comparisons; `expand_head` and friends expand abbreviations; `generalize`, `instance` and `update_level` manage levels; `nondep_type` removes references to identifiers going out of scope. OxCaml adds jkind checks and mode crossing here."
+    },
+    "vox": {
+      "short": "Refinements are rigid in unify, moregen and eqtype; dependent arrows align binders; scope tracking for term dependencies; the totality tests on types.",
+      "long": [
+        "Two `Trefine` nodes unify when their payloads unify and their predicates are alpha-equal after path normalization (`refinement_predicates_equal`); a refined and an unrefined type never unify, and there is no subsumption. The predicates are compared without their types, which is an open issue (the same law can be reused at another type); variance treats parameters that occur only in predicate types as non-phantom to limit it.",
+        "A predicate can mention term variables, so a type now has term dependencies. `register_refinement_value_scope` and `Refinement_scope_escape` extend the GADT-style escape check to them. `Typecore` substitutes an argument for a dependent binder with `substitute_refinement_expression`, and renames one with `substitute_refinement_ident`; `apply_dependent_type` is exported but has no caller.",
+        "`is_inductive` and `can_pattern_match_total` decide when a match is total: the representation of the scrutinee's type must not lead back to the type itself, except through the direct, unchanged recursive fields of an `[@@inductive]` type. This stops a Landin-style knot from being built and taken apart in total code. `can_unpack_total` applies the same jkind test to the abstract types of a first-class module that total code unpacks."
+      ]
+    },
+    "notes": [
+      {
+        "title": "Rigid refinements in unification",
+        "from": [
+          "and unify3 uenv t1 t1' t2 t2' =",
+          "| (Trefine r1, Trefine r2) ->"
+        ],
+        "span": 10,
+        "kind": "vox",
+        "text": "Payloads unify; predicates must be alpha-equal, pairing the two binders. A one-sided refinement falls through to the ordinary mismatch, so `{x : int | p}` and `int` do not unify. The typer moves between the two only at expression boundaries, through `Texp_refinement`."
+      },
+      {
+        "title": "Can a match on this type be total?",
+        "from": "let can_pattern_match_total env ty",
+        "to": "check Path.Set.empty ty",
+        "kind": "vox",
+        "text": "Variants and records are checked by `declaration_can_pattern_match_total`, which walks the representation and rejects any route back to the type other than a direct, unchanged recursive field of an `[@@inductive]` type. Since the hidden-types fix (`09dfd7e2fa`) the walk tracks polarity through the arrows it traverses and rejects a matched constructor's existentials, and any abstract or open type reached in negative position, unless the hidden type's jkind rules out pointers. One route remains open: an abstract type equal to a function type and consumed by an exported total function, which needs a declared matchability attribute."
+      }
+    ]
+  },
+  "typing/btype.ml": {
+    "what": {
+      "short": "Basic operations on types shared by the type checker: iterators, marks, snapshots and backtracking, and OxCaml's Jkind0 helpers for kinds and with-bounds.",
+      "long": "`iter_type_expr`, `snapshot`/`backtrack` and the `Jkind0` module (the parts of jkinds that `Types` needs) live here."
+    },
+    "vox": {
+      "short": "fold_type_expr visits a refinement's payload and copy_type_desc copies its predicate too; ghost fields count in a record's with-bounds on every axis except externality.",
+      "long": "`add_field_with_bounds ~ghost` adds a ghost field's type as a bound on every modal axis except externality, since the field has no slot. `Mod_bounds.min_crossable` is `min` with ghostliness pinned to no crossing, because no type crosses ghostliness."
+    }
+  },
+  "typing/typecore.ml": {
+    "what": {
+      "short": "Type inference for expressions, patterns and let bindings, with mode inference (submode against expected modes and closure locks) and uniqueness.",
+      "long": [
+        "`type_expect` checks an expression against an expected type and `expected_mode`; `type_pat` handles patterns; `type_let` handles bindings and generalization; `type_application` and `type_function` handle calls and functions. OxCaml threads modes through all of these and walks closure locks in `Env` when a variable is used.",
+        "At 17,187 lines this is the largest file of the type checker, and the one Vox changes most."
+      ]
+    },
+    "vox": {
+      "short": "Where refinements are eliminated and introduced, ghost_/refine_/assume_/unreachable_ and === are typed, partial constructs are marked, and total let rec is decided.",
+      "long": [
+        "**Refinement boundaries.** `type_expect` introduces the outer refinement of an expected type: it checks the expression against the payload and records `Texp_refinement` with the refined target (`introduce_refinement`), which the verifier turns into a proof obligation. `rue` eliminates the outer refinement of an inferred type (`eliminate_refinement`), which the verifier assumes. A refined expected type also requires the value at total, stateless and portable modes, which is what lets refined types cross those axes.",
+        "**Predicates** are typed as ordinary OCaml under `enter_total_ghost_context` (a total, stateless, portable closure lock in a ghost context), with the binder at an immutable total mode, then converted to a `refinement_expression` by `refinement_expression_of_typed`. `refine_ e` introduces a refinement explicitly; on a function it builds an eta-adapter. `assume_ x` requires a plain variable, is always partial, and becomes `Texp_assume`. `unreachable_ ()` is a proof of a `false`-refined unit followed by a kept `assert false`.",
+        "**Totality.** Constructs that may fail or loop (`try`, loops, `assert`, mutation and mutable reads, `lazy`, objects, local exceptions, non-exhaustive matches, matches on types that fail `can_pattern_match_total`) constrain every enclosing closure to be partial through `Env.walk_locks_for_partial_construct`. A single `let rec` is total only through `Structural_recursion.check` or a `[@@decreases]` measure proved by `Verification.check_termination`.",
+        "**Ghost code.** `ghost_ e` requires a ghost-accepting context and types `e` as total inside a ghost context; reads of `@@ ghost` fields return a ghost value that keeps the record's other modes, including locality. `let[@def] f x = e` makes `f` total and generates the equation `f_def`, which the verifier assumes. Warnings 223 to 226 point at ghost code that still runs and at redundant `ghost_`."
+      ]
+    },
+    "notes": [
+      {
+        "title": "Introducing an expected refinement",
+        "from": [
+          "Refinements guarantee these modes even when their payload does not.",
+          "| Some { ref_payload; _ }, _ ->"
+        ],
+        "to": "sexp.pexp_loc exp",
+        "kind": "vox",
+        "text": "For an expected type `{x : t | p}` (and an expression that does not handle refinements itself, such as `if` or `match`), the expression is checked against the payload `t` and then wrapped by `introduce_refinement`. The resulting `Texp_refinement` extra is the only source of proof obligations for the verifier."
+      },
+      {
+        "title": "The obligation and its cancellation",
+        "from": "let introduce_refinement env target loc exp",
+        "span": 22,
+        "kind": "vox",
+        "text": "If the most recent refinement extra on the expression eliminated exactly this refinement (a refined value passed straight to a position expecting the same type), the two cancel and no obligation is emitted. Otherwise the new extra records `source` and `target` for `Vox_vc`."
+      },
+      {
+        "title": "The predicate lock",
+        "from": "let enter_total_ghost_context loc env",
+        "span": 11,
+        "kind": "vox",
+        "text": "Predicates, `ghost_` bodies and measures are typed under this constant closure lock: total, stateless and portable, in a ghost context. Captured variables must be usable at those modes, so a predicate cannot observe mutable state or call a partial function. Because the lock is a closure lock, a captured unique value is seen as aliased, which is why `ghost_` cannot consume a token."
+      },
+      {
+        "title": "Ghost field reads and writes",
+        "from": "let ghost_field_crossing =",
+        "to": "Totality.Const.Total } ])",
+        "kind": "vox",
+        "text": "A read crosses only ghostliness: the result is ghost and total, and keeps every other axis of the record, including locality and uniqueness. Crossing locality here let a borrowed token escape its region; that was fixed on 27 September (`f409ea963e`). A write requires the value to be total."
+      },
+      {
+        "title": "ghost_ e",
+        "from": "| Pexp_ghost e ->",
+        "to": "{exp with exp_extra}",
+        "kind": "vox",
+        "text": "The context must accept a ghost value; inside, the body is typed in a ghost context at total mode, where every value may be used. `Translcore` replaces the whole expression by a placeholder of its layout, so `e` never runs."
+      },
+      {
+        "title": "Deciding totality of a let rec",
+        "from": "if provisional_recursion then",
+        "to": "\"structural recursion requires a simple function binding\")",
+        "kind": "vox",
+        "text": "With `[@@decreases m]`, the measure is typed and the termination proof is run before generalization. Without it, `Structural_recursion.check` looks for a parameter of an `[@@inductive]` type that every recursive call receives a proper subterm of. If neither applies, the function stays partial, and the reason is kept in `Includecore.partial_recursion` for the error an interface requiring `total` would report."
+      }
+    ]
+  },
+  "typing/typedecl.ml": {
+    "what": {
+      "short": "Type declarations: translation of type definitions, kinds and layouts of records and variants, representation choice, and well-formedness checks.",
+      "long": "`transl_type_decl` handles a group of declarations, computing jkinds, unboxed versions and mixed-block layouts; separability and variance are delegated to `typedecl_separability.ml` and `typedecl_variance.ml`."
+    },
+    "vox": {
+      "short": "Checks [@@inductive] and [@@phantom_parameters] declarations, and gives @@ ghost fields a void slot; an all-ghost record has kind void.",
+      "long": [
+        "`check_inductive_decl` accepts a single, closed, non-GADT variant whose recursive occurrences are direct constructor arguments or tuple components with unchanged parameters. That is what makes structural recursion on it well-founded and lets the verifier encode it as an SMT datatype.",
+        "A `@@ ghost` field cannot be mutable. It gets the `Void` element representation; a record whose fields are all ghost gets kind `void` (this is `'a Ghost.t`), and a one-field unboxed ghost record is void too."
+      ]
+    }
+  },
+  "typing/typemod.ml": {
+    "what": {
+      "short": "Module-level type checking: structures, signatures, functors, recursive modules, and the top-level entry points for implementations and interfaces.",
+      "long": "`type_implementation` types a unit, checks it against its `.mli` (or infers one) and writes the `.cmi`; `type_structure` handles structure items; `transl_signature` handles signatures; recursive modules are handled by `type_module` with approximation."
+    },
+    "vox": {
+      "short": "Runs the verifier on each unit before artifacts are written, and closes routes by which recursive modules could certify their own totality.",
+      "long": [
+        "`Verification.run_unit` is called after `force_delayed_checks` and the interface check, before the `.cmi`, `.cmt` and code are written. Values bound by `include` and `open struct` are registered as scopes for term dependencies.",
+        "`Vox_trust.check_external` warns (228) about trusted externals in structures and signatures, and after verification `Vox_trust.record_implementation` builds the unit's trust record, which `Env.save_signature` stores in the `.cmi`; packs merge their members' records (`Vox_trust.pack_record`).",
+        "In a recursive module group, value signatures are weakened to partial while the group is typed, and a signature may not contain an `[@@inductive]` type, expose a total value whose type depends on the group, or contain other items that depend on the group in unsupported ways. When printing an inferred interface with the extension on, the totality and ghostliness of values are kept."
+      ]
+    }
+  },
+  "typing/env.ml": {
+    "what": {
+      "short": "The typing environment: identifier tables for values, types, modules and classes, persistent-module loading, and OxCaml's locks for closures and regions.",
+      "long": "OxCaml stores locks (closure, region, exclave, unboxed) in the value table; `walk_locks` computes the mode at which a variable can be used from inside them."
+    },
+    "vox": {
+      "short": "Adds the ghost-context flag, the total closure lock, walk_locks_for_partial_construct, and path-based lookups for elaborating stored predicates.",
+      "long": [
+        "`walk_locks_for_partial_construct` constrains every enclosing closure to be partial on the totality axis only; this is how partial constructs make functions partial. `add_total_closure_lock` restricts captures to what a total, stateless and portable computation may use.",
+        "Closure locks exclude ghostliness: capturing a ghost value does not make the closure ghost, while uses inside still see the value as ghost. When a stored predicate is re-elaborated, `lookup_value_path` and `lookup_constructor_path` look up its resolved paths directly; printed names are not looked up again."
+      ]
+    }
+  },
+  "typing/mode.ml": {
+    "what": {
+      "short": "The mode solver: the lattices of each mode axis, the morphisms between them, and the constraint solver over mode variables.",
+      "long": "Comonadic axes (areality, linearity, portability, forkable, yielding, statefulness) and monadic axes (uniqueness, contention, visibility, staticity) are products of small lattices; `Value` and `Alloc` modes, modalities and `Crossing` are built on top."
+    },
+    "vox": {
+      "short": "Adds two comonadic axes, Totality (Total < Partial, legacy Partial) and Ghostliness (Real < Ghost, legacy Real), and excludes ghostliness from closure capture.",
+      "long": [
+        "With the new axes there are twelve: eight comonadic and four monadic. Both new axes go through the same solver and lock walks as portability and statefulness; no morphism connects them to the other axes.",
+        "Ghostliness is unusual on purpose: no type crosses it (`always_constructed_at` pins it), and `close_over` ignores it, so a closure that captures a ghost value is not itself ghost."
+      ]
+    },
+    "notes": [
+      {
+        "title": "The totality lattice",
+        "from": "  module Totality = struct",
+        "span": 23,
+        "kind": "vox",
+        "text": "`Total` is the bottom, like `portable`: a total closure may be used where a partial one is expected. The legacy mode is `Partial`, so unannotated code is unaffected."
+      },
+      {
+        "title": "The ghostliness lattice",
+        "from": "  module Ghostliness = struct",
+        "span": 23,
+        "kind": "vox",
+        "text": "`Real` is the bottom and the legacy mode. A `Ghost` value may have been erased to a placeholder, so real code must not read it; only positions that expect a ghost value accept one: `@ ghost` parameters and results, ghost fields, ghost contexts and statement position."
+      }
+    ]
+  },
+  "typing/mode_intf.mli": {
+    "what": {
+      "short": "The signature of the mode solver: axes as a GADT, constant lattices, mode and modality types, crossings, and the operations on them.",
+      "long": "Everything outside `mode.ml` sees modes through this interface."
+    },
+    "vox": {
+      "short": "Adds the Totality and Ghostliness modules and axis constructors, the new fields of the mode records, and non-committing queries such as is_total.",
+      "long": "`is_total`, `is_stateless`, `is_portable`, `is_ghost`, `is_real` and `is_unique` inspect an inferred mode without committing solver changes. `Vox_vc` uses `is_total` and `is_stateless` to decide whether a call may be treated as an uninterpreted function."
+    }
+  },
+  "typing/typemode.ml": {
+    "what": {
+      "short": "Translation of mode and modality syntax (@ m, @@ m) to the solver's constants, with the implied defaults between axes.",
+      "long": "`implied_modalities` and `default_mode_annots` encode rules such as `global` implying `aliased` and `stateless` implying `portable`."
+    },
+    "vox": {
+      "short": "Parses total, partial, real and ghost; total implies stateless and hence portable unless statefulness is written; ghost is not a modality.",
+      "long": "`dependent_argument_mode` (total, stateless, portable) is the view a dependent result type gets of its argument. `@@ ghost` on a record field is a representation flag, handled by `Typedecl`."
+    }
+  },
+  "typing/jkind.ml": {
+    "what": {
+      "short": "Jkinds: layouts, mode-crossing bounds and with-bounds, subkinding and intersection, and the kinds of products and records.",
+      "long": "A jkind pairs a layout with a mod-bound on each axis and with-bounds on type parameters; `Jkind.sub` and `intersection` decide kind compatibility."
+    },
+    "vox": {
+      "short": "Kinds gain the totality and ghostliness axes; ghost fields take no space in a record's layout and still count in its with-bounds.",
+      "long": "Kinds such as `immutable_data` now also cross totality. An all-ghost record reports `Void_creation Ghost_record` when its layout is explained."
+    }
+  },
+  "typing/ikind.ml": {
+    "what": {
+      "short": "Ikinds: jkinds as lattice polynomials (LDDs), used to compute and compare kinds and mode crossing by fixpoint solving.",
+      "long": "`crossing_of_type` and the subjkind check go through this representation."
+    },
+    "vox": {
+      "short": "A refined type's kind is its payload's met with refinement_crossings, which adds crossing of portability, totality and statefulness and leaves the other axes as they were.",
+      "long": "This is why `{f : int -> int | true}` is `value mod portable` while `int -> int` is not. It is sound because every introduction of a refinement checks the value at total, stateless and portable modes. Tokens inside refined types stay affine, since uniqueness and locality are not crossed."
+    }
+  },
+  "typing/typetexp.ml": {
+    "what": {
+      "short": "Translation of type expressions (core_type) to types: type variables and their scopes, arrows with modes, polymorphic types, package types.",
+      "long": "`transl_simple_type` and `transl_type_scheme` are the entry points; `TyVarEnv` manages named type variables."
+    },
+    "vox": {
+      "short": "Translates {x : t | p} and dependent arrows; the predicate is typed by Typecore through a forward reference, with the binders in scope.",
+      "long": "`type_refinement_predicate` and `add_dependent_binder` are set by `Typecore`. A dependent arrow's binder is in scope in the rest of the arrow, with a total, immutable view of the argument (`Typemode.dependent_argument_mode`). `TyVarEnv.protect_reentrant` keeps the caller's type variables intact while a predicate is typed in the middle of a type."
+    }
+  },
+  "typing/subst.ml": {
+    "what": {
+      "short": "Substitutions on types, signatures and declarations: renaming of type, module and module-type paths, and preparation of types for saving in .cmi files.",
+      "long": "`Subst.Lazy` delays substitution in signatures read from `.cmi` files."
+    },
+    "vox": {
+      "short": "Substitutions now map value paths (which occur in types only inside predicates) and rename term binders of dependent arrows and refinements.",
+      "long": "`add_value` and `add_bound_value` are new. Without them, a predicate that mentions `M.f` would lose its meaning when a signature is prefixed or strengthened, and binders would collide on instantiation."
+    }
+  },
+  "typing/mtype.ml": {
+    "what": {
+      "short": "Operations on module types: scraping, strengthening, nondep, freshening, and computing the paths a module type depends on.",
+      "long": "`strengthen` and `scrape` are the core; OxCaml adds lazy strengthening."
+    },
+    "vox": {
+      "short": "prefix_refinement_paths_lazy rewrites value paths inside predicates when a signature is prefixed by a module path.",
+      "long": "Inside `M`, a predicate may say `f x`; seen from outside it must say `M.f x`."
+    }
+  },
+  "typing/includecore.ml": {
+    "what": {
+      "short": "Inclusion checks for core items: value descriptions, type declarations, labels and constructors, with the mismatch reports behind signature errors.",
+      "long": "`Includemod` calls these for each item when checking an implementation against its interface."
+    },
+    "vox": {
+      "short": "Declarations must agree on [@@inductive] (it can only be hidden by making the type abstract), phantom parameters, and the ghostliness of each field.",
+      "long": "`partial_recursion` records recursive functions made partial because their recursion is not structural, so that an interface requiring `total` can say why. Value inclusion stays syntactic: refinements in an `.mli` must be alpha-equal to those of the implementation, and no proof obligation is emitted."
+    }
+  },
+  "typing/typedecl_variance.ml": {
+    "what": {
+      "short": "Computes and checks the variance and injectivity of type parameters in declarations.",
+      "long": "Used by `Typedecl` for every declaration and by `Includecore` when comparing variances."
+    },
+    "vox": {
+      "short": "Occurrences under a refinement are invariant; a parameter that occurs only in a predicate's types is invariant and non-injective, which keeps it from being phantom.",
+      "long": "Otherwise `int t` could be converted to `bool t` and carry a fact proved at `int` to `bool` (the W8 fix, `70a56a181f`)."
+    }
+  },
+  "typing/predef.ml": {
+    "what": {
+      "short": "The predefined types and exceptions (int, bool, list, option, exn, Assert_failure, ...) and the initial environment.",
+      "long": "The declarations here are built by hand rather than parsed."
+    },
+    "vox": {
+      "short": "list is declared [@@inductive], so functions over lists can be total by structural recursion, and let rec ones = 1 :: ones is rejected.",
+      "long": "The last point holds even without `-extension refinement_types`, because `Value_rec_check` treats constructors of inductive types as dereferencing their arguments."
+    }
+  },
+  "typing/axis_lattice.ml": {
+    "what": {
+      "short": "A packed bit-vector encoding of mode-crossing bounds, one small field per axis, used by ikinds.",
+      "long": "Meet and join are bitwise operations on this encoding."
+    },
+    "vox": {
+      "short": "Adds bit fields for totality and ghostliness; the .mli exposes only totality, and create pins ghostliness to Ghost.",
+      "long": "The ghostliness field (axis 11) has an accessor and a setter here, but [axis_lattice.mli](src:typing/axis_lattice.mli) hides them, and `create` always sets the field to `Ghost`, the top of `Real -> Ghost`, so no ikind bound crosses ghostliness. `oxcaml/tests/typing/axis_lattice_roundtrip_test.ml` checks the encoding."
+    }
+  },
+  "typing/value_rec_check.ml": {
+    "what": {
+      "short": "The static check of let rec right-hand sides: each binding is classified and uses of the recursive names are graded (Ignore < Delay < Guard < Return < Dereference).",
+      "long": "It rejects definitions that would read an uninitialized recursive value."
+    },
+    "vox": {
+      "short": "Adds the grade Require_initialized: a total closure, a total field or an inductive constructor must not depend on its unfinished recursive group.",
+      "long": "Constructors of `[@@inductive]` types dereference their arguments, so cyclic values of those types cannot be built and the verifier can encode them as acyclic SMT datatypes. A function whose closure mode is total demands `Require_initialized` of what it captures."
+    }
+  },
+  "typing/uniqueness_analysis.ml": {
+    "what": {
+      "short": "The post-typing uniqueness analysis: it tracks uses of values along paths to reject using a unique value after it has been consumed.",
+      "long": "It runs on the Typedtree after type checking, with its own abstract domain of usages."
+    },
+    "vox": {
+      "short": "Handles the two new expression nodes: Texp_assume (binding, predicate, then body in sequence) and Texp_logical_equal (both sides in parallel).",
+      "long": "Ownership in Vox's libraries rests on this analysis unchanged: a heap token is affine because it is `unique`."
+    }
+  },
+  "typing/typeopt.ml": {
+    "what": {
+      "short": "Type-directed information for code generation: value kinds, layouts, array kinds and the representation of types.",
+      "long": "Lambda translation asks it how a value of a given type is represented."
+    },
+    "vox": {
+      "short": "scrape_ty looks through Trefine to the payload, so refinements never influence representation; all-ghost records never reach value_kind.",
+      "long": "A refined type has exactly its payload's layout and representation."
+    }
+  },
+  "typing/printtyp.ml": {
+    "what": {
+      "short": "The type printer's front: printing types, signatures and errors with consistent naming, built on Out_type.",
+      "long": "It sets up the naming context and calls `Out_type` to build `Outcometree` values, which `Oprint` renders."
+    }
+  },
+  "typing/out_type.ml": {
+    "what": {
+      "short": "Conversion of types and signatures to Outcometree, with the naming of type variables, short paths and cycle aliases.",
+      "long": "Split out of `printtyp.ml`; most printing goes through here."
+    },
+    "vox": {
+      "short": "Prints refinement types, dependent arrows and predicates as source, and omits stateless when it is implied by total.",
+      "long": "Predicates are turned back into Parsetree with `Refinement_predicate.untype`; names of free values are rendered through the printer's path machinery, and constructors are qualified by the module of their type."
+    }
+  },
+  "typing/untypeast.ml": {
+    "what": {
+      "short": "Conversion of a Typedtree back to a Parsetree, used by tools and for printing.",
+      "long": "It inverts typing as far as the syntax allows."
+    },
+    "vox": {
+      "short": "Maps the Vox nodes back to syntax: Texp_assume to assume_, Texp_logical_equal to ===, Ttyp_refine to a refinement type, ghost fields to @@ ghost.",
+      "long": "`Texp_refinement` and `Texp_value_name` have no syntax and are dropped; `Texp_let_refine` becomes `let refine_` again."
+    }
+  },
+  "typing/refinement_predicate.ml": {
+    "what": {
+      "short": "New in Vox: generic operations on stored predicates (Types.refinement_expression): map, fold over types, alpha-equality and conversion back to syntax.",
+      "long": [
+        "`map` rebuilds a predicate while renaming binders, rewriting free value, constructor and type paths, and mapping embedded types; `Subst`, `Ctype` and `Mtype` use it to keep predicates meaningful under substitution. `equal` is the syntactic alpha-equivalence behind rigid unification; it does not compare the types stored at each node.",
+        "`untype` converts back to Parsetree for printing; `logical_definition_body` prepares a `[@def]` body for its generated equation."
+      ]
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "It is also copied into `dynlink`'s private compiler libraries, because `Btype` depends on it."
+    }
+  },
+  "typing/structural_recursion.ml": {
+    "what": {
+      "short": "New in Vox: decides whether a let rec is total by structural descent on a parameter of an [@@inductive] type.",
+      "long": [
+        "`check` tries each parameter of inductive type in turn. It tracks which variables are proper descendants of that parameter through `match` and `let` patterns, looking only at constructor fields of the same type (and tuples of them), and requires every recursive call to pass such a variable in that position.",
+        "Failure is not an error: the function is then partial, and `Typecore` records the reason for interface errors."
+      ]
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "Mutual recursion is never total; `[@@decreases]` covers descent that this check cannot see."
+    }
+  },
+  "typing/recursive_function.ml": {
+    "what": {
+      "short": "New in Vox: shared checks on a let rec that may be total: simple unlabelled parameters, and only direct, full, unlabelled recursive calls.",
+      "long": "`check_uses` rejects escaping, partially applied or labelled occurrences of the recursive function, and occurrences in delayed bodies (`lazy`, quotations, binding operators, functors, classes); `check_predicates` rejects the function in its own type predicates. Both the structural check and `[@@decreases]` use it."
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "Recursive calls inside ordinary local closures are allowed and must satisfy the same descent obligations as calls in the body."
+    }
+  },
+  "typing/verification.ml": {
+    "what": {
+      "short": "New in Vox: the typer's hooks for the verifier, run_unit, run and check_termination, with defaults that reject anything needing a proof.",
+      "long": "`Vox_verify.install` (in `verification/runtime/`) replaces the defaults. Keeping the verifier behind a hook keeps `typing/` free of a dependency on `verification/`, and a build without the verifier fails closed: an unverified refinement introduction or `[@@decreases]` measure is an error."
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "The toplevel calls `run` per phrase; compilation units call `run_unit` from `Typemod`."
+    }
+  },
+  "typing/vox_type.ml": {
+    "what": {
+      "short": "New in Vox: classifies a type as int, bool or Bigint.t, the types with an exact SMT meaning, and says which external declarations carry a C primitive's built-in meaning.",
+      "long": [
+        "Used by the measure check in `Typecore` (an `int` or `Bigint` measure) and by `Translcore` to decide how `===` can be checked at run time.",
+        "`builtin_c_primitives` lists the C primitives with a built-in meaning in the verifier (`Bigint`, the trailing-zero count, iarray and sequence primitives, the `Pref` heap and the borrow transitions), each with the library units that own it. `carries_builtin_meaning` holds for such a primitive only when the declaration's UID belongs to one of those units and its native name is the library's; `Vox_encoding.primitive` and `Vox_trust` use it. `%` primitives need no check: the compiler implements them whatever the declaration says."
+      ]
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "`Bigint.t` is recognized by its path `Stdlib__Bigint.t`."
+    },
+    "notes": [
+      {
+        "title": "Built-in meanings belong to declarations",
+        "from": "let builtin_c_primitives =",
+        "to": "\"caml_borrow_frame_right\" ] ]",
+        "kind": "vox",
+        "text": "Before trust hardening (`9864700994`) the verifier looked meanings up by bytecode primitive name alone, so `external plus : Bigint.t -> Bigint.t -> Bigint.t = \"caml_bigint_add\" \"caml_bigint_sub\"` verified `2 + 3 = 5` while native code subtracted. [builtin_declaration_identity.ml](src:testsuite/tests/vox/builtin_declaration_identity.ml) is the regression test."
+      }
+    ]
+  },
+  "typing/vox_trust.ml": {
+    "what": {
+      "short": "New in Vox: what a unit's verification trusts, recorded in its compiled files; warnings 228 (trusted external) and 229 (unverified import); -vox-library and -vox-audit.",
+      "long": [
+        "`trusted_external` classifies an external as trusted when its type states a refinement (`Refined`), it provides a value declared total (`Total`), or it is a `%identity` cast to total (`Total_cast`), looking through abbreviations, record fields and first-class module types. `check_external` reports such a declaration with warning 228 unless the unit is compiled with `-vox-library`, as the verified library and the standard library are.",
+        "`record_implementation` and `interface_record` build a unit's `Cmi_format.vox_unit`: its trusted externals, the definitions that apply a totality cast, uses of unsafe features (`Obj`, `Marshal`'s readers, `input_value`, unsafe primitives, `-unsafe`), other externals, and whether verification ran. A compilation with `-smt-assume-verified` is recorded as not verified unless a `.cmo` or `.cmi` left by a verified compilation of the same parse tree, settings and interfaces vouches for it (`counterparts`), which is how the library's native build counts as verified. A verified unit that imports an interface recorded as not verified draws warning 229."
+      ]
+    },
+    "vox": {
+      "short": "The whole file is new, from trust hardening (a187b9ab9c)."
+    }
+  },
+  "typing/vox_trust.mli": {
+    "what": {
+      "short": "Interface of Vox_trust: the -vox-library and -vox-audit flags, trusted-external classification and warning, and building, reading and merging units' trust records."
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "The implementation is described at [vox_trust.ml](src:typing/vox_trust.ml)."
+    }
+  },
+  "lambda/lambda.ml": {
+    "what": {
+      "short": "The Lambda intermediate language: terms, primitives, layouts, and helper constructors shared by the translation and later passes.",
+      "long": "OxCaml's Lambda carries layouts on bindings and functions and modes on allocations."
+    },
+    "vox": {
+      "short": "Adds placeholder_of_layout, the value that erased ghost code compiles to: Pobj_magic of the dummy constant 0xBBBB for values, zeros for unboxed numbers.",
+      "long": "Unboxed products get a product of placeholders; vector layouts are rejected. `Pobj_magic` hides the placeholder's shape from Flambda 2 and disappears in Cmm, so an unused placeholder costs nothing."
+    }
+  },
+  "lambda/translcore.ml": {
+    "what": {
+      "short": "Translation of core expressions from Typedtree to Lambda: applications, functions, records, allocations with modes, let bindings and primitives.",
+      "long": "`transl_exp` is the entry point; pattern matching goes to `Matching` and primitives to `Translprim`."
+    },
+    "vox": {
+      "short": "Erases ghost_ e to a placeholder without evaluating e, gives ghost fields no slot, and compiles assume_ and === to run-time checks.",
+      "long": [
+        "A `Texp_ghost` extra short-circuits `transl_exp` to `transl_ghost`. A statement `ghost_ e; e'` translates to `e'` alone. Reading a ghost field evaluates the record and yields a placeholder; building a record evaluates ghost field expressions for their effects and stores nothing, and an all-ghost record is the empty unboxed product.",
+        "`Texp_assume` becomes a binding and `if predicate then body else Assert_failure`, and is kept under `-noassert`. `Texp_logical_equal` is `caml_equal` at `int`, `bool` and `Bigint`; at other types it is physical equality when that implies logical equality (`can_check_logical_identity`) and raises `Invalid_argument` otherwise."
+      ]
+    }
+  },
+  "lambda/matching.ml": {
+    "what": {
+      "short": "The pattern-match compiler: splits matrices of patterns into decision trees, and emits field accesses and tests.",
+      "long": "It also handles exhaustiveness-driven failure handlers and let-bound patterns."
+    },
+    "vox": {
+      "short": "A ghost field in a record pattern binds a placeholder of the field's layout instead of reading a slot.",
+      "long": "The field's sort is computed from its type, since the label's own sort is `Void`."
+    }
+  },
+  "lambda/translmod.ml": {
+    "what": {
+      "short": "Translation of structures, functors and compilation units to Lambda, including recursive modules and the toplevel.",
+      "long": "It builds the module block and the global bindings of a unit. Vox does not change it."
+    }
+  },
+  "lambda/simplif.ml": {
+    "what": {
+      "short": "Lambda-level simplifications run before the backends: exits, let elimination, tail-call marking and local function lifting.",
+      "long": "Vox does not change it."
+    }
+  },
+  "lambda/translprim.ml": {
+    "what": {
+      "short": "Translation of external primitives (%-names and C calls) to Lambda primitives, with specialization by argument types and layouts.",
+      "long": "Vox does not change it. Vox's C primitives are ordinary externals; some are lowered to inline Cmm later, in `backend/cmm_builtins.ml`."
+    }
+  },
+  "lambda/translquote.ml": {
+    "what": {
+      "short": "Translation of runtime metaprogramming quotations (<[ ... ]>) to Lambda that builds the quoted code.",
+      "long": "Part of OxCaml's runtime metaprogramming extension."
+    },
+    "vox": {
+      "short": "Refinement types in quotations are rejected, and some internal types were made abstract so the module passes Vox's recursive-module rules.",
+      "long": "The restructuring came with the recursive-module totality hardening (`fef5ae73d9`)."
+    }
+  },
+  "lambda/slambdaeval.ml": {
+    "what": {
+      "short": "An evaluator for Slambda, the staged Lambda used by runtime metaprogramming.",
+      "long": "It computes the compile-time halves of staged values."
+    },
+    "vox": {
+      "short": "A recursive module of types was rewritten as ordinary recursive types, with no change in behavior, to pass Vox's recursive-module rules.",
+      "long": "Part of the recursive-module totality hardening (`fef5ae73d9`)."
+    }
+  },
+  "parsing/parser.mly": {
+    "what": {
+      "short": "The Menhir grammar of OCaml with OxCaml's extensions.",
+      "long": "Productions build Parsetree nodes through `Ast_helper` or `mkexp`/`mktyp`."
+    },
+    "vox": {
+      "short": "Grammar for {x : t | p} in atomic types, dependent arrows (x : t) -> u, ghost_, refine_, assume_, unreachable_ () and let refine_ x = e in.",
+      "long": "A refinement type reuses the head of a record label declaration and rejects mutable or modal heads. A dependent parameter may be polymorphic. `unreachable_ ()` becomes the extension node `[%vox.unreachable]`, which `Typecore` expands."
+    }
+  },
+  "parsing/lexer.mll": {
+    "what": {
+      "short": "The ocamllex lexer of OCaml source, with the keyword table and its per-dialect gating.",
+      "long": "Keywords are tagged with the language version or dialect that reserves them."
+    },
+    "vox": {
+      "short": "Adds the keywords ghost_, refine_, assume_ and unreachable_, reserved in OxCaml mode.",
+      "long": "They follow the naming of OxCaml's `stack_`, `exclave_` and `borrow_`."
+    }
+  },
+  "parsing/parsetree.mli": {
+    "what": {
+      "short": "The untyped AST produced by the parser and consumed by ppx rewriters and the type checker.",
+      "long": "OxCaml extends it with modes, jkind annotations, unboxed types and other constructs."
+    },
+    "vox": {
+      "short": "Adds Ptyp_refine, a binder on Ptyp_arrow, and Pexp_ghost, Pexp_refine, Pexp_assume and Pexp_let_refine.",
+      "long": "In `{x : T | P}` the binder scopes over `P` only; in `(x : T1) -> T2` it scopes over `T2`. The extra argument of `Ptyp_arrow` changes a constructor that ppx code commonly matches on."
+    }
+  },
+  "parsing/ast_helper.ml": {
+    "what": {
+      "short": "Smart constructors for Parsetree nodes, used by the parser and by ppx rewriters.",
+      "long": "`Exp`, `Typ`, `Pat` and friends fill in locations and attributes."
+    },
+    "vox": {
+      "short": "Adds Typ.refine, a ?binder argument to Typ.arrow, and Exp.ghost, Exp.refine, Exp.assume and Exp.let_refine.",
+      "long": "`Exp.map_expression_types`, set by `Ast_mapper`, lets `varify_constructors` reach types inside refinement predicates. `ast_iterator.ml`, `ast_mapper.ml` and `depend.ml` gain the matching cases."
+    }
+  },
+  "parsing/builtin_attributes.ml": {
+    "what": {
+      "short": "The registry of attributes the compiler interprets, and the machinery that warns about misplaced or unused ones.",
+      "long": "An attribute in `builtin_attrs` is expected to be consumed; one that is not triggers warning 53."
+    },
+    "vox": {
+      "short": "Registers def, decreases, inductive and phantom_parameters; a misplaced [@def] or [@decreases] is an error; is_transparent_definition reads [@def transparent].",
+      "long": "The error replaces warning 53 for these two, since a silently ignored `[@def]` or `[@decreases]` would change what is proved."
+    }
+  },
+  "parsing/language_extension.ml": {
+    "what": {
+      "short": "The -extension flag machinery: the set of language extensions, their maturity levels, and which are enabled.",
+      "long": "Built on the GADT in `utils/language_extension_kernel.ml`."
+    },
+    "vox": {
+      "short": "Adds Refinement_types, a non-erasable alpha extension named refinement_types.",
+      "long": "It gates the refinement syntax in the typer: refinement types, dependent binders, `refine_`, `assume_`, `unreachable_`, `===`, `[@def]` and `[@decreases]`. Totality and ghost modes do not need it."
+    }
+  },
+  "parsing/pprintast.ml": {
+    "what": {
+      "short": "The Parsetree pretty-printer, which prints source that parses back to the same tree.",
+      "long": "Used by `-dsource`, by ppx tooling and in error messages."
+    },
+    "vox": {
+      "short": "Prints refinement types, dependent arrows and the new expression forms, with parentheses where the grammar needs them.",
+      "long": "The typer's printer builds predicates back into Parsetree and prints them with it."
+    }
+  },
+  "parsing/printast.ml": {
+    "what": {
+      "short": "The raw Parsetree dumper behind -dparsetree.",
+      "long": "It prints every node with its location."
+    },
+    "vox": {
+      "short": "Dumps Ptyp_refine, the arrow binder, Pexp_ghost, Pexp_refine, Pexp_assume and Pexp_let_refine.",
+      "long": "The same cases are in `printer/printast_with_mappings.ml`."
+    }
+  },
+  "driver/compile.ml": {
+    "what": {
+      "short": "The bytecode per-file pipeline after typing: Lambda translation, bytecode generation and emission of the .cmo.",
+      "long": "Shared parsing and typing are in `compile_common.ml`."
+    },
+    "vox": {
+      "short": "Compile.implementation calls Vox_verify.install () first, so tools that call it directly also get the verifier.",
+      "long": "The verifier itself runs inside typing, from `Typemod`."
+    }
+  },
+  "driver/maindriver.ml": {
+    "what": {
+      "short": "The main function of ocamlc: argument parsing and dispatch to compilation or linking.",
+      "long": "Options come from `Main_args`."
+    },
+    "vox": {
+      "short": "Calls Vox_verify.install () before parsing arguments, which also registers the -smt-* and -dvc options.",
+      "long": "One added line."
+    }
+  },
+  "driver/optmaindriver.ml": {
+    "what": {
+      "short": "The main function of ocamlopt: argument parsing, backend selection (Flambda 2) and dispatch.",
+      "long": "Options come from `Oxcaml_args`."
+    },
+    "vox": {
+      "short": "Calls Vox_verify.install () before parsing arguments, as ocamlc does.",
+      "long": "One added line."
+    }
+  },
+  "driver/vox_audit.ml": {
+    "what": {
+      "short": "New in Vox: reads the trust records of compiled units from .cmi, .cmo and .cmx files, and prints the -vox-audit report for a unit and everything it depends on.",
+      "long": "`print_unit` follows the imports of the unit's interface and implementation through the load path and lists, by kind, what each unit trusts: refined and total externals, totality casts and their uses, unsafe features, other externals, units whose verification was skipped, and solvers other than the expected one. It also names units, and compiled files, that have no record, and units whose files it cannot find. `counterparts` reads the records an earlier compilation left in a unit's `.cmo` and `.cmi`, for `Vox_trust`."
+    },
+    "vox": {
+      "short": "The whole file is new, from trust hardening (a187b9ab9c)."
+    }
+  },
+  "driver/vox_audit.mli": {
+    "what": {
+      "short": "Interface of Vox_audit: counterparts, the records earlier compilations left for a unit, and print_unit, the -vox-audit report."
+    },
+    "vox": {
+      "short": "The whole file is new."
+    }
+  },
+  "utils/warnings.ml": {
+    "what": {
+      "short": "The definition of every compiler warning: constructors, numbers, names, descriptions, default settings and messages.",
+      "long": "Warnings are enabled, disabled and made errors by number or name through `-w` and `-warn-error`."
+    },
+    "vox": {
+      "short": "Adds warnings 222 (slow proof), 223 to 226 (ghost code that still runs), 227 (unused proof step, off by default), 228 and 229 (trusted externals, unverified imports).",
+      "long": [
+        "222 `slow-refinement`: a proof used more solver resources than `-smt-resource-warning`. 223 `unerased-ghost-body`: a total function with a ghost result whose body is not `ghost_ (...)`. 224 `unerased-ghost-call`: real code calls such a function only to discard its result. 225 `redundant-ghost`. 226 `proof-only-binding`: a value computed at run time but used only in ghost code.",
+        "227 `unused-proof-step` reports lemma calls, `assume_` checks and refined arguments whose facts no proof in the function used, found from Z3 unsat cores. Warning 26 now suggests replacing an unused binding of a refined `unit` by a statement.",
+        "228 `trusted-external`, on by default: an external outside the verified library whose type states a refinement or totality, or a `%identity` cast to total, which the verifier assumes. 229 `unverified-import`: a verified unit imports an interface whose compilation skipped verification with `-smt-assume-verified`, with no verified compilation of the same program to vouch for it."
+      ]
+    }
+  },
+  "utils/language_extension_kernel.ml": {
+    "what": {
+      "short": "The GADT of language extensions and their string names, shared by the compiler and by ppxlib-facing code.",
+      "long": "`parsing/language_extension.ml` adds levels and enabling on top."
+    },
+    "vox": {
+      "short": "Adds the constructor Refinement_types, named refinement_types.",
+      "long": "One constructor and its name."
+    }
+  },
+  "stdlib/ghost.mli": {
+    "what": {
+      "short": "New in Vox: 'a Ghost.t, a record with a single @@ ghost field, which has kind void and so costs nothing at run time.",
+      "long": "`{ Ghost.ghost = v }` evaluates `v` and discards it (write `ghost_ v` to skip the evaluation); `x.Ghost.ghost` is a placeholder at mode `ghost`. Being `void`, it cannot go in value-polymorphic containers such as `'a list`; it is meant for record fields and parameters."
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "The field's value must be total, since total ghost computations may use it."
+    }
+  },
+  "stdlib/ghost.ml": {
+    "what": {
+      "short": "New in Vox: the one-line implementation of Ghost, type 'a t = { ghost : 'a @@ ghost }.",
+      "long": "All the behavior comes from the typer's treatment of ghost fields."
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "See [ghost.mli](src:stdlib/ghost.mli)."
+    }
+  },
+  "stdlib/bigint.mli": {
+    "what": {
+      "short": "New in Vox: unbounded signed integers, an immutable_data type with @@ total arithmetic and comparisons, implemented in runtime/bigint.c.",
+      "long": "Division and remainder are Euclidean, and total: `div a zero = zero` and `modulo a zero = a`. Polymorphic comparison and hashing use the numeric value."
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "The verifier encodes `Bigint.t` as SMT `Int`, so a `Bigint` measure or ghost counter never wraps. The C implementation is assumed correct; it was tested by differential testing."
+    }
+  },
+  "stdlib/bigint.ml": {
+    "what": {
+      "short": "New in Vox: Bigint's implementation, the externals into runtime/bigint.c plus zero, one and pp.",
+      "long": "Equality and comparison are OCaml's polymorphic primitives, which use the custom block's operations."
+    },
+    "vox": {
+      "short": "The whole file is new.",
+      "long": "See [bigint.mli](src:stdlib/bigint.mli)."
+    }
+  },
+  "stdlib/stdlib.mli": {
+    "what": {
+      "short": "The interface of the initially opened module Stdlib: exceptions, comparisons, arithmetic, strings, references, I/O, and the aliases of the stdlib modules.",
+      "long": "OxCaml annotates it with modes, layouts and `@@ portable`."
+    },
+    "vox": {
+      "short": "Integer arithmetic, bitwise and, or and xor, boolean operators, ignore, abs and @ become @@ total; shifts stay partial; raise is layout-polymorphic.",
+      "long": "Allocation of mutable data (`ref`) and reads of it stay partial. The shifts are partial because an out-of-range count gives an unspecified result that can differ between evaluations (native constant folding and the machine instruction disagree); their documentation points to `Int.Refined`. `raise` and `raise_notrace` accept any layout, so an exception can be raised at an unboxed or void type."
+    }
+  },
+  "stdlib/stdlib.ml": {
+    "what": {
+      "short": "The implementation of Stdlib.",
+      "long": "Mostly externals and short definitions."
+    },
+    "vox": {
+      "short": "The same totality annotations as stdlib.mli; abs and @ are declared total and checked, @ by structural recursion on the list.",
+      "long": "`abs` compares with a total `%geint` external, since the polymorphic `>=` is not total."
+    }
+  },
+  "stdlib/int.mli": {
+    "what": {
+      "short": "Operations on the int type.",
+      "long": "Mostly externals that match the ones in `Stdlib`."
+    },
+    "vox": {
+      "short": "Adds Int.Refined: total /, mod, div and rem with a nonzero divisor, and total shifts whose count is in [0, 63].",
+      "long": "These are refined externals: the verifier proves the precondition at each call. They are the total counterparts of the partial operators in `Stdlib`."
+    }
+  },
+  "stdlib/list.mli": {
+    "what": {
+      "short": "The interface of List.",
+      "long": "OxCaml adds `value_or_null` kinds to its type parameters."
+    },
+    "vox": {
+      "short": "list is re-exported with [@@inductive]; the functions that terminate for total arguments are marked @@ total; List.Refined adds hd and tl on non-empty lists.",
+      "long": "Functions that can raise or diverge (`hd`, `tl`, `nth`, `init`, `find`, `iter2`, `map2` and the like) stay partial. A higher-order function marked total, such as `map`, is total only when applied to total arguments."
+    }
+  },
+  "stdlib/list.ml": {
+    "what": {
+      "short": "The implementation of List.",
+      "long": "Tail-modulo-cons is used for the non-tail-recursive functions."
+    },
+    "vox": {
+      "short": "Most functions are checked total; concat_map, merge, the four sorts, to_seq and Refined.hd and tl are re-bound through trust_total, an identity external at mode total.",
+      "long": "Trust hardening (`46c8f22a56`) removed the cast from 38 of the 45 functions that had it: written with explicit parameters, they pass the structural-recursion check. The seven that keep it are `concat_map` (mutual recursion), `merge`, `stable_sort`, `sort`, `fast_sort` and `sort_uniq` (their recursion is not structural) and `to_seq` (partial self-application). The two functions of `Refined` introduce their precondition (`l` is not `[]`) with `let refine_` and are cast the same way."
+    }
+  },
+  "stdlib/listLabels.mli": {
+    "what": {
+      "short": "The labelled interface of List.",
+      "long": "Generated from `list.mli` by `tools/sync_stdlib_docs`."
+    },
+    "vox": {
+      "short": "The same totality annotations and [@@inductive] as list.mli.",
+      "long": "It mirrors `list.mli`."
+    }
+  },
+  "stdlib/map.mli": {
+    "what": {
+      "short": "The interface of Map: OrderedType, the signature S, and the functors Make and MakePortable.",
+      "long": "Maps are balanced binary trees keyed by a user-supplied comparison."
+    },
+    "vox": {
+      "short": "Adds MakeTotal over TotalOrderedType (a total compare with ghost witnesses of its laws) and TotalS, with @@ total operations and a Refined submodule.",
+      "long": "`TotalOrderedType` asks for `compare` at `total` plus ghost, total lemmas for reflexivity, antisymmetry of the sign and transitivity. `TotalS.Refined` has constructors that keep only total keys and values, and `find` with the precondition `mem key map`."
+    }
+  },
+  "stdlib/map.ml": {
+    "what": {
+      "short": "The implementation of Map.",
+      "long": "AVL-style balanced trees."
+    },
+    "vox": {
+      "short": "MakeTotal applies Make and re-binds its operations through trust_total and similar identity externals, so their totality is assumed.",
+      "long": "The functor's law witnesses are required by its signature; the implementation does not use them."
+    }
+  },
+  "stdlib/set.mli": {
+    "what": {
+      "short": "The interface of Set: OrderedType, the signature S, and the functors Make and MakePortable.",
+      "long": "Sets are balanced binary trees ordered by a user-supplied comparison."
+    },
+    "vox": {
+      "short": "Adds MakeTotal over TotalOrderedType and TotalS, with @@ total operations and a Refined submodule, as for Map.",
+      "long": "`TotalS.Refined` has total `singleton`, `add`, `remove`, `union`, `inter` and `diff`, and `find` with the precondition `mem elt set`."
+    }
+  },
+  "stdlib/set.ml": {
+    "what": {
+      "short": "The implementation of Set.",
+      "long": "AVL-style balanced trees."
+    },
+    "vox": {
+      "short": "MakeTotal applies Make and re-binds its operations through trust_total, so their totality is assumed.",
+      "long": "As for `Map.MakeTotal`."
+    }
+  },
+  "stdlib/moreLabels.mli": {
+    "what": {
+      "short": "Labelled interfaces of Hashtbl, Map and Set.",
+      "long": "Generated from the unlabelled interfaces by `tools/sync_stdlib_docs`."
+    },
+    "vox": {
+      "short": "Gains the labelled TotalOrderedType, TotalS and MakeTotal for Map and Set.",
+      "long": "`tools/unlabel-patches/` holds the `MakeTotal` declarations that the generation script substitutes in."
+    }
+  },
+  "stdlib/iarray.mli": {
+    "what": {
+      "short": "The interface of Iarray, OxCaml's immutable arrays.",
+      "long": "Immutable arrays cross contention and can be shared between domains."
+    },
+    "vox": {
+      "short": "length and the iterators, folds, searches, comparisons and sorts are marked @@ total; Iarray.Refined.get takes an index proved to be in bounds.",
+      "long": "`Refined.get` has a dependent type, `(a : 'a iarray) -> {i : int | 0 <= i && i < length a} -> 'a`, and still uses the bounds-checked primitive."
+    }
+  },
+  "stdlib/iarray.ml": {
+    "what": {
+      "short": "The implementation of Iarray.",
+      "long": "Mostly shared with Array through unsafe casts."
+    },
+    "vox": {
+      "short": "Re-binds the total functions through trust_total, and defines Refined.get as a refined external.",
+      "long": "As in `Map.MakeTotal` and `Set.MakeTotal`, the totality of these functions is assumed."
+    }
+  },
+  "stdlib/templates/map.template.mli": {
+    "what": {
+      "short": "The template from which the Map interfaces are generated.",
+      "long": "The stdlib build generates `map.mli` and its labelled variant from it."
+    },
+    "vox": {
+      "short": "Carries the TotalOrderedType, TotalS and MakeTotal additions.",
+      "long": "See [map.mli](src:stdlib/map.mli)."
+    }
+  },
+  "stdlib/templates/set.template.mli": {
+    "what": {
+      "short": "The template from which the Set interfaces are generated.",
+      "long": "The stdlib build generates `set.mli` and its labelled variant from it."
+    },
+    "vox": {
+      "short": "Carries the TotalOrderedType, TotalS and MakeTotal additions.",
+      "long": "See [set.mli](src:stdlib/set.mli)."
+    }
+  }
+}

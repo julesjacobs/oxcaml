@@ -1,0 +1,95 @@
+{
+  "_about": "Demo tour. Sources: verification/catalogue/pages/hindley-milner.md (its sources: list is the backbone), research/mastery-20260927/demos-algorithms.md §3.2; every claim re-checked against the code at HEAD 8479634adc. The comparison with ctype.ml was checked against typing/ctype.ml and typing/btype.ml at the same commit (Tlink, generic_level, update_level, Btype.with_new_pool / add_to_pool, For_copy.redirect_desc with Tsubst).",
+  "_note_pools": "demos-algorithms.md §3.2 says the per-level pools 'replace OCaml's whole-type traversal'. At HEAD OxCaml's own generalization also uses per-level pools (Btype.pool_stack, with_new_pool, add_to_pool; Ctype.with_local_level_gen), so the tour describes the demo's pools as mirroring those.",
+  "id": "hindley-milner",
+  "title": "Hindley–Milner type inference",
+  "kind": "demo",
+  "demo": "hindley-milner",
+  "order": 2,
+  "summary": [
+    "`Hm_inference.infer` infers types for a small ML with let-polymorphism, using a graph of mutable type nodes with union-find links, levels, per-level pools for generalization and copying for instantiation: a miniature of `typing/ctype.ml`. It is proved sound and principal against a declarative typing relation, so a rejection means the term has no type. The tour goes from the interface and the declarative system, through a client and a rejected client, to the type graph, the relational specification of the algorithm, the runtime code for `let`, the completeness proof and the trusted base.",
+    "Only normal return is specified: `infer` is not `total`, may raise, and is not proved to terminate. The [catalogue page](demo:hindley-milner) states the claim, scope and trusted base."
+  ],
+  "stops": [
+    {
+      "title": "The interface: four theorems about one result",
+      "path": "testsuite/tests/vox/hm_inference.mli",
+      "from": "type result : immutable_data",
+      "to": "{u : unit | false} @ ghost @@ total",
+      "lines": "4-31",
+      "text": "`result` is abstract; `source` gives the inferred term (erased) and `inferred_type` the answer. `infer` is the only runtime function, and it is not `@@ total`. `sound` returns the typing derivation itself, erased. `principal` states an existential in continuation-passing form, because refinements have no existential quantifier: any `claim` that follows from `inferred_type out = Some ty` and `target = substitute delta ty`, for an arbitrary substitution `delta`, holds. `rejected` is its `None` case: a term that `infer` rejects has no typing at any type."
+    },
+    {
+      "title": "The contract: a declarative typing relation",
+      "path": "testsuite/tests/vox/hm_declarative.ml",
+      "from": "let[@def] rec (typed @ total)",
+      "to": "&& typed n (Binding (s, g)) b t body",
+      "lines": "90-127",
+      "text": "`typed n g e t d` holds when the derivation tree `d` shows that `e` has type `t` in context `g`, with `n` type parameters in scope; it is an ordinary total function over an `[@@inductive]` datatype of derivations. `Variable args` instantiates a scheme by `open_scheme`; `Abstraction` and `Recursion` bind monomorphic schemes `Forall (Z, a)`. `Let_binding` is where generalization happens: the right-hand side is typed under `add k n` parameters and `weaken_context k g`, so the new parameters are de Bruijn-shifted in. Type variables of an inferred type appear here as `Free p` constants, through `embed`."
+    },
+    {
+      "title": "A client proof",
+      "path": "testsuite/tests/vox/hm_inference_public_client.ml",
+      "from": "let source = D.Lambda (D.Bound D.Z) in",
+      "to": "self-application accepted",
+      "lines": "31-52",
+      "text": "The client uses only the public interfaces. The `scoped_term_def` calls in the first `ghost_` block prove that `λx. x` is closed, the precondition of `infer`. It builds a derivation that `λx. x` has type `bool → bool` (`identity_typing`, above) and passes it to `principal` with `claim = not (inferred_type out === None)`; the continuation `use` is trivial because `principal` already rules out `None`. The refined `ty` then records statically that inference succeeded, so the `failwith` branch is dead. The last lines check at run time that `λx. x x` is rejected; that part is a test."
+    },
+    {
+      "title": "A rejected client",
+      "path": "testsuite/tests/vox/verified_hm_rejected.ml",
+      "from": "let steal : (input : {e : Hm_declarative.term |",
+      "to": "The refinement is stated here.",
+      "lines": "28-40",
+      "text": "`Verified_hm` is the internal module behind `Hm_inference`; its `infer` returns an unboxed record whose `root` is the inferred type's node, or `None` on failure. This client claims that inference always fails, and the checker rejects it with a counterexample because the contract allows `Some`. The same file rejects a forged `V.Spec.evidence` and uses of `principal` and `elaborate` with an unrelated input. [`hm_inference_rejected.ml`](src:testsuite/tests/vox/hm_inference_rejected.ml) checks that the evidence inside `Hm_inference.result` cannot be read: `out.evidence` is an unbound field."
+    },
+    {
+      "title": "The type graph: a miniature of type_expr",
+      "path": "testsuite/tests/vox/copy_spec.ml",
+      "from": "type level = Generic | Finite of int",
+      "to": "| Arrow (a, b) -> rho p === Function (rho a, rho b) | Link q -> rho p === rho q)",
+      "lines": "3-24",
+      "text": "Each type node is a `Pref` cell in a ghost heap `node Pref.heap`. `Link` plays the role of `Tlink`, `Generic` of `generic_level`, and `memo`/`Forward` of the `Tsubst` redirection that `ctype.ml` installs while copying; `visited` is the occurs check's mark bit. Inferred types `ty` have `Variable of node Pref.t`: a type variable is a heap location. `equation h rho p` says that `rho : node Pref.t -> ty` respects node `p`; a function satisfying it at every node is a *model* of the heap, and the completeness proof works with models where textbook proofs use most general unifiers."
+    },
+    {
+      "title": "The algorithm as a relation: let over the heap",
+      "path": "testsuite/tests/vox/hm_effective_execution_spec.ml",
+      "from": "| RLet_left (rhs, _) -> ran h (depth + 1) Empty env rhs after final_pool",
+      "to": "(Bind (p, env)) body after final_pool))",
+      "lines": "149-157",
+      "text": "`ran h depth pool env e after final_pool` is a big-step specification of algorithm J over the heap, with one constructor of the `execution` datatype per inference case. For `let`, the right-hand side runs one level deeper with an empty pool. `close_heap middle depth child_pool` then generalizes: every node of the child's pool whose level exceeds `depth` becomes `Generic` (`Generalize_spec.closed_heap`), and `transfer_rep` moves the surviving representatives to the parent's pool. The invariant `covered` in [`generalize_spec.ml`](src:testsuite/tests/vox/generalize_spec.ml), that every node above the cut is in the pool, is what lets a pool stand in for a traversal of the whole type, as `Btype.with_new_pool` does in OxCaml."
+    },
+    {
+      "title": "The runtime code for let",
+      "path": "testsuite/tests/vox/hm_routed_infer.ml",
+      "from": "| T.Let (runtime_rhs, runtime_body) ->",
+      "to": "let child_pool : pool = Empty in",
+      "lines": "1042-1053",
+      "text": "`work`, most of this 1,241-line file, is the inference itself: continuation-passing code that mutates real `Pref` cells through a unique token and builds the ghost `execution` alongside. Its postcondition is `ran` on that execution. At `let` it raises `Failure` through the `raise_any` external if the level would overflow, saves the current pool in the per-level array (`Rp.save`) and starts the child with an empty pool. After the right-hand side, `Rp.close_and_route` generalizes the child's pool and routes the surviving nodes to their levels' pools. Universally quantified invariants such as `facts` and `trees` are passed as ghost functions over nodes, because the logic has no quantifiers."
+    },
+    {
+      "title": "The core proof: completeness by induction over the execution",
+      "path": "testsuite/tests/vox/hm_effective_complete.ml",
+      "from": "let rec (with_run_model @ total)",
+      "to": "{u : unit | claim} @ ghost =",
+      "lines": "42-66",
+      "text": "`with_run_model` is Damas–Milner completeness. Given a run of the algorithm, a model `rho` of the heap before it, and a declarative derivation `d` of the term at `target` in a context `g` that `realize` relates to the environment's templates, it produces a model `tau` of the heap after the run that agrees with `rho` on the old nodes and sends the result to `target`. `closed_completes`, at the end of the file, starts it from the empty heap with the model `fun _ -> Boolean` and concludes that the run did not fail. `closed_factor` adds `Level_mgu_proofs.readback_factor`, which gives `target = substitute rho inferred`: principality."
+    },
+    {
+      "title": "The public result seals its evidence",
+      "path": "testsuite/tests/vox/hm_inference.ml",
+      "from": "type payload = {input : D.term @@ ghost;",
+      "to": "V.Spec.typing out.input ty out.evidence ())",
+      "lines": "5-24",
+      "text": "`Hm_inference.result` keeps only the type at run time; the input and the `Verified_hm` evidence (execution, heap, finite readback tree, typing) are ghost fields, and the refinement on `result` ties them together. `infer` wraps `Verified_hm.infer_type`, and `sound` reads the derivation out of the evidence. Further down, `principal` defers to `Verified_hm.principal_evidence`, and `rejected` is `principal` with `claim = false`. The finite readback tree is there because the logic is quantifier-free: that the graph under a node is acyclic and unfolds to a type has to be a concrete ghost tree checked by `finite`."
+    },
+    {
+      "title": "The trusted base",
+      "path": "verification/library/vox_iarray.mli",
+      "from": "external extensional : ('a : immutable_data).",
+      "to": "@ immutable total @@ total = \"caml_vox_iarray_sub\"",
+      "lines": "36-57",
+      "text": "Beyond the shared base (the checker, Z3, the compiler, and the contracts of `Pref` and `Borrow_iarray`), the demo trusts these `external` declarations, whose refined types the checker assumes, and `get` at the top of the file. The per-level pools live in a `Borrow_iarray.Owned_array` whose contents the contracts describe with `Vox_iarray.updated`, which calls `set`. `extensional` is assumed: arrays that agree at every index, shown by a ghost function, are equal. The other trusted declaration is `raise_any`, the layout-polymorphic `%raise` in [`hm_routed_infer.ml`](src:testsuite/tests/vox/hm_routed_infer.ml); the `unreachable_ ()` arms of the algorithm add nothing to this list, since the checker proves each unreachable and a run-time trap remains."
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "_about": "Demo tour of Vox_lz4. Sources: verification/catalogue/pages/lz4.md (its sources: list is the backbone), research/mastery-20260927/runtime-checks-testing.md section 8 (total classifiers with error values), research/mastery-20260927/refinement-types.md sections 3.3 and 5.3 (labelled and optional dependent binders), verification/library/vox_lz4_review_boundary.md, and the code at HEAD (8479634adc).",
+  "_sources_stop2": "Optional binders: typing/typetexp.ml ('An optional argument's binder denotes the option the caller passed'), typing/typecore.ml (a defaulted optional parameter cannot be named); substitution of Some e / None at application is refinement-types.md 3.3 item 4, observed in testsuite/tests/vox/lz4_boundary.ml (invalid, default, explicit).",
+  "id": "lz4",
+  "title": "LZ4 block compression",
+  "kind": "demo",
+  "demo": "lz4",
+  "order": 19,
+  "summary": [
+    "`Vox_lz4` compresses and decompresses raw LZ4 blocks, and its contracts pin both directions to specifications written as total functions: a compressor model that fixes every choice the compressor makes, and a decoder model that classifies every input as success, malformed or over the output limit. Bad input comes back as an error value in a `result`, and the one numeric precondition, the capacity, is also an error value in `decompress`, whose contract names the optional argument in a dependent type.",
+    "The [catalogue page](demo:lz4) states the claim, the trusted base and the scope."
+  ],
+  "stops": [
+    {
+      "title": "Compression and the checked decoder",
+      "path": "verification/library/vox_lz4.mli",
+      "from": "(** Independent raw LZ4 blocks",
+      "to": "Vox_lz4_spec.matches_model wire capacity decoded}",
+      "lines": "1-29",
+      "text": "`Vox_lz4` handles independent raw LZ4 blocks of at most 4 MiB. The decoder reports bad input as a value: `decompress_verified` returns `(string, decode_error) result`, so malformed wire bytes give `Error (Malformed (reason, offset))` and a block that needs more than `capacity` bytes gives `Error Output_limit`. Its contract is `matches_model`: the status, the length and, on success, every byte agree with a total decoder model. The contract of `compress` fixes its output exactly, as the wire bytes of a compressor model, so a different valid encoding would fail it. Only the size limit and allocation failure raise, and both are outside the normal-return contracts."
+    },
+    {
+      "title": "A labelled argument in a dependent type",
+      "path": "verification/library/vox_lz4.mli",
+      "from": "(** A string/result adapter over [decompress_verified].",
+      "to": "else result === Error Invalid_capacity}",
+      "lines": "31-42",
+      "text": "`decompress` takes the capacity as an optional argument, and `?capacity:(c : int)` names it for the result type. The binder of an optional argument denotes the option the caller passed, so `c` has type `int option` (the typer builds that type in [`typetexp.ml`](src:typing/typetexp.ml)), and the refinement matches on it: `None` means the default 4,194,304, and `Some n` with `n` out of range means `Error Invalid_capacity`. At a call, `~capacity:e` substitutes `Some e` for `c` and an omitted argument substitutes `None`, which is how the three uses in `lz4_boundary.ml` get their exact facts. An optional parameter with a default value cannot be named this way, because the function never sees the option. So the precondition of `decompress_verified` becomes a branch in `decompress` whose failing side is an error value stated in the type."
+    },
+    {
+      "title": "A client proof: decoding undoes encoding",
+      "path": "testsuite/tests/vox/vox_lz4_public_client.ml",
+      "from": "let roundtrip",
+      "to": "| Error _ -> unreachable_ ()",
+      "lines": "6-15",
+      "text": "The client proves that decompressing a compressed string returns it. `C.roundtrip` is an erased theorem whose premises are `compress`'s contract, a capacity between the source length and 4,194,304, and `decompress_verified`'s contract; the two calls establish all of them. Its conclusion rules out `Error` and equates the contents in the `Ok` case, and `unreachable_ ()` asks the checker to prove the `Error` branch dead, which it can do only with the `ghost_` line. `V.contents` is an erased view of a string as a `char iarray`, and `===` is logical equality. `lz4_boundary.ml` compiles this client against the `.cmi` files of `Vox_lz4`, the ten specification modules and three sequence and string modules only."
+    },
+    {
+      "title": "A rejected client",
+      "path": "testsuite/tests/vox/lz4_boundary.ml",
+      "from": "let f (wire : string) :",
+      "to": "|}]",
+      "lines": "488-505",
+      "text": "This client claims that decoding at capacity 0 never reports a malformed block. The claim is false, since the empty string is a malformed block, and the checker rejects it at the call. The phrases around it test the same contracts from both sides: a claim that `compress` returns its input is rejected, the three uses of `decompress` below are accepted with exactly the facts its refinement gives, and a claim that the default capacity is 0 is rejected. Earlier phrases reject a runtime use of the erased `Vox_string_view.contents` and references to the hidden `Vox_lz4_spec_decode` and `Vox_lz4.C`."
+    },
+    {
+      "title": "The two relations in the contracts",
+      "path": "verification/library/vox_lz4_spec.ml",
+      "from": "type decoded = (string, decode_error) result",
+      "to": "from_source model))",
+      "lines": "15-36",
+      "text": "`matches_model` runs the decoder model over the wire bytes with fuel equal to their length, requires the capacity to be in range, and compares the model with the value returned: an `Error` must carry the model's error kind, `Invalid_capacity` never matches, and `Ok output` must have the model's length and bytes. The reason and offset inside `Malformed` are left unspecified. `compresses` says that the wire bytes lay out, in the format `wire_matches_plan` fixes, the matches that the compressor model `from_source` chooses. Both are `[@def]` definitions, and the generated lemmas `matches_model_def` and `compresses_def` state their equations for proofs that need the bodies."
+    },
+    {
+      "title": "The decoder model: a total classifier",
+      "path": "verification/library/vox_lz4_spec_decode_bytes.ml",
+      "from": "let[@def] rec (decode_model @ total)",
+      "span": 30,
+      "lines": "37-66",
+      "text": "The decoder model is a total function that classifies every input: each path ends in a record whose `kind` is `Done`, `Malformed` or `Output_limit`, with the number of bytes produced and the output in reverse. It reads a token, the literal length with its extension bytes, the literals, a two-byte offset and the match length, then recurses; `fuel` bounds the number of sequences and is the `[@@decreases]` measure. The check on the last sequence encodes LZ4's end-of-block rules: the final token's low four bits are zero, and in a block with a match the last five bytes are literals and the last match starts at least 12 bytes before the end. `byte_of_char` is an `%identity` primitive in [`vox_lz4_spec_parse.ml`](src:verification/library/vox_lz4_spec_parse.ml) whose contract is assumed."
+    },
+    {
+      "title": "The compressor model fixes every choice",
+      "path": "verification/library/vox_lz4_spec_scan.ml",
+      "from": "let[@def] rec (scan @ total) :",
+      "to": "fun source -> scan source [] 0 0 (Iarray.length source + 1)",
+      "lines": "1-30",
+      "text": "At each position up to 12 bytes before the end, `scan` hashes four bytes with `hash4`, looks up the most recent position with that hash, records the current one, and asks `choose_match` whether the earlier position starts a match of at least four bytes within 65,535 bytes. After a match the scan resumes past it, without hashing the positions inside it. The refinement `valid_plan` states that each chosen match repeats earlier bytes and respects the end-of-block limits, so a plan is correct by construction. The hash in [`vox_lz4_spec_match.ml`](src:verification/library/vox_lz4_spec_match.ml) uses six `int32` primitives declared `total` with no contract; the proofs hold whatever values they compute, because `choose_match` checks every candidate against the source."
+    },
+    {
+      "title": "The decoder over raw memory, and its trusted parts",
+      "path": "verification/library/vox_lz4_string_decode.ml",
+      "from": "let decode_string : (wire : string) ->",
+      "to": "let decoded : decoded = Ok output in",
+      "lines": "270-308",
+      "text": "`decode` allocates a raw buffer of `capacity` bytes and runs `decode_sequences`, which returns each malformed case as an error value and whose contract ties its result to a second decoder model, `Vox_lz4_spec_decode.decode_model`, stated over raw memory and the token's heap. `Bytes_proof.decode` relates that model to the pure byte model of the public specification, and `Copy.copy_prefix` copies the decoded prefix into a string. `copy_prefix` is a trusted external, an allocation and a `memcpy` in `runtime/pref.c`; the buffer's `malloc`, `read`, `write` and `free` are the trusted externals of [`raw_memory.mli`](src:verification/library/raw_memory.mli), which check no bounds, so the refinements on their indices are what keep every access in bounds. The `try` releases the buffer before re-raising a failure of the copy, and the comment says why the handler cannot release it itself: the uniqueness analysis does not know that `raise` leaves."
+    },
+    {
+      "title": "The core proof: decoding a plan's wire bytes",
+      "path": "verification/library/vox_lz4_decode_bytes_roundtrip.ml",
+      "from": "let rec (decode_plan @ total) :",
+      "to": "&& S.matches_bytes source result.S.count result.S.reversed} @ ghost =",
+      "lines": "265-281",
+      "text": "The round-trip theorem reduces to this lemma, by induction over the compressor's plan. The premise says that the bytes decoded so far are the source up to `anchor` and that the wire from `cursor` lays out the rest of the plan; the conclusion says that the decoder model, started there, ends in `Done` with exactly the source's bytes. Each step unfolds one sequence of the wire layout and one step of the model (`decode_sequence_step`), and the lemmas `literals` and `matches` show that the copied literals and the back-reference extend the output by the source's next bytes. `decode_wire` starts it at position 0, and `roundtrip` at the end of the file adds `compresses_def`; `Vox_lz4.roundtrip` is that function. The lemma is a total ghost function, and its implication is written `not premise || conclusion`."
+    },
+    {
+      "title": "Tests: the client calls the codec and nothing else",
+      "path": "testsuite/tests/vox/lz4_boundary_check.ml",
+      "from": "(* Checks the Lambda of the LZ4 public client",
+      "to": "finish ()",
+      "lines": "1-11",
+      "text": "[`lz4_boundary.ml`](src:testsuite/tests/vox/lz4_boundary.ml) compiles the codec with both compilers, natively at `-O3`, then compiles the public client with `-dlambda` against the public `.cmi` files, and this program checks the client's Lambda. It must mention no specification module and make exactly two calls into `Vox_lz4`, to `compress` and `decompress_verified`: the ghost call of `roundtrip` is erased. The same test runs the rejected phrases and checks buffer release and finalizer reclamation after simulated `Out_of_memory` exits. Agreement with liblz4 is tested outside the suite by `verification/benchmarks/lz4_interop.py`; the models are the definition of LZ4 here, and nothing proves that they agree with liblz4."
+    }
+  ]
+}

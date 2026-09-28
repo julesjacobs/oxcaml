@@ -1,0 +1,97 @@
+{
+  "_about": "Demo tour, the model for the other demo tours. Sources: verification/catalogue/pages/flat-hash-table.md, verification/library/vox_flat_hashtbl_review.md, research/mastery-20260927/demos-data-structures.md; every claim re-checked against the code at a0b99ddfeb.",
+  "id": "flat-hash-table",
+  "title": "The flat hash table",
+  "kind": "demo",
+  "demo": "flat-hash-table",
+  "order": 1,
+  "summary": [
+    "`Vox_verified_flat_hashtbl.Make` is a mutable open-addressing hash table that probes sixteen slots at a time with SIMD, and whose operations are proved to act on an abstract finite map. The tour reads it from the outside in: the interface and a client proof, the representation invariant and the proof that makes probing correct, the trusted storage contracts, and the native code, from which the proofs are erased.",
+    "The [catalogue page](demo:flat-hash-table) states the claim, the trusted base, the scope and the measured performance."
+  ],
+  "stops": [
+    {
+      "title": "Keys come with proofs",
+      "path": "verification/library/vox_verified_flat_hashtbl.mli",
+      "from": "(** Keys: [equal] must be an equivalence",
+      "to": [
+        "module type Key = sig",
+        "end"
+      ],
+      "lines": "51-65",
+      "text": "A client instantiates `Make` with a key module. `equal` and `hash` are declared at `@@ total`, Vox's totality mode: the checker ensures they terminate without raising, and `@@ total` defaults their statefulness to `stateless`, so their results depend only on their arguments. `{u : unit | p}` is `unit` refined by the predicate `p`, and the dependent arrow `(x : t) -> ...` names the argument so that `p` can mention it; each of the four laws is a total function of such a type, and so a proof of `p` for every `x`. The client writes these proofs, and a false law is a compile-time error. Hashes may collide and may be any `int`: the public test hashes every key to 0."
+    },
+    {
+      "title": "An abstract finite map and its laws",
+      "path": "verification/library/vox_verified_flat_hashtbl.mli",
+      "from": "(** Finite maps from keys to values, specified only by the laws",
+      "to": ["count_nonnegative", "end"],
+      "lines": "68-107",
+      "text": "`Make (Key)` exports its specification language before its operations. `Map.t` is abstract, so a client can neither inspect nor construct a map's representation; it reasons with the seven laws only. Each law is a ghost function (`@ ghost`: it exists only for the checker and is erased) whose result type states an equation, and `===` is logical equality at any type. Because `===` on maps is not extensional, the comment tells clients to compare maps through `lookup` and `count`; `count` is a `Bigint.t`, so the size laws have no overflow case. Behind the signature the laws are proved in [`vox_table_bindings.ml`](src:verification/library/vox_table_bindings.ml), where a map is an association list with at most one binding per `Key.equal` class."
+    },
+    {
+      "title": "What a mutation promises",
+      "path": "verification/library/vox_verified_flat_hashtbl.mli",
+      "from": "(** Raises [Invalid_argument] if the table would need",
+      "to": ["val replace", "H.put (P.own token)"],
+      "lines": "175-183",
+      "text": "Besides the runtime handle `table`, every operation takes two erased arguments: a view `before`, an immutable snapshot of one version of the table, and a token, affine ownership of a ghost heap. The token's refinement `current table before (P.own t)` says that the token's heap holds `version before` at `location table`; `current` is `[@@def transparent]`, so the checker unfolds it by `current_def` at every full application and the name only abbreviates. `replace` consumes the token (`@ unique`) and returns an unboxed record with a new view and a new token, while reads such as `find_opt` borrow it (`@ local read`). The result states that the new bindings are exactly `Map.put` of the old ones, and that the new heap is the old one changed only at `location table`, so a token that also owns other tables keeps their versions. Only normal return is specified: if the table would need more than 2^30 slots, `replace` raises and the consumed token is lost."
+    },
+    {
+      "title": "A client proof",
+      "path": "testsuite/tests/vox/flat_hashtbl_public.ml",
+      "from": "(* Reading a key back after storing it",
+      "to": "V.find_opt c.#table u.#view key (borrow_ u.#token)",
+      "lines": "6-14",
+      "text": "This client is a functor over any `Key`, compiled against the `Pref`, `Ghost_pref` and `Vox_verified_flat_hashtbl` interfaces only. Its result type `{v : int option | v === Some value}` is the theorem. `P.empty ()` makes a token that owns nothing; `create` extends it with the new table, `replace` consumes `c.#token` and returns `u.#token`, and `borrow_ u.#token` lends that token to `find_opt` for the call. `ghost_ (...)` is proof code, checked and then erased: it applies `Key.reflexive` and the law `put_get`, which reduce `Map.lookup (Map.put m key value) key` to `Some value`. Without the ghost block the claim is rejected: the checker does not apply the map's laws on its own."
+    },
+    {
+      "title": "A rejected client",
+      "path": "testsuite/tests/vox/flat_hashtbl_boundary.ml",
+      "from": "(* A lookup after an update, with its proof: the ghost block shows",
+      "to": ["A false claim about a lookup", "|}]"],
+      "lines": "439-469",
+      "text": "This expect test compiles its phrases against the public interfaces and the client above, after `module V = Flat_hashtbl_public.V`. The same program is accepted when it claims that `find` returns 84 and rejected when it claims 85; the error points at the refinement `v = 85`. Earlier phrases in the file are rejected for a stale view, a token that does not own the table, a reused token, two false key laws, and seven abstraction checks, such as naming the hidden `V.Impl` or building a `Map.t` from a list. The reused token is a uniqueness error from OxCaml's type checker, reported before the verifier runs. The stale-view, missing-ownership and reused-token programs are also compiled from separate files without `-extension refinement_types`, and are still rejected."
+    },
+    {
+      "title": "Inside: a view is a refinement type",
+      "path": "verification/library/vox_verified_flat_hashtbl.ml",
+      "from": "(* A view pairs a storage snapshot with the map it represents",
+      "to": "ghost_ (H.at heap (location table) === Some (version view))",
+      "lines": "16-36",
+      "text": "In the implementation a view is a record of two ghost fields: the internal storage view `I.view` and the public `Map.t`. The public `view` type refines it: `I.valid` is the representation invariant, and `Assoc.same v.map (Bridge.compact ...)` says that the map has the same bindings as the live slots, in any order. Because `view` is abstract in the interface, every view a client holds was built here: each construction, in `create`, `replace`, `remove` and `clear`, must prove the refinement, and every read may assume it. `let[@def]` keeps a definition opaque behind a lemma (`version_def`, `bindings_def`) that a proof calls where it needs the body. `current` is `[@def transparent]` here too, and the exported `current_def` is the lemma generated from this body, so the abbreviation adds nothing to the trusted base."
+    },
+    {
+      "title": "The key invariant: every entry lies on its probe path",
+      "path": "verification/library/vox_table_invariant.ml",
+      "from": "let[@def] rec (probe @ total) (capacity : int) (hash : int)",
+      "to": "&& empty_free s (Key.hash key) depth",
+      "lines": "17-49",
+      "text": "`probe` is triangular probing over groups of sixteen slots: the first group comes from `hash lsr 7`, and the step grows by 16 at each depth. `empty_free s hash d` says that none of the first `d` groups on that sequence contains an EMPTY control byte (128). `route` gives each live entry a ghost path `(depth, lane)`: the entry is in lane `lane` of the group at `depth` on its key's sequence, and no earlier group there has an EMPTY byte, which is what lets a search stop at the first group with an EMPTY byte. The paths are the `routes` field of the internal view, ghost data with one entry per slot. `valid`, at the end of the file, conjoins `routes_valid` with the shape and count invariants (including a reserve of one eighth of the capacity), the fingerprint `hash land 127` in each full slot's control byte, the cloned control bytes and `Map.distinct`."
+    },
+    {
+      "title": "The core proof: why a search may stop at an EMPTY byte",
+      "path": "verification/library/vox_table_stop_proof.ml",
+      "from": "let (stored_misses @ total)",
+      "to": "end else ())",
+      "lines": "63-99",
+      "text": "`groups` in [`vox_table_search.ml`](src:verification/library/vox_table_search.ml) scans the probe sequence with `match16_empty`. When a group has an EMPTY lane and none of its candidates matched, it calls `empty_stop`, which proves the key absent by applying `Map.absent_intro` to this lemma at every index. `stored_misses` assumes a stored key equal to the query and derives a contradiction: by `Key.hash_equal` the two keys have the same hash, hence the same probe sequence. If the stored entry's route rank is at most `stop`, the entry was among the candidates already rejected (`visited_misses`); otherwise `empty_free` on its route says group `stop` has no EMPTY byte (`Spec.empty_free_at`), contradicting the observed bit. The lemma is an ordinary total ghost function: its implication is written `not premise || conclusion`, and its body is plain control flow over ghost values."
+    },
+    {
+      "title": "The trusted base: storage and SIMD contracts",
+      "path": "verification/library/vox_table_storage.mli",
+      "from": "(** Exact observation of the 16 physical control bytes",
+      "to": ["external match16_empty", "[@@no_effects]"],
+      "lines": "147-170",
+      "text": "What the proof knows about memory comes from `external` declarations like these, whose refined types the checker assumes. `match16_empty` returns the mask of a group's lanes whose control byte equals `byte`, plus bit 16 for an EMPTY lane, and its postcondition states the mask exactly as `M.matching`, which is checked OCaml in [`vox_table_model.ml`](src:verification/library/vox_table_model.ml). The borrowed token must hold `state.model` at `location table`, so a primitive read is tied to ownership as a public one is; writes such as `write_control` consume the token and return one whose heap is updated by `M.set_control`. The NEON and SSE2 routines in [`runtime/vox_control.c`](src:runtime/vox_control.c), their native lowering in [`backend/cmm_builtins.ml`](src:backend/cmm_builtins.ml) and the storage in [`runtime/pref.c`](src:runtime/pref.c) are trusted to meet the contracts in this file. With count-trailing-zeros, they are the table's trusted base beyond the checker itself."
+    },
+    {
+      "title": "Emitted code: the proof is gone",
+      "path": "testsuite/tests/vox/flat_hashtbl_boundary_check.ml",
+      "from": "if native then begin",
+      "to": "the -O3 client calls the table's search directly",
+      "lines": "37-66",
+      "text": "[`flat_hashtbl_boundary.ml`](src:testsuite/tests/vox/flat_hashtbl_boundary.ml) compiles the public client natively with `-dcmm`, at the default level and at `-O3` against a library also built at `-O3`, and this program checks the dumps. Views and tokens have the zero-width layout `#()` in the client's Lambda. Neither Cmm file calls an ownership primitive (`caml_pref`) or a lemma named in `lemmas` (the laws the client uses and `current_def`). At `-O3` there is no `caml_apply`: the table's functor instance is specialized in the client, and the search in `Vox_table_search` is reached by a direct call. The [catalogue page](demo:flat-hash-table) shows the resulting code for `find_after_replace_int`: one SSE2 comparison of sixteen control bytes, a loop over the candidate lanes, and a direct call of `Vox_table_search.groups` for larger tables."
+    }
+  ]
+}

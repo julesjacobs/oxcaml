@@ -1,0 +1,87 @@
+{
+  "_about": "Demo tour. Sources: verification/catalogue/pages/online-union-find.md (its sources: list is the backbone), research/mastery-20260927/time-credits.md (sections 2.4, 4.1-4.3, 7), verification/library/README.md (union-find time credits, the external identification of the clamped Ackermann hierarchy); every claim re-checked against the code at 8479634adc.",
+  "_checks": "Client arithmetic: create 1 + 5 allocations x 3 + 4 unions x (2 + 2 + 7 + 1) + 3 finds x 2 = 70; Q.budget 8 5 3 4 = 1 + 55 + 44*3 + 132*4 = 716. connectivity_rejected.ml has 11 modules (Underpay_insertion plus ten more). Only vox_union_find_worker.ml calls C.tick; link charges 7 through charge, allocate ticks 3 times, find ticks 2 per node visited and 2 around each rewrite. Tests connectivity.ml, union_find*.ml and ackermann.ml are { bytecode; } only; no emitted-code check names these units.",
+  "id": "online-union-find",
+  "title": "Online union–find with time credits",
+  "kind": "demo",
+  "demo": "online-union-find",
+  "order": 3,
+  "summary": [
+    "`Vox_connectivity.Make` is union by rank with full path compression over mutable nodes, proved to maintain a partition. Each operation takes a ghost credit token of an exact fee, and the implementation proves that the fees cover the steps charged in the run-time code, with an inverse-Ackermann bound on the fees. The tour reads the public interface and a client proof of a run's exact cost, then the layers underneath: the growing ghost capacity, the bank that holds four times the potential, the proof of `find`, and the hand-placed charges that define what is counted.",
+    "The [catalogue page](demo:online-union-find) states the claim, the trusted base and the scope."
+  ],
+  "stops": [
+    {
+      "title": "Operations that take an exact fee",
+      "path": "verification/library/vox_connectivity.mli",
+      "from": "val create : (fee",
+      "to": ["val union", ":: events state}"],
+      "lines": "124-159",
+      "text": "The state `t` has a product-of-`void` layout, so at run time `find` and `union` take only elements. Each operation consumes the state (`@ unique`) and a ghost token from the credit library `C`, whose balance must equal the fee exactly: 1 for `create`, 11 for `make_set`, `find_fee state` and `union_fee state`. The postconditions describe the new snapshot through `added`, `found` and `joined`, whose laws earlier in the file give every element's membership and root after the call. They also state the events each operation appends to `events`, newest first; a find of `x` records `Find (depth p x)` and leaves the snapshot `compressed p x`, two functions this interface keeps abstract."
+    },
+    {
+      "title": "Ticks, the account and the inverse-Ackermann fees",
+      "path": "verification/library/vox_connectivity.mli",
+      "from": "val account_bounds :",
+      "to": ["val event_cost", "@ ghost @@ total"],
+      "lines": "95-122",
+      "text": "`ticks s` is the total weight of `events s` (`event_cost`), with the weights listed in the comment: Initialize 1, Allocate 3, `Find d` 4d + 2, Link 7, Union 1. `account s` is what has been paid in so far, and `account_bounds` proves `ticks s <= account s`. `fee_bounds` bounds the variable fees for any population P of at least `size s`: when `iter P a 1 1 >= P` and `below P a`, `find_fee s <= 4a + 12` and `union_fee s <= 12a + 36`. `Vox_ackermann.iter cap k 1 1` is A_k(1) clamped at `cap`, so `a` is the least k ≥ 1 with A_k(1) ≥ P; that the clamped hierarchy agrees with the textbook one is an argument outside Vox, recorded in [the library README](src:verification/library/README.md)."
+    },
+    {
+      "title": "A client pays each fee from its wallet",
+      "path": "testsuite/tests/vox/connectivity.ml",
+      "from": "let find : (x : U.elem) @ immutable ->",
+      "to": "let r = #{value; owned} in r",
+      "lines": "111-137",
+      "text": "The public client keeps a ghost `wallet` next to the state in the unboxed record `funded`, and every wrapper conserves its `budget`, the account plus the wallet. `find` requires at most 8 elements and 44 credits in the wallet: the client's `fee_bounds` obtains 44 from the interface's 4a + 12 with a ≤ 8, the bound that `Vox_ackermann.inverse` gives for a population of 8. The wrapper splits exactly `find_fee` credits off the wallet with `C.split`, pays them to `U.find`, and packs the new state with the rest of the wallet. Its last conjunct, a cost of 2 + 4·depth ticks, follows from the `Find` event `U.find` appends, `event_cost` before and after the call, and the definitions of `total` and `weight`."
+    },
+    {
+      "title": "The exact cost of a run",
+      "path": "testsuite/tests/vox/connectivity.ml",
+      "from": "(* The whole run:",
+      "to": "U.ticks owned.#state <= initial} = () in",
+      "lines": "322-338",
+      "text": "`run` makes five elements, performs four unions and three finds, and before each call names, through the abstract `depth`, the parent links it will follow: `work6` to `work9` for the two finds inside each union, `work10` and `work11` for the first two finds. The third find is of `root0`, the root the first find returned; `root_law` shows that it is a member at depth 0, so that find costs exactly 2 ticks. From the recorded events the client proves that the run costs 70 ticks plus four per link followed, and that the ticks are covered by the 1,000 credits it minted. A final ghost block records the account after each step as a trace for `Vox_union_find_online_cost.sequence`, which bounds 70 + 4·`work` by the budget paid, 1 + 11·5 + 44·3 + 132·4 = 716."
+    },
+    {
+      "title": "A rejected client: paying 10 for an insertion",
+      "path": "testsuite/tests/vox/connectivity_rejected.ml",
+      "from": "module Underpay_insertion = struct",
+      "to": "The refinement is stated here.",
+      "lines": "14-28",
+      "text": "Paying 10 credits for `make_set` is a type error, and the message points at `C.credits b = 11Z` in `vox_connectivity.mli`. Overpaying by one fails the same way: fees are exact, and a client keeps any surplus in its own wallet. The file rejects nine more programs: reusing a state after `find` consumed it (a uniqueness error), naming the online layer's `savings` field or the hidden `contents`, asserting membership without proof, inserting into a state of `max_int` elements, claiming a `found` transition or a find's event without calling `find`, claiming that every find costs 2 ticks, and splitting 11 credits from a wallet of 10."
+    },
+    {
+      "title": "The online layer: a ghost capacity that doubles",
+      "path": "verification/library/vox_union_find_online.ml",
+      "from": "type t = #{core : U.t; savings",
+      "to": "(Bigint.mul 4Z (Bigint.sub s.#epoch 1Z)))",
+      "lines": "13-34",
+      "text": "The public `t` in [`vox_connectivity.ml`](src:verification/library/vox_connectivity.ml) is `#{inner : {state : U.t | U.valid state}}` over this layer, so the representation invariant is a refinement on a hidden field, and the public observations are `[@def]` wrappers of the ones here. This layer adds two ghost fields to the core state: a credit token `savings`, and an `epoch` whose minimum with `max_int` is the core's fixed analysis capacity. `valid` keeps `epoch` at 1 while the structure is empty and below twice its size afterwards, and keeps at least 8n − 4(E − 1) credits in `savings`. `make_set` deposits 8 of its 11 credits; when the structure is full it doubles `epoch` and pays 4E saved credits to `U.reparameterize`, which re-scales the potential for the larger capacity. The core's α may then exceed α(P) by one, which is why the public bounds are 4a + 12 and 12a + 36 where the core's fees are 4α + 8 and 12α + 24."
+    },
+    {
+      "title": "The key invariant: the bank holds exactly 4Φ",
+      "path": "verification/library/vox_union_find.ml",
+      "from": "type t = #{",
+      "to": "W.balance s.#raw = Bigint.mul 4Z",
+      "lines": "16-38",
+      "text": "The core state holds the worker's `void` resource `raw`, which pairs a `Ghost_pref` token for the nodes with a credit `bank`, and ghost fields: one path per element from it to its root (`paths`), the capacity N, `alpha`, the tick counter `spent` and the event list. `valid` makes `spent` the total weight of `events`, bounds the population by `capacity`, requires ranks to increase along every path (`R.all_ordered`), and ties `alpha` to the capacity through `iter` and `below`. Its last conjunct carries the amortization: the bank's balance is exactly four times the potential defined in [`vox_union_find_bank.ml`](src:verification/library/vox_union_find_bank.ml), where a root of rank r is worth α·r and a non-root is worth `node_phi` of its rank and its parent's, the level-and-index potential of the CLRS analysis. `account` is `spent` plus the bank, so `ticks <= account` needs only a nonnegative bank."
+    },
+    {
+      "title": "The core proof: a find pays through the bank",
+      "path": "verification/library/vox_union_find.ml",
+      "from": ["let find : (x : M.elem) @ immutable ->", "let raw = state.#raw in"],
+      "to": "let result = #{value; state; refund = divided.C.right} in",
+      "lines": "379-409",
+      "text": "Before this code, `prepare_find` proves two facts about the path from `x` to its root: its cost 4d + 2 is at most four times the potential `release`d by compressing it plus `find_fee alpha` (`A.find_bound`), and compression lowers the potential by exactly that `release` (`B.compression_potential`). The operation merges the caller's fee into the bank, lets the worker `find` burn 4d + 2 credits while it follows and rewrites the path, and splits off exactly four times the new potential as the new bank. The rest goes back as `refund`, `spent` grows by the cost, and `Find depth` is recorded. The contract states `account r + refund = account + fee`, so a find that costs more than its fee is paid for by potential stored earlier."
+    },
+    {
+      "title": "Trusted: the charges placed by hand",
+      "path": "verification/library/vox_union_find_worker.ml",
+      "from": "let rec find : (depth : Bigint.t) @ ghost ->",
+      "to": "let bank = C.tick fourth in",
+      "lines": "109-158",
+      "text": "This is the run-time loop, and its calls to `C.tick` define what a tick is: two when it visits a node and two more around each pointer rewrite, so a find that follows d links costs 4d + 2. The contract fixes the charge exactly (`balance r.#state = balance state − cost depth`), so a copy that skips a tick fails to verify; which steps are charged, and how much, is a modeling choice that no check relates to the compiled code. `allocate` charges 3, and `link` charges 7 through `charge`, a `C.split` whose split-off part is dropped. The other trusted pieces are `Ghost_pref.alloc`, an external although `ghost_pref.mli` declares it with `val`, and `Pref.equal`, physical equality assumed to agree with `===`, which `link` uses to detect that both roots are one node. The union-find tests run in bytecode only, and none inspects the emitted code."
+    }
+  ]
+}

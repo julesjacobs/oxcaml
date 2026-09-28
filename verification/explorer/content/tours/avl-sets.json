@@ -1,0 +1,95 @@
+{
+  "_about": "Demo tour of AVL sets. Sources: verification/catalogue/pages/avl-sets.md (its sources: list is the backbone), research/mastery-20260927/demos-data-structures.md §6.1, definitions-lemmas.md §1-2; every claim re-checked against the code at 8479634adc.",
+  "_notes": "collections_boundary_check.ml audits add, union, lookup, add_tree, lookup_tree, make_node, balance and add_elements; union_tree (which union runs) and count_tree (which size runs) are not in its list, and add_elements runs only in proofs. The rejected phrase avl_representation names Avl_sets.Core.Leaf, a constructor that does not exist (the tree's constructors are Empty and Node); it is rejected at the module path either way.",
+  "id": "avl-sets",
+  "title": "AVL sets",
+  "kind": "demo",
+  "demo": "avl-sets",
+  "order": 8,
+  "summary": [
+    "`Avl_sets` is a persistent set of `int`s stored as an AVL tree, specified by membership alone. The tour reads it from the public signatures and a client proof, through the sorted-list model and the AVL invariant hidden behind the abstract type, to the insertion proof, the proof that `equal` is exact, and the check that the compiled operations run no proof code.",
+    "The [catalogue page](demo:avl-sets) states the claim, the trusted base and the scope."
+  ],
+  "stops": [
+    {
+      "title": "Membership is the whole specification",
+      "path": "testsuite/tests/vox/int_set_intf.mli",
+      "from": "module type Operations = sig",
+      "to": "end",
+      "lines": "1-29",
+      "text": "`Int_set_intf.Operations` is the vocabulary of the demo. `t` is abstract and `immutable_data`, and `lookup`, `add`, `union` and `size` are declared `@@ total`, which lets them appear inside refinements. The three laws are total functions returning `{u : unit | p}`: a call gives the solver `p` for those arguments. They specify `add` and `union` through `lookup` alone, as Boolean equations under `===`, logical equality. `size` appears in no law here; the next signature constrains it only at zero."
+    },
+    {
+      "title": "Equality is semantic",
+      "path": "testsuite/tests/vox/int_set_intf.mli",
+      "from": "module type Extensional = sig",
+      "to": "end",
+      "lines": "46-70",
+      "text": "[`avl_sets.mli`](src:testsuite/tests/vox/avl_sets.mli) is the single line `include Int_set_intf.Extensional`. `equal` is a runtime Boolean function pinned down by two laws: `equal_lookup` says that equal sets have the same members, and `extensional` gives the converse. The premise of `extensional` is itself a total function of type `(element : int) -> {u : unit | ...}`: a universally quantified hypothesis that the client supplies as a closure, so no quantifier reaches the solver. `size_zero` says only that `size s` is `0Z` exactly when `s` is `equal` to `empty`. The `Canonical` signature above concludes `left === right` instead; `Avl_sets` does not implement it, because trees of different shapes hold the same set."
+    },
+    {
+      "title": "A client proof: insertions commute",
+      "path": "testsuite/tests/vox/collections_boundary_client.ml",
+      "from": "let (set_commutes @ total)",
+      "to": "Avl_sets.extensional left right members",
+      "lines": "38-52",
+      "text": "This client sees only the public interfaces. `set_commutes` proves that adding `a` then `b` gives a set `equal` to adding `b` then `a`. The local function `members` is the pointwise premise: for each `query`, four instances of `lookup_add` reduce both sides to the same disjunction of `query = a`, `query = b` and membership in `source`. Passing `members` to `extensional` concludes `equal left right`. Further down, `ghost_ (set_commutes Avl_sets.empty 1 2)` checks a use of the lemma and erases it; the file runs as bytecode and as native code."
+    },
+    {
+      "title": "A rejected client: equal sets need not be identical",
+      "path": "testsuite/tests/vox/collections_boundary.ml",
+      "from": "(* avl_structural_equality *)",
+      "to": "|}]",
+      "lines": "885-898",
+      "text": "This program assumes `Avl_sets.equal a b` and claims `a === b`. The interface has no law from `equal` to logical equality, and the solver reports a counterexample. The phrase is one of the expect tests in `collections_boundary.ml`, compiled against the public `.cmi` files; its neighbours reject naming the hidden `Avl_sets.Core` and reading the queue's `front` field. The runtime client [`avl_set_client.ml`](src:testsuite/tests/vox/avl_set_client.ml) shows that the claim is false: sets built by inserting 1 to 4 in ascending and in descending order are `equal`, and polymorphic `=` on them returns `false`."
+    },
+    {
+      "title": "Inside: a sorted-list model",
+      "path": "testsuite/tests/vox/avl_sets.ml",
+      "from": "(* The model: a set is a list, strictly increasing when [valid].",
+      "to": ["let[@def] rec (union_repr @ total)", "Cons (head, tail) -> union_repr tail"],
+      "lines": "58-102",
+      "text": "The implementation reasons about a tree through `List_set.repr`, an `[@@inductive]` list of `int`s that is strictly increasing when `List_set.valid` holds. `add_repr` is sorted insertion, and `union_repr` inserts the elements of its first argument into the second one at a time, as the tree code does. Every function here is `let[@def]`, opaque to the solver until a proof calls its generated equation, such as `add_repr_def`. The `List_proofs` module that follows proves the list laws in about 420 lines of structural induction; the one the public `equal` rests on is `extensional_repr`: two strictly increasing lists with the same members are equal."
+    },
+    {
+      "title": "The key invariant: ordered, balanced, heights cached",
+      "path": "testsuite/tests/vox/avl_sets.ml",
+      "from": "(* The runtime tree and its specification functions.",
+      "to": ["let[@def] rec (valid @ total) tree", "&& valid right"],
+      "lines": "543-581",
+      "text": "`Core.tree` stores each node's height as a `Bigint.t`, so neither the code nor the proof has an overflow case; the cost is a call to the C runtime's `caml_bigint_add` whenever `make_node` rebuilds a node. `valid` is the AVL invariant: the ordering through `all_less` and `all_greater`, sibling heights within one of each other, and a cached height equal to one plus the larger. `elements`, just below, is the abstraction function to the list model: the in-order traversal. These are ordinary total OCaml functions, so the same definitions are the logic's vocabulary; `valid` and `elements` are never called at run time."
+    },
+    {
+      "title": "The abstract type carries the invariant",
+      "path": "testsuite/tests/vox/avl_sets.ml",
+      "from": "(* The public module. [t] is a tree refined by [valid]",
+      "to": "List_set.same_repr (elements left_tree) (elements right_tree)",
+      "lines": "2614-2657",
+      "text": "`Set` is the public module: `Model_proofs` is sealed with `Int_set_intf.Extensional` and the file ends with `include Model_proofs.Set`, so `t` is abstract outside. Inside, `t` is `{tree : tree | valid tree}`. Every function that returns a `t`, such as `add`, must prove its tree valid, and every function that receives one may assume it; that assumption discharges the `()` validity arguments passed to `Operations.add` and `Operations.union`. `equal` runs `List_set.same_repr` on the two element lists, so it holds between trees of any shapes with the same contents."
+    },
+    {
+      "title": "The core proof: insertion keeps the tree valid",
+      "path": "testsuite/tests/vox/avl_sets.ml",
+      "from": "(* The induction on the tree. For an insertion into [left], the",
+      "to": "balance_right_height left value new_right right_height;",
+      "lines": "1823-1868",
+      "text": "`add_valid_height` is proved by induction on the tree: its recursive calls are the induction hypotheses, which is sound because totality allows only structural recursion here. The height bound is part of the statement because `balance` repairs a node only when its children differ in height by at most two, and that holds because the changed child grew by at most one. Each case combines the hypothesis with `add_all_less` or `add_all_greater` (the new subtree stays on its side of `value`), `balance_valid` and a `balance_*_height` lemma; those rest on four rotation-height lemmas over plain `Bigint` heights, proved by unfolding `maximum`. `Validity_proofs` is about 1,200 lines, the bulk of the demo, and its signature exports only this theorem."
+    },
+    {
+      "title": "Why equal is exact",
+      "path": "testsuite/tests/vox/avl_sets.ml",
+      "from": "(* Both element lists are strictly increasing ([elements_valid])",
+      "to": "List_proofs.same_repr_reflexive left_elements;",
+      "lines": "2753-2787",
+      "text": "`extensional` is where the list model pays off. `elements_valid` shows that both element lists are strictly increasing, and the local total function `model_premise` turns the client's premise about `lookup` into one about `List_set.lookup_repr`, through `lookup_tree_elements`. `List_proofs.extensional_repr` then makes the two lists equal, and `same_repr_reflexive` shows that `equal`, which compares those lists, returns `true`. The proof is a chain of explicit lemma calls; the solver's part is to combine the ground facts those calls produce."
+    },
+    {
+      "title": "Erasure and the trusted base",
+      "path": "testsuite/tests/vox/collections_boundary_check.ml",
+      "from": "audit ~both:true \"avl_sets\"",
+      "to": "~called:[ \"valid\"; \"all_less\"; \"all_greater\" ] ~to_line_end:false;",
+      "lines": "71-77",
+      "text": "[`collections_boundary.ml`](src:testsuite/tests/vox/collections_boundary.ml) compiles `avl_sets.ml` with `-dlambda`, with both compilers and with and without `-principal`, and this program checks the dumps. The bodies of `add`, `union`, `lookup`, `add_tree`, `lookup_tree`, `make_node`, `balance` and `add_elements` may not mention the four proof modules or call a `_def` equation, `valid`, `all_less` or `all_greater`; `~both:true` checks the first and the last definition of each name, since several, such as `add`, are defined in two modules. The demo adds nothing to the trusted base: `avl_sets.ml` contains no `assume_`, `external` or `Obj.magic`. The one trusted declaration nearby is the `external compare ... @@ total` in [`avl_stdlib_set.ml`](src:testsuite/tests/vox/avl_stdlib_set.ml), `%compare` at `int`, which orders the standard library's `Set.MakeTotal` model that the file checks `Avl_sets` membership against; the AVL proof does not depend on it."
+    }
+  ]
+}

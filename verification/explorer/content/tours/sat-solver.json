@@ -1,0 +1,105 @@
+{
+  "_about": "Demo tour of the CDCL SAT solver. Sources: verification/catalogue/pages/sat-solver.md (its sources: list is the backbone), verification/library/vox_cdcl_total.md, research/mastery-20260927/demos-algorithms.md sections 3.1, 5.1, 5.1b and 5.2; every claim re-checked against the code at 8479634adc. The dropped-weight test testsuite/tests/vox/talk-sat-measure/ is at HEAD since the trunk merge (c7ec2f92a8) and is stop 9; its reference output (error at the end of progress_learning, line 4197) was checked against trunk and matches this HEAD's line numbers.",
+  "id": "sat-solver",
+  "title": "The CDCL SAT solver",
+  "kind": "demo",
+  "demo": "sat-solver",
+  "order": 16,
+  "summary": [
+    "`Vox_cdcl_total.solve_complete` is a CDCL SAT solver with clause learning and backjumping, proved total and correct: `Sat` carries an assignment that satisfies the formula, and `Unsat` means that every assignment of the `n` variables falsifies it. The tour reads the interface, the specification and two clients, then the two ghost arguments that carry the proof: a resolution derivation attached to every learned clause, and a termination measure over the finite set of clauses that could still be learned.",
+    "The [catalogue page](demo:sat-solver) states the claim, the size limits and the trusted base."
+  ],
+  "stops": [
+    {
+      "title": "The public interface",
+      "path": "verification/library/vox_cdcl_total.mli",
+      "from": "(** Complete CDCL on every accepted input",
+      "to": "| Unknown -> false} @@ total",
+      "lines": "39-49",
+      "text": "`solve_complete n formula` is declared `@@ total`: the checker proves that it terminates without raising on every input. Its result type is the theorem. On an input that `classify_input` accepts, the answer is `Sat` with an assignment that `check` accepts, or `Unsat` with `unsatisfiable n formula`; the arm `Unknown -> false` says the solver never gives up. The `report` also carries `statistics` (decisions, conflicts, learned clauses, backjumps), which the contract does not constrain, so the contract alone cannot tell this solver from an enumeration of all assignments. The bounded `solve fuel`, above, has the same contract except that it may return `Unknown`, which implies only `statistics.steps = fuel`."
+    },
+    {
+      "title": "The specification: evaluation and unsatisfiability",
+      "path": "verification/library/vox_sat_spec.ml",
+      "from": "let[@def] check n formula assignment",
+      "to": "  else None",
+      "lines": "68-100",
+      "text": "The contract is written with `let[@def]` definitions in `Vox_sat_spec`. Each also generates a lemma, such as `check_def`, stating its equation, and the checker unfolds a definition only where a proof applies that lemma. `rejects_extensions prefix remaining formula` enumerates the `2^remaining` extensions of `prefix` by appending `false` and `true`, with `[@@decreases remaining]` as its termination measure, so `unsatisfiable n formula` says literally that each of the `2^n` assignments of length `n` falsifies the formula. `classify_input` sets the limits: at most 256 variables, 4,096 clauses and 65,536 literal occurrences. The first two exist because the proofs index variables and input clauses with machine `int`s; no proof uses the literal limit, which is checked at the entry and nowhere else."
+    },
+    {
+      "title": "A client that uses both answers",
+      "path": "testsuite/tests/vox/sat_public.ml",
+      "from": "let (decide_cdcl @ total)",
+      "to": "  result",
+      "lines": "3-27",
+      "text": "`sat_boundary.ml` compiles this client in a directory holding only the `.cmi` files of `Vox_sat_spec`, `Vox_sat` and `Vox_cdcl_total`. The refinements on `n` and `formula` spell out `classify_input n formula = None`, and the ghost call `classify_input_def` lets the checker see that, so the `Error` case of the result type is proved impossible. In the `Unsat` branch, `Vox_sat.unsat_at` turns `unsatisfiable n formula` into the fact that the arbitrary `candidate`, of any length, falsifies the formula. `unsat_at` is a ghost lemma, so its call sits inside `ghost_` and is erased. `Unknown -> false` in the result type comes straight from `solve_complete`."
+    },
+    {
+      "title": "A rejected client: no fuel is promised to suffice",
+      "path": "testsuite/tests/vox/sat_cdcl_progress_rejected.ml",
+      "from": "let (unsupported_cdcl_depth @ total)",
+      "to": "Vox_cdcl_total.solve (n + 1) n formula",
+      "lines": "19-31",
+      "text": "The same claim about the bounded solver is rejected: `solve (n + 1) n formula` may return `Unknown` for any nonnegative fuel, so `Unknown -> false` cannot be proved. The test compiles against the two public interfaces only and expects the error in [`sat_cdcl_progress_rejected.compilers.reference`](src:testsuite/tests/vox/sat_cdcl_progress_rejected.compilers.reference), which points at the call and at the refinement it failed. `complete_cdcl` in [`sat_cdcl_total.ml`](src:testsuite/tests/vox/sat_cdcl_total.ml) is the accepted twin that calls `solve_complete`. Nothing relates `steps` to the work done, so a `solve` that returned `Unknown` at once with `steps = fuel` would also meet its contract."
+    },
+    {
+      "title": "Resolution derivations, checked by a total function",
+      "path": "verification/library/vox_sat_proof.ml",
+      "from": "type derivation : immutable_data mod total =",
+      "to": "same_clause (conclusion formula right) right_clause",
+      "lines": "421-444",
+      "text": [
+        "A `derivation` is proof data: an input clause by index, or a resolution step with its pivot variable, the two side clauses and their derivations. `conclusion` computes the clause a derivation proves, where `resolve_clause` removes the pivot from both sides and deduplicates, and `derivation_valid` checks that each premise concludes its stated side clause. Below, `derivation_sound` proves by structural recursion that a valid derivation's conclusion holds under every assignment that satisfies the formula; resolving on a pivot that a side lacks is a weakening and remains sound.",
+        "The solver never handles a bare derivation. It holds `proof_result = { clause; proof : derivation @@ ghost }`, which is `private` in [`vox_sat_proof.mli`](src:verification/library/vox_sat_proof.mli), so only `original_result` and `resolve_result` build one, and both guarantee that `proof` is valid and concludes `clause`."
+      ]
+    },
+    {
+      "title": "From the empty clause to unsatisfiable",
+      "path": "verification/library/vox_sat_proof.ml",
+      "from": "let rec (empty_rejects_extensions @ total) :",
+      "to": "unsatisfiable_def n formula)",
+      "lines": "841-869",
+      "text": "A conflict at decision level 0 yields a `proof_result` whose clause is `[]`. `empty_result_at` shows that a valid derivation of `[]` falsifies any one assignment, and `empty_rejects_extensions` applies it at every leaf of the enumeration that `rejects_extensions` describes, by recursion on `remaining`. The recursion has `2^n` leaves, but it is a ghost proof: the checker verifies it once, symbolically, and it is erased before code generation. [`Vox_cdcl_total.convert_report`](src:verification/library/vox_cdcl_total.ml) calls `empty_unsatisfiable` inside `ghost_` at the one point where the internal `Unsat entry` becomes the public nullary `Unsat`."
+    },
+    {
+      "title": "Conflict analysis, backjumping and learning",
+      "path": "verification/library/vox_cdcl_total_proof.ml",
+      "from": "let learned = analyze (ghost_ n) formula database state stop entry in",
+      "to": "let database = database_cons formula learned database in",
+      "lines": "4400-4427",
+      "text": "This is the conflict branch of `search`. `analyze` resolves the conflicting clause with the reason of its latest-assigned current-level literal until at most one current-level literal remains, extending the ghost derivation through `resolve_result` at each step. It needs no fuel: it is `total` with `[@@decreases clause_rank state.trail current.clause]`, because the invariant `reason_order` says each reason's other literals were assigned earlier, so every step lowers the latest trail position among the clause's literals. At level 0 the result is the empty clause and the answer is `Unsat learned`. Otherwise `asserting_clause` picks the literal to assert and the backjump level, `backtrack` unbinds everything above that level, and the ghost lemma `prepare_learning` proves that the new state and the extended database satisfy the invariants `search` requires."
+    },
+    {
+      "title": "The termination measure",
+      "path": "verification/library/vox_cdcl_total_proof.ml",
+      "from": "let[@def] progress_measure n database bindings =",
+      "to": "unassigned_bounds after)",
+      "lines": "4153-4197",
+      "text": "`search` is `@ total` with `[@@decreases progress_measure n database state.bindings]`, a ghost `Bigint` equal to `absent * (n + 1) + unassigned`, where `absent` counts the members of `clause_universe n (2 * n)`, the list of every literal list of length at most `2n` over the variables below `n`, that are not in the learned-clause database. For `n = 256` that universe has about 512^512 members; the measure exists only as a term that Z3 reasons about. A decision lowers `unassigned` (`progress_decision`); learning lowers `absent` by at least one, and `progress_learning` shows that the weight `n + 1` pays for the at most `n` variables the backjump unbinds."
+    },
+    {
+      "title": "Tested: dropping the weight breaks the proof",
+      "path": "testsuite/tests/vox/talk-sat-measure/test.reference",
+      "from": "## vox_cdcl_total_proof.ml, mutant:",
+      "to": "exit 2",
+      "lines": "6-21",
+      "text": "[`run.sh`](src:testsuite/tests/vox/talk-sat-measure/run.sh) derives a copy of `vox_cdcl_total_proof.ml` in which the weight `n + 1` of the measure is replaced by `1Z`, and compiles the real module and the copy. The real one is accepted; the copy is rejected at the last line of `progress_learning`, whose conclusion no longer follows, because one learned clause cannot pay for a long backjump. Deriving the copy from the current source keeps the test in step with the library."
+    },
+    {
+      "title": "Why a learned clause is new",
+      "path": "verification/library/vox_cdcl_total_proof.ml",
+      "from": "unit_clause_unstable (binding_values next.bindings) literal",
+      "to": "= () in ();",
+      "lines": "4274-4292",
+      "text": "Inside `prepare_learning`, this is where `absent` is shown to drop. `unit_clause_unstable` says the learned clause is unit under the bindings kept after the backjump. The invariant `prefix_stable` says no clause already in the input or the database is unit under them, so `formula_stable_member` shows the learned clause is in neither. It has no repeated literal (resolution deduplicates, and the one case where `analyze` returns the conflicting clause unchanged is excluded because that clause is already in the input or the database), so `unique_clause_length` bounds it by `2n` literals, `clause_universe_member` puts it in the universe, and `count_absent_prepend` gives the strict decrease. Clauses are compared as ordered lists, so the permutations of one clause count separately; the bound is loose and sound."
+    },
+    {
+      "title": "Emitted code: the proofs are gone",
+      "path": "testsuite/tests/vox/sat_boundary_check.ml",
+      "from": "let proofs =",
+      "to": "measures;",
+      "lines": "8-35",
+      "text": "[`sat_boundary.ml`](src:testsuite/tests/vox/sat_boundary.ml) compiles `Vox_sequence` and the five SAT modules with `ocamlc` and `ocamlopt`, then compiles, links and runs the public client against the public `.cmi` files only. This program reads the dumps. The `-dlambda` of `Vox_sat` and `Vox_cdcl_total` must name none of the listed proof functions and must make exactly 0 and 4 calls; the native object of `Vox_cdcl_total_proof` must have no symbol for the trail ranks, the clause universe, the measure and the other listed helpers. These are text searches of the emitted code. There is no runtime certificate, proof trace or final check of the answer; the `unreachable_ ()` arms of the search are proved dead and compile to a trap."
+    }
+  ]
+}

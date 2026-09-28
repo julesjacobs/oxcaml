@@ -1,0 +1,96 @@
+{
+  "_about": "Demo tour of the verified quicksort. Sources: verification/catalogue/pages/quicksort.md (its sources: list is the backbone), research/mastery-20260927/borrowing.md (prophecies, the borrow transitions in vox_vc.ml, the soundness argument), design-docs/borrows-and-slices.md. The mastery report describes an older parallel sort (a runner abstraction over Slice.parallel on borrowed slices); HEAD sorts owned arrays with Vox_parallel.fork_join, and this tour follows the code at HEAD (8479634adc). Build status: without --enable-multidomain, runtime/caml/domain.h sets Max_domains to 1, so Domain.recommended_domain_count () is 1 (runtime/domain.c). Name-keyed borrow facts: at 8479634adc normal_borrow_transition applies to any external with a caml_borrow_* C name; trunk a187b9ab9c (merge of trust-hardening, commit 9864700994) restricts built-in meanings to the owning library's declarations. Stop 8 states only what holds at both revisions. Stops 5 and 7 omit 'lines' because trunk adds a line above them.",
+  "id": "quicksort",
+  "title": "Quicksort: borrowed slices and a plain fork/join",
+  "kind": "demo",
+  "demo": "quicksort",
+  "order": 20,
+  "summary": [
+    "`Quicksort` sorts a mutable `int` array in place and is proved to leave it sorted and a permutation of its input. The sequential sort works on uniquely borrowed slices whose contract is stated with a prophecy, `Borrow.Slice.final`, the contents a slice will have when its borrow ends. The parallel sort splits an owned array into disjoint owned pieces and sorts two of them with `Vox_parallel.fork_join`, whose type is ordinary polymorphism: the proofs come back through the join as refined type arguments.",
+    "The tour goes from the interface and the slice library to the two recursions, then to what the checker assumes about borrows and what it checks about erasure. The [catalogue page](demo:quicksort) states the claim, the trusted base and the scope."
+  ],
+  "stops": [
+    {
+      "title": "The interface: three sorts, two of them total",
+      "path": "testsuite/tests/vox/quicksort.mli",
+      "from": "val sort : (s : int Borrow.Slice.t) @ local unique ->",
+      "to": [
+        "val parallel_sort_array",
+        "} @ unique"
+      ],
+      "lines": "5-17",
+      "text": "`sort` takes a slice `@ local unique`: the caller lends its only reference, and the slice cannot escape the call. Its contract relates two erased views of the slice, `Borrow.Slice.current s`, the contents at the call, and `Borrow.Slice.final s`, the contents when the borrow ends. `sort_array` and `parallel_sort_array` consume an owned array and return one, and state the same property on `Borrow.Owned_array.contents`. `Spec` is `Vox_int_sequence`: `sorted` is by `<=`, and `permutation` means every integer occurs equally often. `sort` and `sort_array` are `@@ total`; `parallel_sort_array` is not, so its contract holds on normal return only, and if it raises the array is lost."
+    },
+    {
+      "title": "A slice carries a prophecy",
+      "path": "verification/library/borrow.mli",
+      "from": "external current : ('a : immutable_data).",
+      "to": "&& final r === final s} @ local unique @@ total",
+      "lines": "12-40",
+      "text": "`current` and `final` are ghost externals, which exist for the checker only; `Slice.set` consumes the slice and returns a successor whose `current` is updated and whose `final` is unchanged, so a borrow's history is a chain of handles that share one prophecy. `Slice.finish`, further down, resolves it: its result is `{u : unit | final s === current s}`. `Owned_array.with_mut` lends an owner as a slice and, when the callback returns, sets the owner's `contents` to that slice's `final`. The argument that this is sound uses OxCaml's existing modes: uniqueness makes the chain linear, so a prophecy is resolved at most once; locality keeps a loan inside its callback; ghostliness keeps prophecies out of running code. [`borrows-and-slices.md`](src:design-docs/borrows-and-slices.md) has the design."
+    },
+    {
+      "title": "A client proof",
+      "path": "testsuite/tests/vox/quicksort_client.ml",
+      "from": "let verified_sort : (parallel : bool) -> (values : int iarray) ->",
+      "to": "Owned_array.into_iarray sorted",
+      "lines": "13-21",
+      "text": "The client copies an immutable array into an owner with `Owned_array.of_iarray`, sorts it with either operation, and freezes it again with `into_iarray`. The refined result, stated with `Model.of_iarray`, follows from the three contracts with no proof code. The rest of the file runs this on fixed inputs, 129 random lists and four lists of 8,192 elements, and compares both results with `List.sort`. On a runtime configured without `--enable-multidomain`, `Domain.recommended_domain_count ()` is 1, so `parallel_sort_array` never starts a domain in these runs."
+    },
+    {
+      "title": "A rejected sort that only resolves its prophecy",
+      "path": "testsuite/tests/vox/quicksort_rejected.ml",
+      "from": "(* A sort that leaves its slice unchanged keeps the elements",
+      "to": "|}]",
+      "lines": "68-89",
+      "text": "This function takes erased snapshots of `current` and `final`, then calls `Slice.finish` without writing. `finish` gives `final s === current s`, so the checker proves the permutation claim in the body, and it reports a counterexample at the claimed `sorted (final s)`. The same expect test, compiled against the interfaces with `-principal`, rejects a slice overwritten before `sort` that claims a permutation of the original, a `total` function calling `parallel_sort_array`, a non-terminating callback to `with_mut` inside a `total` function, and a write inside `ghost_ (...)`. The last is caught by uniqueness: inside `ghost_` the slice is aliased, so `Slice.set` cannot consume it."
+    },
+    {
+      "title": "The sequential recursion: sort the children's prophecies",
+      "path": "testsuite/tests/vox/quicksort.ml",
+      "from": "(left : int Model.t @ immutable)",
+      "to": "[@@decreases size]",
+      "text": "Before this point `partition_middle` swaps the middle element to the end and runs Lomuto's `partition`, whose contract keeps `final r.state === final s`: partitioning rewrites `current` and passes the caller's prophecy along. `Slice.split3` then lends the slice as three fresh loans (left, pivot, right), each with its own prophecy. The callback records their `final`s before sorting them, which is legitimate because they are values the loans will have at the end. The recursive calls establish `sorted` and `permutation` of those finals, `Slice.finish middle` resolves the pivot, and `Quicksort_model.glue_partition` proves `post` of the three. `split3`'s contract turns that into a fact about `current state`, and the final `Slice.finish state` resolves the caller's own prophecy; the recursion, through a callback, is checked by `[@@decreases size]`."
+    },
+    {
+      "title": "A fork/join with an ordinary polymorphic type",
+      "path": "verification/library/vox_parallel.mli",
+      "from": "(** [fork_join left right] runs [left] in a new domain",
+      "to": "'a * 'b @ unique",
+      "lines": "3-15",
+      "text": "`fork_join` mentions no refinement, array or ownership. The thunks are `portable once`, so they capture no unsynchronized state and run once, and their results are `unique`. Vox needs no rule for parallelism here: instantiating `'a` and `'b` at refined types carries each side's proof across the join, as a type argument. `portable` thunks are global, so they cannot capture a borrowed slice, which is `local` to its borrow; that is why the parallel sort works on owned arrays. The implementation, [`vox_parallel.ml`](src:verification/library/vox_parallel.ml), is trusted; see [stop 9](tour:quicksort/9)."
+    },
+    {
+      "title": "The parallel recursion on owned pieces",
+      "path": "testsuite/tests/vox/quicksort.ml",
+      "from": "let left, rest = Owned_array.split_at partitioned boundary in",
+      "to": "ghost_ (Spec.permutation_trans before divided (Owned_array.contents (borrow_ result)));",
+      "text": "`sort_owned` partitions in place through `with_mut`, then calls `Owned_array.split_at` twice to get three owners of disjoint ranges of one backing array, without copying. `left_before` and `right_before` are erased snapshots, and `sort_left` and `sort_right` annotate their results with refined types, and `fork_join` is instantiated at those types. A domain is started only when both sides have at least `cutoff` elements; otherwise the sides are sorted in turn, each with the whole domain budget. After the join, `glue_partition` proves the whole sorted, and two `Owned_array.append`s rejoin adjacent pieces in place. `sort_owned` has no `[@@decreases]` and is not total: `fork_join` and `append`, whose copying path can raise, are not."
+    },
+    {
+      "title": "Trusted: the borrow transitions built into the checker",
+      "path": "verification/vox_vc.ml",
+      "from": "| \"caml_borrow_open\", _, Some [frame; loan] ->",
+      "to": "same_size loan receiver ]",
+      "lines": "1370-1401",
+      "focus": "verification/",
+      "text": "The slice operations above are verified OCaml over private `Raw` externals in [`borrow.ml`](src:verification/library/borrow.ml), implemented in [`runtime/borrow.c`](src:runtime/borrow.c). The checker's knowledge of them has two sources: the refinements on those `external` declarations, and these fixed equations in `normal_borrow_transition`. `open` ties the loan's `final` to its frame, `restore` sets the owner's contents to the frame's final, `split` and `recombine` pass children's finals to the parent's `current`, and `finish` equates `final` and `current`. These equations are assumed: nothing proves them against the C code, and they are part of the checker's trusted base."
+    },
+    {
+      "title": "Trusted: owned pieces and the join",
+      "path": "verification/library/borrow.ml",
+      "from": "external split_at : ('a : immutable_data).",
+      "to": "@ unique @@ portable = \"caml_borrow_owned_append\"",
+      "lines": "391-403",
+      "text": "`Owned_array.split_at` and `append` are externals whose refinements (`Model.take`, `Model.drop`, `Model.append`) the checker assumes. `caml_borrow_owned_append` joins two adjacent ranges of one backing array without copying and copies any other pair. This is sound because owners are unique: the live owners of one array cover disjoint ranges. [`vox_parallel.ml`](src:verification/library/vox_parallel.ml) is also trusted: it spawns with the mode-checked `Domain.Safe.spawn`, joins before returning or re-raising, and applies `Obj.magic_unique` to the joined result, which `Domain.join` returns `aliased`. Finally, `quicksort.ml` declares integer division as a `@@ total` `external` of `%divint` whose divisor is refined to be nonzero; callers prove that refinement, the checker assumes the declared totality, and the declaration silences warning 228, `trusted-external`."
+    },
+    {
+      "title": "Checked: the sort runs no proof code",
+      "path": "testsuite/tests/vox/collections_boundary_check.ml",
+      "from": "audit \"quicksort\"",
+      "to": "~called:[] ~to_line_end:true;",
+      "lines": "59-64",
+      "text": "[`collections_boundary.ml`](src:testsuite/tests/vox/collections_boundary.ml) compiles `quicksort.ml` with `-dlambda`, compiles the quicksort client against the public interfaces only, and runs it. This program then reads the Lambda dump and requires that the bodies of `partition`, `partition_middle`, `sort_sized`, `sort` and `sort_owned` mention neither `Quicksort_model`, `Vox_int_sequence` nor `Vox_sequence`, nor the projections `caml_borrow_current`, `caml_borrow_final` and `caml_borrow_contents`. The check is textual. Erasure does not remove the run-time cost of the library: every `Slice.get` and `Slice.set` is a C call that checks the index again."
+    }
+  ]
+}

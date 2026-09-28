@@ -1,0 +1,416 @@
+{
+  "_about": "Root and top-level directories. Sources: git diff f42b1a9726 HEAD per directory, each directory's README/HACKING, research/mastery-20260927/INDEX.md Part A (re-checked against the code at HEAD). American spelling.",
+  "/": {
+    "what": {
+      "short": "The OxCaml compiler (Jane Street's branch of OCaml) with Vox on top: compiler, runtime, standard library, tools and test suite.",
+      "long": [
+        "This is a full OxCaml checkout. The compiler pipeline is the usual one: `parsing/` to Parsetree, `typing/` to Typedtree (with modes and jkinds), `lambda/` to Lambda, then either `bytecomp/` or Flambda 2 (`middle_end/`) and the CFG backend (`backend/`, `asmcomp/`). `runtime/` is the OCaml 5 runtime and `stdlib/` the standard library.",
+        "The explorer leaves out `external/` (vendored dependencies), `research/` (Vox working notes) and `.claude/`. Area in the treemap is proportional to lines of source."
+      ]
+    },
+    "vox": {
+      "short": "Vox adds refinement types checked by Z3, ghost code, a totality mode and affine ghost ownership; the upstream merge base is f42b1a9726 (24 August 2026).",
+      "long": [
+        "Most of the language lives in [typing/](src:typing/): the type former `Trefine` for `{x : t | p}`, dependent arrows `(x : t) -> u`, two new comonadic mode axes (totality `Total < Partial` and ghostliness `Real < Ghost`), `@@ ghost` record fields, `[@@inductive]` datatypes, and the typer-inserted `Texp_refinement` coercions that mark where a refinement is assumed or must be proved.",
+        "The verifier is in [verification/](src:verification/). `Vox_vc.generate` runs inside `ocamlc`/`ocamlopt` after typing and before any artifact is written, and sends each function body's obligations to Z3 as one quantifier-free query, split up only if it fails. Only an `unsat` answer (or a cache hit) counts as a proof. After verification, ghost code is erased and refinements are dropped before Lambda, so the backend sees ordinary code.",
+        "Around that: `stdlib/` gains `Ghost`, `Bigint` and `@@ total` annotations; `runtime/` gains C primitives for typed heaps, loans, atomics and big integers; `backend/cmm_builtins.ml` gains native lowerings for some of them; `testsuite/tests/vox/` holds the tests and demos. Totality and ghostliness are checked in every compilation; the refinement syntax requires `-extension refinement_types`."
+      ]
+    }
+  },
+  ".github/": {
+    "what": {
+      "short": "GitHub configuration: the Actions workflows that build and test OxCaml across a matrix of configurations, CODEOWNERS and Dependabot.",
+      "long": "`workflows/build.yml` is the main CI job: it configures and builds the compiler for each matrix entry and runs the test suite."
+    },
+    "vox": {
+      "short": "The default x86_64-linux CI job downloads Z3 4.16.0, checks its SHA-256 and version, and sets VOX_TEST_Z3 so the SMT tests run.",
+      "long": "The verifier enforces the same version: it refuses a solver that does not report Z3 4.16.0 unless `-smt-solver-any-version` is given, and the unit then records the version it used."
+    }
+  },
+  "api_docgen/": {
+    "what": {
+      "short": "Build rules and hand-written pages for the API documentation of the standard library and compiler-libs, with ocamldoc or odoc.",
+      "long": "The `.mld` files are the landing pages (`Compiler_libs.pre.mld`, `Ocaml_operators.mld`, the Format tutorial); `ocamldoc/` and `odoc/` hold the per-tool Makefiles."
+    }
+  },
+  "asmcomp/": {
+    "what": {
+      "short": "Native-code compilation and linking drivers: Asmgen runs Cmm through the backend to assembly or objects, Asmlink links .cmx/.o files.",
+      "long": [
+        "In OxCaml most of the old `asmcomp/` has moved to `backend/`. What remains is `asmgen.ml` (the entry from Cmm to emitted code), `asmlink.ml`, `cm_bundle.ml` (bundling a `.cmi` into an object file), and `binary_emitter_verify.ml`, which compares the internal binary emitter's output with the system assembler's.",
+        "`dissector/` measures the ELF sections of every object in a link and partitions the objects, so that very large executables can link with the small code model without relocation overflow."
+      ]
+    }
+  },
+  "backend/": {
+    "what": {
+      "short": "The OxCaml native backend: Cmm and its helpers, instruction selection to CFG, CFG passes, register allocation, and the amd64 and arm64 emitters.",
+      "long": "`cmm_helpers.ml` and `cmm_builtins.ml` build Cmm (Flambda 2's `to_cmm` calls them); `cfg_selectgen.ml` selects instructions into the CFG IR in `cfg/`; `regalloc/` holds the register allocators (IRC, linscan, GI); `amd64/` and `arm64/` hold the target-specific selection, proc and emit code; `internal_assembler/` and `binary_emitter_intf/` emit object code directly."
+    },
+    "vox": {
+      "short": "One file changes: cmm_builtins.ml lowers seventeen cases of Vox C primitives (loans, raw memory, Pref, the flat table's SIMD control bytes, ctz) to inline Cmm.",
+      "long": [
+        "Each case of `Cmm_builtins` is keyed by the C symbol of an `external` and replaces the call with inline Cmm: `caml_borrow_int_get`/`set`, the `caml_raw_memory_*` accessors, `caml_pref_empty`, the `caml_vox_table_*` field accessors, `caml_vox_control_match16` (a 16-byte SIMD compare with SSE2 or NEON), and `caml_vox_int_ctz_untagged`.",
+        "These lowerings are assumed to agree with the C stubs they replace. `caml_borrow_int_get`/`set` and the table accessors do no bounds check in native code; their contracts require the index to be proved in range."
+      ]
+    }
+  },
+  "build-aux/": {
+    "what": {
+      "short": "Autoconf support files: third-party m4 macros, libtool, config.guess/config.sub, and ocaml_version.m4, which defines the version and the file-format magic numbers.",
+      "long": "`ocaml_version.m4` is read by `configure.ac`; `MAGIC_NUMBER__VERSION` is the three-digit suffix of every magic number (`.cmi`, `.cmx`, `.cmo`, ...)."
+    },
+    "vox": {
+      "short": "MAGIC_NUMBER__VERSION goes from 584 to 585, because Vox changes the serialized type representation in .cmi and .cmt files.",
+      "long": "`Types.type_desc` gains `Trefine`, `arrow_desc` gains a binder, type declarations gain `type_inductive` and `type_phantom_parameters`, and label declarations gain `ld_ghost`. The bump makes an upstream compiler reject Vox artifacts, and the reverse, instead of misreading them."
+    }
+  },
+  "bytecomp/": {
+    "what": {
+      "short": "The bytecode backend: Lambda to Blambda to ZINC instructions, bytecode emission, and the bytecode linker, librarian and packager.",
+      "long": "`blambda_of_lambda.ml` and `bytegen.ml` compile Lambda to instructions; `emitcode.ml` writes `.cmo`; `bytelink.ml`, `bytelibrarian.ml` and `bytepackager.ml` build executables, `.cma` and packs."
+    },
+    "vox": {
+      "short": "Only the trust record: emitcode.ml writes a unit's Vox record after its compilation unit description, and bytepackager.ml merges the members' records into a pack's.",
+      "long": "Code generation is unchanged: ghost code and refinements are gone before Lambda, and bytecode keeps a slot for every record field, ghost ones included. Readers that do not know the record ignore what follows the unit description."
+    }
+  },
+  "chamelon/": {
+    "what": {
+      "short": "Chamelon, a test-case minimizer for compiler bugs: it shrinks a program with a battery of Typedtree-level reductions while an error still reproduces.",
+      "long": "See its `README.md`. `lib/minimizer/` holds the individual reductions, and `compat/` adapts it to the compiler's Typedtree."
+    },
+    "vox": {
+      "short": "Follows the new constructor arities only: arrows carry a dependent binder (None here) in Tarrow and Ttyp_arrow.",
+      "long": "Two small edits in `compat/compat.ox.ml` and `lib/minimizer/dummy.ml`. Chamelon does not know about refinements or ghost code."
+    }
+  },
+  "compilerlibs/": {
+    "what": {
+      "short": "The findlib META template for the compiler-libs packages (common, frontend, bytecomp, optcomp, toplevel and so on).",
+      "long": "`META.in` is instantiated at install time; each package names the archives that make it up and what it requires."
+    },
+    "vox": {
+      "short": "Adds a compiler-libs.verification package (vox_smt, vox_vc, vox_smt_solver, vox_verify) and makes bytecomp and optcomp require it.",
+      "long": "Every tool linked against `compiler-libs.bytecomp` or `compiler-libs.optcomp` therefore links the verifier, and `Vox_verify.install` can plug it into the typer."
+    }
+  },
+  "debugger/": {
+    "what": {
+      "short": "ocamldebug, the bytecode debugger: breakpoints, checkpoints by fork, time travel and printing of values through the debug events of the program.",
+      "long": "It talks to the bytecode runtime over a socket (`debugcom.ml`) and reads types from `.cmi`/`.cmt` to print values."
+    }
+  },
+  "design-docs/": {
+    "what": {
+      "short": "Design notes written for Vox; the directory does not exist upstream.",
+      "long": [
+        "The documents that describe the language are [ghost.md](src:design-docs/ghost.md) (ghost mode, `ghost_`, `@@ ghost` fields and erasure; it is stale on ghost-field reads, where it still gives the old rule of the minimum on every other axis), [typed-heaps.md](src:design-docs/typed-heaps.md) (why heaps are indexed by payload type), [borrows-and-slices.md](src:design-docs/borrows-and-slices.md) (loans with prophecies), [total-recursion-closures.md](src:design-docs/total-recursion-closures.md), [verification-programming.md](src:design-docs/verification-programming.md) and [vox-v1.md](src:design-docs/vox-v1.md) (the capability contract).",
+        "The rest are working notes for particular demos (the flat hash table checklist, the HM inference and unifier series) and ergonomics checklists. Some are dated; the code and the tests are authoritative."
+      ]
+    },
+    "vox": {
+      "short": "All twenty files are new in Vox.",
+      "long": "They record decisions and their reasons. Where a document and the code disagree, the code is right."
+    }
+  },
+  "driver/": {
+    "what": {
+      "short": "The compiler drivers: command-line handling (Main_args), the per-file pipelines Compile_common and Compile, and the ocamlc/ocamlopt entry points.",
+      "long": "`compile_common.ml` runs parsing and typing for both backends; `compile.ml` finishes the bytecode pipeline; `maindriver.ml` and `optmaindriver.ml` are the `main` functions of `ocamlc` and `ocamlopt`."
+    },
+    "vox": {
+      "short": "Vox_verify.install () starts both main functions and Compile.implementation; Compile_common saves interfaces' trust records, finds earlier records for Vox_trust, and runs -vox-audit.",
+      "long": [
+        "`Vox_verify.install` (in `verification/runtime/`) registers the verifier's options (`-smt-solver`, `-smt-timeout`, `-smt-resource-limit`, `-smt-assume-verified`, `-dvc`, `-dsmtlib` and others) and sets the callbacks in `typing/verification.ml`. The typer calls them after typing a unit (`Verification.run_unit`) and for `[@@decreases]` measures (`Verification.check_termination`). Without the hook the typer rejects any unit that needs a proof, with \"Refinement verification is unavailable in this compiler\".",
+        "For an interface, `Compile_common` builds the record of what its verification trusts (`Vox_trust.interface_record`) and passes it to `Env.save_signature`; for an implementation it points `Vox_trust.counterparts` at the records earlier compilations left, and `Typemod` saves the record. With `-vox-audit` it prints the unit's record with the records of every unit the unit depends on, through [vox_audit.ml](src:driver/vox_audit.ml)."
+      ]
+    }
+  },
+  "duneconf/": {
+    "what": {
+      "short": "Dune rules shared by the build that cannot live in the root dune file, such as building CamlinternalQuote for a first-stage system compiler that lacks it.",
+      "long": "They are included by the root `dune` file."
+    }
+  },
+  "extract_externals/": {
+    "what": {
+      "short": "A tool that reads .cmt files and prints every external declaration with its type information as S-expressions.",
+      "long": "Installed as `extract_externals.opt`; it takes the same `-I`, `-H` and `-open` flags as the compiler (see its `README.md`)."
+    }
+  },
+  "file_formats/": {
+    "what": {
+      "short": "Readers and writers for the compiler's file formats: .cmi, .cmt/.cmti, .cms, .cmx, .cmo, .cmxs, CFG and Linear dumps.",
+      "long": "`cmt_format.ml` also has `iter_on_occurrences`, which tools use to find every use of an identifier in a typed tree."
+    },
+    "vox": {
+      "short": "cmi_format.ml gains the Vox trust record of a unit (vox_unit) as a .cmi flag and in .cmo and .cmx files; cmt_format.ml learns the new Typedtree constructors.",
+      "long": [
+        "`vox_unit` lists what a unit's verification assumed: trusted externals, totality casts and their uses, unsafe features, other externals, whether verification ran or was skipped with `-smt-assume-verified`, and the solver version if it was not the expected one. `output_vox_record` and `input_vox_record` write and read it in `.cmo` and `.cmx` files, where files written before it read as having none.",
+        "`iter_on_occurrences` in `cmt_format.ml` covers `Texp_assume`, `Texp_logical_equal`, `Ttyp_refine` and `Tpat_refinement`. The other serialized types change through `typing/types.mli`, and the magic number is bumped in `build-aux/`."
+      ]
+    }
+  },
+  "jane/": {
+    "what": {
+      "short": "Jane Street's own documentation of the OxCaml language extensions (modes, kinds, uniqueness, unboxed types, SIMD, templates) and merge-conflict notes.",
+      "long": "`jane/doc/extensions/` is the reference for OxCaml's modes (`_05-modes`), kinds (`_06-kinds`) and uniqueness (`_07-uniqueness`)."
+    },
+    "vox": {
+      "short": "The modes and kinds documentation gains the totality axis: a section on total functions and inductive pattern matching, and total in the kind syntax.",
+      "long": "`_05-modes/intro.md` documents totality as a future mode (in the page's sense: an axis that restricts what may later be done with a value), with the rules for `[@@inductive]` pattern matching; `_06-kinds/02-syntax.md` adds `total` to the lists of axes that kinds such as `immutable_data` cross."
+    }
+  },
+  "lambda/": {
+    "what": {
+      "short": "Translation from Typedtree to Lambda: expressions, modules, pattern matching, primitives, and the simplification passes on Lambda.",
+      "long": "`translcore.ml` and `translmod.ml` do the translation, `matching.ml` compiles pattern matches, `translprim.ml` maps `external` primitives, and `simplif.ml` runs the Lambda-level simplifications before Flambda 2 or bytecode."
+    },
+    "vox": {
+      "short": "Ghost erasure: ghost_ e and ghost-field reads become a placeholder of the layout, ghost fields get no slot, and assume_ and === get run-time code.",
+      "long": [
+        "`Lambda.placeholder_of_layout` is the erased value: `Pobj_magic` applied to the dummy constant (`0xBBBB`) for values, zeros for unboxed numbers, and nothing for `void`. `Translcore` emits it for `ghost_ e` without evaluating `e`, and for reads of `@@ ghost` fields after evaluating the record.",
+        "`Texp_assume` becomes a binding, a test of the predicate and `Assert_failure`; `Texp_logical_equal` becomes `caml_equal` at `int`, `bool` and `Bigint`, and physical equality or `Invalid_argument` elsewhere. Refinements themselves produce no code: `Texp_refinement` extras are ignored."
+      ]
+    }
+  },
+  "lex/": {
+    "what": {
+      "short": "ocamllex, the lexer generator: parses .mll files and compiles the automata to OCaml tables or code.",
+      "long": "The compiler's own lexer, `parsing/lexer.mll`, is built with it."
+    }
+  },
+  "man/": {
+    "what": {
+      "short": "Unix man pages for the command-line tools: ocaml, ocamlc, ocamlopt, ocamlrun, ocamldep, ocamldoc, ocamllex, ocamlyacc and others.",
+      "long": "Vox's options (`-smt-solver`, `-dvc` and the rest) are not documented here."
+    }
+  },
+  "manual/": {
+    "what": {
+      "short": "Sources of the upstream OCaml reference manual (LaTeX, with tools to build HTML and text), and tests that its examples still compile.",
+      "long": "This is the OCaml manual; OxCaml's extensions are documented in `jane/doc/` instead."
+    }
+  },
+  "middle_end/": {
+    "what": {
+      "short": "The optimizing middle end: Flambda 2 (Lambda to Flambda, simplification, and Flambda to Cmm), plus shared compilation-unit bookkeeping.",
+      "long": [
+        "`flambda2/` is the whole Flambda 2 pipeline: `from_lambda/` converts Lambda through CPS, `simplify/` is the main optimizer with its typing environment, and `to_cmm/` emits Cmm. `compilenv.ml` and friends manage `.cmx` information across units.",
+        "Vox does not change the middle end. Ghost placeholders reach it as `Pobj_magic` of a constant, which hides the placeholder's shape from Flambda 2's type propagation."
+      ]
+    }
+  },
+  "ocamldoc/": {
+    "what": {
+      "short": "ocamldoc, the documentation generator: it type-checks sources, collects doc comments and renders HTML, LaTeX, man pages and other formats.",
+      "long": "It reuses the compiler's parser and typer, so it follows changes to `Types`."
+    },
+    "vox": {
+      "short": "Follows the new type representation only: Trefine is treated like other non-printed type forms, arrows have a fourth component, labels have ld_ghost.",
+      "long": "ocamldoc does not render refinement predicates specially."
+    }
+  },
+  "ocamltest/": {
+    "what": {
+      "short": "ocamltest, the test driver of the test suite: it reads the test script in each test file's header and runs actions such as compile, run and compare.",
+      "long": "`OCAMLTEST.org` is its manual. Actions are defined in `builtin_actions.ml` and `ocaml_actions.ml`; `tsl_*` is the test-script language."
+    },
+    "vox": {
+      "short": "Adds a has-z3 predicate, the source_directories and prebuilt_modules variables, and -plan-incremental and -list-sources, so Vox tests share one prebuilt library.",
+      "long": [
+        "`has-z3` skips a test when no `z3` is on the path. `source_directories` lets a test compile modules from another directory, typically `verification/library`. `prebuilt_modules` links modules from a library built once, in parallel, by `testsuite/vox-test-library.sh`, instead of compiling (and verifying) them again in every test.",
+        "`-plan-incremental` and `-list-sources` let `./dev test` work out which tests and compiler libraries a change affects."
+      ]
+    }
+  },
+  "optcomp/": {
+    "what": {
+      "short": "OxCaml's native compiler driver as a functor over the backend: Optcompile.Make, the native linker environment, librarian and packager.",
+      "long": "`optcompile.ml` runs the native pipeline for one file through `Optcomp_intf.Backend`, so the same code serves the amd64 and arm64 backends and the JIT."
+    },
+    "vox": {
+      "short": "Optcompile.Make calls Vox_verify.install () before compiling a file, as driver/compile.ml does for bytecode, and the packager merges its members' Vox records.",
+      "long": "`optmaindriver.ml` also calls it; `install` does its work only once. It sets the callbacks in `typing/verification.ml` and registers the verifier's command-line options."
+    }
+  },
+  "otherlibs/": {
+    "what": {
+      "short": "Libraries shipped with the compiler outside the stdlib: unix, str, dynlink, runtime_events, systhreads and others.",
+      "long": "`dynlink/` embeds a private copy of part of the compiler (`dynlink_compilerlibs`), listed module by module in its `dune` file."
+    },
+    "vox": {
+      "short": "dynlink's private copy of the compiler now includes typing/refinement_predicate.ml, which the type representation depends on.",
+      "long": "No library behavior changes."
+    }
+  },
+  "oxcaml/": {
+    "what": {
+      "short": "OxCaml-specific tests and test tooling: backend, SIMD, intrinsics and dissector tests, the Flambda 2 test list, and the expect-test tool.",
+      "long": "`oxcaml/testsuite/tools/` holds `expect.ml` and `expectnat.ml`, the tools behind `[%%expect]` tests in bytecode and native code."
+    },
+    "vox": {
+      "short": "The expect tool records default and -principal outputs separately (an upstream fix, #6806, cherry-picked), and the axis-lattice test covers the new axes.",
+      "long": "`axis_lattice_roundtrip_test.ml` round-trips the bit encoding of mode bounds, which now includes totality and ghostliness."
+    }
+  },
+  "parsing/": {
+    "what": {
+      "short": "The front end: lexer, Menhir parser, Parsetree, AST helpers, iterators and mappers, printers, attributes and language-extension flags.",
+      "long": "`parser.mly` produces `Parsetree.mli`; `ast_helper`, `ast_iterator` and `ast_mapper` are the ppx-facing API; `pprintast` prints source back; `builtin_attributes.ml` tracks which attributes the compiler consumes; `language_extension.ml` implements `-extension`."
+    },
+    "vox": {
+      "short": "New syntax: {x : t | p}, (x : t) -> u, ghost_, refine_, assume_, unreachable_ (), let refine_ x = e in, and the refinement_types extension.",
+      "long": [
+        "The Parsetree gains `Ptyp_refine`, a binder on `Ptyp_arrow`, and `Pexp_ghost`, `Pexp_refine`, `Pexp_assume` and `Pexp_let_refine`; `unreachable_ ()` is parsed as the extension node `[%vox.unreachable]`. The keywords are OxCaml keywords, reserved whether or not the extension is on.",
+        "`Refinement_types` is an alpha extension; the typer checks it for the refinement forms. `def`, `decreases`, `inductive` and `phantom_parameters` are registered as built-in attributes, and a misplaced `[@def]` or `[@decreases]` is an error rather than a warning."
+      ]
+    }
+  },
+  "printer/": {
+    "what": {
+      "short": "A Parsetree printer that records the mapping between printed output and source locations, used by tooling.",
+      "long": "`printast_with_mappings.ml` mirrors `parsing/printast.ml` and tracks locations through `location_tracker_formatter.ml`."
+    },
+    "vox": {
+      "short": "Prints the new Parsetree nodes: Ptyp_refine, the dependent-arrow binder, Pexp_ghost, Pexp_refine, Pexp_assume and Pexp_let_refine.",
+      "long": "The same cases are added to `parsing/printast.ml`."
+    }
+  },
+  "runtime/": {
+    "what": {
+      "short": "The OCaml 5 runtime in C: allocation and the multicore GC, domains, fibers and effects, exceptions, bytecode interpreter, custom blocks and primitives.",
+      "long": "`caml/` holds the headers. OxCaml's runtime adds support for its own features (mixed blocks, unboxed types, stack allocation) on top of upstream OCaml 5."
+    },
+    "vox": {
+      "short": "Four new C files: pref.c (typed heaps, verified atomics, unique cells), borrow.c (loans and slices), bigint.c (Bigint) and vox_control.c (SIMD probe).",
+      "long": [
+        "These implement the externals of Vox's libraries. Many are empty at run time because their arguments are ghost (heap equations, `split`/`join` of tokens, prophecy resolution); the real ones allocate `Pref` cells with a fresh identity, run SC atomic operations, lend owned arrays, and do arbitrary-precision arithmetic. `custom.c` registers `caml_bigint_ops`.",
+        "All of this C is trusted: its contracts are stated as refined `external` declarations in `verification/library`, and the verifier assumes them."
+      ]
+    }
+  },
+  "scripts/": {
+    "what": {
+      "short": "Developer scripts for the OxCaml repository: formatting, merging upstream OCaml, profiling the compiler build, collecting metrics.",
+      "long": "They are run by hand or from the `Makefile`; none is part of the compiler."
+    },
+    "vox": {
+      "short": "Two Vox scripts: measure-hm-check.py times checking the HM inference demo's module closure, and run-diff-demo builds and runs the verified diff demo.",
+      "long": "Both expect a local `_install` built with `./dev init`."
+    }
+  },
+  "stdlib/": {
+    "what": {
+      "short": "The standard library, with OxCaml's modes, kinds and layout annotations on its interfaces (Stdlib, List, Array, Iarray, Map, Set and so on).",
+      "long": "It is compiled with `-nostdlib -principal`; `Stdlib` re-exports the modules as `Stdlib__X` aliases, listed in `StdlibModules` and `dune`."
+    },
+    "vox": {
+      "short": "Adds Ghost and Bigint, marks terminating functions @@ total, adds Refined submodules with refined domains, and Map/Set.MakeTotal for law-carrying orders.",
+      "long": [
+        "The stdlib is now compiled with `-extension refinement_types`. `'a Ghost.t` is an all-ghost record of kind `void`; `Bigint.t` is an unbounded integer with `@@ total` arithmetic (division by zero is defined). `list` is `[@@inductive]`, so functions over it can be total by structural recursion.",
+        "Some totality annotations are assumed: `Iarray`, `Map` and `Set` re-bind their functions through `trust_total`, an identity `external` at mode `total`, and `List` does so for seven functions and `Refined.hd` and `tl`; the other `List` functions are checked total. The standard shifts stay partial, because an out-of-range count gives a result that can differ between evaluations; `Int.Refined` has total shifts whose count is proved to be in `[0, 63]`, and total `/` and `mod` with a nonzero divisor."
+      ]
+    }
+  },
+  "testsuite/": {
+    "what": {
+      "short": "The compiler test suite, driven by ocamltest: tests/ has one directory per area, lib/ and tools/ hold shared support code.",
+      "long": "Each test is a source file whose header comment is an ocamltest script. Expect tests (`[%%expect]`) record the toplevel's output inline; others compare against `.reference` files."
+    },
+    "vox": {
+      "short": "Adds tests/vox/ (about 490 ocamltest tests and 1,200 other files), tests/typing-refinement-types/, totality and ghost tests in typing-modes/, and two scripts for the prebuilt test library.",
+      "long": [
+        "`vox-test-library.sh` builds the library modules that tests list in `prebuilt_modules` once, with both compilers; `vox-affected-tests.sh` selects the tests a change can affect. Both are used by `./dev test`.",
+        "Tests that need Z3 start with the `has-z3` predicate and are skipped when it is not installed; CI installs a pinned version."
+      ]
+    }
+  },
+  "testsuite/tests/": {
+    "what": {
+      "short": "The test directories, one per area of the compiler (typing-modes, typing-layouts, letrec-check, lib-*, basic, ...), about 300 in all.",
+      "long": "Directory names follow the upstream convention: `typing-*` for the type checker, `lib-*` for libraries, `tool-*` for tools, and so on."
+    },
+    "vox": {
+      "short": "Vox adds vox/ and typing-refinement-types/, and adds or updates tests in typing-modes, typing-jkind-bounds, letrec-check, letrec-compilation and others.",
+      "long": "Changes to upstream directories are mostly new cases for totality (`let rec ones = 1 :: ones` is now rejected, because `list` is `[@@inductive]`), inductive and phantom-parameter module tests in `typing-modes/`, and updated expected outputs where kinds now mention the new axes."
+    }
+  },
+  "testsuite/tests/vox/": {
+    "what": {
+      "short": "The Vox tests and demo clients: verified programs, rejected programs with their exact errors, erasure checks on emitted code, and run-time checks.",
+      "long": [
+        "The [README](src:testsuite/tests/vox/README.md) suggests a first tour: `bounded_clamp.ml`, `checked_windows.ml`, then `queue_client.ml`. Proof tests compile once, as bytecode; public clients and tests of run-time representation run in both bytecode and native code.",
+        "Rejection tests are expect files that pin the whole error and keep an accepted phrase as a positive control. Boundary tests (`*_boundary.ml`) compile a library, copy only its public `.cmi` files to a second directory and check a client there; some dump `-dlambda` or `-dcmm` to check that ghost code was erased."
+      ]
+    },
+    "vox": {
+      "short": "The whole directory is new in Vox.",
+      "long": "Many tests use `source_directories` and `prebuilt_modules` to compile against `verification/library` rather than copies of it."
+    }
+  },
+  "tools/": {
+    "what": {
+      "short": "Assorted tools and maintenance scripts: ocamlmktop, objinfo, dumpobj, ocamlcp/ocamlprof, the magic-number bump script, CI helpers and checks.",
+      "long": "Most are small standalone programs linked against compiler-libs; `ci/` holds CI scripts."
+    },
+    "vox": {
+      "short": "ocamlmktop links unix and the four verifier archives into custom toplevels; the stdlib-docs sync and unlabel patches know Map/Set.MakeTotal.",
+      "long": "The toplevel runs the verifier on each phrase, so a custom toplevel must contain it."
+    }
+  },
+  "toplevel/": {
+    "what": {
+      "short": "The interactive toplevel (ocaml) and its native variant: reading and typing phrases, evaluation, value printing, and directives.",
+      "long": "`topcommon.ml` holds the code shared by the bytecode and native toplevels; `genprintval.ml` prints values from their types; `topdirs.ml` defines `#` directives."
+    },
+    "vox": {
+      "short": "The toplevel installs the verifier and runs Verification.run on each phrase; #rectypes, like -rectypes, is refused when refinement_types is enabled.",
+      "long": "`Typemod` rejects `-rectypes` together with `-extension refinement_types` for compilation units too. `genprintval.ml` prints a refined value by its payload type."
+    }
+  },
+  "typing/": {
+    "what": {
+      "short": "The type checker: Parsetree to Typedtree, with unification, modes and mode crossing, jkinds, modules and signatures, and inclusion checks.",
+      "long": [
+        "`types.mli` defines the type graph, `ctype.ml` unification and instantiation, `typecore.ml` expressions and patterns, `typedecl.ml` type declarations, `typemod.ml` modules, `includemod.ml`/`includecore.ml` signature inclusion. OxCaml adds `mode.ml` (the mode solver), `jkind.ml`/`ikind.ml` (kinds and their lattice form), `typemode.ml` (mode syntax), and `uniqueness_analysis.ml`.",
+        "The directory is flat; the side panel describes its main files."
+      ]
+    },
+    "vox": {
+      "short": "Refinement types and dependent arrows, the totality and ghostliness mode axes, ghost fields, inductive types and total recursion, and the verifier hooks.",
+      "long": [
+        "Refinements are a new `type_desc`, `Trefine`, with a resolved predicate (`refinement_expression`) stored in the type. They are rigid: never inferred, and equal only when payloads unify and predicates are alpha-equal. The typer eliminates an outer refinement from an inferred type (an assumption) and introduces one on an expected type (an obligation), recording each as a `Texp_refinement` extra for the verifier.",
+        "Totality and ghostliness are comonadic axes in `mode.ml`, checked by OxCaml's closure-lock walk. The typer marks constructs such as `try`, loops, mutation, `assert` and non-exhaustive matches as partial, and accepts a `let rec` as total only by structural descent on an `[@@inductive]` argument or a proved `[@@decreases]` measure.",
+        "Six implementation files are new: [refinement_predicate.ml](src:typing/refinement_predicate.ml), [structural_recursion.ml](src:typing/structural_recursion.ml), [recursive_function.ml](src:typing/recursive_function.ml), [verification.ml](src:typing/verification.ml), [vox_trust.ml](src:typing/vox_trust.ml) (what verification trusts, warnings 228 and 229) and the small [vox_type.ml](src:typing/vox_type.ml)."
+      ]
+    }
+  },
+  "utils/": {
+    "what": {
+      "short": "Utilities shared by the whole compiler: command-line flags (Clflags), configuration, warnings, Misc, identifiers for compilation units, profiling.",
+      "long": "`warnings.ml` defines every warning with its number, names and message; `language_extension_kernel.ml` defines the extension GADT that `parsing/language_extension.ml` builds on."
+    },
+    "vox": {
+      "short": "Warnings 222 to 229 for proof cost, unerased ghost code, unused proof steps, trusted externals and unverified imports, a hint on warning 26, and the Refinement_types extension constructor.",
+      "long": "The Vox warnings are described under `utils/warnings.ml`. Warning 227 is off by default."
+    }
+  },
+  "verification/": {
+    "what": {
+      "short": "Vox's verifier (VC generation, SMT encoding, solver driver), its verified library, the demos and their catalogue, and the site and this explorer.",
+      "long": "This directory does not exist upstream. The compiler-side modules are at the top: `vox_vc.ml` (symbolic execution of the Typedtree into verification conditions), `vox_encoding.ml` and `vox_smt.ml` (the SMT terms and their encoding), `vox_smt_solver.ml` (running Z3), and `runtime/vox_verify.enabled.ml` (the driver that the typer calls, with the caches)."
+    },
+    "vox": {
+      "short": "Everything here is Vox.",
+      "long": "`library/` holds the verified library (typed heaps, loans, atomics, credits, data structures), `demos/` and `clients/` the demo programs, `catalogue/` the demo index, and `playground/`, `site/` and `explorer/` the web front ends."
+    }
+  },
+  "yacc/": {
+    "what": {
+      "short": "ocamlyacc, the LALR(1) parser generator written in C, derived from Berkeley yacc.",
+      "long": "The compiler's own parser is built with Menhir; `lex/parser.mly` and the debugger's parser still use ocamlyacc."
+    }
+  }
+}
