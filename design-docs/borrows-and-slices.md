@@ -696,7 +696,8 @@ a checked lemma proves sortedness and permutation of the actual current parent
 array. The permutation proof adds counts from three subranges. The sortedness
 proof checks adjacent pairs within each child and across the pivot. Sequential
 sorting remains total; domain joining and parallel sorting retain their existing
-normal-return contracts.
+normal-return contracts. (Since 28 September 2026 the iarray sorts borrow and
+are not total; see "Totality of borrowing".)
 
 The SMT representation remains an opaque iarray sort with bounded ground
 observations. Constructor identities and raw length/read applications preserve

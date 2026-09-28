@@ -382,7 +382,7 @@
   "verification/library/borrow.mli": {
     "what": {
       "short": "Owned arrays and exclusive, callback-scoped slices of them, specified by a current model and a prophesied final model as Vox_sequence lists.",
-      "long": "A `Slice.t` is local and unique; `set` changes `current` and keeps `final`, and `finish` resolves the prophecy (`final s === current s`). `split_at`, `with_range` and `parallel` lend sub-slices to callbacks and relate their final models to the parent's. The operations that create or end a loan are not `total`; `get`, `set` and `swap`, on slices and on owned arrays, are. `Owned_array` splits and appends without copying. The design is in [borrows-and-slices.md](src:design-docs/borrows-and-slices.md)."
+      "long": "A `Slice.t` is local and unique; `set` changes `current` and keeps `final`, and `finish` resolves the prophecy (`final s === current s`). `split_at`, `with_range` and `parallel` lend sub-slices to callbacks and relate their final models to the parent's. The operations that create or end a loan are not `total`; `get`, `set` and `swap`, on slices and on owned arrays, are. `Owned_array` splits without copying and appends adjacent pieces of one array in place. The design is in [borrows-and-slices.md](src:design-docs/borrows-and-slices.md)."
     }
   },
   "verification/library/borrow.ml": {
