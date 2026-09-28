@@ -85,7 +85,7 @@
       "path": "testsuite/tests/vox/collections_boundary_check.ml",
       "from": "audit ~optional:true \"sparse_overlay\"",
       "span": 3,
-      "lines": "70-72",
+      "lines": "68-70",
       "text": "[`collections_boundary.ml`](src:testsuite/tests/vox/collections_boundary.ml) compiles `sparse_overlay.ml` with `-dlambda`, compiles the client against the public interfaces, links it and runs it with both compilers. This check requires that the bodies of `empty`, `set`, `clear`, `lookup` and `get` call no `_def` equation and mention neither `find_remove` nor `Vox_iarray`. It is textual and does not follow `get_raw` and `length_known`, which call no proof code either. The audit is optional because the `-principal` build leaves this module out: with `-principal`, `sparse_overlay.ml` does not type-check."
     }
   ]

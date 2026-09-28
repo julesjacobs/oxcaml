@@ -1069,7 +1069,7 @@
   },
   "testsuite/tests/vox/borrow_partial.ml": {
     "what": {
-      "short": "Creating and ending a loan are not total: ghost_, lemmas and total functions reject Slice.finish and Owned_array.with_mut, and the total owned-array sort is accepted; each verdict has a control."
+      "short": "Creating and ending a loan are not total: ghost_, lemmas and total functions reject Slice.finish, Owned_array.with_mut and the borrowing quicksort, while total owned-array operations are accepted; each verdict has a control."
     }
   },
   "testsuite/tests/vox/quicksort_rejected.ml": {

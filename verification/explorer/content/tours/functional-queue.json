@@ -81,7 +81,7 @@
       "path": "testsuite/tests/vox/collections_boundary_check.ml",
       "from": "audit \"functional_queue\" [ \"enqueue\"; \"dequeue\" ]",
       "to": "~to_line_end:true;",
-      "lines": "67-69",
+      "lines": "65-67",
       "text": "[`collections_boundary.ml`](src:testsuite/tests/vox/collections_boundary.ml) compiles `functional_queue.ml` with `-dlambda` under both compilers, with and without `-principal`, and this check requires that the bodies of `enqueue` and `dequeue` call no `_def` equation and none of `contents`, `reverse` and `reverse_append_correct`. The demo trusts nothing beyond the shared base: the implementation contains no `assume_` or `external`, and the one `unreachable_ ()` is proved. What is not proved is cost: when a version is dequeued more than once, the rear list can be reversed more than once, and no amortized bound is stated."
     }
   ]

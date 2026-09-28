@@ -123,8 +123,8 @@ so a test with several new outputs may need several `--promote` runs.
 | Scoped borrows | `borrow_demo.ml`, `borrow_ranges.ml`, `borrow_rejected.ml` | Exact updates, split/reborrow reconstruction, preserved frames, snapshots, and ownership/proof rejections. |
 | Runtime slice validation | `borrow_validation.ml` | `assume_` checks a real snapshot and exports its sortedness through the borrow. |
 | Parallel slices | `borrow_parallel.ml` | Disjoint callbacks, sequential fallback, and joining before exception propagation. |
-| Loans are not total | `borrow_partial.ml` | Creating and ending a loan are rejected in erased code, in lemmas and in total functions; owned-array writes are accepted there. |
-| Quicksort | `quicksort.mli`, `quicksort_client.ml` | Sequential and parallel in-place sorting establish sortedness and multiplicity-preserving permutation on normal return; the owned-array `sort_array` borrows nothing and is total. |
+| Loans are not total | `borrow_partial.ml` | Creating and ending a loan are rejected in erased code, in lemmas and in total functions; total owned-array operations are accepted there. |
+| Quicksort | `quicksort.mli`, `quicksort_client.ml` | Sequential and parallel in-place sorting establish sortedness and multiplicity-preserving permutation on normal return; the sorts borrow, so none is total. |
 | Ghost code | `ghost*.ml` | Total proof computations erase; ghost values remain usable in static predicates and cannot be read by runtime checks. |
 | Time credits | `time_credits.ml`, `time_credits_rejected.ml`, `merge_sort.ml`, `merge_sort_rejected.ml` | Unique ghost credits split and merge; generic merge sort preserves full-element multiplicities and uses at most `n * ceil(log2 n)` comparison calls. |
 
