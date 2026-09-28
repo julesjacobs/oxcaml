@@ -42,6 +42,14 @@ let report name payload n operation count (bytes, time) =
   Printf.printf "%s,%s,%d,%s,%.3f,%.3f\n%!" name payload n operation
     (elapsed *. 1e9 /. float count) (allocated /. float count)
 
+(* Checksum of the final table: which of the keys [key 0 .. key (3n-1)] are
+   present and the hash of each value found, in key order. Every
+   implementation runs the same operations, so every one must print the same
+   line. *)
+let check_step acc i v = (acc * 1000003) lxor (i * 31 + Hashtbl.hash v)
+let report_check name payload n count sum =
+  Printf.printf "%s,%s,%d,check,%d,%d\n%!" name payload n count sum
+
 let rec fill : ('a : immutable_data).
     (table : 'a V.t) @ immutable -> (values : 'a iarray) @ immutable -> (index
       : int) ->
@@ -94,6 +102,48 @@ let rec churn_rounds : ('a : immutable_data).
     churn_rounds table values (index - 1) (Iarray.length values - offset)
       changed.#view changed.#token
 
+(* One step of the mixed workload: find a present key, look up an absent key,
+   remove the present key and insert a new one (four operations). *)
+let rec mix : ('a : immutable_data).
+    (table : 'a V.t) @ immutable -> (values : 'a iarray) @ immutable -> (index
+      : int) -> (offset : int) ->
+    (view : 'a V.view) @ immutable ->
+    (token : {t : 'a V.state P.token | H.at (P.own t)
+      (V.location table) === Some
+      (V.version view)})
+      @ unique read_write ghost ->
+    {r : 'a V.updated | H.at (P.own r.#token) (V.location table) === Some (V.version r.#view)} @
+        unique =
+  fun table values index offset view token ->
+    let n = Iarray.length values in
+    if index >= n then #{V.view; token} else begin
+      ignore (Sys.opaque_identity
+        (V.find table view (key (index + offset)) (borrow_ token)));
+      ignore (Sys.opaque_identity
+        (V.mem table view (key (2 * n + index)) (borrow_ token)));
+      let removed = V.remove table view (key (index + offset)) token in
+      let changed = V.replace table removed.#view
+        (key (index + n - offset))
+        (Iarray.get values index) removed.#token in
+      mix table values (index + 1) offset changed.#view changed.#token
+    end
+
+let rec mix_rounds : ('a : immutable_data).
+    (table : 'a V.t) @ immutable -> (values : 'a iarray) @ immutable -> (index
+      : int) -> (offset : int) ->
+    (view : 'a V.view) @ immutable ->
+    (token : {t : 'a V.state P.token | H.at (P.own t)
+      (V.location table) === Some
+      (V.version view)})
+      @ unique read_write ghost ->
+    {r : 'a V.updated | H.at (P.own r.#token) (V.location table) === Some (V.version r.#view)} @
+        unique =
+  fun table values index offset view token ->
+    if index = 0 then #{V.view; token} else
+    let changed = mix table values 0 offset view token in
+    mix_rounds table values (index - 1) (Iarray.length values - offset)
+      changed.#view changed.#token
+
 let rec replace_rounds : ('a : immutable_data).
     (table : 'a V.t) @ immutable -> (values : 'a iarray) @ immutable -> (index
       : int) ->
@@ -115,6 +165,9 @@ let verified : ('a : immutable_data).
       values ->
   let n = Iarray.length values in
   let batches = max 1 (100000 * work_factor / n) in
+  (let r : 'a V.created = V.create (P.empty ()) in
+   let _ = fill r.#table values 0 r.#view r.#token in
+   ignore (Sys.opaque_identity r.#table));
   let timing = stamp () in
   for _batch = 1 to batches do
     let r : 'a V.created = V.create (P.empty ()) in
@@ -131,6 +184,10 @@ let verified : ('a : immutable_data).
   let hits, misses = queries n in
   let rounds = max 1 (1000000 * work_factor / n) in
   let iterations = rounds * n in
+  for i = 0 to n - 1 do
+    ignore (Sys.opaque_identity
+      (V.find r.#table built.#view (Iarray.get hits i) (borrow_ built.#token)))
+  done;
   let timing = stamp () in
   for _round = 1 to rounds do
     for i = 0 to n - 1 do
@@ -139,6 +196,10 @@ let verified : ('a : immutable_data).
     done
   done;
   report name payload n "hit" iterations timing;
+  for i = 0 to n - 1 do
+    ignore (Sys.opaque_identity
+      (V.mem r.#table built.#view (Iarray.get misses i) (borrow_ built.#token)))
+  done;
   let timing = stamp () in
   let found = ref 0 in
   for _round = 1 to rounds do
@@ -163,11 +224,27 @@ let verified : ('a : immutable_data).
       (borrow_ changed.#token)));
     assert (V.find r.#table changed.#view (key (i + offset)) (borrow_
       changed.#token) = (Iarray.get values i))
-  done
+  done;
+  let timing = stamp () in
+  let changed = mix_rounds r.#table values batches offset
+    changed.#view changed.#token in
+  report name payload n "mixed" (4 * n * batches) timing;
+  let count = ref 0 and sum = ref 0 in
+  for i = 0 to 3 * n - 1 do
+    match V.find_opt r.#table changed.#view (key i) (borrow_ changed.#token)
+    with
+    | None -> ()
+    | Some v -> incr count; sum := check_step !sum i v
+  done;
+  report_check name payload n !count !sum
 
 let standard payload values =
   let n = Iarray.length values in
   let batches = max 1 (100000 * work_factor / n) in
+  (let table = Standard.create 16 in
+   for i = 0 to n - 1 do Standard.replace table (key i) (Iarray.get values i)
+     done;
+   ignore (Sys.opaque_identity table));
   let timing = stamp () in
   for _batch = 1 to batches do
     let table = Standard.create 16 in
@@ -184,6 +261,9 @@ let standard payload values =
   let hits, misses = queries n in
   let rounds = max 1 (1000000 * work_factor / n) in
   let iterations = rounds * n in
+  for i = 0 to n - 1 do
+    ignore (Sys.opaque_identity (Standard.find table (Iarray.get hits i)))
+  done;
   let timing = stamp () in
   for _round = 1 to rounds do
     for i = 0 to n - 1 do
@@ -191,6 +271,9 @@ let standard payload values =
     done
   done;
   report "stdlib" payload n "hit" iterations timing;
+  for i = 0 to n - 1 do
+    ignore (Sys.opaque_identity (Standard.mem table (Iarray.get misses i)))
+  done;
   let timing = stamp () in
   let found = ref 0 in
   for _round = 1 to rounds do
@@ -220,7 +303,25 @@ let standard payload values =
   for i = 0 to n - 1 do
     assert (not (Standard.mem table (key (i + n - offset))));
     assert (Standard.find table (key (i + offset)) = (Iarray.get values i))
-  done
+  done;
+  let timing = stamp () in
+  for batch = 0 to batches - 1 do
+    let offset = if batch mod 2 = 0 then offset else n - offset in
+    for i = 0 to n - 1 do
+      ignore (Sys.opaque_identity (Standard.find table (key (i + offset))));
+      ignore (Sys.opaque_identity (Standard.mem table (key (2 * n + i))));
+      Standard.remove table (key (i + offset));
+      Standard.replace table (key (i + n - offset)) (Iarray.get values i)
+    done
+  done;
+  report "stdlib" payload n "mixed" (4 * n * batches) timing;
+  let count = ref 0 and sum = ref 0 in
+  for i = 0 to 3 * n - 1 do
+    match Standard.find_opt table (key i) with
+    | None -> ()
+    | Some v -> incr count; sum := check_step !sum i v
+  done;
+  report_check "stdlib" payload n !count !sum
 
 let () =
   let name = Sys.argv.(1) in
