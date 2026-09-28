@@ -383,6 +383,13 @@ this file.
 Automatic laws and quantifiers (16, 55); automatic unfolding (53, 54); one
 function for proving and running (48); termination for stateful code (88).
 
+**Effects in the mode system (owner, 28 September).**
+- **The principle:** a `total` function is a mathematical function. Unique-in/unique-out code and heap tokens fit it, read as functional threading: path copying, or a threaded map.
+- **What does not fit:** borrowing, read the RustHorn way, is an effect. Creating a borrow chooses its prophecy nondeterministically, and `finish` assumes `final = current`, which kills the other worlds.
+- **Today:** `finish` and borrow creation are typed `total`. Erasing a borrowing call is prevented only because `ghost_` captures real values as aliased.
+- **Future work:** model these effects with finer-grained modes. Then the in-place sort can state what is true, that it terminates, with an argument better than "every operation it uses is total".
+- **The immediate option discussed:** make prophecy creation and `finish` partial. It is not yet decided.
+
 ## Decisions waiting for the owner
 
 - *Decided 27 September:* `[@def]` lemmas are not re-proved. The generated
