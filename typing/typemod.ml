@@ -3060,6 +3060,13 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
         Location.raise_errorf ~loc:decl.type_loc
           "Recursive module signatures cannot assert phantom parameter \
            guarantees."
+    | Sig_type (_, decl, _, _) when decl.type_total_matchable ->
+        (* The definition-site check compares against the declaration's own
+           path; inside a recursive module the type is reached through the
+           forward path ([A.u]), so the check cannot see the recursion. *)
+        Location.raise_errorf ~loc:decl.type_loc
+          "Recursive module signatures cannot assert %a."
+          Style.inline_code "[@@total_matchable]"
     | Sig_type (id, decl, _, _) when decl.type_inductive ->
         Some (`Inductive (Ident.name id))
     | Sig_module (_, _, decl, _, _) ->

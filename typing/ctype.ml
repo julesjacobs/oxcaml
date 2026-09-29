@@ -4093,6 +4093,15 @@ let declaration_can_pattern_match_total ?(knot_free = false) env root root_args
             else Path.Map.add path active !active_declarations)
         (fun () ->
           match Env.find_type path env with
+          | decl when decl.type_inductive ->
+              (* A nested [@@inductive] type is a trusted leaf. Its check, at
+                 its definition, saw its whole representation: every type it
+                 mentions other than itself was defined strictly before it
+                 (an inductive declaration is a single, non-mutual one), so
+                 none of them can reach the root, which mentions this one and
+                 so is defined after it. Only the arguments, which come from
+                 the use site, are walked. *)
+              List.iter (visit_type ~direct:false ~negative) args
           | decl ->
               begin match decl.type_kind with
               | Type_abstract _ | Type_open
@@ -4136,6 +4145,15 @@ let declaration_can_pattern_match_total ?(knot_free = false) env root root_args
     | Type_abstract _ -> ()
     | Type_open -> ()
   in
+  (* An [@@inductive] root is trusted outright, in both modes. Its declaration
+     was checked where it was defined, with its representation visible: a
+     single closed variant, not a GADT, recursive only through direct fields.
+     Every other type its representation mentions was defined strictly before
+     it, so no hidden type there can be or reach it. Inclusion lets an
+     interface expose the representation with [@@inductive] only if the
+     implementation's declaration carries it. *)
+  decl.type_inductive
+  ||
   try
     visit_representation ~direct:true ~negative:false decl root_args;
     true
@@ -4228,8 +4246,34 @@ let can_unpack_total env ty =
    does not reach [X]), then [X] does not reach [decl] either -- otherwise
    [decl] would reach [decl] via [X] and this check would fail. *)
 let declaration_total_matchable env path decl =
-  declaration_can_pattern_match_total ~knot_free:true env path
-    decl.type_params decl
+  (* A declaration that merely re-exports another nominal type -- the
+     strengthened [type u = Bad.u] of a module path, a functor argument or an
+     [include] -- has the guarantee exactly when that type does. Walking from
+     the alias with its own name as the root would miss the recursion, which
+     the representation reaches under the original path. *)
+  let rec canonical fuel path decl =
+    match decl.type_manifest with
+    | Some ty when fuel > 0 ->
+      begin match get_desc ty with
+      | Tconstr (p, args, _)
+        when List.length args = List.length decl.type_params
+             && List.for_all2 eq_type args decl.type_params ->
+        begin match Env.find_type p env with
+        | decl' -> canonical (fuel - 1) p decl'
+        | exception Not_found -> path, decl
+        end
+      | _ -> path, decl
+      end
+    | _ -> path, decl
+  in
+  let path', decl' = canonical 32 path decl in
+  if decl' != decl then
+    decl'.type_total_matchable
+    || declaration_can_pattern_match_total ~knot_free:true env path'
+         decl'.type_params decl'
+  else
+    declaration_can_pattern_match_total ~knot_free:true env path
+      decl.type_params decl
 
 (* Whether [ty] is a safe component of a type matched in total code: its jkind
    rules out pointers, or it is a nominal type that carries [@@total_matchable]
