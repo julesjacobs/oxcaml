@@ -66,6 +66,14 @@ end;;
 module Inductive : sig type t : logical_data end
 |}]
 
+type inductive = Nil | Cons of int * inductive [@@inductive]
+let (head @ total) (x : inductive) =
+  match x with Nil -> 0 | Cons (n, _) -> n;;
+[%%expect{|
+type inductive = Nil | Cons of int * inductive [@@inductive]
+val head : inductive -> int = <fun>
+|}]
+
 (* [mod logical] composes with with-bounds: ['a box] is logical when ['a]
    is, and [int -> int] (a function between logical types) is logical as a
    field. *)
@@ -154,4 +162,3 @@ module type Composed =
     type 'x c : logical_data mod global unforkable yielding with 'x
   end
 |}]
-
