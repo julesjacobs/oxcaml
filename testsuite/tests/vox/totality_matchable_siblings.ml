@@ -201,7 +201,19 @@ module Bad_arg : sig type u = t -> int and t = Roll of u end
 
 module Applied_bad = Functor_consumer_ok (Bad_arg);;
 [%%expect{|
-module Applied_bad : sig val use : Bad_arg.t -> int end
+Line 1, characters 21-50:
+1 | module Applied_bad = Functor_consumer_ok (Bad_arg);;
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Modules do not match:
+       sig type u = t -> int and t = Bad_arg.t = Roll of u end
+     is not included in sig type u type t = Roll of u end
+     Type declarations do not match:
+       type u = t -> int
+     is not included in
+       type u
+     Their total-matchability guarantees differ;
+     an interface may promise
+     "[@@total_matchable]" only if the implementation's declaration does.
 |}]
 
 (* Legitimate total code over an abstract type is still accepted: a functional
