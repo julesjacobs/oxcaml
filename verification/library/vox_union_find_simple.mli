@@ -7,7 +7,7 @@ module P = Ghost_pref
 module H = P.Heap
 
 module Make (C : Vox_big_credits.S) : sig
-  type t : (void & void & void & void & void & void) & void
+  type t : ((void & void & void & void & void & void) & void) mod logical
   type result = #{value : M.elem @@ aliased; state : t}
 
   val contents : t @ local immutable total ghost forkable unyielding -> M.path list @ immutable ghost @@ total

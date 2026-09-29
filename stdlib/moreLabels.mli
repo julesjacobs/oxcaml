@@ -1059,7 +1059,7 @@ module Map : sig
   module type TotalS =
     sig
       type key
-      type !+'a t : immutable_data with key with 'a
+      type !+'a t : logical_data with key with 'a
       include S with type key := key and type 'a t := 'a t
 
       val empty: 'a t @@ total
@@ -1482,7 +1482,7 @@ module Set : sig
   module type TotalS =
     sig
       type elt
-      type t : immutable_data with elt
+      type t : logical_data with elt
       include S with type elt := elt and type t := t
 
       val empty: t @@ total

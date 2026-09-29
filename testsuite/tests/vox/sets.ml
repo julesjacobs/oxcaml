@@ -711,7 +711,7 @@ end;;
 Line 16, characters 2-31:
 16 |   type t : immutable_data = S.t
        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "S.t" is mutable_data.
+Error: The kind of type "S.t" is mutable_data mod logical.
        But the kind of type "S.t" must be a subkind of immutable_data
          because of the definition of t at line 16, characters 2-31.
 |}]

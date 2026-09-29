@@ -10,15 +10,15 @@
 
 (** The guarded cell: its ghost location and when its payload is full. *)
 module type Cell = sig
-  type payload : immutable_data [@@total_matchable]
-  type cell : immutable_data [@@total_matchable]
+  type payload : logical_data
+  type cell : logical_data
   val location : cell @ immutable -> payload Ghost_pref.t @ immutable ghost
     @@ total
   val full : payload @ immutable -> bool @ ghost @@ total
 end
 
 module Make (C : Cell) : sig @@ portable
-  type t : immutable_data [@@total_matchable]
+  type t : logical_data
   val cell : t @ local immutable -> C.cell @ immutable @@ total
   (** [owned a h]: [h] is exactly the cell of [a], holding a full payload. *)
   val owned : t @ immutable -> C.payload Ghost_pref.heap @ immutable ->

@@ -12,7 +12,7 @@
 
 open! Stdlib
 
-type t : immutable_data [@@total_matchable]
+type t : logical_data
 
 external of_int : int -> t @@ total = "caml_bigint_of_int"
 external to_int_opt : t -> int option @@ total = "caml_bigint_to_int_opt"

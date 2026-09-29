@@ -3,7 +3,7 @@ module M := Level_mgu_spec
 
 module Spec : sig
   (** Ghost witnesses; their representation is private. *)
-  type evidence : immutable_data [@@total_matchable]
+  type evidence : logical_data
 
   (** Evidence of the completed inference result, used by [principal]. *)
   val inferred : D.term @ immutable -> Copy_spec.ty option @ immutable ->

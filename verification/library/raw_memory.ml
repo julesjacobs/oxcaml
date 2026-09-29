@@ -1,7 +1,7 @@
 module P = Ghost_pref
 module H = P.Heap
 
-type t : immutable_data [@@total_matchable]
+type t : logical_data
 type byte : immediate = {v : int | 0 <= v && v <= 255}
 type contents : immutable_data = byte option
 type allocation : immutable_data = t option

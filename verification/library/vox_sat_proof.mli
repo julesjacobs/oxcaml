@@ -1,6 +1,6 @@
 open Vox_sat_spec
 
-type derivation : immutable_data mod total [@@total_matchable]
+type derivation : logical_data
 val clause_at : formula -> int -> literal list option @@ total
 val clause_at_def : (formula : formula) -> (index : int) ->
   {u : unit |
@@ -372,7 +372,7 @@ val clause_at_valid : (n : int) -> (formula : formula) -> (index : int) ->
     | None -> true | Some clause -> valid_clause n clause else true}
   @ ghost @@ total
 
-type stored_result : immutable_data mod total [@@total_matchable]
+type stored_result : logical_data
 val load_result : stored_result -> proof_result @@ total
 val store_result : (entry : proof_result) ->
   {stored : stored_result | load_result stored === entry} @@ total

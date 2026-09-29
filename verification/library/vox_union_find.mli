@@ -12,7 +12,7 @@ module P = Ghost_pref
 module H = P.Heap
 
 module Make (C : Vox_big_credits.S) : sig
-  module W : sig type resource : void end
+  module W : sig type resource : void mod logical end
   type t = private #{
     raw : W.resource;
     paths : M.path list @@ ghost global immutable total;

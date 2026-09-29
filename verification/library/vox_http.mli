@@ -19,7 +19,7 @@ open Vox_http_spec
 
 module S := Vox_sequence
 
-type state : immutable_data mod total [@@total_matchable]
+type state : logical_data
 
 (** The state after a call and the part of the input it did not consume. *)
 type result : immutable_data mod total = { state : state; rest : bytes }

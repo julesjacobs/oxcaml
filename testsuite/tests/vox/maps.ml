@@ -1008,7 +1008,7 @@ end;;
 Line 16, characters 2-39:
 16 |   type t : immutable_data = int ref S.t
        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "int ref S.t" is mutable_data.
+Error: The kind of type "int ref S.t" is mutable_data mod logical.
        But the kind of type "int ref S.t" must be a subkind of immutable_data
          because of the definition of t at line 16, characters 2-39.
 |}]

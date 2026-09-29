@@ -41,8 +41,7 @@ Line 3, characters 56-57:
                                                             ^
 Error: The value "t" has type "Pref_ring.node option Pref.token"
        but an expression was expected of type "'a Pref.token"
-       The kind of Pref_ring.node option is
-           immutable_data with Pref_ring.node
+       The kind of Pref_ring.node option is logical_data with Pref_ring.node
          because it's a boxed variant type.
        But the kind of Pref_ring.node option must be a subkind of
            immutable_data.
@@ -81,8 +80,7 @@ Line 10, characters 23-28:
                             ^^^^^
 Error: The value "state" has type "Pref_ring.node option Pref.token"
        but an expression was expected of type "'a Pref.token"
-       The kind of Pref_ring.node option is
-           immutable_data with Pref_ring.node
+       The kind of Pref_ring.node option is logical_data with Pref_ring.node
          because it's a boxed variant type.
        But the kind of Pref_ring.node option must be a subkind of
            immutable_data.
@@ -122,8 +120,7 @@ Line 11, characters 23-28:
                             ^^^^^
 Error: The value "state" has type "Pref_ring.node option Pref.token"
        but an expression was expected of type "'a Pref.token"
-       The kind of Pref_ring.node option is
-           immutable_data with Pref_ring.node
+       The kind of Pref_ring.node option is logical_data with Pref_ring.node
          because it's a boxed variant type.
        But the kind of Pref_ring.node option must be a subkind of
            immutable_data.

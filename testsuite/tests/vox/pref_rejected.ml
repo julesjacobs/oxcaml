@@ -339,9 +339,34 @@ end;;
 Line 10, characters 23-28:
 10 |       | Some f -> not (f.run h))
                             ^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (callback is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at lines 6-10, characters 25-32
+         which is expected to be "total".
+|}]
+
+(* The same diagonal through a heap token. A token is [void] at run time, but
+   its logical content is a heap of ['a], so its kind says it is logical only
+   when ['a] is ([void mod ... logical with 'a]); [callback] is recursive through
+   it and is not logical. *)
+module Token_diagonal = struct
+  type callback = {
+    run : callback Pref.token @ local immutable -> bool @ ghost
+      @@ many forkable unyielding total immutable
+  }
+  let (diagonal @ total) (p : callback Pref.t @ immutable)
+      (tok : callback Pref.token @ local immutable) =
+    ghost_ (match Pref.Heap.at (Pref.own tok) p with
+      | None -> false
+      | Some f -> not (f.run tok))
+end;;
+[%%expect{|
+Line 10, characters 23-28:
+10 |       | Some f -> not (f.run tok))
+                            ^^^^^
+Error: The match on a value whose type is not logical (callback is recursive but not [@@inductive]) is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 6-10, characters 25-34
          which is expected to be "total".
 |}]
 

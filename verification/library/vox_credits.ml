@@ -1,5 +1,5 @@
 module type S = sig
-  type token : void [@@total_matchable]
+  type token : void mod logical
 
   type partition = { left : token @@ ghost; right : token @@ ghost }
 

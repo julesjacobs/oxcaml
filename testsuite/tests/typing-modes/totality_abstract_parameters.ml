@@ -1,15 +1,15 @@
 (* TEST expect; *)
 
-type 'a heap [@@total_matchable];;
+type 'a heap : value mod logical with 'a;;
 type callback = { run : callback heap -> bool @@ total };;
 let (project @ total) x = x.run;;
 [%%expect{|
-type 'a heap
+type 'a heap : value mod logical with 'a
 type callback = { run : callback heap -> bool @@ total; }
 Line 3, characters 26-31:
 3 | let (project @ total) x = x.run;;
                               ^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (callback is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 3, characters 22-31
          which is expected to be "total".
@@ -25,17 +25,17 @@ let (destructure @ total) { run } = run;;
 Line 1, characters 26-33:
 1 | let (destructure @ total) { run } = run;;
                               ^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (callback is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 1, characters 26-39
          which is expected to be "total".
 |}]
 
-type 'a handle [@@phantom_parameters] [@@total_matchable];;
+type 'a handle : value mod logical [@@phantom_parameters];;
 type node = { value : int; next : node handle };;
 let (value @ total) n = n.value;;
 [%%expect{|
-type 'a handle [@@phantom_parameters]
+type 'a handle : value mod logical [@@phantom_parameters]
 type node = { value : int; next : node handle; }
 val value : node -> int = <fun>
 |}]
@@ -111,7 +111,7 @@ type hidden = { field : hidden Hide.t; }
 Line 3, characters 25-32:
 3 | let (hidden @ total) h = h.field;;
                              ^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (Hide.t is abstract and its kind does not say mod logical) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 3, characters 21-32
          which is expected to be "total".
@@ -125,20 +125,20 @@ end;;
 Line 3, characters 25-31:
 3 |   let (call @ total) x = x.call
                              ^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (H.t is abstract and its kind does not say mod logical) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 3, characters 21-31
          which is expected to be "total".
 |}]
 
-module G (H : sig type 'a t [@@phantom_parameters] [@@total_matchable] end) = struct
+module G (H : sig type 'a t : value mod logical [@@phantom_parameters] end) = struct
   type t = { field : t H.t }
   let (field @ total) x = x.field
 end;;
 [%%expect{|
 module G :
-  functor (H : sig type 'a t [@@phantom_parameters] end) ->
-    sig type t = { field : t H.t; } val field : t -> t H.t end
+  functor (H : sig type 'a t : value mod logical [@@phantom_parameters] end)
+    -> sig type t = { field : t H.t; } val field : t -> t H.t end
 |}]
 
 module rec Circular : Phantom = Circular;;
@@ -164,7 +164,7 @@ type hidden_callback_record = {
 Line 5, characters 34-42:
 5 | let (hidden_callback @ total) x = x.stored;;
                                       ^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (a constructor has an existential type, which could be the matched type itself) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 5, characters 30-42
          which is expected to be "total".
@@ -237,7 +237,7 @@ and 'a growing_wrapper = Grow of 'a list growing_wrapper
 Line 3, characters 42-49:
 3 | let (get_growing @ total) (x : growing) = x.value;;
                                               ^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (growing_wrapper is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 3, characters 26-49
          which is expected to be "total".
@@ -273,10 +273,13 @@ end;;
 type pack =
     Pack : 'a @@ total immutable * ('a @ total immutable -> unit) @@ total
       immutable -> pack
-Line 7, characters 32-59:
-7 |   let rec packed_cycle : pack = Pack (packed_cycle, invoke)
-                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: This kind of expression is not allowed as right-hand side of "let rec"
+Line 6, characters 17-28:
+6 |     match p with Pack (x, f) -> f x
+                     ^^^^^^^^^^^
+Error: The match on a value whose type is not logical (a constructor has an existential type, which could be the matched type itself) is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 5-6, characters 23-35
+         which is expected to be "total".
 |}]
 
 type runtime_callbacks = { runtime_run : unit -> unit };;
@@ -323,10 +326,13 @@ end;;
 type callback_first_pack =
     Callback_first_pack : ('a @ total immutable -> unit) @@ total immutable *
       'a @@ total immutable -> callback_first_pack
-Line 9, characters 4-46:
-9 |     Callback_first_pack (invoke, packed_cycle)
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: This kind of expression is not allowed as right-hand side of "let rec"
+Line 7, characters 17-43:
+7 |     match p with Callback_first_pack (f, x) -> f x
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The match on a value whose type is not logical (a constructor has an existential type, which could be the matched type itself) is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 6-7, characters 23-50
+         which is expected to be "total".
 |}]
 
 let rec independent_in_recursive : runtime_callbacks =
@@ -348,10 +354,13 @@ end;;
 type bounded_pack =
     Bounded_pack : ('a : value mod total immutable). 'a *
       ('a @ immutable -> unit) @@ total immutable -> bounded_pack
-Line 7, characters 40-75:
-7 |   let rec packed_cycle : bounded_pack = Bounded_pack (packed_cycle, invoke)
-                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: This kind of expression is not allowed as right-hand side of "let rec"
+Line 6, characters 17-36:
+6 |     match p with Bounded_pack (x, f) -> f x
+                     ^^^^^^^^^^^^^^^^^^^
+Error: The match on a value whose type is not logical (a constructor has an existential type, which could be the matched type itself) is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 5-6, characters 23-43
+         which is expected to be "total".
 |}]
 
 let rec tuple_alias_cycle : callbacks =

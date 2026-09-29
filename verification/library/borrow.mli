@@ -15,7 +15,7 @@ type ('value, 'state) step =
    and [finish] assumes that they equal its [current] contents; neither step
    is a function of the arguments. *)
 module Slice : sig @@ portable
-  type ('a : immutable_data) t : value mod total contended [@@total_matchable]
+  type ('a : immutable_data) t : value mod total contended logical
 
   external current : ('a : immutable_data).
     'a t @ local immutable -> 'a Model.t @ immutable total ghost
@@ -165,7 +165,7 @@ module Slice : sig @@ portable
 end
 
 module Owned_array : sig @@ portable
-  type ('a : immutable_data) t : value mod total contended [@@total_matchable]
+  type ('a : immutable_data) t : value mod total contended logical
 
   external contents : ('a : immutable_data).
     'a t @ local immutable -> 'a Model.t @ immutable total ghost

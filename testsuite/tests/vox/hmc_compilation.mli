@@ -4,8 +4,8 @@ module B := Wasm_u32
 module C := Wasm_code
 module M := Hmc_compilation_model
 
-type artifact : immutable_data [@@total_matchable]
-type rejection : immutable_data [@@total_matchable]
+type artifact : logical_data
+type rejection : logical_data
 type error = Unbound_variable | Type_error | Entry_type_mismatch
   | Unsupported_polymorphic_local_let | Non_callable_outer_binding
   | Non_callable_entry | Invalid_annotation | Layout_rejected

@@ -7,13 +7,13 @@ type ('value, 'state) step =
     state : 'state }
 
 type ('a : immutable_data) owned :
-  value mod total contended [@@total_matchable]
+  value mod total contended logical
 type ('a : immutable_data) loan :
-  value mod total contended [@@total_matchable]
+  value mod total contended logical
 type ('a : immutable_data) root_frame :
-  value mod total contended [@@total_matchable]
+  value mod total contended logical
 type ('a : immutable_data) split_frame :
-  value mod total contended [@@total_matchable]
+  value mod total contended logical
 
 module Raw = struct
   external contents : ('a : immutable_data).

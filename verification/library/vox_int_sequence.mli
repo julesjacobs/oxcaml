@@ -1,7 +1,7 @@
 open Vox_sequence
 
 
-type multiset : immutable_data [@@total_matchable]
+type multiset : logical_data
 
 val element : int list -> Bigint.t -> int @@ total
 val element_def : (values : int list) -> (index : Bigint.t) ->

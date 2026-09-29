@@ -14,7 +14,7 @@ end;;
 Line 4, characters 17-23:
 4 |     match x with Roll f -> f x
                      ^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (t is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at lines 3-4, characters 27-30
          which is expected to be "total".
@@ -30,7 +30,7 @@ end;;
 Line 4, characters 17-23:
 4 |     match x with Roll f -> f x
                      ^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (t is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at lines 3-4, characters 27-30
          which is expected to be "total".
@@ -45,7 +45,7 @@ end;;
 Line 3, characters 45-50:
 3 |   let (self_apply @ total) (x : t @ total) = x.run x
                                                  ^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (t is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 3, characters 27-52
          which is expected to be "total".
@@ -61,7 +61,7 @@ end;;
 Line 5, characters 8-14:
 5 |     let Roll f = x in f x
             ^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (t is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at lines 4-5, characters 27-25
          which is expected to be "total".

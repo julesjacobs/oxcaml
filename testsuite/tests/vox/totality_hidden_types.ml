@@ -27,7 +27,7 @@ type (_, _) eq = Refl : ('a, 'a) eq
 Line 6, characters 43-54:
 6 |   let (use @ total) (x : t) = match x with Pack (v, f) -> f v
                                                ^^^^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (a constructor has an existential type, which could be the matched type itself) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 6, characters 20-61
          which is expected to be "total".
@@ -81,7 +81,7 @@ end;;
 Line 3, characters 43-54:
 3 |   let (use @ total) (x : t) = match x with Pack (v, f) -> f v
                                                ^^^^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (a constructor has an existential type, which could be the matched type itself) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 3, characters 20-61
          which is expected to be "total".
@@ -98,7 +98,7 @@ end;;
 Line 4, characters 43-54:
 4 |   let (use @ total) (x : t) = match x with Pack (v, W) -> v x
                                                ^^^^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (a constructor has an existential type, which could be the matched type itself) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 4, characters 20-61
          which is expected to be "total".
@@ -126,7 +126,7 @@ end;;
 Line 3, characters 43-57:
 3 |   let (use @ total) (x : t) = match x with Pack (v, Refl) -> v x
                                                ^^^^^^^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (a constructor has an existential type, which could be the matched type itself) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 3, characters 20-64
          which is expected to be "total".
@@ -155,7 +155,7 @@ end;;
 Line 5, characters 43-54:
 5 |   let (use @ total) (x : t) = match x with Pack (_, _) -> 0
                                                ^^^^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (a constructor has an existential type, which could be the matched type itself) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 5, characters 20-59
          which is expected to be "total".
@@ -170,7 +170,7 @@ end;;
 Line 4, characters 43-54:
 4 |   let (use @ total) (x : t) = match x with Pack (_, _) -> 0
                                                ^^^^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (a constructor has an existential type, which could be the matched type itself) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 4, characters 20-59
          which is expected to be "total".
@@ -186,7 +186,7 @@ end;;
 Line 4, characters 49-50:
 4 |   let (use @ total) (k : int key) = match k with K -> 0 | _ -> 1
                                                      ^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (key is an extensible type) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 4, characters 20-64
          which is expected to be "total".
@@ -230,7 +230,7 @@ end;;
 Line 9, characters 45-53:
 9 |   let (use @ total) (x : M.t) = match x with M.Roll _ -> 0
                                                  ^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (M.u is abstract and its kind does not say mod logical) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 9, characters 20-58
          which is expected to be "total".
@@ -274,7 +274,7 @@ Warning 220 [redundant-modality]: This modality is redundant.
 Line 11, characters 45-53:
 11 |   let (use @ total) (x : M.t) = match x with M.Roll _ -> 0
                                                   ^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (M.u is abstract and its kind does not say mod logical) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 11, characters 20-58
          which is expected to be "total".
@@ -319,7 +319,7 @@ end;;
 Line 3, characters 43-49:
 3 |   let (use @ total) (x : t) = match x with Roll _ -> 0
                                                ^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (X.u is abstract and its kind does not say mod logical) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 3, characters 20-54
          which is expected to be "total".
@@ -354,7 +354,7 @@ end;;
 Line 11, characters 45-53:
 11 |   let (use @ total) (x : M.t) = match x with M.Roll _ -> 0
                                                   ^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (M.u is abstract and its kind does not say mod logical) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 11, characters 20-58
          which is expected to be "total".

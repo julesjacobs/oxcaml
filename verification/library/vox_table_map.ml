@@ -1,7 +1,7 @@
 module S = Vox_sequence
 
 module type Key = sig
-  type t : immutable_data [@@total_matchable]
+  type t : logical_data
   val equal : t -> t -> bool @@ total
   val hash : t -> int @@ total
   val reflexive : (x : t) -> {u : unit | equal x x} @@ total

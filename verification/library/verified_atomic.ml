@@ -1,12 +1,12 @@
 module type Invariant = sig
-  type payload : immutable_data [@@total_matchable]
-  type key : void [@@total_matchable]
+  type payload : logical_data
+  type key : void mod logical
   val holds : key @ immutable -> int @ immutable ->
     payload Ghost_pref.heap @ immutable -> bool @ ghost
     @@ total
 end
 module Make (I : Invariant) = struct
-  type t : immutable_data [@@total_matchable]
+  type t : logical_data
   external key : t @ local immutable -> I.key @ immutable ghost
     @@ total = "caml_vox_atomic_key_bytecode" "caml_vox_atomic_key"
   type ('a : immediate) result = #{

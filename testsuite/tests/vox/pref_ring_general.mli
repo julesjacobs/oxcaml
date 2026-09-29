@@ -48,7 +48,7 @@ type built = { sentinel : node @@ aliased; nodes : node list @@ aliased ghost;
   state : node option Pref.token }
 
 module Owned : sig
-  type t : value & void & void [@@total_matchable]
+  type t : (value & void & void) mod logical
   val model : t @ local immutable total ghost -> node list @ ghost @@ total
   val sentinel : t @ local immutable total ghost -> node @ ghost @@ total
   val heap : t @ local immutable total ghost -> node option Pref.heap @ ghost @@ total

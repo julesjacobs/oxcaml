@@ -1,11 +1,11 @@
 module type Payload = sig
-  type t : value mod portable contended [@@total_matchable]
-  type model : immutable_data [@@total_matchable]
+  type t : value mod portable contended logical
+  type model : logical_data
   val snapshot : t @ local immutable -> model @ immutable total ghost @@ total
 end
 
 module Make (V : Payload) = struct
-  type t : immutable_data [@@total_matchable]
+  type t : logical_data
   type contents : immutable_data = V.model option
   type 'a step = { value : 'a; state : contents Ghost_pref.token @@ ghost }
 
@@ -50,7 +50,7 @@ module Make (V : Payload) = struct
 end
 
 module Slot = struct
-  type ('a : value mod portable contended) t : immutable_data [@@total_matchable]
+  type ('a : value mod portable contended) t : logical_data
   type 'a step = { value : 'a; state : bool Ghost_pref.token @@ ghost }
   external location : 'a t @ local immutable -> bool Ghost_pref.t @ immutable
     ghost

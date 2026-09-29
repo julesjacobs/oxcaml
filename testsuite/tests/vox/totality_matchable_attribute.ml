@@ -4,15 +4,15 @@
  expect;
 *)
 
-(* The [@@total_matchable] guarantee closes the abstract-consumer route: an
-   abstract type whose implementation hides a negative recursion (a function
-   that consumes the type and reaches back) may NOT be matched in total code,
-   even through a positive field, unless its declaration carries the checked
-   guarantee. The guarantee is verified where the type is defined, with its
-   representation visible; a negatively recursive type cannot carry it, but a
-   positively recursive one (a tree, a list, a functional map) can. Signature
-   inclusion lets an interface promise it only when the implementation has it,
-   by attribute or by computation. See negative_totality.ml and
+(* Logicality closes the abstract-consumer route. Total code may look inside a
+   value only if its type is logical (its values form a set), and a type is
+   logical only if its components are. An abstract type is logical only if its
+   kind says so ([value mod logical], [logical_data], ...), and
+   inclusion checks that claim against the implementation like any other kind
+   bound. An abstract type whose implementation hides a negative recursion (a
+   function that consumes the type and reaches back) cannot make that claim,
+   so a container holding it may not be matched in total code. A recursive
+   type is logical only if it is [@@inductive]. See negative_totality.ml and
    totality_hidden_types.ml for the underlying totality checks. *)
 
 (* The abstract-consumer knot: [u = t -> unit] is hidden behind an abstract
@@ -34,14 +34,14 @@ end;;
 Line 11, characters 45-53:
 11 |   let (use @ total) (x : M.t) = match x with M.Roll _ -> 0
                                                   ^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (M.u is abstract and its kind does not say mod logical) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 11, characters 20-58
          which is expected to be "total".
 |}]
 
-(* An immediate abstract type cannot be a function or the boxed matched type,
-   so it needs no attribute. *)
+(* An immediate abstract type cannot be a function or the boxed matched type;
+   [immediate] includes [logical]. *)
 module Abstract_consumer_immediate = struct
   module M : sig
     type u : immediate
@@ -67,11 +67,11 @@ module Abstract_consumer_immediate :
   end
 |}]
 
-(* A genuinely opaque data type may carry the guarantee, and then total code
+(* A genuinely opaque data type may be declared logical, and then total code
    may match a container that holds it. *)
 module Attributed_opaque = struct
   module M : sig
-    type u [@@total_matchable]
+    type u : value mod logical
     type t = Roll of u
     val v : u
   end = struct
@@ -84,17 +84,18 @@ end;;
 [%%expect{|
 module Attributed_opaque :
   sig
-    module M : sig type u type t = Roll of u val v : u end
+    module M :
+      sig type u : value mod logical type t = Roll of u val v : u end
     val use : M.t -> int
   end
 |}]
 
-(* A boxed [immutable_data] data type also may carry it: [immutable_data] alone
-   does not make a hidden type safe (it can hold a function), but the checked
-   guarantee, verified against the implementation, does. *)
+(* [immutable_data] alone says nothing about logicality: a non-inductive
+   recursive type is immutable data. With [mod logical] the claim is checked
+   against the implementation. *)
 module Attributed_immutable_data = struct
   module M : sig
-    type u : immutable_data [@@total_matchable]
+    type u : logical_data
     type t = Roll of u
   end = struct
     type u = int list
@@ -105,16 +106,17 @@ end;;
 [%%expect{|
 module Attributed_immutable_data :
   sig
-    module M : sig type u : immutable_data type t = Roll of u end
+    module M : sig type u : logical_data type t = Roll of u end
     val use : M.t -> int
   end
 |}]
 
-(* Positive recursion is fine for the guarantee: a recursive tree is knot-free.
-   Total code may match a container holding the abstract tree. *)
+(* A recursive tree is logical only if it is [@@inductive], which makes its
+   values finite. Without the attribute (possibly cyclic values) the claim is
+   refused; see Attributed_inductive below. *)
 module Attributed_recursive = struct
   module M : sig
-    type tree [@@total_matchable]
+    type tree : value mod logical
     type t = Wrap of tree
     val leaf : tree
   end = struct
@@ -125,18 +127,66 @@ module Attributed_recursive = struct
   let (use @ total) (x : M.t) = match x with M.Wrap _ -> 0
 end;;
 [%%expect{|
-module Attributed_recursive :
+Lines 6-10, characters 8-5:
+ 6 | ........struct
+ 7 |     type tree = Leaf | Node of tree * int * tree
+ 8 |     type t = Wrap of tree
+ 9 |     let leaf = Leaf
+10 |   end
+Error: Signature mismatch:
+       Modules do not match:
+         sig
+           type tree = Leaf | Node of tree * int * tree
+           type t = Wrap of tree
+           val leaf : tree
+         end
+       is not included in
+         sig
+           type tree : value mod logical
+           type t = Wrap of tree
+           val leaf : tree
+         end
+       Type declarations do not match:
+         type tree = Leaf | Node of tree * int * tree
+       is not included in
+         type tree : value mod logical
+       The kind of the first is immutable_data
+         because of the definition of tree at line 7, characters 4-48.
+       But the kind of the first must be a subkind of value mod logical
+         because of the definition of tree at line 3, characters 4-33.
+       The first is not logical: tree is recursive but not [@@inductive].
+|}]
+
+module Attributed_inductive = struct
+  module M : sig
+    type tree : value mod logical
+    type t = Wrap of tree
+    val leaf : tree
+  end = struct
+    type tree = Leaf | Node of tree * int * tree [@@inductive]
+    type t = Wrap of tree
+    let leaf = Leaf
+  end
+  let (use @ total) (x : M.t) = match x with M.Wrap _ -> 0
+end;;
+[%%expect{|
+module Attributed_inductive :
   sig
-    module M : sig type tree type t = Wrap of tree val leaf : tree end
+    module M :
+      sig
+        type tree : value mod logical
+        type t = Wrap of tree
+        val leaf : tree
+      end
     val use : M.t -> int
   end
 |}]
 
-(* Inclusion refuses the guarantee when the implementation is negatively
-   recursive (would forge it). *)
+(* Inclusion refuses the claim when the implementation is negatively recursive
+   (would forge it). *)
 module False_attribute = struct
   module M : sig
-    type u [@@total_matchable]
+    type u : value mod logical
     type t = Roll of u
   end = struct
     type u = t -> int
@@ -153,31 +203,37 @@ Error: Signature mismatch:
        Modules do not match:
          sig type u = t -> int and t = Roll of u end
        is not included in
-         sig type u type t = Roll of u end
+         sig type u : value mod logical type t = Roll of u end
        Type declarations do not match:
          type u = t -> int
        is not included in
-         type u
-       Their total-matchability guarantees differ;
-       an interface may promise
-       "[@@total_matchable]" only if the implementation's declaration does.
+         type u : value mod logical
+       The kind of the first is value non_float mod aliased immutable
+         because it's a function type.
+       But the kind of the first must be a subkind of value mod logical
+         because of the definition of u at line 3, characters 4-30.
+       The first is not logical: t is recursive but not [@@inductive].
 |}]
 
-(* The definition site itself rejects a [@@total_matchable] that its own
+(* The definition site itself rejects a [mod logical] annotation that its own
    representation refutes (a negatively recursive type). *)
 module Self_negative = struct
-  type t = Roll of (t -> int) [@@total_matchable]
+  type t : value mod logical = Roll of (t -> int)
 end;;
 [%%expect{|
 Line 2, characters 2-49:
-2 |   type t = Roll of (t -> int) [@@total_matchable]
+2 |   type t : value mod logical = Roll of (t -> int)
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Invalid "[@@total_matchable]" declaration: total code cannot pattern-match this type, because eliminating it could reach the type itself.
+Error: The kind of type "t" is value non_float mod immutable
+         because it's a boxed variant type.
+       But the kind of type "t" must be a subkind of value mod logical
+         because of the annotation on the declaration of the type t.
+       It is not logical: t is recursive but not [@@inductive].
 |}]
 
-(* A [with type] constraint may not forge the guarantee either. *)
+(* A [with type] constraint may not forge the claim either. *)
 module type Hidden = sig
-  type u [@@total_matchable]
+  type u : value mod logical
   type t = Roll of u
 end
 module Constraint_forge = struct
@@ -185,17 +241,27 @@ module Constraint_forge = struct
   module type S = Hidden with type u = bad -> int
 end;;
 [%%expect{|
-module type Hidden = sig type u type t = Roll of u end
-Line 7, characters 30-49:
+module type Hidden = sig type u : value mod logical type t = Roll of u end
+Line 7, characters 18-49:
 7 |   module type S = Hidden with type u = bad -> int
-                                  ^^^^^^^^^^^^^^^^^^^
-Error: This constraint requires a type with a checked total-matchability guarantee.
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: In this "with" constraint, the new definition of "u"
+       does not match its original definition in the constrained signature:
+       Type declarations do not match:
+         type u = bad -> int
+       is not included in
+         type u : value mod logical
+       The kind of the first is value non_float mod aliased immutable
+         because it's a function type.
+       But the kind of the first must be a subkind of value mod logical
+         because of the definition of u at line 2, characters 2-28.
+       The first is not logical: bad is recursive but not [@@inductive].
 |}]
 
 (* Round-trip through a compiled interface: a client matches a container that
-   holds another module's attributed abstract type. *)
+   holds another module's abstract logical type. *)
 module Producer : sig
-  type u [@@total_matchable]
+  type u : value mod logical
   type t = Hold of u
   val make : unit -> t
 end = struct
@@ -208,6 +274,7 @@ module Client = struct
   let (use @ total) (x : Producer.t) = match x with Producer.Hold _ -> 0
 end;;
 [%%expect{|
-module Producer : sig type u type t = Hold of u val make : unit -> t end
+module Producer :
+  sig type u : value mod logical type t = Hold of u val make : unit -> t end
 module Client : sig val use : Producer.t -> int end
 |}]

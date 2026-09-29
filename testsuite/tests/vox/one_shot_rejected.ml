@@ -105,7 +105,7 @@ Line 2, characters 39-40:
                                            ^
 Error: The value "x" has type "int ref" but an expression was expected of type
          "('a : value mod portable contended)"
-       The kind of int ref is mutable_data.
+       The kind of int ref is mutable_data mod logical.
        But the kind of int ref must be a subkind of
            value mod portable contended.
 |}, Principal{|
@@ -115,7 +115,7 @@ Line 2, characters 39-40:
 Error: The value "x" has type "int ref" but an expression was expected of type
          "('a : value mod portable contended)"
        The kind of int ref is
-           mutable_data with int @@ forkable unyielding many.
+           mutable_data mod logical with int @@ forkable unyielding many.
        But the kind of int ref must be a subkind of
            value mod portable contended.
 

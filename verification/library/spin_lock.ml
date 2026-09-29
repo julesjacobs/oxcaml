@@ -1,6 +1,6 @@
 module type Cell = sig
-  type payload : immutable_data [@@total_matchable]
-  type cell : immutable_data [@@total_matchable]
+  type payload : logical_data
+  type cell : logical_data
   val location : cell @ immutable -> payload Ghost_pref.t @ immutable ghost
     @@ total
   val full : payload @ immutable -> bool @ ghost @@ total

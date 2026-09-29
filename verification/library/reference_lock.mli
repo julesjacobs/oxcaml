@@ -3,7 +3,7 @@
 (** A nonnegative integer reference guarded by a strong sequentially
     consistent lock. Failure transfers no reference authority. Normal-return
     safety only: no fairness, exception recovery or termination guarantee. *)
-type t : immutable_data [@@total_matchable]
+type t : logical_data
 val location : t @ immutable -> int Ghost_pref.t @ immutable @@ total
 val owned : t @ immutable -> int Ghost_pref.heap @ immutable -> bool @ ghost @@ total
 val owned_def : (a : t) @ immutable -> (h : int Ghost_pref.heap) @ immutable ->

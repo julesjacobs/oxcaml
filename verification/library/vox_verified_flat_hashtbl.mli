@@ -52,7 +52,7 @@ module H = P.Heap
     Both functions are [total] and stateless: they terminate without
     raising, and their results depend only on their arguments. *)
 module type Key = sig
-  type t : immutable_data [@@total_matchable]
+  type t : logical_data
   val equal : t -> t -> bool @@ total
   val hash : t -> int @@ total
   val reflexive : (x : t) -> {u : unit | equal x x} @@ total
@@ -70,7 +70,7 @@ module Make (Key : Key) : sig
       maps with the same bindings built by different updates need not be
       equal, so compare them through [lookup] and [count]. *)
   module Map : sig
-    type ('a : immutable_data) t : immutable_data [@@total_matchable]
+    type ('a : immutable_data) t : logical_data with 'a
     val count : ('a : immutable_data). 'a t -> Bigint.t @@ total
     val empty : ('a : immutable_data). {map : 'a t | count map = 0Z} @@ total
     val lookup : ('a : immutable_data). 'a t -> Key.t -> 'a option @@ total
@@ -106,9 +106,10 @@ module Make (Key : Key) : sig
       (map : 'a t) -> {u : unit | 0Z <= count map} @ ghost @@ total
   end
 
-  type ('a : immutable_data) t : immutable_data [@@total_matchable]
-  type ('a : immutable_data) state : immutable_data [@@total_matchable]
-  type ('a : immutable_data) view : void mod total [@@total_matchable]
+  type ('a : immutable_data) t : logical_data with 'a
+  type ('a : immutable_data) state : logical_data
+    with 'a @@ global many total immutable
+  type ('a : immutable_data) view : void mod total logical with 'a
 
   val location : ('a : immutable_data). 'a t -> 'a state P.t @ ghost @@ total
   val version : ('a : immutable_data).

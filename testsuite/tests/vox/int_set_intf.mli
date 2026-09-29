@@ -1,5 +1,5 @@
 module type Operations = sig
-  type t : immutable_data [@@total_matchable]
+  type t : logical_data
 
   val empty : t
   val lookup : int -> t -> bool @@ total
