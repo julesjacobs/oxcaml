@@ -518,6 +518,7 @@ and with_bounds_types
 and mod_bounds =
   { crossing : Mode.Crossing.t;
     externality: Jkind_axis.Externality.t;
+    logicality: Jkind_axis.Logicality.t;
   }
 
 and 'd with_bounds =
@@ -1001,11 +1002,6 @@ type type_declaration =
     type_inductive: bool;
     type_phantom_parameters: bool;
     (* Whether the declaration has a checked [@@inductive] guarantee. *)
-    type_total_matchable: bool;
-    (* Whether the declaration has a checked [@@total_matchable] guarantee:
-       total code may pattern-match a value of this type, so an abstract type
-       carrying it is a safe component of a matched type. See
-       [Ctype.declaration_can_pattern_match_total]. *)
     type_uid: Uid.t;
     type_unboxed_version : type_declaration option;
     (* stores the unboxed version of that this type introduces: this is [Some]

@@ -315,12 +315,19 @@ val expand_head_once: Env.t -> type_expr -> type_expr
 val expand_head: Env.t -> type_expr -> type_expr
 val is_inductive: Env.t -> type_expr -> bool
 val can_pattern_match_total: Env.t -> type_expr -> bool
+(* Why total code may not match a value of this type, for error messages;
+   [None] when it may. With [~component:true], why the type is not logical as
+   a component (its kind is not [mod logical]), when a culprit is found. *)
+val not_logical_reason: ?component:bool -> Env.t -> type_expr -> string option
 val can_unpack_total: Env.t -> type_expr -> bool
-(* Verify a declaration's [@@total_matchable] guarantee at its definition. *)
-val declaration_total_matchable: Env.t -> Path.t -> type_declaration -> bool
-(* Whether a type is a safe [@@total_matchable] component (used to check a
-   [with type] constraint against a signature type carrying the guarantee). *)
-val type_is_total_matchable: Env.t -> type_expr -> bool
+(* Whether a jkind rules out heap pointers (so a type of it can be neither a
+   function nor a boxed nominal type). *)
+val jkind_cannot_be_pointer: Env.t -> 'd jkind -> bool
+(* Whether an abstract declaration is declared logical by its kind, or its
+   kind rules out pointers. *)
+val abstract_declaration_is_logical: Env.t -> Path.t -> type_declaration -> bool
+(* Whether values of a jkind are run-time scalars: never pointers, not void. *)
+val jkind_is_scalar: Env.t -> 'd jkind -> bool
 val expand_head_opt: Env.t -> type_expr -> type_expr
 (** The compiler's own version of [expand_head] necessary for type-based
     optimisations. *)

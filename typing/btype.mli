@@ -350,19 +350,25 @@ module Jkind0 : sig
   module Mod_bounds : sig
     module Crossing = Mode.Crossing
     module Externality = Jkind_axis.Externality
+    module Logicality = Jkind_axis.Logicality
 
     type t = mod_bounds =
       { crossing : Mode.Crossing.t;
         externality: Jkind_axis.Externality.t;
+        logicality: Jkind_axis.Logicality.t;
       }
 
-    val create : Crossing.t -> externality:Externality.t -> t
+    (** [logicality] defaults to [Maybe_logical], which promises nothing. *)
+    val create :
+      ?logicality:Logicality.t -> Crossing.t -> externality:Externality.t -> t
 
     val crossing : t -> Crossing.t
     val externality : t -> Externality.t
+    val logicality : t -> Logicality.t
 
     val set_crossing : Crossing.t -> t -> t
     val set_externality : Externality.t -> t -> t
+    val set_logicality : Logicality.t -> t -> t
 
     (** [set_max_in_set bounds axes] sets all the axes in [axes] to their [max]
         within [bounds] *)
@@ -499,6 +505,10 @@ module Jkind0 : sig
 
       (** Immutable non-float values that don't contain functions. *)
       val immutable_data : t
+
+      (** Vox: [immutable_data mod logical]. Immutable data whose values form
+          a set in the mathematical sense (see [Jkind_axis.Logicality]). *)
+      val logical_data : t
 
       (** Exceptions; crossing portability, contention, statelessness and
           visibility. *)
@@ -667,6 +677,8 @@ module Jkind0 : sig
     val of_builtin :
       why:Jkind_intf.History.creation_reason ->
       Const.Builtin.t -> ('a * disallowed) jkind
+
+    val set_logicality : Jkind_axis.Logicality.t -> 'd jkind -> 'd jkind
 
     val fresh_jkind :
       (allowed * allowed) jkind_desc ->

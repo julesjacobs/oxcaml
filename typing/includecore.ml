@@ -472,7 +472,6 @@ type type_mismatch =
   | Arity
   | Inductiveness
   | Phantom_parameters
-  | Total_matchable
   | Privacy of privacy_mismatch
   | Kind of kind_mismatch
   | Constraint of Errortrace.equality_error
@@ -488,6 +487,7 @@ type type_mismatch =
   | With_null_representation of position
   | Fixed_representation of position
   | Jkind of Ikind.subjkind_error
+  | Not_logical of Ikind.subjkind_error * string
   | Unsafe_mode_crossing of unsafe_mode_crossing_mismatch
 
 type jkind_mismatch =
@@ -874,10 +874,6 @@ let report_type_mismatch first second decl env ppf err =
   | Inductiveness ->
       pr "Their inductive guarantees differ;@ the guarantee can only be \
           hidden@ behind an abstract type."
-  | Total_matchable ->
-      pr "Their total-matchability guarantees differ;@ an interface may \
-          promise@ %a only if the implementation's declaration does."
-        Style.inline_code "[@@total_matchable]"
   | Privacy err ->
       report_privacy_mismatch ppf err
   | Kind err ->
@@ -933,6 +929,15 @@ let report_type_mismatch first second decl env ppf err =
        | None -> report ()
        | Some printing_env ->
          Printtyp.wrap_printing_env ~error:true printing_env report)
+  | Not_logical (v, reason) ->
+      let report () =
+        Ikind.report_subjkind_error_with_name ~name:first env ppf v
+      in
+      (match Ikind.subjkind_error_printing_env v with
+       | None -> report ()
+       | Some printing_env ->
+         Printtyp.wrap_printing_env ~error:true printing_env report);
+      pr "@ @[The first is not logical:@ %s.@]" reason
   | Unsafe_mode_crossing mismatch ->
     pr "They have different unsafe mode crossing behavior:@,@[<v 2>%a@]"
       (fun ppf (first, second, mismatch) ->
@@ -1698,17 +1703,13 @@ let type_manifest env ty1 ty2 priv2 kind2 =
    types, this is the case as soon as the two type declarations share the same
    arity and the privacy of [td1] is less than the privacy of [td2] (consider a
    context E where all type constructors are equal). *)
-let type_declarations_consistency env path decl1 decl2 =
+let type_declarations_consistency env decl1 decl2 =
   if decl1.type_arity <> decl2.type_arity then Some Arity
   else if decl1.type_inductive <> decl2.type_inductive
        && (decl2.type_inductive || not (Btype.type_kind_is_abstract decl2))
   then Some Inductiveness
   else if decl2.type_phantom_parameters && not decl1.type_phantom_parameters
   then Some Phantom_parameters
-  else if decl2.type_total_matchable
-       && not (decl1.type_total_matchable
-               || Ctype.declaration_total_matchable env path decl1)
-  then Some Total_matchable
   else match privacy_mismatch env decl1 decl2 with
     | Some err -> Some (Privacy err)
     | None -> None
@@ -1722,7 +1723,7 @@ let type_declarations ?(equality = false) ~loc env ~mark name
     loc
     decl1.type_attributes decl2.type_attributes
     name;
-  let err = type_declarations_consistency env path decl1 decl2 in
+  let err = type_declarations_consistency env decl1 decl2 in
   if err <> None then err else
   (* Step 1 from the Note *)
   let err =
@@ -1811,7 +1812,17 @@ let type_declarations ?(equality = false) ~loc env ~mark name
           (* Note that [decl2.type_jkind] is an upper bound *)
           match Ctype.check_decl_jkind env decl1 decl2.type_jkind with
            | Ok _ -> None
-           | Error v -> Some (Jkind v)
+           | Error v ->
+             let reason =
+               if Jkind.requires_logical decl2.type_jkind then
+                 Ctype.not_logical_reason ~component:true env
+                   (Btype.newgenty
+                      (Tconstr (path, decl1.type_params, ref Mnil)))
+               else None
+             in
+             match reason with
+             | Some reason -> Some (Not_logical (v, reason))
+             | None -> Some (Jkind v)
         else None
     | (Type_variant (cstrs1, rep1, umc1), Type_variant (cstrs2, rep2, umc2)) -> begin
         if mark then begin

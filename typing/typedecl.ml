@@ -399,7 +399,6 @@ in
       type_unboxed_default = false;
       type_inductive = false;
       type_phantom_parameters = false;
-      type_total_matchable = false;
       type_uid = Uid.unboxed_version uid;
       type_unboxed_version = None;
     }
@@ -421,7 +420,6 @@ in
       type_unboxed_default = false;
       type_inductive = false;
       type_phantom_parameters = false;
-      type_total_matchable = false;
       type_uid = uid;
       type_unboxed_version;
     }
@@ -1319,9 +1317,6 @@ let transl_declaration env sdecl (id, uid) =
         type_phantom_parameters =
           Attr_helper.has_no_payload_attribute
             "phantom_parameters" sdecl.ptype_attributes;
-        type_total_matchable =
-          Attr_helper.has_no_payload_attribute
-            "total_matchable" sdecl.ptype_attributes;
         type_uid = uid;
         type_unboxed_version = None;
         (* Unboxed versions are computed after all declarations have been
@@ -1528,7 +1523,6 @@ let derive_unboxed_version env path_in_group_has_unboxed_version decl =
         type_unboxed_default = false;
         type_inductive = false;
         type_phantom_parameters = false;
-        type_total_matchable = false;
         type_uid = Uid.unboxed_version decl.type_uid;
         type_unboxed_version = None;
       }
@@ -3735,6 +3729,33 @@ let check_redefined_unit (td: Parsetree.type_declaration) =
    jkind.
 *)
 
+(* Replace the logicality of a declaration's (normalized) jkind by the one
+   ikinds infers from its representation. Normalization of with-bounds cuts
+   recursion off at the best bound, which is right for mode crossing but not
+   for logicality: see Note [Logicality of recursive types] in ikind.ml. A
+   parameter whose logicality bears on the declaration's gets a [with] bound
+   on the logicality axis. *)
+let set_inferred_logicality env path decl jkind =
+  match decl.type_kind, decl.type_manifest with
+  | (Type_variant _ | Type_record _ | Type_record_unboxed_product _), _ ->
+    let logicality, bearing = Ikind.declaration_logicality ~env ~path in
+    let jkind = Jkind.set_logicality logicality jkind in
+    if List.compare_lengths bearing decl.type_params <> 0
+    then Jkind.set_logicality Maybe_logical jkind
+    else
+      List.fold_left2
+        (fun jkind param bears ->
+          if bears then Jkind.add_logicality_with_bound param jkind else jkind)
+        jkind decl.type_params bearing
+  | (Type_abstract _ | Type_open), Some _ ->
+    (* An abbreviation has the kind of its manifest. Only correct a logicality
+       that normalization got wrong by cutting off recursion. *)
+    begin match Ikind.declaration_logicality ~env ~path with
+    | Maybe_logical, _ -> Jkind.set_logicality Maybe_logical jkind
+    | Logical, _ -> jkind
+    end
+  | (Type_abstract _ | Type_open), None -> jkind
+
 (* Normalize the jkinds in a list of (potentially mutually recursive) type declarations *)
 let normalize_decl_jkinds env decls =
   let rec normalize_decl_jkind env original_decl allow_any_crossing decl path =
@@ -3753,6 +3774,7 @@ let normalize_decl_jkinds env decls =
         ~context:normalization_context
         env
         decl.type_jkind
+      |> set_inferred_logicality env path decl
     in
     let decl =
       { decl with
@@ -3799,6 +3821,9 @@ let normalize_decl_jkinds env decls =
           let type_jkind =
             Jkind.unsafely_set_bounds env ~from:original_decl.type_jkind
               decl.type_jkind
+            (* The annotation's bounds are trusted on the modal axes only;
+               logicality still comes from the representation. *)
+            |> set_inferred_logicality env path decl
           in
           let umc = Some (Jkind.to_unsafe_mode_crossing type_jkind) in
           let type_kind =
@@ -3959,30 +3984,16 @@ let check_inductive_decl env ~single id decl =
           if Option.is_some cd.cd_res then
             reject "GADT constructors are not supported";
           match cd.cd_args with
-          | Cstr_record _ ->
-              reject "inline-record constructors are not supported"
+          | Cstr_record labels ->
+              (* An inline record's fields are the constructor's fields. *)
+              List.iter (fun (label : Types.label_declaration) ->
+                check TypeSet.empty true label.ld_type) labels
           | Cstr_tuple args ->
               List.iter (fun (arg : Types.constructor_argument) ->
                 check TypeSet.empty true arg.ca_type) args)
           constructors
     | _ -> reject "a closed variant declaration is required"
   end
-
-(* A [@@total_matchable] declaration promises that total code may pattern-match
-   a value of the type, so that an abstract export of it is a safe component of
-   another matched type. Verify it here, where the manifest/representation is
-   visible: eliminating the type must not reach the type itself through a knot.
-   An abstract type with no manifest is a safe leaf. Inclusion (see
-   [Includecore.type_declarations_consistency]) then lets an interface carry
-   the guarantee only if the implementation's declaration does. *)
-let check_total_matchable_decl env id decl =
-  if decl.type_total_matchable
-     && not (Ctype.declaration_total_matchable env (Path.Pident id) decl)
-  then
-    Location.raise_errorf ~loc:decl.type_loc
-      "Invalid %a declaration: total code cannot pattern-match this type, \
-       because eliminating it could reach the type itself."
-      Style.inline_code "[@@total_matchable]"
 
 (* Translate a set of type declarations, mutually recursive or not *)
 let transl_type_decl env rec_flag sdecl_list =
@@ -4209,8 +4220,7 @@ let transl_type_decl env rec_flag sdecl_list =
   let final_env = add_types_to_env ~shapes:(Some shapes) decls env in
   List.iter (fun (id, decl) ->
     check_phantom_parameters_decl final_env decl;
-    check_inductive_decl final_env ~single:(List.length decls = 1) id decl;
-    check_total_matchable_decl final_env id decl)
+    check_inductive_decl final_env ~single:(List.length decls = 1) id decl)
     decls;
   (* Keep original declaration *)
   let final_decls =
@@ -5221,13 +5231,6 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
      && not (Ctype.is_inductive env man) then
     Location.raise_errorf ~loc
       "This constraint requires a type with a checked inductive guarantee.";
-  if (sig_decl.type_total_matchable
-      || Attr_helper.has_no_payload_attribute
-           "total_matchable" sdecl.ptype_attributes)
-     && not (Ctype.type_is_total_matchable env man) then
-    Location.raise_errorf ~loc
-      "This constraint requires a type with a checked total-matchability \
-       guarantee.";
   (* In the second part, we check the consistency between the two
      declarations and compute a "merged" declaration; we now need to
      work in the larger signature environment [sig_env], because
@@ -5294,7 +5297,6 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
           type_unboxed_default = false;
           type_inductive = false;
           type_phantom_parameters = false;
-          type_total_matchable = false;
           type_uid = Uid.unboxed_version type_uid;
           type_unboxed_version = None;
         }
@@ -5339,10 +5341,6 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
         sig_decl.type_phantom_parameters
         || Attr_helper.has_no_payload_attribute
              "phantom_parameters" sdecl.ptype_attributes;
-      type_total_matchable =
-        sig_decl.type_total_matchable
-        || Attr_helper.has_no_payload_attribute
-             "total_matchable" sdecl.ptype_attributes;
       type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
       type_unboxed_version;
     }
@@ -5381,7 +5379,6 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
       type_unboxed_default = new_sig_decl.type_unboxed_default;
       type_inductive = new_sig_decl.type_inductive;
       type_phantom_parameters = new_sig_decl.type_phantom_parameters;
-      type_total_matchable = new_sig_decl.type_total_matchable;
       type_is_newtype = new_sig_decl.type_is_newtype;
       type_expansion_scope = new_sig_decl.type_expansion_scope;
       type_loc = new_sig_decl.type_loc;
@@ -5455,7 +5452,6 @@ let transl_package_constraint ~loc ty =
     type_unboxed_default = false;
     type_inductive = false;
     type_phantom_parameters = false;
-    type_total_matchable = false;
     type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
     type_unboxed_version = None;
   }
@@ -5483,7 +5479,6 @@ let abstract_type_decl ~injective ~jkind ~params =
       type_unboxed_default = false;
       type_inductive = false;
       type_phantom_parameters = false;
-      type_total_matchable = false;
       type_uid = Uid.internal_not_actually_unique;
       type_unboxed_version =
         Some {
@@ -5503,7 +5498,6 @@ let abstract_type_decl ~injective ~jkind ~params =
           type_unboxed_default = false;
           type_inductive = false;
           type_phantom_parameters = false;
-          type_total_matchable = false;
           type_uid = Uid.internal_not_actually_unique;
           type_unboxed_version = None;
         };
@@ -5523,6 +5517,14 @@ let approx_type_decl env sdecl_list =
            ~context:(Type_declaration path)
            sdecl
          |> Option.value ~default:(Jkind.Builtin.value ~why:Default_type_jkind)
+       in
+       (* These approximations type the signatures of recursive modules, so
+          a declared logicality could justify itself through the recursion
+          ([A.t = Roll of B.u] and [B.u : immutable_data = A.t -> int]).
+          Assume nothing: see [Typemod.transl_recmodule_modtypes]. *)
+       let jkind =
+         if Ctype.jkind_is_scalar env jkind then jkind
+         else Jkind.set_logicality Maybe_logical jkind
        in
        let params =
          List.map (fun (param, _) -> get_type_param_jkind env path param)
@@ -6122,14 +6124,27 @@ let report_error ~loc = function
       in
       fprintf ppf "type %a" Style.inline_code path_end
     in
+    let not_logical =
+      if Ikind.subjkind_error_on_logicality v then
+        match Env.find_type dpath env with
+        | decl ->
+          Ctype.not_logical_reason ~component:true env
+            (Btype.newgenty (Tconstr (dpath, decl.type_params, ref Mnil)))
+        | exception Not_found -> None
+      else None
+    in
     Location.errorf ~loc "%t" (fun ppf ->
       let report () =
         Ikind.report_subjkind_error_with_offender ~offender env ppf v
       in
-      match Ikind.subjkind_error_printing_env v with
-      | None -> report ()
-      | Some printing_env ->
-        Printtyp.wrap_printing_env ~error:true printing_env report)
+      (match Ikind.subjkind_error_printing_env v with
+       | None -> report ()
+       | Some printing_env ->
+         Printtyp.wrap_printing_env ~error:true printing_env report);
+      Option.iter
+        (fun reason ->
+          fprintf ppf "@ @[It is not logical:@ %s.@]" reason)
+        not_logical)
   | Jkind_mismatch_of_type (env, ty, v) ->
     let offender ppf = fprintf ppf "type %a"
         (Style.as_inline_code Printtyp.type_expr) ty in
