@@ -105,6 +105,12 @@ module Typ :
 
     val force_poly: core_type -> core_type
 
+    val map_expression_types:
+      ((core_type -> core_type) -> expression -> expression) ref
+    (** Apply a function to the outermost types inside an expression. Set by
+        [Ast_mapper]; used by [varify_constructors] on refinement
+        predicates. *)
+
     val varify_constructors: str list -> core_type -> core_type
     (** [varify_constructors newtypes te] is type expression [te], of which
         any of nullary type constructor [tc] is replaced by type variable of

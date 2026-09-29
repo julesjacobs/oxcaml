@@ -144,8 +144,29 @@ let check_parameter self body index root =
   let it = iterator (Ident.Map.singleton root Root) in
   it.expr it body
 
+(* A [let rec] whose function never refers to itself does not recurse. *)
+let refers_to self exp =
+  let exception Found in
+  let is_self path = Path.same path (Path.Pident self) in
+  let default = Tast_iterator.default_iterator in
+  let it =
+    { default with
+      expr = (fun it exp ->
+        match exp.exp_desc with
+        | Texp_ident { path; _ } when is_self path -> raise Found
+        | _ -> default.expr it exp);
+      binding_op = (fun it op ->
+        if is_self op.bop_op_path then raise Found;
+        default.binding_op it op) }
+  in
+  match it.expr it exp with
+  | () -> false
+  | exception Found -> true
+
 let check self exp =
   try
+    Recursive_function.check_predicates self exp;
+    if not (refers_to self exp) then Ok () else
     let params, body = Recursive_function.parameters exp in
     let candidates =
       List.mapi (fun index (id, pat) -> index, id, pat) params

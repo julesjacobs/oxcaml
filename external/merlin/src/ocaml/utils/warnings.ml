@@ -59,6 +59,17 @@ type redundant_modifier_reason =
   | Default_bound
   | Implied_by of string
 
+(* A proof step whose facts no refinement proof used (warning 227). *)
+type unused_proof_step =
+  | Unused_lemma_call of string  (* the function called *)
+  | Unused_assume
+  | Unused_argument of string  (* the parameter *)
+
+type trusted_external_reason =
+  | Trusted_refinement
+  | Trusted_totality
+  | Trusted_total_cast
+
 type t =
   | Comment_start                           (*  1 *)
   | Comment_not_end                         (*  2 *)
@@ -85,8 +96,10 @@ type t =
   | Useless_record_with of string           (* 23 *)
   | Bad_module_name of string               (* 24 *)
   | All_clauses_guarded                     (* 8, used to be 25 *)
-  | Unused_var of { name : string ; mutated : bool } (* 26 *)
-  | Unused_var_strict of { name : string ; mutated : bool } (* 27 *)
+  | Unused_var of { name : string ; mutated : bool ; refined_unit : bool }
+                                            (* 26 *)
+  | Unused_var_strict of
+      { name : string ; mutated : bool ; refined_unit : bool } (* 27 *)
   | Wildcard_arg_to_constant_constr         (* 28 *)
   | Eol_in_string                           (* 29 *)
   | Duplicate_definitions of string * string * string * string (*30 *)
@@ -170,6 +183,15 @@ type t =
   | Useless_valpoly                         (* 219 *)
   | Redundant_modality                      (* 220 *)
   | Unused_alert_disable of string          (* 221 *)
+  | Slow_refinement of { resources : int; threshold : int; limit : int }
+                                            (* 222 *)
+  | Unerased_ghost_body                     (* 223 *)
+  | Unerased_ghost_call                     (* 224 *)
+  | Redundant_ghost                         (* 225 *)
+  | Proof_only_binding of string            (* 226 *)
+  | Unused_proof_step of unused_proof_step   (* 227 *)
+  | Trusted_external of trusted_external_reason (* 228 *)
+  | Unverified_import of string            (* 229 *)
 
 (* If you remove a warning, leave a hole in the numbering.  NEVER change
    the numbers of existing warnings.
@@ -273,6 +295,14 @@ let number = function
   | Useless_valpoly -> 219
   | Redundant_modality -> 220
   | Unused_alert_disable _ -> 221
+  | Slow_refinement _ -> 222
+  | Unerased_ghost_body -> 223
+  | Unerased_ghost_call -> 224
+  | Redundant_ghost -> 225
+  | Proof_only_binding _ -> 226
+  | Unused_proof_step _ -> 227
+  | Trusted_external _ -> 228
+  | Unverified_import _ -> 229
 ;;
 (* DO NOT REMOVE the ;; above: it is used by
    the testsuite/ests/warnings/mnemonics.mll test to determine where
@@ -715,6 +745,45 @@ let descriptions = [
     description = "An attribute disabling an alert did not suppress any\n\
     \    occurrence of that alert.";
     since = since 5 4 };
+  { number = 222;
+    names = ["slow-refinement"];
+    description = "A refinement proof used more solver resources than the\n\
+    \    warning threshold (see -smt-resource-warning).";
+    since = since 5 4 };
+  { number = 223;
+    names = ["unerased-ghost-body"];
+    description = "A total function returns a ghost result, but its body is\n\
+    \    not wrapped in ghost_, so the body runs when the function is called.";
+    since = since 5 4 };
+  { number = 224;
+    names = ["unerased-ghost-call"];
+    description = "Real code calls a total function only to discard its ghost\n\
+    \    result; the call runs.";
+    since = since 5 4 };
+  { number = 225;
+    names = ["redundant-ghost"];
+    description = "ghost_ inside code that is already ghost.";
+    since = since 5 4 };
+  { number = 226;
+    names = ["proof-only-binding"];
+    description = "A local value is computed at run time but used only in\n\
+    \    ghost code.";
+    since = since 5 4 };
+  { number = 227;
+    names = ["unused-proof-step"];
+    description = "A lemma call, assume_ or refined argument whose facts no\n\
+    \    refinement proof in its function used (checked with unsat cores).";
+    since = since 5 4 };
+  { number = 228;
+    names = ["trusted-external"];
+    description = "An external declaration outside the verified library\n\
+    \    states a refinement or totality that the verifier assumes.";
+    since = since 5 4 };
+  { number = 229;
+    names = ["unverified-import"];
+    description = "A verified unit imports an interface whose compilation\n\
+    \    skipped verification (-smt-assume-verified).";
+    since = since 5 4 };
 ]
 
 let name_to_number =
@@ -1134,7 +1203,7 @@ let parse_options errflag s =
   alerts
 
 (* If you change these, don't forget to change them in man/ocamlc.m *)
-let defaults_w = "+a-4-7-9-27-29-30-32..42-44-45-48-50-60-66..70-74-221"
+let defaults_w = "+a-4-7-9-27-29-30-32..42-44-45-48-50-60-66..70-74-221-227"
 let defaults_warn_error = "-a"
 let default_disabled_alerts = [ "unstable"; "unsynchronized_access" ]
 
@@ -1253,12 +1322,19 @@ let message = function
   | All_clauses_guarded ->
       msg "this pattern-matching is not exhaustive.@ \
            All clauses in this pattern-matching are guarded."
-  | Unused_var { name = v; mutated = false }
-  | Unused_var_strict { name = v; mutated = false } ->
+  | Unused_var { name = v; mutated = false; refined_unit = false }
+  | Unused_var_strict { name = v; mutated = false; refined_unit = false } ->
       msg "unused variable %a."
         Style.inline_code v
-  | Unused_var { name = v; mutated = true }
-  | Unused_var_strict { name = v; mutated = true } ->
+  | Unused_var { name = v; mutated = false; refined_unit = true }
+  | Unused_var_strict { name = v; mutated = false; refined_unit = true } ->
+      msg "unused variable %a.@ \
+           Hint: the binding is unnecessary, because the fact in its@ \
+           refined type holds without the name;@ \
+           a statement such as %a suffices."
+        Style.inline_code v Style.inline_code "lemma x;"
+  | Unused_var { name = v; mutated = true; _ }
+  | Unused_var_strict { name = v; mutated = true; _ } ->
       msg "variable %a was mutated but never used."
         Style.inline_code v
   | Wildcard_arg_to_constant_constr ->
@@ -1625,6 +1701,51 @@ let message = function
   | Unused_alert_disable name ->
       msg "This attribute disables alert %a,@ \
            but it did not suppress any occurrence of the alert."
+        Style.inline_code name
+  | Slow_refinement { resources; threshold; limit } ->
+      msg "Proving this refinement used %d solver resource units,@ \
+           over the warning threshold of %d (the limit is %d).@ \
+           Split the proof with intermediate assertions or lemmas."
+        resources threshold limit
+  | Unerased_ghost_body ->
+      msg "This function's result is ghost, but its body is not wrapped in@ \
+           %a, so the body is computed when the function is called and its@ \
+           value may be thrown away.@ \
+           Wrap the body in %a to erase it."
+        Style.inline_code "ghost_" Style.inline_code "ghost_ (...)"
+  | Unerased_ghost_call ->
+      msg "This call is evaluated at run time only to discard its ghost@ \
+           result.@ \
+           Wrap the call in %a to erase it."
+        Style.inline_code "ghost_ (...)"
+  | Redundant_ghost ->
+      msg "This %a is redundant: the enclosing code is already ghost."
+        Style.inline_code "ghost_"
+  | Proof_only_binding name ->
+      msg "%a is computed at run time but used only in ghost code.@ \
+           Wrap its definition in %a to erase it."
+        Style.inline_code name Style.inline_code "ghost_ (...)"
+  | Unused_proof_step (Unused_lemma_call name) ->
+      msg "No refinement proof in this function used the fact from this@ \
+           call to %a."
+        Style.inline_code name
+  | Unused_proof_step Unused_assume ->
+      msg "No refinement proof in this function used the fact from this %a."
+        Style.inline_code "assume_"
+  | Unused_proof_step (Unused_argument name) ->
+      msg "No refinement proof in this function used the refinement of@ \
+           argument %a."
+        Style.inline_code name
+  | Trusted_external reason ->
+      msg "The verifier assumes this external's %s;@ nothing checks it."
+        (match reason with
+         | Trusted_refinement -> "refinement"
+         | Trusted_totality -> "totality"
+         | Trusted_total_cast -> "cast of its argument to a total function")
+  | Unverified_import name ->
+      msg "The interface of %a was produced by a compilation that skipped@ \
+           verification (-smt-assume-verified), and no verified compilation@ \
+           of the same program was found; its refinements are assumed."
         Style.inline_code name
 ;;
 

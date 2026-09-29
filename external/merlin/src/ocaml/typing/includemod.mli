@@ -175,6 +175,17 @@ val modes_toplevel : modes
 
 (* Typechecking *)
 
+(** [collect_refinements f] runs the inclusion checks of [f] so that
+    refinements needing a proof are accepted, and returns the obligations the
+    verifier must discharge. Module type equivalence, applicative functor
+    paths and consistency checks stay syntactic. *)
+val collect_refinements :
+  (unit -> 'a) -> 'a * Typedtree.refinement_obligation list
+
+(** Runs [f] with refinements compared syntactically again, for inclusion
+    checks nested in a collected one that have no place for proofs. *)
+val without_refinements : (unit -> 'a) -> 'a
+
 val modtypes:
   loc:Location.t -> Env.t -> mark:bool -> modes:modes ->
   module_type -> module_type -> module_coercion

@@ -90,6 +90,15 @@ val output_cmi : string -> out_channel -> cmi_infos_lazy -> Digest.t
 val input_cmi : in_channel -> cmi_infos
 val input_cmi_lazy : in_channel -> cmi_infos_lazy
 
+(* The Vox record among a .cmi's flags *)
+val vox_unit : pers_flags list -> vox_unit option
+
+(* Write and read a unit's Vox record in a .cmo or .cmx file. Reading
+   returns [None], and leaves the channel where it was, if the next bytes are
+   not a record (as in files written before records existed). *)
+val output_vox_record : out_channel -> vox_unit option -> unit
+val input_vox_record : in_channel -> vox_unit option
+
 (* read a cmi from a filename, checking the magic *)
 val read_cmi : string -> cmi_infos
 val read_cmi_lazy : string -> cmi_infos_lazy

@@ -502,8 +502,11 @@ let enter_ancestor_met ~loc name ~sign ~meths ~cl_num ~ty ~attrs met_env =
 let add_self_met loc id sign self_var_kind vars cl_num
       as_var ty attrs met_env =
   let check =
-    if as_var then (fun s -> Warnings.Unused_var { name = s; mutated = false })
-    else (fun s -> Warnings.Unused_var_strict { name = s; mutated = false })
+    if as_var then (fun s ->
+      Warnings.Unused_var { name = s; mutated = false; refined_unit = false })
+    else (fun s ->
+      Warnings.Unused_var_strict
+        { name = s; mutated = false; refined_unit = false })
   in
   let kind = Val_self (sign, self_var_kind, vars, cl_num) in
   let desc =
@@ -1721,6 +1724,7 @@ let temp_abbrev loc id arity uid =
        type_unboxed_default = false;
        type_inductive = false;
        type_phantom_parameters = false;
+       type_total_matchable = false;
        type_uid = uid;
        type_unboxed_version = None;
       }
@@ -1957,6 +1961,7 @@ let class_infos define_class kind
      type_unboxed_default = false;
      type_inductive = false;
      type_phantom_parameters = false;
+     type_total_matchable = false;
      type_uid = dummy_class.cty_uid;
      type_unboxed_version = None;
     }

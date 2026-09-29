@@ -250,6 +250,30 @@ end
 let modes_toplevel =
   Specific ((toplevel_mode, None), toplevel_mode)
 
+(* Refinement subsumption obligations of the inclusion check being run, when
+   its caller can have them verified (see [collect_refinements]). *)
+let refinement_collector :
+  (Typedtree.refinement_obligation -> unit) option ref = ref None
+
+let with_refinement_collector collector f =
+  let saved = !refinement_collector in
+  refinement_collector := collector;
+  Fun.protect ~finally:(fun () -> refinement_collector := saved) f
+
+let collect_refinements f =
+  let collected = ref [] in
+  let result =
+    with_refinement_collector
+      (Some (fun o -> collected := o :: !collected)) f
+  in
+  result, List.rev !collected
+
+let without_refinements f = with_refinement_collector None f
+
+(* The submodules, outermost first, of the module whose inclusion is being
+   checked that contain the current item. *)
+let refinement_modules = ref []
+
 module Core_inclusion = struct
   (* All functions "blah env x1 x2" check that x1 is included in x2,
      i.e. that x1 is the type of an implementation that fulfills the
@@ -261,9 +285,28 @@ module Core_inclusion = struct
     if Directionality.mark_as_used direction then
       Env.mark_value_used vd1.val_uid;
     let vd2 = Subst.value_description subst vd2 in
+    (* Module type equivalence stays syntactic.  In a negative position the
+       compared value is a functor's parameter, not a known value. *)
+    let refinements =
+      match !refinement_collector with
+      | Some collect when not direction.Directionality.in_eq ->
+          let ro_value =
+            match direction.Directionality.pos with
+            | Directionality.Negative -> None
+            | Positive | Strictly_positive -> Some (Path.Pident id)
+          in
+          let ro_modules = List.rev !refinement_modules in
+          Some (fun ~source ~target ->
+              collect
+                { Typedtree.ro_value; ro_modules; ro_name = Ident.name id;
+                  ro_source = source; ro_target = target; ro_env = env;
+                  ro_value_loc = vd1.val_loc;
+                  ro_declaration_loc = vd2.val_loc })
+      | _ -> None
+    in
     try
-      Ok (Includecore.value_descriptions ~loc env (Ident.name id) ~mmodes
-            vd1 vd2)
+      Ok (Includecore.value_descriptions ?refinements ~loc env (Ident.name id)
+            ~mmodes vd1 vd2)
     with Includecore.Dont_match err ->
       Error Error.(Core (Value_descriptions (mdiff vd1 vd2 mmodes err)))
 
@@ -1174,8 +1217,11 @@ and module_declarations ~core ~direction ~loc env subst id1 ~mmodes md1 md2
     Includecore.child_modes_with_modalities id ~modalities mmodes
     |> map_error (fun e -> Error.(Core (Modalities e)))
   in
-  strengthened_modtypes ~core ~direction ~loc ~aliasable:true env subst ~modes
-    md1.md_type p1 md2.md_type orig_shape
+  let enclosing = !refinement_modules in
+  refinement_modules := id :: enclosing;
+  Fun.protect ~finally:(fun () -> refinement_modules := enclosing) (fun () ->
+    strengthened_modtypes ~core ~direction ~loc ~aliasable:true env subst
+      ~modes md1.md_type p1 md2.md_type orig_shape)
   |> map_error (fun x -> Error.Module_type x)
 
 (* Inclusion between module type specifications *)
@@ -1270,8 +1316,10 @@ let core_inclusion = Core_inclusion.{
 }
 
 let core_consistency =
-  let type_declarations ~loc:_ env ~direction:_ _ _ ~mmodes:_ d1 d2 =
-    match Includecore.type_declarations_consistency env d1 d2 with
+  let type_declarations ~loc:_ env ~direction:_ _ id ~mmodes:_ d1 d2 =
+    match
+      Includecore.type_declarations_consistency env (Path.Pident id) d1 d2
+    with
     | None -> Ok Tcoerce_none
     | Some err ->  Error Error.(Core(Type_declarations (diff d1 d2 err)))
   in
@@ -1327,6 +1375,8 @@ let strengthened_modtypes ~direction ~loc ~aliasable env
     path1 mty2 shape
 
 let check_functor_application_raw ~loc env mty1 path1 mty2 =
+  (* Functor applications in type paths have no place for proofs. *)
+  without_refinements @@ fun () ->
   let aliasable = can_alias env path1 in
   let direction = Directionality.unknown ~mark:true in
   strengthened_modtypes ~core:core_inclusion ~direction ~loc ~aliasable env

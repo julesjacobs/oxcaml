@@ -697,6 +697,7 @@ let decl_of_type_constr type_constr =
       type_unboxed_default = false;
       type_inductive = false;
       type_phantom_parameters = false;
+      type_total_matchable = false;
       type_uid = Uid.unboxed_version type_uid;
       type_unboxed_version = None;
     }
@@ -731,6 +732,7 @@ let decl_of_type_constr type_constr =
      type_unboxed_default = false;
      type_inductive = false;
      type_phantom_parameters = false;
+     type_total_matchable = false;
      type_uid;
      type_unboxed_version;
     }

@@ -402,6 +402,7 @@ in
       type_unboxed_default = false;
       type_inductive = false;
       type_phantom_parameters = false;
+      type_total_matchable = false;
       type_uid = Uid.unboxed_version uid;
       type_unboxed_version = None;
     }
@@ -423,6 +424,7 @@ in
       type_unboxed_default = false;
       type_inductive = false;
       type_phantom_parameters = false;
+      type_total_matchable = false;
       type_uid = uid;
       type_unboxed_version;
     }
@@ -1320,6 +1322,9 @@ let transl_declaration env sdecl (id, uid) =
         type_phantom_parameters =
           Attr_helper.has_no_payload_attribute
             "phantom_parameters" sdecl.ptype_attributes;
+        type_total_matchable =
+          Attr_helper.has_no_payload_attribute
+            "total_matchable" sdecl.ptype_attributes;
         type_uid = uid;
         type_unboxed_version = None;
         (* Unboxed versions are computed after all declarations have been
@@ -1526,6 +1531,7 @@ let derive_unboxed_version env path_in_group_has_unboxed_version decl =
         type_unboxed_default = false;
         type_inductive = false;
         type_phantom_parameters = false;
+        type_total_matchable = false;
         type_uid = Uid.unboxed_version decl.type_uid;
         type_unboxed_version = None;
       }
@@ -3965,6 +3971,22 @@ let check_inductive_decl env ~single id decl =
     | _ -> reject "a closed variant declaration is required"
   end
 
+(* A [@@total_matchable] declaration promises that total code may pattern-match
+   a value of the type, so that an abstract export of it is a safe component of
+   another matched type. Verify it here, where the manifest/representation is
+   visible: eliminating the type must not reach the type itself through a knot.
+   An abstract type with no manifest is a safe leaf. Inclusion (see
+   [Includecore.type_declarations_consistency]) then lets an interface carry
+   the guarantee only if the implementation's declaration does. *)
+let check_total_matchable_decl env id decl =
+  if decl.type_total_matchable
+     && not (Ctype.declaration_total_matchable env (Path.Pident id) decl)
+  then
+    Location.raise_errorf ~loc:decl.type_loc
+      "Invalid %a declaration: total code cannot pattern-match this type, \
+       because eliminating it could reach the type itself."
+      Style.inline_code "[@@total_matchable]"
+
 (* Translate a set of type declarations, mutually recursive or not *)
 let transl_type_decl env rec_flag sdecl_list =
   List.iter check_redefined_unit sdecl_list;
@@ -4192,7 +4214,8 @@ let transl_type_decl env rec_flag sdecl_list =
   let final_env = add_types_to_env ~shapes:(Some shapes) decls env in
   List.iter (fun (id, decl) ->
     check_phantom_parameters_decl final_env decl;
-    check_inductive_decl final_env ~single:(List.length decls = 1) id decl)
+    check_inductive_decl final_env ~single:(List.length decls = 1) id decl;
+    check_total_matchable_decl final_env id decl)
     decls;
   (* Keep original declaration *)
   let final_decls =
@@ -4990,6 +5013,14 @@ let transl_value_decl env loc ~modal ~why valdecl =
         in
         mode, Mode.Modality.undefined, Valmi_str_primitive modes
     | Sig_value (md_mode, sig_modalities) ->
+        List.iter
+          (fun (attr : Parsetree.attribute) ->
+             if not (Builtin_attributes.is_transparent_definition [attr]) then
+               Location.raise_errorf ~loc:attr.attr_loc
+                 "In a signature, the def attribute requires the payload \
+                  transparent")
+          (Builtin_attributes.select_attributes ["def", Return]
+             valdecl.pval_attributes);
         if valdecl.pval_poly then begin
           Language_extension.assert_enabled ~loc Layout_poly
             Language_extension.Alpha;
@@ -5198,6 +5229,13 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
      && not (Ctype.is_inductive env man) then
     Location.raise_errorf ~loc
       "This constraint requires a type with a checked inductive guarantee.";
+  if (sig_decl.type_total_matchable
+      || Attr_helper.has_no_payload_attribute
+           "total_matchable" sdecl.ptype_attributes)
+     && not (Ctype.type_is_total_matchable env man) then
+    Location.raise_errorf ~loc
+      "This constraint requires a type with a checked total-matchability \
+       guarantee.";
   (* In the second part, we check the consistency between the two
      declarations and compute a "merged" declaration; we now need to
      work in the larger signature environment [sig_env], because
@@ -5264,6 +5302,7 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
           type_unboxed_default = false;
           type_inductive = false;
           type_phantom_parameters = false;
+          type_total_matchable = false;
           type_uid = Uid.unboxed_version type_uid;
           type_unboxed_version = None;
         }
@@ -5308,6 +5347,10 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
         sig_decl.type_phantom_parameters
         || Attr_helper.has_no_payload_attribute
              "phantom_parameters" sdecl.ptype_attributes;
+      type_total_matchable =
+        sig_decl.type_total_matchable
+        || Attr_helper.has_no_payload_attribute
+             "total_matchable" sdecl.ptype_attributes;
       type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
       type_unboxed_version;
     }
@@ -5346,6 +5389,7 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
       type_unboxed_default = new_sig_decl.type_unboxed_default;
       type_inductive = new_sig_decl.type_inductive;
       type_phantom_parameters = new_sig_decl.type_phantom_parameters;
+      type_total_matchable = new_sig_decl.type_total_matchable;
       type_is_newtype = new_sig_decl.type_is_newtype;
       type_expansion_scope = new_sig_decl.type_expansion_scope;
       type_loc = new_sig_decl.type_loc;
@@ -5419,6 +5463,7 @@ let transl_package_constraint ~loc ty =
     type_unboxed_default = false;
     type_inductive = false;
     type_phantom_parameters = false;
+    type_total_matchable = false;
     type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
     type_unboxed_version = None;
   }
@@ -5446,6 +5491,7 @@ let abstract_type_decl ~injective ~jkind ~params =
       type_unboxed_default = false;
       type_inductive = false;
       type_phantom_parameters = false;
+      type_total_matchable = false;
       type_uid = Uid.internal_not_actually_unique;
       type_unboxed_version =
         Some {
@@ -5465,6 +5511,7 @@ let abstract_type_decl ~injective ~jkind ~params =
           type_unboxed_default = false;
           type_inductive = false;
           type_phantom_parameters = false;
+          type_total_matchable = false;
           type_uid = Uid.internal_not_actually_unique;
           type_unboxed_version = None;
         };
@@ -5900,7 +5947,8 @@ let report_error ~loc = function
       let get_jkind_error : _ Errortrace.elt -> _ = function
       | Bad_jkind (ty, violation) | Bad_jkind_sort (ty, violation) ->
         Some (ty, violation)
-      | Unequal_var_jkinds _ | Unequal_tof_kind_jkinds _ | Diff _ | Variant _
+      | Unequal_var_jkinds _ | Unequal_tof_kind_jkinds _ | Refinement _
+      | Diff _ | Variant _
       | Obj _ | Escape _ | Incompatible_fields _ | Rec_occur _
       | Function_label_mismatch _ | Tuple_label_mismatch _
       | First_class_module _ -> None
