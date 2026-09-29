@@ -1723,8 +1723,6 @@ let temp_abbrev loc id arity uid =
        type_attributes = []; (* or keep attrs from the class decl? *)
        type_unboxed_default = false;
        type_inductive = false;
-       type_phantom_parameters = false;
-       type_total_matchable = false;
        type_uid = uid;
        type_unboxed_version = None;
       }
@@ -1960,8 +1958,6 @@ let class_infos define_class kind
      type_attributes = []; (* or keep attrs from cl? *)
      type_unboxed_default = false;
      type_inductive = false;
-     type_phantom_parameters = false;
-     type_total_matchable = false;
      type_uid = dummy_class.cty_uid;
      type_unboxed_version = None;
     }

@@ -1314,10 +1314,8 @@ let core_inclusion = Core_inclusion.{
 }
 
 let core_consistency =
-  let type_declarations ~loc:_ env ~direction:_ _ id ~mmodes:_ d1 d2 =
-    match
-      Includecore.type_declarations_consistency env (Path.Pident id) d1 d2
-    with
+  let type_declarations ~loc:_ env ~direction:_ _ _ ~mmodes:_ d1 d2 =
+    match Includecore.type_declarations_consistency env d1 d2 with
     | None -> Ok Tcoerce_none
     | Some err ->  Error Error.(Core(Type_declarations (diff d1 d2 err)))
   in

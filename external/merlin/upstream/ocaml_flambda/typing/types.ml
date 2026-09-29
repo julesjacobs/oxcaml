@@ -135,6 +135,7 @@ let mutable_mode m0 : _ Mode.Value.t =
 type mod_bounds =
   { crossing : Mode.Crossing.t;
     externality: Jkind_axis.Externality.t;
+    logicality: Jkind_axis.Logicality.t;
   }
 
 module With_bounds_type_info = struct
@@ -565,8 +566,6 @@ type type_declaration =
     type_attributes: Parsetree.attributes;
     type_unboxed_default: bool;
     type_inductive: bool;
-    type_phantom_parameters: bool;
-    type_total_matchable: bool;
     type_uid: Uid.t;
     type_unboxed_version : type_declaration option;
  }

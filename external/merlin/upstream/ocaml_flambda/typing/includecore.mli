@@ -138,8 +138,6 @@ type unsafe_mode_crossing_mismatch =
 type type_mismatch =
   | Arity
   | Inductiveness
-  | Phantom_parameters
-  | Total_matchable
   | Privacy of privacy_mismatch
   | Kind of kind_mismatch
   | Constraint of Errortrace.equality_error
@@ -155,6 +153,8 @@ type type_mismatch =
   | With_null_representation of position
   | Fixed_representation of position
   | Jkind of Ikind.subjkind_error
+  | Not_logical of Ikind.subjkind_error * string
+      (** A kind mismatch where the implementation is not logical, and why *)
   | Unsafe_mode_crossing of unsafe_mode_crossing_mismatch
 
 type jkind_mismatch =
@@ -240,8 +240,7 @@ val jkind_declarations:
 val value_descriptions_consistency:
   Env.t -> value_description -> value_description -> module_coercion
 val type_declarations_consistency:
-  Env.t -> Path.t -> type_declaration -> type_declaration ->
-  type_mismatch option
+  Env.t -> type_declaration -> type_declaration -> type_mismatch option
 
 (*
 val class_types:

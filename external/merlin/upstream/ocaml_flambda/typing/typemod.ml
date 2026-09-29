@@ -1064,8 +1064,6 @@ module Merge = struct
               type_attributes = [];
               type_unboxed_default = false;
               type_inductive = false;
-              type_phantom_parameters = false;
-              type_total_matchable = false;
               type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
               type_unboxed_version = None;
             }
@@ -3056,10 +3054,20 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
              env dependent_ids)
           signature
   and find_forbidden_recursive_signature_item env dependent_ids = function
-    | Sig_type (_, decl, _, _) when decl.type_phantom_parameters ->
+    | Sig_type (id, decl, _, _)
+      when Btype.type_kind_is_abstract decl
+           && Option.is_none decl.type_manifest
+           && Ctype.abstract_declaration_is_logical env (Path.Pident id) decl
+           && not (Ctype.jkind_is_scalar env decl.type_jkind) ->
+        (* The approximations used to type the signatures assume nothing
+           about logicality (see [Typedecl.approx_type_decl]), but a declared
+           abstract type is only checked against its implementation after the
+           signatures are fixed, where it could justify itself through the
+           recursion. *)
         Location.raise_errorf ~loc:decl.type_loc
-          "Recursive module signatures cannot assert phantom parameter \
-           guarantees."
+          "Recursive module signatures cannot declare an abstract type whose \
+           kind is logical;@ drop %a from its kind."
+          Style.inline_code "mod logical"
     | Sig_type (id, decl, _, _) when decl.type_inductive ->
         Some (`Inductive (Ident.name id))
     | Sig_module (_, _, decl, _, _) ->

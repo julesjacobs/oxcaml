@@ -1802,8 +1802,6 @@ let new_local_type ?(loc = Location.none) ?manifest_and_scope origin jkind =
     type_attributes = [];
     type_unboxed_default = false;
     type_inductive = false;
-    type_phantom_parameters = false;
-    type_total_matchable = false;
     type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
     type_unboxed_version = None;
   }
@@ -3846,45 +3844,39 @@ let is_always_gc_ignorable env ty =
 (* Totality of pattern matching.
 
    Total code may eliminate a value of a nominal type (match a constructor,
-   project a field) only if the type is definitely nonrecursive, or
-   [@@inductive] and recursive only directly. Otherwise the elimination ties
-   a knot without syntactic recursion: [type t = Roll of (t -> int)] gives
-   [delta (Roll delta)].
+   project a field) only if the type is logical: its values form a set in
+   the mathematical sense. Otherwise the elimination can tie a knot without
+   syntactic recursion: [type t = Roll of (t -> int)] gives
+   [delta (Roll delta)], and no set [t] can be in bijection with
+   [t -> int] (Cantor).
 
-   A type that the walk cannot see into may be, or contain, the matched type.
-   These hidden types are a GADT constructor's existential variables, an
-   abstract type without a manifest (other than a predefined one) and an open
-   type; unpacking a first-class module creates more of them
-   ([can_unpack_total]). Examples: [Pack : 'a * ('a, t -> int) eq -> t]
-   recovers [t -> int] after the match, and a signature that exports
-   [type u] and [type t = Roll of (u -> int)] can hide [type u = t].
+   Logicality is an axis of the kind (see [Jkind_axis.Logicality] and Note
+   [Logicality of recursive types] in ikind.ml). It is inferred for a
+   variant or record from its fields: a base type, a tuple, record, variant
+   or function type built from logical types is logical, and any recursion
+   makes the type [Maybe_logical] unless it is [[@@inductive]]. An abstract
+   type is logical only if its declared kind says so, which inclusion checks
+   against the implementation like any other kind bound. So the T9 knot
+   through an abstract [type u] with a hidden manifest [u = t -> int] is
+   refused at the client ([u]'s kind does not say it is logical, so [t] is
+   not logical) or at the implementation (the kind of [t -> int] is not
+   logical, because [t] and [u] are mutually recursive).
 
-   The knot needs the hidden type to appear where a function consumes it, i.e.
-   in a NEGATIVE position (under an odd number of arrow-arguments). A hidden
-   type in positive position -- a functional map or bignum stored in a field --
-   cannot be called and so cannot loop. The walk therefore tracks polarity and
-   rejects a hidden abstract or open type only when it is reached negatively,
-   which keeps the existing acceptance of positive occurrences. Polarity comes
-   from the arrows actually traversed, so no variance annotation is trusted.
+   The check is on the matched type's constructor only: [(t -> int) option]
+   may be matched even though [t] may not, because eliminating the option
+   does not eliminate a [t]. It asks whether the constructor is logical when
+   its parameters are ([Ikind.declaration_is_logical]).
 
-   An existential variable is different: a GADT witness in the same value can
-   retype it to [root -> _] after the match, moving [root] into negative
-   position invisibly (as in [Witness_same_group] below). So a directly matched
-   constructor's existentials are rejected whatever position they appear in.
+   An existential variable of a directly matched constructor is also
+   rejected if it can be a pointer: a GADT witness in the same value can
+   retype it to [root -> _] after the match. The jkind guard below says when
+   a hidden type cannot be a pointer.
 
-   Both hidden kinds need the same jkind guard: they are harmless only if
-   their values can never be a heap pointer. The matched type is a boxed
-   nominal type and a closure is a heap block, so a jkind that rules out
-   pointers -- a non-scannable layout, a non-pointer separability, or an
-   immediate ([external]) value -- excludes both being the matched type and
-   being a function. [immutable_data] is NOT enough on either count: a record
-   whose field modality caps a [total] arrow across every axis (e.g.
+   [immutable_data] is NOT enough on either count: a record whose field
+   modality caps a [total] arrow across every axis (e.g.
    [f : t -> unit @@ many portable forkable unyielding stateless total]) is
-   [immutable_data], so an [immutable_data] type can be the matched type and
-   can hold a callable function. Before this guard rejected [immutable_data],
-   both an abstract [immutable_data] type in negative position and an
-   [immutable_data] existential recovered to such a record were accepted false
-   proofs. *)
+   [immutable_data], so an [immutable_data] existential can hold a callable
+   function. *)
 let jkind_cannot_be_pointer env jkind =
   (* A closure, and any boxed nominal type, is a heap pointer. We read the
      layout off the jkind's own description, which keeps a declared layout
@@ -3938,210 +3930,24 @@ let declaration_is_hidden path decl =
   | Type_open -> true
   | Type_variant _ | Type_record _ | Type_record_unboxed_product _ -> false
 
-(* Two modes share this walk:
-   - [~knot_free:false] (the default) is the pattern-match check: the matched
-     type must be definitely nonrecursive (or [@@inductive]); every hidden type
-     it reaches, in ANY position, must be a safe component (carry the
-     [@@total_matchable] guarantee or have a pointer-free jkind).
-   - [~knot_free:true] verifies a [@@total_matchable] guarantee: the type must
-     not reach ITSELF, nor an unsafe hidden type, through a NEGATIVE (function-
-     argument) position. Positive recursion (a tree, a list, a functional map)
-     is fine -- you cannot loop by matching a container that merely holds such
-     a value, only by feeding it to a function that reaches back. This is why a
-     recursive-but-knot-free data structure can carry the guarantee while a
-     negatively recursive group cannot. The lemma that makes the guarantee
-     sound to consult in the match: if the match walk reaches an attributed
-     type [X], and [X] is knot-free (does not reach [X] negatively), then [X]
-     does not reach the matched type either. *)
-let declaration_can_pattern_match_total ?(knot_free = false) env root root_args
-      decl =
-  (* Visited sets are keyed by [direct] (drives the inductive allowance) and by
-     [negative] (drives the hidden-type check), so a type seen in one polarity
-     is still walked in the other. *)
-  let visited_dp = ref TypeSet.empty and visited_dn = ref TypeSet.empty in
-  let visited_ip = ref TypeSet.empty and visited_in = ref TypeSet.empty in
-  let visited_set direct negative =
-    match direct, negative with
-    | true, false -> visited_dp
-    | true, true -> visited_dn
-    | false, false -> visited_ip
-    | false, true -> visited_in
-  in
-  (* The declaration caches are also keyed by polarity: a declaration walked
-     in one polarity must still be walked in the other, or a negative
-     occurrence hidden behind a positively-visited declaration is missed. *)
-  let active_declarations_p = ref Path.Map.empty
-  and active_declarations_n = ref Path.Map.empty in
-  let completed_declarations_p = ref Path.Map.empty
-  and completed_declarations_n = ref Path.Map.empty in
-  let active_declarations negative =
-    if negative then active_declarations_n else active_declarations_p in
-  let completed_declarations negative =
-    if negative then completed_declarations_n else completed_declarations_p in
-  let exception Not_definitely_nonrecursive in
-  let allow_direct_recursion = decl.type_inductive in
-  let strictly_contains outer inner =
-    if eq_type outer inner then false
-    else
-      let seen = ref TypeSet.empty in
-      let found = ref false in
-      let rec visit ty =
-        if not (TypeSet.mem ty !seen) then begin
-          seen := TypeSet.add ty !seen;
-          if eq_type ty inner then found := true
-          else Btype.iter_type_expr visit ty
-        end
-      in
-      Btype.iter_type_expr visit outer;
-      !found
-  in
-  let arguments_decrease args previous =
-    List.length args = List.length previous
-    && List.for_all2
-         (fun arg previous ->
-           eq_type arg previous || strictly_contains previous arg)
-         args previous
-  in
-  (* A hidden type the walk reaches could be, or reach, the matched type in
-     ANY position: even a positive field can hide a bare function that an
-     exported total consumer applies to the matched value (the abstract-
-     consumer knot). It is safe only if its declaration carries a checked
-     [@@total_matchable] guarantee -- verified where the type is defined, with
-     its manifest visible, and preserved by signature inclusion -- or if its
-     jkind rules out pointers, so it can be neither a function nor the boxed
-     matched type. If the walk cannot see into a type at all ([Not_found]),
-     reject. *)
-  let check_not_hidden ~negative path ty =
-    match Env.find_type path env with
-    | decl ->
-      (* In [knot_free] mode only a negative occurrence of an unsafe hidden
-         type can close a knot; positive occurrences are harmless. In match
-         mode any position is unsafe (abstract-consumer route). *)
-      if (not knot_free || negative)
-         && declaration_is_hidden path decl
-         && not decl.type_total_matchable
-         && type_may_be_matched_type env ty
-      then raise_notrace Not_definitely_nonrecursive
-    | exception Not_found -> raise_notrace Not_definitely_nonrecursive
-  in
-  (* A directly matched constructor's existential variables are hidden: a GADT
-     witness can retype one to [root -> _] after the match, so any of them that
-     can be a pointer is a possible knot, whatever position it occupies. *)
-  let check_existentials (constructor : constructor_declaration) =
+
+(* Whether total code may look inside a value of type constructor [path]: its
+   declaration shows a representation, the constructor is logical when its
+   parameters are, and a directly matched constructor has no existential
+   that could be a pointer. *)
+let declaration_can_pattern_match_total env path decl =
+  let existentials_are_safe (constructor : constructor_declaration) =
     let _, existentials =
       Datarepr.constructor_existentials constructor.cd_args constructor.cd_res
     in
-    if List.exists (type_may_be_matched_type env) existentials then
-      raise_notrace Not_definitely_nonrecursive
+    not (List.exists (type_may_be_matched_type env) existentials)
   in
-  let rec visit_type ~direct ~negative ty =
-    let visited = visited_set direct negative in
-    if not (TypeSet.mem ty !visited) then begin
-      visited := TypeSet.add ty !visited;
-      match get_desc ty with
-      | Tconstr (path, args, _) ->
-        if Path.same path root then begin
-          if knot_free then begin
-            (* Only a negative self-occurrence is a knot; positive recursion
-               (a tree, a list) is harmless in a component. *)
-            if negative then raise_notrace Not_definitely_nonrecursive
-          end else if not (allow_direct_recursion
-                  && direct
-                  && List.equal eq_type args root_args)
-          then raise_notrace Not_definitely_nonrecursive
-        end else begin
-          let expanded = expand_head env ty in
-          if eq_type expanded ty then begin
-            check_not_hidden ~negative path ty;
-            visit_declaration ~negative path args
-          end
-          else visit_type ~direct ~negative expanded
-        end
-      | Ttuple fields ->
-        List.iter (fun (_, ty) -> visit_type ~direct ~negative ty) fields
-      | Tarrow (_, arg, res, _) ->
-        (* The argument flips polarity; the result keeps it. *)
-        visit_type ~direct:false ~negative:(not negative) arg;
-        visit_type ~direct:false ~negative res
-      | Tvar _ | Tunivar _ -> ()
-      | _ ->
-        Btype.iter_type_expr (visit_type ~direct:false ~negative) ty
-    end
-  and visit_declaration ~negative path args =
-    let active_declarations = active_declarations negative in
-    let completed_declarations = completed_declarations negative in
-    let completed =
-      Option.value
-        (Path.Map.find_opt path !completed_declarations)
-        ~default:[]
-    in
-    let active =
-      Option.value (Path.Map.find_opt path !active_declarations) ~default:[]
-    in
-    if List.exists (List.equal eq_type args) (completed @ active) then ()
-    else match active with
-    | previous :: _ when not (arguments_decrease args previous) ->
-      (* Permit finite nesting, but do not expand growing instantiations. *)
-      raise_notrace Not_definitely_nonrecursive
-    | _ ->
-      active_declarations := Path.Map.add path (args :: active)
-        !active_declarations;
-      Fun.protect
-        ~finally:(fun () ->
-          active_declarations :=
-            if active = [] then Path.Map.remove path !active_declarations
-            else Path.Map.add path active !active_declarations)
-        (fun () ->
-          match Env.find_type path env with
-          | decl ->
-              begin match decl.type_kind with
-              | Type_abstract _ | Type_open
-                when not decl.type_phantom_parameters ->
-                  List.iter (visit_type ~direct:false ~negative) args
-              | Type_variant (constructors, _, _)
-                when List.exists (fun constructor ->
-                  Option.is_some constructor.cd_res) constructors ->
-                  List.iter (visit_type ~direct:false ~negative) args
-              | _ -> ()
-              end;
-              visit_representation ~direct:false ~negative decl args
-          | exception Not_found ->
-              List.iter (visit_type ~direct:false ~negative) args);
-      completed_declarations :=
-        Path.Map.add path (args :: completed) !completed_declarations
-  and visit_representation ~direct ~negative decl args =
-    let visit ty =
-      let ty =
-        if decl.type_params = [] then ty
-        else apply env decl.type_params ty args
-      in
-      visit_type ~direct ~negative ty
-    in
-    Option.iter visit decl.type_manifest;
-    match decl.type_kind with
-    | Type_variant (constructors, _, _) ->
-      List.iter
-        (fun constructor ->
-          (* Only the directly matched constructor exposes its existentials;
-             a nested type's constructors are matched (and checked) on their
-             own. In [knot_free] mode we are verifying that a value of this type
-             is a safe component, not matching it, so its own existentials are
-             opaque and irrelevant. *)
-          if direct && not knot_free then check_existentials constructor;
-          Btype.iter_type_expr_cstr_args visit constructor.cd_args)
-        constructors
-    | Type_record (labels, _, _)
-    | Type_record_unboxed_product (labels, _, _) ->
-      List.iter (fun label -> visit label.ld_type) labels
-    | Type_abstract _ -> ()
-    | Type_open -> ()
-  in
-  try
-    visit_representation ~direct:true ~negative:false decl root_args;
-    true
-  with
-  | Not_definitely_nonrecursive
-  | Cannot_apply -> false
+  (match decl.type_kind with
+   | Type_variant (constructors, _, _) ->
+     List.for_all existentials_are_safe constructors
+   | Type_record _ | Type_record_unboxed_product _ -> true
+   | Type_abstract _ | Type_open -> false)
+  && Ikind.declaration_is_logical ~env ~path
 
 let can_pattern_match_total env ty =
   let rec check seen ty =
@@ -4154,13 +3960,7 @@ let can_pattern_match_total env ty =
               let expanded = expand_head env ty in
               if not (eq_type expanded ty) then
                 check (Path.Set.add path seen) expanded
-              else begin match decl.type_kind with
-              | Type_variant _ | Type_record _
-              | Type_record_unboxed_product _ ->
-                declaration_can_pattern_match_total env path
-                  decl.type_params decl
-              | Type_abstract _ | Type_open -> false
-              end
+              else declaration_can_pattern_match_total env path decl
           | exception Not_found -> false
         end
     | Tpoly (ty, _) -> check seen ty
@@ -4168,15 +3968,176 @@ let can_pattern_match_total env ty =
   in
   check Path.Set.empty ty
 
+(* Why total code may not look inside a value of type [ty], for error
+   messages: [None] when it may. The reason names the first culprit found by
+   walking the type's representation: a recursion without [@@inductive], an
+   abstract type whose kind does not say [mod logical], an existential, and so
+   on. It mirrors the checks above but is not relied on for soundness. *)
+let not_logical_reason ?(component = false) env ty =
+  let name p = Format_doc.asprintf "%a" Misc.Style.inline_code (Path.name p) in
+  let mod_logical =
+    Format_doc.asprintf "%a" Misc.Style.inline_code "mod logical"
+  in
+  let inductive = "[@@inductive]" in
+  let exception Found of string in
+  let found fmt = Printf.ksprintf (fun s -> raise_notrace (Found s)) fmt in
+  let rec visit ~visiting ~existentials ~in_progress ty =
+    let visit_ty = visit ~visiting ~existentials ~in_progress in
+    if not (TypeSet.mem ty in_progress) then begin
+      let in_progress = TypeSet.add ty in_progress in
+      let visit_in = visit ~visiting ~existentials ~in_progress in
+      match get_desc ty with
+      | Tconstr (q, args, _) ->
+        if List.exists (Path.same q) visiting then begin
+          match Env.find_type q env with
+          | { type_inductive = true; _ } -> List.iter visit_in args
+          | _ | exception Not_found ->
+            found "%s is recursive but not %s" (name q) inductive
+        end else begin
+          match Env.find_type q env with
+          | exception Not_found -> found "%s is not known" (name q)
+          | decl ->
+            let expanded = expand_head env ty in
+            if not (eq_type expanded ty) then visit_in expanded
+            else begin
+              let bearing =
+                match Ikind.declaration_logicality ~env ~path:q with
+                | _, bearing
+                  when List.compare_lengths bearing args = 0 -> bearing
+                | _ -> List.map (fun _ -> true) args
+              in
+              let visit_args () =
+                List.iter2 (fun arg bears -> if bears then visit_in arg)
+                  args bearing
+              in
+              match decl.type_kind with
+              | Type_open ->
+                found "%s is an extensible type, which is never logical"
+                  (name q)
+              | Type_abstract _ ->
+                if Ikind.declaration_is_logical ~env ~path:q then visit_args ()
+                else
+                  found "%s is abstract and its kind does not say %s" (name q)
+                    mod_logical
+              | Type_variant _ | Type_record _ | Type_record_unboxed_product _
+                ->
+                if not (Ikind.declaration_is_logical ~env ~path:q) then
+                  visit_declaration ~visiting:(q :: visiting) q decl;
+                visit_args ()
+            end
+        end
+      | Tvar _ | Tunivar _ ->
+        if List.exists (eq_type ty) existentials then
+          found "a constructor has an existential type, which could be the \
+                 matched type itself"
+      | Tpoly (body, (_ :: _)) ->
+        ignore body;
+        found "a field has a polymorphic type"
+      | Tobject _ -> found "an object type occurs in it"
+      | Tpackage _ -> found "a first-class module type occurs in it"
+      | Tvariant _ ->
+        (* A row re-entered while in progress is caught by [in_progress]
+           below; iterate the arguments. *)
+        Btype.iter_type_expr visit_in ty
+      | _ -> Btype.iter_type_expr visit_in ty
+    end else begin
+      match get_desc ty with
+      | Tvariant _ -> found "a recursive polymorphic variant occurs in it"
+      | Tconstr _ | Tarrow _ | Ttuple _ | Tobject _ | Tpoly _ ->
+        found "a recursive type expression occurs in it"
+      | _ -> ignore visit_ty
+    end
+  and visit_declaration ~visiting path decl =
+    ignore path;
+    let visit_field ~existentials ty =
+      visit ~visiting ~existentials ~in_progress:TypeSet.empty ty
+    in
+    Option.iter (visit_field ~existentials:[]) decl.type_manifest;
+    match decl.type_kind with
+    | Type_variant (constructors, _, _) ->
+      List.iter
+        (fun (c : constructor_declaration) ->
+          let _, existentials =
+            Datarepr.constructor_existentials c.cd_args c.cd_res
+          in
+          match c.cd_args with
+          | Cstr_tuple args ->
+            List.iter (fun (a : constructor_argument) ->
+              visit_field ~existentials a.ca_type) args
+          | Cstr_record labels ->
+            List.iter (fun (l : label_declaration) ->
+              if not (Types.is_mutable l.ld_mutable) then
+                visit_field ~existentials l.ld_type) labels)
+        constructors
+    | Type_record (labels, _, _) | Type_record_unboxed_product (labels, _, _) ->
+      List.iter (fun (l : label_declaration) ->
+        if not (Types.is_mutable l.ld_mutable) then
+          visit_field ~existentials:[] l.ld_type) labels
+    | Type_abstract _ | Type_open -> ()
+  in
+  let rec head seen ty =
+    match get_desc ty with
+    | Tconstr (path, _, _) ->
+      begin match Env.find_type path env with
+      | exception Not_found ->
+        Some (Printf.sprintf "%s is not known" (name path))
+      | decl ->
+        let expanded = expand_head env ty in
+        if not (eq_type expanded ty) && not (Path.Set.mem path seen) then
+          head (Path.Set.add path seen) expanded
+        else if declaration_can_pattern_match_total env path decl then None
+        else
+          match decl.type_kind with
+          | Type_abstract _ ->
+            Some (Printf.sprintf "%s is abstract" (name path))
+          | Type_open ->
+            Some (Printf.sprintf "%s is an extensible type" (name path))
+          | Type_variant _ | Type_record _ | Type_record_unboxed_product _ ->
+            if Ikind.declaration_is_logical ~env ~path then
+              Some (Printf.sprintf
+                "a constructor of %s has an existential type that could be \
+                 a function" (name path))
+            else
+              match visit_declaration ~visiting:[path] path decl with
+              | () -> Some (Printf.sprintf "%s is not logical" (name path))
+              | exception Found reason -> Some reason
+      end
+    | Tpoly (ty, _) -> head seen ty
+    | Tvariant _ -> Some "it is a polymorphic variant"
+    | _ -> Some "its type is not a variant or record"
+  in
+  if component then
+    match visit ~visiting:[] ~existentials:[] ~in_progress:TypeSet.empty ty with
+    | () -> None
+    | exception Found reason -> Some reason
+  else head Path.Set.empty ty
+
+(* Whether values of a jkind are run-time scalars: never pointers, and not
+   [void] (a void value can have ghost content). *)
+let jkind_is_scalar env jkind =
+  jkind_cannot_be_pointer env jkind
+  && (match (Jkind.get jkind).base with
+      | Layout layout ->
+        let rec has_void : Jkind.Sort.Flat.t Jkind.Layout.t -> bool = function
+          | Sort (Base Void, _) -> true
+          | Sort _ | Any _ -> false
+          | Product layouts -> List.exists has_void layouts
+        in
+        not (has_void layout)
+      | Kconstr _ -> false)
+
+(* Whether an abstract type's declared kind makes it logical. *)
+let abstract_declaration_is_logical env path _decl =
+  Ikind.declaration_is_logical ~env ~path
+
 (* Unpacking a first-class module is like matching a constructor with
    existentials: the abstract types of its signature are fresh hidden types,
-   and a value in the module can consume one of them, so the module can hide a
-   knot the way [type u  type t = Roll of (u -> unit)] with [u = t] does. Total
-   code may therefore unpack a module only if none of its abstract types can be
-   a pointer (a bare arrow, or the boxed type a negative use would feed itself).
-   The check is position-agnostic -- it does not track where each abstract type
-   is used -- so it rejects a boxed abstract type even when it happens to be
-   used only positively. Types fixed by the package's constraints
+   and a value in the module can consume one of them. With logicality in the
+   kind, a hidden type that is not declared logical cannot be a component of a
+   type total code matches, so unpacking alone cannot tie a knot; we still
+   require every abstract type the package leaves open to be declared logical
+   (or to rule out pointers), which keeps the check independent of how the
+   module's types are used. Types fixed by the package's constraints
    ([with type ...]) are not hidden; nested modules and functor results are
    included; abstract module types are hidden. *)
 let can_unpack_total env ty =
@@ -4198,8 +4159,7 @@ let can_unpack_total env ty =
     | Sig_type (id, decl, _, _) ->
       declaration_is_hidden (Path.Pident id) decl
       && not (List.mem (prefix @ [Ident.name id]) constrained)
-      && not decl.type_total_matchable
-      && not (jkind_cannot_be_pointer env decl.type_jkind)
+      && not (abstract_declaration_is_logical env (Path.Pident id) decl)
     | Sig_module (id, _, md, _, _) ->
       module_type_hides env ~constrained
         ~prefix:(prefix @ [Ident.name id]) md.md_type
@@ -4218,38 +4178,6 @@ let can_unpack_total env ty =
      whose type is known), so it cannot be shown safe and is conservatively
      rejected. *)
   | _ -> false
-
-(* Verify a declaration's claimed [@@total_matchable] guarantee, at its
-   definition where its manifest/representation is visible: eliminating a value
-   of the type cannot reach the type itself through a knot. An abstract type
-   with no manifest is a safe leaf. The walk consults the (already recorded)
-   guarantee of the abstract types it reaches, which is sound: if the walk from
-   [decl] reaches an attributed type [X], and [X] carries the guarantee (so [X]
-   does not reach [X]), then [X] does not reach [decl] either -- otherwise
-   [decl] would reach [decl] via [X] and this check would fail. *)
-let declaration_total_matchable env path decl =
-  declaration_can_pattern_match_total ~knot_free:true env path
-    decl.type_params decl
-
-(* Whether [ty] is a safe component of a type matched in total code: its jkind
-   rules out pointers, or it is a nominal type that carries [@@total_matchable]
-   or whose visible representation is definitely nonrecursive. Used to check a
-   [with type] constraint against a signature type that carries the guarantee. *)
-let type_is_total_matchable env ty =
-  not (type_may_be_matched_type env ty)
-  || match get_desc (expand_head env ty) with
-     | Tconstr (path, _, _) ->
-       begin match Env.find_type path env with
-       | decl ->
-         decl.type_total_matchable
-         || (match decl.type_kind with
-             | Type_variant _ | Type_record _ | Type_record_unboxed_product _ ->
-               declaration_can_pattern_match_total ~knot_free:true env path
-                 decl.type_params decl
-             | Type_abstract _ | Type_open -> false)
-       | exception Not_found -> false
-       end
-     | _ -> false
 
 let check_type_jkind_exn env texn ty jkind =
   match check_type_jkind env ty jkind with
@@ -9851,8 +9779,6 @@ let rec nondep_type_decl env mid is_covariant decl =
       type_attributes = decl.type_attributes;
       type_unboxed_default = decl.type_unboxed_default;
       type_inductive = decl.type_inductive;
-      type_phantom_parameters = decl.type_phantom_parameters;
-      type_total_matchable = decl.type_total_matchable;
       type_uid = decl.type_uid;
       type_unboxed_version;
     }

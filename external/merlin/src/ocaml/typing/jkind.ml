@@ -523,13 +523,18 @@ module Mod_bounds = struct
     @@ Sub_result.combine (modal_less_or_equal (Monadic Visibility))
     @@ Sub_result.combine (modal_less_or_equal (Monadic Staticity))
     @@ Sub_result.combine (modal_less_or_equal (Comonadic Ghostliness))
-    @@ axis_less_or_equal ~le:Externality.le ~axis:(Pack (Nonmodal Externality))
-         (externality t1) (externality t2)
+    @@ Sub_result.combine
+         (axis_less_or_equal ~le:Externality.le
+            ~axis:(Pack (Nonmodal Externality)) (externality t1)
+            (externality t2))
+    @@ axis_less_or_equal ~le:Logicality.le ~axis:(Pack (Nonmodal Logicality))
+         (logicality t1) (logicality t2)
 
   let[@inline] get (type a) ~(axis : a Axis.t) t : a =
     match axis with
     | Modal ax -> t |> crossing |> (Crossing.proj [@inlined hint]) ax
     | Nonmodal Externality -> externality t
+    | Nonmodal Logicality -> logicality t
 
   (** Get all axes that are set to max *)
   let get_max_axes t =
@@ -560,6 +565,9 @@ module Mod_bounds = struct
     |> add_if
          (Externality.le Externality.max (externality t))
          (Nonmodal Externality)
+    |> add_if
+         (Logicality.le Logicality.max (logicality t))
+         (Nonmodal Logicality)
 
   let to_mode_crossing t = crossing t
 end
@@ -1271,6 +1279,7 @@ module Base_and_axes = struct
               let crossing : Mod_bounds.Crossing.t = { monadic; comonadic } in
               Mod_bounds.create crossing
                 ~externality:(value_for_axis ~axis:(Nonmodal Externality))
+                ~logicality:(value_for_axis ~axis:(Nonmodal Logicality))
             in
             match get_desc ty with
             | Tmod (ty, mod_bounds) ->
@@ -1774,7 +1783,15 @@ module Const = struct
           then Externality.max
           else Mod_bounds.externality actual
         in
-        Some (Mod_bounds.create crossing_diff ~externality)
+        let logicality =
+          if
+            Logicality.equal
+              (Mod_bounds.logicality base)
+              (Mod_bounds.logicality actual)
+          then Logicality.max
+          else Mod_bounds.logicality actual
+        in
+        Some (Mod_bounds.create ~logicality crossing_diff ~externality)
 
     let get_modal_bounds ~verbosity ~(base : Mod_bounds.t)
         (actual : Mod_bounds.t) =
@@ -2702,6 +2719,31 @@ let set_externality_upper_bound jk externality_upper_bound =
       { jk.jkind with
         mod_bounds =
           Mod_bounds.set_externality externality_upper_bound jk.jkind.mod_bounds
+      }
+  }
+
+let set_logicality logicality jk =
+  { jk with
+    jkind =
+      { jk.jkind with
+        mod_bounds = Mod_bounds.set_logicality logicality jk.jkind.mod_bounds
+      }
+  }
+
+let requires_logical (jk : _ jkind) =
+  match jk.jkind.base with
+  | Layout _ ->
+    Logicality.equal (Mod_bounds.logicality jk.jkind.mod_bounds) Logical
+  | Kconstr _ -> false
+
+let add_logicality_with_bound ty (jk : jkind_l) : jkind_l =
+  let type_info : With_bounds_type_info.t =
+    { relevant_axes = Axis_set.singleton (Nonmodal Logicality) }
+  in
+  { jk with
+    jkind =
+      { jk.jkind with
+        with_bounds = With_bounds.add ty type_info jk.jkind.with_bounds
       }
   }
 

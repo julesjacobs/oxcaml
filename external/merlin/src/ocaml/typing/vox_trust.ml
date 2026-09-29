@@ -8,20 +8,10 @@ let audit = ref false
 
 let registered = ref false
 
-let add_arguments () =
-  if not !registered
-  then begin
-    registered := true;
-    Clflags.add_arguments __LOC__
-      [ ( "-vox-library",
-          Arg.Set library,
-          " Compile a unit of the verified Vox library or of the standard \
-           library, whose trusted declarations are part of the trusted base" );
-        ( "-vox-audit",
-          Arg.Set audit,
-          " Print what the verification of this unit trusts, including in \
-           the units it depends on" ) ]
-  end
+(* Merlin: the compiler registers [-vox-library] and [-vox-audit] here; Merlin
+   does not parse compiler command lines through [Clflags], so there is
+   nothing to register. *)
+let add_arguments () = registered := true
 
 type external_kind =
   | Refined
@@ -524,8 +514,10 @@ let source_digest (ast : Parsetree.structure) =
 
 let config () =
   String.concat " "
+    (* Merlin: its [Clflags] has no [noassert]; Merlin never compiles code,
+       so the flag is recorded as off. *)
     ([ Printf.sprintf "noassert=%b unsafe=%b nopervasives=%b rectypes=%b"
-         !Clflags.noassert !Clflags.unsafe !Clflags.nopervasives
+         false !Clflags.unsafe !Clflags.nopervasives
          !Clflags.recursive_types ]
     @ List.rev_map
         (function

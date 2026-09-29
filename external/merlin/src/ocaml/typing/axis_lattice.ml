@@ -32,9 +32,10 @@
    10. Totality: Total -> Partial
    11. Ghostliness: Real -> Ghost
    12. Externality: External -> External64 -> Internal
+   13. Logicality: Logical -> Maybe_logical
 
    Axes 0-11 are modal axes (affect mode-crossing).
-   Axis 12 is the only non-modal axis (externality).
+   Axes 12 and 13 are the non-modal axes (externality and logicality).
 
    Each 2-valued axis uses 1 bit. The 3-valued chain axes and 4-valued diamond
    axes use 2 bits.
@@ -76,7 +77,8 @@ let axis_shapes =
       | Modal (Monadic Staticity) -> Chain2
       | Modal (Comonadic Totality) -> Chain2
       | Modal (Comonadic Ghostliness) -> Chain2
-      | Nonmodal Externality -> Chain3)
+      | Nonmodal Externality -> Chain3
+      | Nonmodal Logicality -> Chain2)
     axis_by_number
 
 let num_axes = Array.length axis_shapes
@@ -198,16 +200,18 @@ let imply (a : t) (b : t) : t =
 
 (* Build a mask from a set of relevant axes. *)
 let of_axis_set (set : Jkind_axis.Axis_set.t) : t =
+  (* Axis-set bit [i] is axis number [i]; set every lattice bit of that axis. *)
   let set : int = Obj.magic set in
-  let lo =
-    set land 0x001
-    lor ((set land 0x00E) lsl 1)
-    lor ((set land 0x010) lsl 2)
-    lor ((set land 0x0E0) lsl 3)
-    lor ((set land 0x100) lsl 4)
-    lor ((set land 0x1E00) lsl 5)
+  let rec loop acc i =
+    if i = num_axes
+    then acc
+    else
+      let acc =
+        if set land (1 lsl i) <> 0 then acc lor axis_mask.(i) else acc
+      in
+      loop acc (i + 1)
   in
-  lo lor ((lo land 0x21451) lsl 1)
+  loop 0 0
 
 (* IK-only: compute relevant axes of a constant modality, mirroring
    Jkind.relevant_axes_of_modality. *)
@@ -224,7 +228,8 @@ let relevant_axes_of_modality (modality : Mode.Modality.Const.t) :
         in
         not
           (Mode.Modality.Per_axis.is_constant axis_for_modality modality_on_axis)
-      | Nonmodal Externality -> true)
+      | Nonmodal Externality -> true
+      | Nonmodal Logicality -> true)
 
 (* Directly produce an axis-lattice mask from a constant modality. *)
 let mask_of_modality (modality : Mode.Modality.Const.t) : t =
@@ -376,6 +381,14 @@ module Levels = struct
     | 1 -> Jkind_axis.Externality.External64
     | 2 -> Jkind_axis.Externality.Internal
     | _ -> invalid_arg "Axis_lattice.externality_of_level"
+
+  let level_of_logicality (x : Jkind_axis.Logicality.t) : int =
+    match x with Logical -> 0 | Maybe_logical -> 1
+
+  let logicality_of_level = function
+    | 0 -> Jkind_axis.Logicality.Logical
+    | 1 -> Jkind_axis.Logicality.Maybe_logical
+    | _ -> invalid_arg "Axis_lattice.logicality_of_level"
 end
 
 let areality (x : t) : Mode.Regionality.Const.t =
@@ -417,6 +430,9 @@ let ghostliness (x : t) : Mode.Ghostliness.Const.t =
 let externality (x : t) : Jkind_axis.Externality.t =
   Levels.externality_of_level (get_axis x ~axis:12)
 
+let logicality (x : t) : Jkind_axis.Logicality.t =
+  Levels.logicality_of_level (get_axis x ~axis:13)
+
 let set_areality (a : Mode.Regionality.Const.t) (x : t) : t =
   set_axis x ~axis:0 ~level:(Levels.level_of_areality a)
 
@@ -455,6 +471,15 @@ let set_ghostliness (e : Mode.Ghostliness.Const.t) (x : t) : t =
 
 let set_externality (e : Jkind_axis.Externality.t) (x : t) : t =
   set_axis x ~axis:12 ~level:(Levels.level_of_externality e)
+
+let set_logicality (e : Jkind_axis.Logicality.t) (x : t) : t =
+  set_axis x ~axis:13 ~level:(Levels.level_of_logicality e)
+
+(* The logicality axis alone at [Maybe_logical], every other axis at [bot]. *)
+let logicality_only : t = set_logicality Maybe_logical bot
+
+(* Every axis at [top] except logicality, which is at [Logical]. *)
+let without_logicality : t = set_logicality Logical top
 
 let to_mode_crossing (x : t) : Mode.Crossing.t =
   let open Mode.Crossing in
@@ -503,7 +528,8 @@ let to_mode_crossing (x : t) : Mode.Crossing.t =
   { monadic; comonadic }
 
 let create ~areality ~linearity ~uniqueness ~portability ~contention ~forkable
-    ~yielding ~totality ~statefulness ~visibility ~staticity ~externality =
+    ~yielding ~totality ~statefulness ~visibility ~staticity ~externality
+    ~logicality =
   bot |> set_areality areality |> set_uniqueness uniqueness
   |> set_linearity linearity |> set_contention contention
   |> set_portability portability
@@ -513,6 +539,7 @@ let create ~areality ~linearity ~uniqueness ~portability ~contention ~forkable
   |> set_totality totality
   |> set_ghostliness Mode.Ghostliness.Const.Ghost
   |> set_externality externality
+  |> set_logicality logicality
 
 (* Canonical lattice constants used by ikinds. *)
 let nonfloat_value : t =
@@ -524,6 +551,7 @@ let nonfloat_value : t =
     ~totality:Mode.Totality.Const.max ~statefulness:Mode.Statefulness.Const.max
     ~visibility:Mode.Visibility.Const.Read_write
     ~staticity:Mode.Staticity.Static ~externality:Jkind_axis.Externality.max
+    ~logicality:Jkind_axis.Logicality.Maybe_logical
 
 let immutable_data : t =
   create ~areality:Mode.Regionality.Const.max
@@ -534,6 +562,7 @@ let immutable_data : t =
     ~totality:Mode.Totality.Const.min ~statefulness:Mode.Statefulness.Const.min
     ~visibility:Mode.Visibility.Const.Immutable ~staticity:Mode.Staticity.Static
     ~externality:Jkind_axis.Externality.max
+    ~logicality:Jkind_axis.Logicality.Logical
 
 let mutable_data : t =
   create ~areality:Mode.Regionality.Const.max
@@ -544,6 +573,7 @@ let mutable_data : t =
     ~totality:Mode.Totality.Const.min ~statefulness:Mode.Statefulness.Const.min
     ~visibility:Mode.Visibility.Const.Read_write
     ~staticity:Mode.Staticity.Static ~externality:Jkind_axis.Externality.max
+    ~logicality:Jkind_axis.Logicality.Logical
 
 let sync_data : t =
   create ~areality:Mode.Regionality.Const.max
@@ -554,6 +584,7 @@ let sync_data : t =
     ~totality:Mode.Totality.Const.min ~statefulness:Mode.Statefulness.Const.min
     ~visibility:Mode.Visibility.Const.Read_write
     ~staticity:Mode.Staticity.Static ~externality:Jkind_axis.Externality.max
+    ~logicality:Jkind_axis.Logicality.Logical
 
 let value : t =
   create ~areality:Mode.Regionality.Const.max
@@ -564,6 +595,7 @@ let value : t =
     ~totality:Mode.Totality.Const.max ~statefulness:Mode.Statefulness.Const.max
     ~visibility:Mode.Visibility.Const.Read_write
     ~staticity:Mode.Staticity.Static ~externality:Jkind_axis.Externality.max
+    ~logicality:Jkind_axis.Logicality.Maybe_logical
 
 let arrow : t =
   create ~areality:Mode.Regionality.Const.max
@@ -575,6 +607,7 @@ let arrow : t =
     ~totality:Mode.Totality.Const.max ~statefulness:Mode.Statefulness.Const.max
     ~visibility:Mode.Visibility.Const.Immutable ~staticity:Mode.Staticity.Static
     ~externality:Jkind_axis.Externality.max
+    ~logicality:Jkind_axis.Logicality.Logical
 
 let immediate : t =
   create ~areality:Mode.Regionality.Const.min
@@ -586,6 +619,7 @@ let immediate : t =
     ~totality:Mode.Totality.Const.min ~statefulness:Mode.Statefulness.Const.min
     ~visibility:Mode.Visibility.Const.Immutable ~staticity:Mode.Staticity.Static
     ~externality:Jkind_axis.Externality.min
+    ~logicality:Jkind_axis.Logicality.Logical
 
 let object_legacy : t =
   let ({ linearity;
@@ -605,6 +639,7 @@ let object_legacy : t =
     ~yielding ~totality ~statefulness
     ~visibility:Mode.Visibility.Const.Read_write
     ~staticity:Mode.Staticity.Static ~externality:Jkind_axis.Externality.max
+    ~logicality:Jkind_axis.Logicality.Maybe_logical
 
 let axis_number_to_axis_packed (axis_number : int) : Jkind_axis.Axis.packed =
   if axis_number < 0 || axis_number >= Array.length axis_by_number

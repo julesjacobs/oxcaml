@@ -15,6 +15,17 @@
 val type_declaration_ikind_gated :
   env:Env.t option -> path:Path.t -> Types.type_ikind
 
+(** [declaration_logicality ~env ~path] reads the logicality axis off the kind
+    of the type constructor [path]: whether it is logical when its parameters
+    are ([Logical]), and for each parameter whether its logicality bears on the
+    result. See Note [Logicality of recursive types] in ikind.ml. *)
+val declaration_logicality :
+  env:Env.t -> path:Path.t -> Jkind_axis.Logicality.t * bool list
+
+(** Whether the type constructor [path] is logical when its parameters are.
+    Total code may look inside a value only if its type constructor is one. *)
+val declaration_is_logical : env:Env.t -> path:Path.t -> bool
+
 val type_declaration_ikind_of_jkind :
   env:Env.t option ->
   params:Types.type_expr list ->
@@ -28,6 +39,9 @@ type subjkind_error =
   | Mode_crossing_error of mode_crossing_error
 
 val subjkind_error_printing_env : subjkind_error -> Env.t option
+
+(** Whether the error is (at least in part) on the logicality axis. *)
+val subjkind_error_on_logicality : subjkind_error -> bool
 
 val report_subjkind_error_with_offender :
   offender:(Format_doc.formatter -> unit) ->

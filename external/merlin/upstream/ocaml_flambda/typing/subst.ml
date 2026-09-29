@@ -1023,8 +1023,6 @@ let rec type_declaration' copy_scope s decl =
     type_attributes = attrs s decl.type_attributes;
     type_unboxed_default = decl.type_unboxed_default;
     type_inductive = decl.type_inductive;
-    type_phantom_parameters = decl.type_phantom_parameters;
-    type_total_matchable = decl.type_total_matchable;
     type_uid = decl.type_uid;
     type_unboxed_version =
       Option.map (type_declaration' copy_scope s) decl.type_unboxed_version;

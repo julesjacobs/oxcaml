@@ -1074,8 +1074,6 @@ module Merge = struct
               type_attributes = [];
               type_unboxed_default = false;
               type_inductive = false;
-              type_phantom_parameters = false;
-              type_total_matchable = false;
               type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
               type_unboxed_version = None;
             }
@@ -3079,10 +3077,20 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
              env dependent_ids)
           signature
   and find_forbidden_recursive_signature_item env dependent_ids = function
-    | Sig_type (_, decl, _, _) when decl.type_phantom_parameters ->
+    | Sig_type (id, decl, _, _)
+      when Btype.type_kind_is_abstract decl
+           && Option.is_none decl.type_manifest
+           && Ctype.abstract_declaration_is_logical env (Path.Pident id) decl
+           && not (Ctype.jkind_is_scalar env decl.type_jkind) ->
+        (* The approximations used to type the signatures assume nothing
+           about logicality (see [Typedecl.approx_type_decl]), but a declared
+           abstract type is only checked against its implementation after the
+           signatures are fixed, where it could justify itself through the
+           recursion. *)
         Location.raise_errorf ~loc:decl.type_loc
-          "Recursive module signatures cannot assert phantom parameter \
-           guarantees."
+          "Recursive module signatures cannot declare an abstract type whose \
+           kind is logical;@ drop %a from its kind."
+          Style.inline_code "mod logical"
     | Sig_type (id, decl, _, _) when decl.type_inductive ->
         Some (`Inductive (Ident.name id))
     | Sig_module (_, _, decl, _, _) ->
@@ -3636,34 +3644,17 @@ let wrap_constraint_package env mark arg mty mode explicit =
   let mty1 = Subst.modtype Keep Subst.identity arg.mod_type in
   let mty2 = Subst.modtype Keep Subst.identity mty in
   let modes : Includemod.modes = Specific (arg.mod_mode, mode) in
-<<<<<<< Merlin:jujacobs/vox/t9-matchability-20260929
-  let coercion =
-    try
-      Includemod.modtypes ~loc:arg.mod_loc env ~mark ~modes mty1 mty2
-    with Includemod.Error msg ->
-      Msupport.raise_error(Error(arg.mod_loc, env, Not_included msg));
-      Tcoerce_none
-  in
-  { mod_desc = Tmod_constraint(arg, mty, explicit, coercion);
-||||||| Compiler:last-imported
-  let coercion =
-    try
-      Includemod.modtypes ~loc:arg.mod_loc env ~mark ~modes mty1 mty2
-    with Includemod.Error msg ->
-      raise(Error(arg.mod_loc, env, Not_included msg)) in
-  { mod_desc = Tmod_constraint(arg, mty, explicit, coercion);
-=======
   let coercion, obligations =
     Includemod.collect_refinements (fun () ->
       try
         Includemod.modtypes ~loc:arg.mod_loc env ~mark ~modes mty1 mty2
       with Includemod.Error msg ->
-        raise(Error(arg.mod_loc, env, Not_included msg)))
+        Msupport.raise_error(Error(arg.mod_loc, env, Not_included msg));
+        Tcoerce_none)
   in
   let mod_desc = Tmod_constraint(arg, mty, explicit, coercion) in
   attach_refinement_site mod_desc Rsite_constraint arg.mod_loc obligations;
   { mod_desc;
->>>>>>> Compiler:HEAD
     mod_type = mty;
     mod_mode = Value.disallow_right mode, None;
     mod_env = env;
@@ -3673,37 +3664,18 @@ let wrap_constraint_package env mark arg mty mode explicit =
 let wrap_constraint_with_shape env mark arg mty mode
   shape explicit =
   let modes : Includemod.modes = Specific (arg.mod_mode, mode) in
-<<<<<<< Merlin:jujacobs/vox/t9-matchability-20260929
-  let coercion, shape =
-    try
-      Includemod.modtypes_constraint ~shape ~loc:arg.mod_loc env ~mark
-        ~modes arg.mod_type mty
-    with Includemod.Error msg ->
-      Msupport.raise_error(Error(arg.mod_loc, env, Not_included msg));
-      Tcoerce_none, Shape.dummy_mod
-  in
-  { mod_desc = Tmod_constraint(arg, mty, explicit, coercion);
-||||||| Compiler:last-imported
-  let coercion, shape =
-    try
-      Includemod.modtypes_constraint ~shape ~loc:arg.mod_loc env ~mark
-        ~modes arg.mod_type mty
-    with Includemod.Error msg ->
-      raise(Error(arg.mod_loc, env, Not_included msg)) in
-  { mod_desc = Tmod_constraint(arg, mty, explicit, coercion);
-=======
   let (coercion, shape), obligations =
     Includemod.collect_refinements (fun () ->
       try
         Includemod.modtypes_constraint ~shape ~loc:arg.mod_loc env ~mark
           ~modes arg.mod_type mty
       with Includemod.Error msg ->
-        raise(Error(arg.mod_loc, env, Not_included msg)))
+        Msupport.raise_error(Error(arg.mod_loc, env, Not_included msg));
+        Tcoerce_none, Shape.dummy_mod)
   in
   let mod_desc = Tmod_constraint(arg, mty, explicit, coercion) in
   attach_refinement_site mod_desc Rsite_constraint arg.mod_loc obligations;
   { mod_desc;
->>>>>>> Compiler:HEAD
     mod_type = mty;
     mod_mode = Value.disallow_right mode, None;
     mod_env = env;
@@ -4170,28 +4142,14 @@ and type_one_application ~ctx:(apply_loc,sfunct,md_f,args)
           funct_shape
       | { loc = app_loc; attributes = app_attributes;
           arg = Some { shape = arg_shape; path = arg_path; arg } } ->
-<<<<<<< Merlin:jujacobs/vox/t9-matchability-20260929
-      let coercion =
-        try Includemod.modtypes ~loc:arg.mod_loc ~mark:true env
-              arg.mod_type mty_param
-              ~modes:(Specific (arg.mod_mode, mm_param))
-        with Includemod.Error _ ->
-          Msupport.raise_error (apply_error ());
-          Tcoerce_none
-||||||| Compiler:last-imported
-      let coercion =
-        try Includemod.modtypes ~loc:arg.mod_loc ~mark:true env
-              arg.mod_type mty_param
-              ~modes:(Specific (arg.mod_mode, mm_param))
-        with Includemod.Error _ -> apply_error ()
-=======
       let coercion, obligations =
         Includemod.collect_refinements (fun () ->
           try Includemod.modtypes ~loc:arg.mod_loc ~mark:true env
                 arg.mod_type mty_param
                 ~modes:(Specific (arg.mod_mode, mm_param))
-          with Includemod.Error _ -> apply_error ())
->>>>>>> Compiler:HEAD
+          with Includemod.Error _ ->
+            Msupport.raise_error (apply_error ());
+            Tcoerce_none)
       in
       let mty_appl =
         match arg_path with

@@ -696,8 +696,6 @@ let decl_of_type_constr type_constr =
       type_attributes = [];
       type_unboxed_default = false;
       type_inductive = false;
-      type_phantom_parameters = false;
-      type_total_matchable = false;
       type_uid = Uid.unboxed_version type_uid;
       type_unboxed_version = None;
     }
@@ -731,8 +729,6 @@ let decl_of_type_constr type_constr =
      type_attributes = [];
      type_unboxed_default = false;
      type_inductive = false;
-     type_phantom_parameters = false;
-     type_total_matchable = false;
      type_uid;
      type_unboxed_version;
     }
@@ -807,9 +803,19 @@ let decl_of_type_constr type_constr =
       Variant_boxed (Misc.Stdlib.Array.of_list_map mk_elt constrs),
       None)
   in
-  let builtin jkind = Jkind.of_builtin ~why:(Primitive type_ident) jkind in
-  let builtin1 jkind _param1 = builtin jkind in
-  let builtin2 jkind _param1 _param2 = builtin jkind in
+  (* Predefined boxed types (strings, boxed numbers, vectors, ...) are
+     logical; the user-facing data abbreviations make no logicality promise,
+     so add it. *)
+  let builtin jkind =
+    Jkind.of_builtin ~why:(Primitive type_ident) jkind
+    |> Jkind.set_logicality Logical
+  in
+  (* Effects, continuations and indices are not logical. *)
+  let builtin_not_logical jkind =
+    Jkind.of_builtin ~why:(Primitive type_ident) jkind
+  in
+  let builtin1 jkind _param1 = builtin_not_logical jkind in
+  let builtin2 jkind _param1 _param2 = builtin_not_logical jkind in
   let value_param_jkind =
     Jkind.Builtin.value ~why:(
       Type_argument {
@@ -873,7 +879,11 @@ let decl_of_type_constr type_constr =
       ~jkind:(builtin Jkind.Const.Builtin.immediate)
       ~unboxed_jkind:Jkind.Const.Builtin.kind_of_unboxed_unit
       ()
-  | `Exn -> decl0 ~kind:Type_open ~jkind:(builtin Jkind.Const.Builtin.exn) ()
+  | `Exn ->
+    (* [exn] is open, so it is not logical. *)
+    decl0 ~kind:Type_open
+      ~jkind:(Jkind.of_builtin ~why:(Primitive type_ident)
+                Jkind.Const.Builtin.exn) ()
   | `Eff ->
     let kind _ = Type_open in
     decl1 ~variance:Variance.full ~kind
@@ -1047,7 +1057,8 @@ let decl_of_type_constr type_constr =
           constructor lookups when deriving ikinds from jkinds. *)
        ~jkind:Jkind.(
          of_builtin Const.Builtin.immutable_data
-           ~why:(Primitive ident_lexing_position))
+           ~why:(Primitive ident_lexing_position)
+         |> set_logicality Logical)
        ()
   | `Expr ->
     decl1

@@ -56,6 +56,7 @@ val create :
   visibility:Mode.Visibility.Const.t ->
   staticity:Mode.Staticity.const ->
   externality:Jkind_axis.Externality.t ->
+  logicality:Jkind_axis.Logicality.t ->
   t
 
 val areality : t -> Mode.Regionality.Const.t
@@ -82,6 +83,18 @@ val staticity : t -> Mode.Staticity.const
 
 val externality : t -> Jkind_axis.Externality.t
 
+val logicality : t -> Jkind_axis.Logicality.t
+
+val set_logicality : Jkind_axis.Logicality.t -> t -> t
+
+(** The logicality axis alone at [Maybe_logical], every other axis at [bot].
+    Meeting a kind with it keeps only its logicality. *)
+val logicality_only : t
+
+(** Every axis at [top] except logicality, at [Logical]. Meeting a kind with it
+    drops its logicality. *)
+val without_logicality : t
+
 val to_mode_crossing : t -> Mode.Crossing.t
 
 (** Canonical lattice constants used by ikinds. *)
@@ -95,6 +108,9 @@ val sync_data : t
 
 val value : t
 
+(** An arrow's own contribution. It is a [Logical] on the logicality axis:
+    whether an arrow type is logical is decided by its argument and result,
+    which ikinds adds separately. *)
 val arrow : t
 
 val immediate : t

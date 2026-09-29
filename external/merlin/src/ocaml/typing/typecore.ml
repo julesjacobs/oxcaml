@@ -1031,17 +1031,9 @@ let submode ~loc ~env ?(reason = Other) mode expected_mode =
   match res with
   | Ok () -> ()
   | Error failure_reason ->
-<<<<<<< Merlin:jujacobs/vox/t9-matchability-20260929
+      let reason = ghostliness_reason reason expected_mode in
       let err = Submode_failed(failure_reason, reason) in
       raise (error(loc, env, err))
-||||||| Compiler:last-imported
-      let error = Submode_failed(failure_reason, reason) in
-      raise (Error(loc, env, error))
-=======
-      let reason = ghostliness_reason reason expected_mode in
-      let error = Submode_failed(failure_reason, reason) in
-      raise (Error(loc, env, error))
->>>>>>> Compiler:HEAD
 
 let escape ~loc ~env ~reason m =
   submode ~loc ~env ~reason m mode_legacy
@@ -1613,9 +1605,15 @@ let mark_partial_if_needed ~loc ~env : Typedtree.partial -> unit = function
   | Partial ->
     Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression)
 
+let not_logical_pinpoint ~loc ~env ty : Mode.Hint.pinpoint =
+  match Ctype.not_logical_reason env ty with
+  | Some reason -> loc, Mode.Hint.Not_logical_match reason
+  | None -> loc, Mode.Hint.Expression
+
 let mark_partial_if_not_total_pattern_type ~loc ~env ty =
   if not (Ctype.can_pattern_match_total env ty) then
-    Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression)
+    Env.walk_locks_for_partial_construct ~env
+      (not_logical_pinpoint ~loc ~env ty)
 
 let check_atomic_loc_of_finalized_repr ~loc ~env label record_repres lid =
   if not (Types.is_atomic label.lbl_mut) then
@@ -1978,7 +1976,10 @@ let run_total_pattern_checks checks =
       in
       if not total then
         Env.walk_locks_for_partial_construct ~env:tpc_env
-          (tpc_loc, Mode.Hint.Expression))
+          (match tpc_kind with
+           | Eliminate ->
+             not_logical_pinpoint ~loc:tpc_loc ~env:tpc_env tpc_type
+           | Unpack -> (tpc_loc, Mode.Hint.Expression)))
     checks
 
 (* Copy mutable fields. Used in typechecking or-patterns. *)
@@ -8234,17 +8235,34 @@ and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
                  sexp.pexp_loc exp
            | _ ->
                type_expect_ ?recarg ?defer_primitive_mode ~overwrite env
-<<<<<<< Merlin:jujacobs/vox/t9-matchability-20260929
                  expected_mode sexp ty_expected_explained
           with exn ->
             let exn =
               match exn with
               | Ctype.Refinement_scope_escape id ->
-                  Error_forward
-                    (Location.errorf ~loc:sexp.pexp_loc
-                       "the refinement type of this expression escapes the \
-                        scope of binding %a"
-                       Style.inline_code (Ident.name id))
+                  let error =
+                    match Ident.Tbl.find_opt argument_origins id with
+                    | Some (parameter, argument_loc) ->
+                        Location.errorf ~loc:sexp.pexp_loc
+                          ~sub:[Location.msg ~loc:argument_loc
+                                  "This is the argument.";
+                                Location.msg
+                                  "@[Hint: bind the argument to a variable \
+                                   with a let@ outside this expression.@]"]
+                          "@[the refinement type of this expression \
+                           mentions the argument@ for parameter %a, which \
+                           is not a variable@]"
+                          Style.inline_code parameter
+                    | None ->
+                        Location.errorf ~loc:sexp.pexp_loc
+                          ~sub:[Location.msg
+                                  "@[Hint: bind %a outside this expression.@]"
+                                  Style.inline_code (Ident.name id)]
+                          "the refinement type of this expression escapes \
+                           the scope of binding %a"
+                          Style.inline_code (Ident.name id)
+                  in
+                  Error_forward error
               | exn -> exn
             in
             Msupport.erroneous_type_register ty_expected_explained.ty;
@@ -8253,41 +8271,6 @@ and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
             let loc = sexp.pexp_loc in
             create_merlin_type_error_node loc env ty_expected_explained.ty
               ~attributes:(Msupport.recovery_attributes sexp.pexp_attributes))
-||||||| Compiler:last-imported
-                 expected_mode sexp ty_expected_explained)
-    with Ctype.Refinement_scope_escape id ->
-      raise
-        (Error_forward
-           (Location.errorf ~loc:sexp.pexp_loc
-              "the refinement type of this expression escapes the scope of \
-               binding %a"
-              Style.inline_code (Ident.name id)))
-=======
-                 expected_mode sexp ty_expected_explained)
-    with Ctype.Refinement_scope_escape id ->
-      let error =
-        match Ident.Tbl.find_opt argument_origins id with
-        | Some (parameter, argument_loc) ->
-            Location.errorf ~loc:sexp.pexp_loc
-              ~sub:[Location.msg ~loc:argument_loc
-                      "This is the argument.";
-                    Location.msg
-                      "@[Hint: bind the argument to a variable with a let@ \
-                       outside this expression.@]"]
-              "@[the refinement type of this expression mentions the \
-               argument@ for parameter %a, which is not a variable@]"
-              Style.inline_code parameter
-        | None ->
-            Location.errorf ~loc:sexp.pexp_loc
-              ~sub:[Location.msg
-                      "@[Hint: bind %a outside this expression.@]"
-                      Style.inline_code (Ident.name id)]
-              "the refinement type of this expression escapes the scope of \
-               binding %a"
-              Style.inline_code (Ident.name id)
-      in
-      raise (Error_forward error)
->>>>>>> Compiler:HEAD
   in
   exp
 
@@ -11808,10 +11791,14 @@ and type_function_
           exp_type)
       in
       let newtype = id, newtype_var, jkind_annot, uid in
-<<<<<<< Merlin:jujacobs/vox/t9-matchability-20260929
       begin
         try with_explanation ty_fun.explanation (fun () ->
-              unify_exp_types loc env exp_type (instance ty_expected));
+              (* [type_newtype] closes [exp_type] over the enclosing
+                 parameters, while [ty_expected] is opened by them: compare
+                 them closed. *)
+              unify_exp_types loc env exp_type
+                (close_dependent_type dependent_openings
+                   (instance ty_expected)));
         with exn ->
           (* Merlin: We recover from this error in [type_function]. *)
           record_exp_and_reraise ~exn
@@ -11845,16 +11832,6 @@ and type_function_
               exp_env = env;
             }
       end;
-||||||| Compiler:last-imported
-      with_explanation ty_fun.explanation (fun () ->
-          unify_exp_types loc env exp_type (instance ty_expected));
-=======
-      (* [type_newtype] closes [exp_type] over the enclosing parameters,
-         while [ty_expected] is opened by them: compare them closed. *)
-      with_explanation ty_fun.explanation (fun () ->
-          unify_exp_types loc env exp_type
-            (close_dependent_type dependent_openings (instance ty_expected)));
->>>>>>> Compiler:HEAD
       { function_ = exp_type, params, body;
         params_contain_gadt = contains_gadt; newtypes = newtype :: newtypes;
         fun_alloc_mode; ret_info; calling_convention_sorts;
