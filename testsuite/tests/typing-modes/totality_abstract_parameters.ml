@@ -31,11 +31,11 @@ Error: The match on a value whose type is not logical (callback is recursive but
          which is expected to be "total".
 |}]
 
-type 'a handle : value mod logical [@@phantom_parameters];;
+type 'a handle : value mod logical;;
 type node = { value : int; next : node handle };;
 let (value @ total) n = n.value;;
 [%%expect{|
-type 'a handle : value mod logical [@@phantom_parameters]
+type 'a handle : value mod logical
 type node = { value : int; next : node handle; }
 val value : node -> int = <fun>
 |}]
@@ -49,30 +49,16 @@ type aliased_node = { next : aliased_node handle_alias; }
 val next : aliased_node -> aliased_node handle_alias = <fun>
 |}]
 
-type 'a invalid = { contents : 'a } [@@phantom_parameters];;
-[%%expect{|
-Line 1, characters 0-58:
-1 | type 'a invalid = { contents : 'a } [@@phantom_parameters];;
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: A phantom parameter cannot occur in the type's representation.
-|}]
-
-type 'a invalid_function = 'a -> bool [@@phantom_parameters];;
-[%%expect{|
-Line 1, characters 0-60:
-1 | type 'a invalid_function = 'a -> bool [@@phantom_parameters];;
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: A phantom parameter cannot occur in the type's representation.
-|}]
-
-type 'a constant = { id : int } [@@phantom_parameters];;
-module type Phantom = sig type 'a t [@@phantom_parameters] end;;
+(* A kind without [with 'a] says the parameter does not bear on logicality
+   (the former [@@phantom_parameters]); inclusion checks it. *)
+type 'a constant = { id : int };;
+module type Phantom = sig type 'a t : logical_data end;;
 module Constant : Phantom = struct
-  type 'a t = 'a constant [@@phantom_parameters]
+  type 'a t = 'a constant
 end;;
 [%%expect{|
-type 'a constant = { id : int; } [@@phantom_parameters]
-module type Phantom = sig type 'a t [@@phantom_parameters] end
+type 'a constant = { id : int; }
+module type Phantom = sig type 'a t : logical_data end
 module Constant : Phantom
 |}]
 
@@ -89,17 +75,28 @@ Error: Signature mismatch:
        Type declarations do not match:
          type 'a t = { contents : 'a; }
        is not included in
-         type 'a t
-       [@@phantom_parameters]
-       Their phantom parameter guarantees do not match.
+         type 'a t : logical_data
+       The kind of the first is logical_data with 'a
+         because of the definition of t at line 1, characters 33-62.
+       But the kind of the first must be a subkind of logical_data
+         because of the definition of t at line 2, characters 26-50.
 |}]
 
 module type Forged_constraint = Phantom with type 'a t = 'a list;;
 [%%expect{|
-Line 1, characters 45-64:
+Line 1, characters 32-64:
 1 | module type Forged_constraint = Phantom with type 'a t = 'a list;;
-                                                 ^^^^^^^^^^^^^^^^^^^
-Error: A phantom parameter cannot occur in the type's representation.
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: In this "with" constraint, the new definition of "t"
+       does not match its original definition in the constrained signature:
+       Type declarations do not match:
+         type 'a t = 'a list
+       is not included in
+         type 'a t : logical_data
+       The kind of the first is logical_data with 'a
+         because it's a boxed variant type.
+       But the kind of the first must be a subkind of logical_data
+         because of the definition of t at line 2, characters 26-50.
 |}]
 
 module Hide : sig type 'a t end = Constant;;
@@ -131,22 +128,23 @@ Error: The match on a value whose type is not logical (H.t is abstract and its k
          which is expected to be "total".
 |}]
 
-module G (H : sig type 'a t : value mod logical [@@phantom_parameters] end) = struct
+module G (H : sig type 'a t : value mod logical end) = struct
   type t = { field : t H.t }
   let (field @ total) x = x.field
 end;;
 [%%expect{|
 module G :
-  functor (H : sig type 'a t : value mod logical [@@phantom_parameters] end)
-    -> sig type t = { field : t H.t; } val field : t -> t H.t end
+  functor (H : sig type 'a t : value mod logical end) ->
+    sig type t = { field : t H.t; } val field : t -> t H.t end
 |}]
 
 module rec Circular : Phantom = Circular;;
 [%%expect{|
-Line 2, characters 26-58:
-2 | module type Phantom = sig type 'a t [@@phantom_parameters] end;;
-                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Recursive module signatures cannot assert phantom parameter guarantees.
+Line 2, characters 26-50:
+2 | module type Phantom = sig type 'a t : logical_data end;;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Recursive module signatures cannot declare an abstract type whose kind is logical;
+       drop "mod logical" from its kind.
 |}]
 
 type (_, _) eq = Refl : ('a, 'a) eq;;
@@ -168,51 +166,6 @@ Error: The match on a value whose type is not logical (a constructor has an exis
        but is expected to be "total"
          because it is used inside the function at line 5, characters 30-42
          which is expected to be "total".
-|}]
-
-type 'a invalid_gadt = Index : int invalid_gadt [@@phantom_parameters];;
-[%%expect{|
-Line 1, characters 0-70:
-1 | type 'a invalid_gadt = Index : int invalid_gadt [@@phantom_parameters];;
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: GADTs cannot guarantee phantom parameters.
-|}]
-
-type 'a invalid_open = .. [@@phantom_parameters];;
-[%%expect{|
-Line 1, characters 0-48:
-1 | type 'a invalid_open = .. [@@phantom_parameters];;
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Extensible types cannot guarantee phantom parameters.
-|}]
-
-
-type 'a constrained_alias = 'b constraint 'a = 'b list
-  [@@phantom_parameters];;
-[%%expect{|
-Lines 1-2, characters 0-24:
-1 | type 'a constrained_alias = 'b constraint 'a = 'b list
-2 |   [@@phantom_parameters]..
-Error: Phantom parameters must be type variables.
-|}]
-
-type 'a constrained_record = { payload : 'b }
-  constraint 'a = 'b list [@@phantom_parameters];;
-[%%expect{|
-Lines 1-2, characters 0-48:
-1 | type 'a constrained_record = { payload : 'b }
-2 |   constraint 'a = 'b list [@@phantom_parameters]..
-Error: Phantom parameters must be type variables.
-|}]
-
-module type Constrained_phantom = sig
-  type 'a t constraint 'a = 'b list [@@phantom_parameters]
-end;;
-[%%expect{|
-Line 2, characters 2-58:
-2 |   type 'a t constraint 'a = 'b list [@@phantom_parameters]
-      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Phantom parameters must be type variables.
 |}]
 
 type 'a box = Box of 'a;;

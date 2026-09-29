@@ -1802,7 +1802,6 @@ let new_local_type ?(loc = Location.none) ?manifest_and_scope origin jkind =
     type_attributes = [];
     type_unboxed_default = false;
     type_inductive = false;
-    type_phantom_parameters = false;
     type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
     type_unboxed_version = None;
   }
@@ -9780,7 +9779,6 @@ let rec nondep_type_decl env mid is_covariant decl =
       type_attributes = decl.type_attributes;
       type_unboxed_default = decl.type_unboxed_default;
       type_inductive = decl.type_inductive;
-      type_phantom_parameters = decl.type_phantom_parameters;
       type_uid = decl.type_uid;
       type_unboxed_version;
     }

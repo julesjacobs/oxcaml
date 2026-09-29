@@ -1,6 +1,6 @@
 @@ portable
 
-type 'a t : logical_data [@@phantom_parameters]
+type 'a t : logical_data
 type 'a pref = 'a t
 (** Affine heap ownership. [void] erases its representation while retaining
     uniqueness, access, and ghostliness checking. Bytecode uses the existing

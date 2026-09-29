@@ -1,4 +1,4 @@
-type 'a t : logical_data [@@phantom_parameters]
+type 'a t : logical_data
 type 'a pref = 'a t
 type 'a token : void mod total contended logical with 'a
 type 'a heap : logical_data with 'a
