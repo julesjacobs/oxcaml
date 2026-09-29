@@ -68,4 +68,19 @@
   $ printf 'type pair = #{ left : int; right : int }\nexternal f : %s = "%%identity"\n' "$inferred" >unboxed.ml
   $ $MERLIN single errors -extension refinement_types \
   > -filename unboxed.ml <unboxed.ml | revert-newlines | jq '.value'
-  []
+  [
+    {
+      "start": {
+        "line": 2,
+        "col": 0
+      },
+      "end": {
+        "line": 2,
+        "col": 66
+      },
+      "type": "warning",
+      "sub": [],
+      "valid": true,
+      "message": "Warning 228: The verifier assumes this external's refinement;\n  nothing checks it."
+    }
+  ]

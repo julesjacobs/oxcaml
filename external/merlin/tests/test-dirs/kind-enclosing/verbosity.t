@@ -13,7 +13,7 @@
   > type t = int
   > EOF
   Verbosity 0: immediate
-  Verbosity 1: value non_pointer mod global many total immutable external_
+  Verbosity 1: value non_pointer mod global many total immutable external_ logical
   Verbosity 2: value non_pointer non_null
     mod global
         many
@@ -26,14 +26,15 @@
         portable
         contended
         external_
+        logical
         static
         ghost
 
   $ run 1:17 <<EOF
   > type 'a t = 'a option
   > EOF
-  Verbosity 0: immutable_data with 'a
-  Verbosity 1: value non_float mod forkable unyielding many total immutable with 'a
+  Verbosity 0: logical_data with 'a
+  Verbosity 1: value non_float mod forkable unyielding many total immutable logical with 'a
   Verbosity 2: value non_float non_null
     mod forkable
         unyielding
@@ -43,6 +44,7 @@
         stateless
         portable
         contended
+        logical
         local
         unique
         static
@@ -70,6 +72,7 @@
         static
         ghost
         internal
+        maybe_logical
     with int t1
 
   $ run 1:5 <<EOF
@@ -90,6 +93,7 @@
         static
         ghost
         internal
+        maybe_logical
   Verbosity 2: value separable non_null
     mod portable
         local
@@ -104,6 +108,7 @@
         static
         ghost
         internal
+        maybe_logical
 
   $ run 1:5 <<EOF
   > type t : value mod stateless
@@ -123,6 +128,7 @@
         static
         ghost
         internal
+        maybe_logical
   Verbosity 2: value separable non_null
     mod stateless
         portable
@@ -137,3 +143,4 @@
         static
         ghost
         internal
+        maybe_logical
