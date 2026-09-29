@@ -37,12 +37,28 @@ ROUTE = [
      'A result type that carries its own evidence: SAT returns a model, UNSAT a proof that no assignment satisfies the formula, both erased.'),
 ]
 
-COUNTS = ('<p>Line counts are physical lines with code, comments excluded. <strong>Spec</strong> is the interface the '
-          'page quotes. <strong>Impl</strong> and <strong>Proof</strong> cover every module reachable from the demo\'s root '
-          'modules; Proof is the lines inside <code>ghost_</code> expressions or refinement types, plus whole '
-          '<code>total</code> declarations whose result is a refined <code>unit</code> or a ghost value. A line with '
-          'both counts in both, so the columns do not add up. Modules shared with other demos are counted separately. '
-          'This is a syntactic count, not a measure of compiled code.</p>')
+COUNTS = ('<p>Line counts are physical lines with code; comments and blank lines are not counted. Each code '
+          'line of the demo\'s <code>.ml</code> files is counted in exactly one column.</p><ul>'
+          '<li><strong>Spec</strong>: the lines the page quotes under Interface.</li>'
+          '<li><strong>Implementation</strong>: code that runs. These are the declarations reachable at run time from '
+          'the exported values of the demo\'s root modules, less the parts that erasure removes or that only the '
+          'verifier reads. Reachability is computed from the compiler\'s typed trees: a reference counts only if it '
+          'is outside ghost code, refinement predicates and lemmas. A line with both run-time code and an '
+          'annotation is counted here.</li>'
+          '<li><strong>Model</strong>: ordinary definitions that never run and that the specification is stated in '
+          'terms of, such as the semantics of a target language. Definitions the page quotes are counted as '
+          'Spec.</li>'
+          '<li><strong>Proof</strong>: <code>ghost_</code> code; ghost declarations, fields and parameters; lemmas '
+          '(total functions whose result is a refined <code>unit</code> or ghost); refinement predicates; '
+          'termination measures; and ordinary definitions that only proofs use, such as invariants.</li>'
+          '<li><strong>Not reached</strong>: declarations in the demo\'s modules that nothing reachable from the '
+          'exported values uses, at run time or in a proof.</li></ul>'
+          '<p>Lines outside every declaration (<code>open</code>, module aliases, <code>struct</code> and '
+          '<code>end</code>) go to the column with the most lines in their module. Interface files '
+          '(<code>.mli</code>) and modules shared with other demos are counted separately. The rules are '
+          'stated in full in <code>verification/catalogue/line_stats.py</code>.</p>')
+COLUMNS = (('spec', 'Spec'), ('impl', 'Implementation'), ('model', 'Model'), ('proof', 'Proof'),
+           ('unused', 'Not reached'))
 
 
 def shell(title, body, prefix='', script=''):
@@ -57,7 +73,8 @@ def header(prefix=''):
 
 
 def counts_line(stats, prefix):
-    return (f'<span class="line-stats">Spec {stats["spec"]:,} · Impl {stats["impl"]:,} · Proof {stats["proof"]:,}</span>'
+    return (f'<span class="line-stats">Spec {stats["spec"]:,} · Impl {stats["impl"]:,} · '
+            f'Model {stats["model"]:,} · Proof {stats["proof"]:,}</span>'
             f' <a class="line-stats" href="{prefix}statistics/{stats["id"]}.html">Line counts →</a>')
 
 
@@ -105,8 +122,9 @@ def build(args):
         f'<p class="card-claim">{P.inline(pages[d][0]["blurb"])}</p>'
         f'<p class="card-foot">'
         f'<a class="card-counts" href="statistics/{d}.html" title="Lines: spec {stats[d]["spec"]:,}, '
-        f'impl {stats[d]["impl"]:,}, proof {stats[d]["proof"]:,}">Spec {short(stats[d]["spec"])} · '
-        f'Impl {short(stats[d]["impl"])} · Proof {short(stats[d]["proof"])}</a></p></li>' for d in demos)
+        f'implementation {stats[d]["impl"]:,}, model {stats[d]["model"]:,}, proof {stats[d]["proof"]:,}">'
+        f'Spec {short(stats[d]["spec"])} · Impl {short(stats[d]["impl"])} · Model {short(stats[d]["model"])} · '
+        f'Proof {short(stats[d]["proof"])}</a></p></li>' for d in demos)
     mechanisms = ''.join(
         f'<li title="{plain(m["summary"])}"><span class="mech-name">{esc(m["name"])}</span>'
         + (badge('future', 'Future') if m.get('future') else '')
@@ -192,33 +210,35 @@ def compiler_example(output, source, linked):
 def statistics(output, pages, demos, stats, source):
     target = output / 'statistics'
     target.mkdir()
+    head = ''.join(f'<th>{label}</th>' for _, label in COLUMNS)
     rows = ''
     for d in demos:
         s = stats[d]
         title = P.inline(pages[d][0]['title'])
         rows += (f'<tr><th scope="row"><a href="{d}.html">{title}</a></th>'
-                 + ''.join(f'<td>{s[k]:,}</td>' for k in ('spec', 'impl', 'proof')) + '</tr>')
+                 + ''.join(f'<td>{s[k]:,}</td>' for k, _ in COLUMNS) + '</tr>')
         body = (header('../') + f'<h1>{title}: line counts</h1><p>At {P.commit_line(source).removeprefix("Sources: ")}. '
                 f'<a href="../specs/{d}.html">Demo page</a>.</p>' + COUNTS
-                + '<div class="table-scroll"><table class="stats-table"><thead><tr><th></th><th>Spec</th><th>Impl</th>'
-                  '<th>Proof</th><th>Both</th><th>Interface files</th></tr></thead><tbody>')
+                + f'<div class="table-scroll"><table class="stats-table"><thead><tr><th></th>{head}'
+                  '<th>Interface files</th></tr></thead><tbody>')
         for label, data in (('Demo', s), ('Shared modules', s['shared'])):
             body += f'<tr><th scope="row">{label}</th>' + ''.join(
-                f'<td>{data[k]:,}</td>' for k in ('spec', 'impl', 'proof', 'mixed', 'interfaces')) + '</tr>'
+                f'<td>{data[k]:,}</td>' for k, _ in COLUMNS + (('interfaces', ''),)) + '</tr>'
         body += ('</tbody></table></div><div class="table-scroll"><table class="stats-table"><thead><tr><th>File</th>'
-                 '<th></th><th>Impl</th><th>Proof</th><th>Both</th><th>Interface</th></tr></thead><tbody>')
+                 '<th></th>' + ''.join(f'<th>{label}</th>' for _, label in COLUMNS[1:])
+                 + '<th>Interface</th></tr></thead><tbody>')
         for f in s['files']:
             source.read(f['path'])
             body += (f'<tr><th scope="row"><a href="../{esc(source.view(f["path"]))}">{esc(f["path"])}</a></th>'
                      f'<td>{"Demo" if f["group"] == "own" else "Shared"}</td>'
                      + ''.join(f'<td>{f[k]:,}</td>' if k in f else '<td>—</td>'
-                               for k in ('impl', 'proof', 'mixed', 'interfaces')) + '</tr>')
+                               for k in ('impl', 'model', 'proof', 'unused', 'interfaces')) + '</tr>')
         body += '</tbody></table></div>'
         (target / f'{d}.html').write_text(shell(f'{pages[d][0]["title"]}: line counts', body, '../'))
     (target / 'index.html').write_text(shell('Line counts',
         header('../') + '<h1>Line counts</h1>' + COUNTS
-        + '<div class="table-scroll"><table class="stats-table"><thead><tr><th>Demo</th><th>Spec</th><th>Impl</th>'
-          f'<th>Proof</th></tr></thead><tbody>{rows}</tbody></table></div>', '../'))
+        + f'<div class="table-scroll"><table class="stats-table"><thead><tr><th>Demo</th>{head}'
+          f'</tr></thead><tbody>{rows}</tbody></table></div>', '../'))
 
 
 class Links(HTMLParser):
