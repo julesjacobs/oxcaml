@@ -1,5 +1,5 @@
 module type Ordered = sig
-  type t : immutable_data mod total
+  type t : immutable_data mod total [@@total_matchable]
 
   val compare : t -> t -> int @@ total
 

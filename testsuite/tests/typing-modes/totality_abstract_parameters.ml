@@ -1,6 +1,6 @@
 (* TEST expect; *)
 
-type 'a heap;;
+type 'a heap [@@total_matchable];;
 type callback = { run : callback heap -> bool @@ total };;
 let (project @ total) x = x.run;;
 [%%expect{|
@@ -31,7 +31,7 @@ Error: The expression is "partial"
          which is expected to be "total".
 |}]
 
-type 'a handle [@@phantom_parameters];;
+type 'a handle [@@phantom_parameters] [@@total_matchable];;
 type node = { value : int; next : node handle };;
 let (value @ total) n = n.value;;
 [%%expect{|
@@ -131,13 +131,13 @@ Error: The expression is "partial"
          which is expected to be "total".
 |}]
 
-module G (H : Phantom) = struct
+module G (H : sig type 'a t [@@phantom_parameters] [@@total_matchable] end) = struct
   type t = { field : t H.t }
   let (field @ total) x = x.field
 end;;
 [%%expect{|
 module G :
-  functor (H : Phantom) ->
+  functor (H : sig type 'a t [@@phantom_parameters] end) ->
     sig type t = { field : t H.t; } val field : t -> t H.t end
 |}]
 

@@ -32,7 +32,7 @@ module Q = Vox_egraph_match_spec
 module L = Vox_egraph_language_spec
 module Snapshot = Vox_egraph_snapshot_spec
 
-type t
+type t [@@total_matchable]
 
 val model : t @ local immutable -> Q.graph @ immutable ghost @@ total
 val rules : t @ local immutable -> R.t @ immutable ghost @@ total

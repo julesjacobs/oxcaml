@@ -162,7 +162,7 @@ val positive_axis : pair -> {r : int | r > 0} = <fun>
 
 type sum = First of int | Second of int
 
-type token
+type token [@@total_matchable]
 type wrapped = Wrap of token
 
 let opaque_payload_injective (left @ immutable) (right @ immutable)

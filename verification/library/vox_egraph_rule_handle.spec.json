@@ -654,7 +654,7 @@
     },
     {
       "path": "verification/library/vox_egraph_rule_handle.mli",
-      "sha256": "0138555edc9dd5b6ebfe606ffec99a05a4be9297b337141fda075c94f23d5efc",
+      "sha256": "538437a797e9e5e49ed44c6443940c26673d4aa92d7f73b4b10c2e8e47c22346",
       "role": "public_contracts",
       "declarations": [
         {
@@ -697,7 +697,7 @@
           "name": "t",
           "start_line": 35,
           "end_line": 35,
-          "code": "type t"
+          "code": "type t [@@total_matchable]"
         },
         {
           "kind": "val",

@@ -4047,7 +4047,7 @@ end = struct
     | Limit -> Comparison_limit
 
   module Pair_trace : sig
-    type t : value mod immutable
+    type t : value mod immutable [@@total_matchable]
     val entries : t -> (int * int * int list) list @@ total
     val make : (values : (int * int * int list) list) @ total ->
       {result : t | entries result === values} @ total @@ total
@@ -4446,7 +4446,7 @@ end = struct
       Different word)
 
   module Access_trace : sig
-    type t : value mod immutable
+    type t : value mod immutable [@@total_matchable]
     val entries : t -> (int * int list) list @@ total
     val make : (values : (int * int list) list) @ total ->
       {result : t | entries result === values} @ total @@ total
