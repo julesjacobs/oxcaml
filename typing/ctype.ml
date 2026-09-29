@@ -4078,6 +4078,18 @@ let declaration_can_pattern_match_total ?(knot_free = false) env root root_args
     let active =
       Option.value (Path.Map.find_opt path !active_declarations) ~default:[]
     in
+    (* In [knot_free] mode, re-entering a declaration that is still being
+       walked in the OTHER polarity closes a cycle through an odd number of
+       arrow arguments: a negative cycle, i.e. a knot, wherever it is. This
+       does not depend on recognising the root by its path, which fails when
+       the declaration being judged is a strengthened copy (inclusion of
+       [module M : S = Bad], a functor argument, [include Bad]) whose
+       recursion is reached under the original path. *)
+    if knot_free
+       && Path.Map.mem path
+            !(if negative then active_declarations_p
+              else active_declarations_n)
+    then raise_notrace Not_definitely_nonrecursive;
     if List.exists (List.equal eq_type args) (completed @ active) then ()
     else match active with
     | previous :: _ when not (arguments_decrease args previous) ->
