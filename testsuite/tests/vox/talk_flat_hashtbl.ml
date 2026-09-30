@@ -131,7 +131,7 @@ Line 10, characters 19-37:
                         ^^^^^^^^^^^^^^^^^^
 Error: The field access "before.model.slots" has type "(Key.t * 'a) option list"
        but an expression was expected of type "'b S.t" = "'b list"
-       The kind of (Key.t * 'a) option is immutable_data with Key.t * 'a
+       The kind of (Key.t * 'a) option is logical_data with Key.t * 'a
          because it's a boxed variant type.
        But the kind of (Key.t * 'a) option must be a subkind of
            immutable_data.
@@ -175,7 +175,7 @@ Line 10, characters 19-37:
                         ^^^^^^^^^^^^^^^^^^
 Error: The field access "before.model.slots" has type "(Key.t * 'a) option list"
        but an expression was expected of type "'b S.t" = "'b list"
-       The kind of (Key.t * 'a) option is immutable_data with Key.t * 'a
+       The kind of (Key.t * 'a) option is logical_data with Key.t * 'a
          because it's a boxed variant type.
        But the kind of (Key.t * 'a) option must be a subkind of
            immutable_data.

@@ -93,6 +93,8 @@ module Typ = struct
     | Ptyp_poly _ -> t
     | _ -> poly ~loc:t.ptyp_loc [] t (* -> ghost? *)
 
+  let map_expression_types = ref (fun _ e -> e)
+
   let varify_constructors var_names t =
     let check_variable vl loc v =
       if List.mem v vl then
@@ -157,7 +159,8 @@ module Typ = struct
         | Ptyp_newlayout (var_lst, core_type) ->
             Ptyp_newlayout (var_lst, loop core_type)
         | Ptyp_refine (binder, core_type, predicate) ->
-            Ptyp_refine (binder, loop core_type, predicate)
+            Ptyp_refine
+              (binder, loop core_type, !map_expression_types loop predicate)
         | Ptyp_extension (s, arg) ->
             Ptyp_extension (s, arg)
       in

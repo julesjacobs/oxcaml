@@ -9,8 +9,37 @@
   > ML
 
   $ $MERLIN single errors -extension refinement_types \
-  > -filename dependent.ml <dependent.ml | jq '.value'
-  []
+  > -filename dependent.ml <dependent.ml | revert-newlines | jq '.value'
+  [
+    {
+      "start": {
+        "line": 1,
+        "col": 0
+      },
+      "end": {
+        "line": 1,
+        "col": 56
+      },
+      "type": "warning",
+      "sub": [],
+      "valid": true,
+      "message": "Warning 228: The verifier assumes this external's refinement;\n  nothing checks it."
+    },
+    {
+      "start": {
+        "line": 4,
+        "col": 0
+      },
+      "end": {
+        "line": 4,
+        "col": 83
+      },
+      "type": "warning",
+      "sub": [],
+      "valid": true,
+      "message": "Warning 228: The verifier assumes this external's refinement;\n  nothing checks it."
+    }
+  ]
 
   $ $MERLIN single type-enclosing -position 3:6 -extension refinement_types \
   > -filename dependent.ml <dependent.ml | jq '.value[0].type'

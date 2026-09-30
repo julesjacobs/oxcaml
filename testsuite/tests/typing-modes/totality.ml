@@ -333,6 +333,12 @@ Error: The value "Declared.partial" is "partial"
 
 external trusted : int -> int @@ total = "%identity"
 [%%expect{|
+Line 1, characters 0-52:
+1 | external trusted : int -> int @@ total = "%identity"
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 external trusted : int -> int = "%identity"
 |}]
 

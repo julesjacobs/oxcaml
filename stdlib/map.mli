@@ -392,7 +392,7 @@ module type S =
 module type TotalS =
   sig
     type key
-    type !+'a t : immutable_data with key with 'a
+    type !+'a t : logical_data with key with 'a
     include S with type key := key and type 'a t := 'a t
 
     val empty: 'a t @@ total

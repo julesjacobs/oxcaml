@@ -61,7 +61,7 @@ Test that hovering over jkind annotations shows their full expansion.
   $ hover 3 16 1
   type ('a : immediate) t3 : value
                   ^
-  "immediate)" : "value non_pointer mod global many total immutable external_"
+  "immediate)" : "value non_pointer mod global many total immutable external_ logical"
 
   $ hover 3 28 2
   type ('a : immediate) t3 : value
@@ -81,18 +81,18 @@ Test that hovering over jkind annotations shows their full expansion.
   type t5 : value mod everything
              ^
   "value " : "value"
-  "value mod everything" : "value mod global many total immutable external_"
+  "value mod everything" : "value mod global many total immutable external_ logical"
 
   $ hover 6 11 1
   type t6 : bits32
              ^
-  "bits32" : "bits32 mod external_"
+  "bits32" : "bits32 mod external_ logical"
 
   $ hover 7 11 2
   type t7 : bits32 mod portable contended
              ^
-  "bits32 " : "bits32 mod external_"
-  "bits32 mod portable contended" : "bits32 mod portable contended external_"
+  "bits32 " : "bits32 mod external_ logical"
+  "bits32 mod portable contended" : "bits32 mod portable contended external_ logical"
 
   $ hover 8 11 1
   type t8 : void
@@ -102,12 +102,12 @@ Test that hovering over jkind annotations shows their full expansion.
   $ hover 10 18 1
     val f : ('a : immediate). 'a -> 'a
                     ^
-  "immediate)" : "value non_pointer mod global many total immutable external_"
+  "immediate)" : "value non_pointer mod global many total immutable external_ logical"
 
   $ hover 11 18 1
     val g : ('b : bits32) -> ('b : value mod portable)
                     ^
-  "bits32)" : "bits32 mod external_"
+  "bits32)" : "bits32 mod external_ logical"
 
 # CR-someday: This is failing because of poor error recovery.
   $ hover 11 35 2

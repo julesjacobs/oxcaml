@@ -1482,9 +1482,15 @@ let mark_partial_if_needed ~loc ~env : Typedtree.partial -> unit = function
   | Partial ->
     Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression)
 
+let not_logical_pinpoint ~loc ~env ty : Mode.Hint.pinpoint =
+  match Ctype.not_logical_reason env ty with
+  | Some reason -> loc, Mode.Hint.Not_logical_match reason
+  | None -> loc, Mode.Hint.Expression
+
 let mark_partial_if_not_total_pattern_type ~loc ~env ty =
   if not (Ctype.can_pattern_match_total env ty) then
-    Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression)
+    Env.walk_locks_for_partial_construct ~env
+      (not_logical_pinpoint ~loc ~env ty)
 
 let check_atomic_loc_of_finalized_repr ~loc ~env label record_repres lid =
   if not (Types.is_atomic label.lbl_mut) then
@@ -1846,7 +1852,10 @@ let run_total_pattern_checks checks =
       in
       if not total then
         Env.walk_locks_for_partial_construct ~env:tpc_env
-          (tpc_loc, Mode.Hint.Expression))
+          (match tpc_kind with
+           | Eliminate ->
+             not_logical_pinpoint ~loc:tpc_loc ~env:tpc_env tpc_type
+           | Unpack -> (tpc_loc, Mode.Hint.Expression)))
     checks
 
 (* Copy mutable fields. Used in typechecking or-patterns. *)

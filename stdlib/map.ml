@@ -92,7 +92,7 @@ module type S =
 module type TotalS =
   sig
     type key
-    type !+'a t : immutable_data with key with 'a
+    type !+'a t : logical_data with key with 'a
     include S with type key := key and type 'a t := 'a t
     val empty: 'a t @@ total
     val add: key -> 'a -> 'a t -> 'a t @@ total
@@ -161,6 +161,7 @@ module Make(Ord: OrderedType) = struct
     type 'a t =
         Empty
       | Node of {l:'a t; v:key; d:'a; r:'a t; h:int}
+    [@@inductive]
 
     let height = function
         Empty -> 0
@@ -637,6 +638,7 @@ module MakePortable(Ord: sig @@ portable include OrderedType end) = struct
     type 'a t =
         Empty
       | Node of {l:'a t; v:key; d:'a; r:'a t; h:int}
+    [@@inductive]
 
     let height = function
         Empty -> 0

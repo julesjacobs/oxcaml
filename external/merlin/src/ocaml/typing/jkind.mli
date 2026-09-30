@@ -656,6 +656,17 @@ val get_externality_upper_bound :
 val set_externality_upper_bound :
   Types.jkind_r -> Jkind_axis.Externality.t -> Types.jkind_r
 
+(** [set_logicality s jk] sets the logicality mod-bound of [jk] to [s]. *)
+val set_logicality : Jkind_axis.Logicality.t -> 'd Types.jkind -> 'd Types.jkind
+
+(** Whether [jk]'s own mod-bounds (ignoring with-bounds) say [mod logical]. *)
+val requires_logical : 'd Types.jkind -> bool
+
+(** [add_logicality_with_bound ty jk] adds [with ty] to [jk], relevant on the
+    logicality axis only (or widens an existing [with ty] to include it). *)
+val add_logicality_with_bound :
+  Types.type_expr -> Types.jkind_l -> Types.jkind_l
+
 (** Gets the nullability from a jkind. Expands abstract kinds if needed. *)
 val get_nullability : Env.t -> 'd Types.jkind -> Jkind_axis.Nullability.t option
 

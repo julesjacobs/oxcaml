@@ -56,6 +56,12 @@ type value_mismatch =
 
 exception Dont_match of value_mismatch
 
+(** Recursive functions that the typechecker made partial because their
+    recursion is not structural, with the location of the offending call and
+    the reason, keyed by the function's uid. An interface that requires the
+    function to be total reports them. *)
+val partial_recursion : (Location.t * string) Types.Uid.Tbl.t
+
 (* Documents which kind of private thing would be revealed *)
 type privacy_mismatch =
   | Private_type_abbreviation
@@ -132,7 +138,6 @@ type unsafe_mode_crossing_mismatch =
 type type_mismatch =
   | Arity
   | Inductiveness
-  | Phantom_parameters
   | Privacy of privacy_mismatch
   | Kind of kind_mismatch
   | Constraint of Errortrace.equality_error
@@ -148,6 +153,8 @@ type type_mismatch =
   | With_null_representation of position
   | Fixed_representation of position
   | Jkind of Ikind.subjkind_error
+  | Not_logical of Ikind.subjkind_error * string
+      (** A kind mismatch where the implementation is not logical, and why *)
   | Unsafe_mode_crossing of unsafe_mode_crossing_mismatch
 
 type jkind_mismatch =
@@ -195,7 +202,12 @@ val check_modes : Env.t -> ?crossing:Mode.Crossing.t ->
   item:Mode.Hint.lock_item ->
   ?typ:type_expr -> mmodes -> (unit, Mode.Value.error) Result.t
 
+(** With [refinements], refinements that the declaration requires beyond
+    those of the implementation are accepted when they can be proved:
+    [refinements ~source ~target] is called with the instantiated pair of
+    types that the verifier must relate. *)
 val value_descriptions:
+  ?refinements:(source:type_expr -> target:type_expr -> unit) ->
   loc:Location.t -> Env.t -> string ->
   mmodes:mmodes ->
   value_description -> value_description -> module_coercion

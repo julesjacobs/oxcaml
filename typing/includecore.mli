@@ -138,7 +138,6 @@ type unsafe_mode_crossing_mismatch =
 type type_mismatch =
   | Arity
   | Inductiveness
-  | Phantom_parameters
   | Privacy of privacy_mismatch
   | Kind of kind_mismatch
   | Constraint of Errortrace.equality_error
@@ -154,6 +153,8 @@ type type_mismatch =
   | With_null_representation of position
   | Fixed_representation of position
   | Jkind of Ikind.subjkind_error
+  | Not_logical of Ikind.subjkind_error * string
+      (** A kind mismatch where the implementation is not logical, and why *)
   | Unsafe_mode_crossing of unsafe_mode_crossing_mismatch
 
 type jkind_mismatch =

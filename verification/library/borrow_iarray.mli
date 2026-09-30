@@ -4,7 +4,7 @@ type ('value, 'state) step =
   { value : 'value @@ global; state : 'state }
 
 module Slice : sig @@ portable
-  type ('a : immutable_data) t : value mod total contended
+  type ('a : immutable_data) t : value mod total contended logical
 
   external current : ('a : immutable_data).
     'a t @ local immutable -> 'a iarray @ total immutable ghost
@@ -117,7 +117,7 @@ module Slice : sig @@ portable
 end
 
 module Owned_array : sig @@ portable
-  type ('a : immutable_data) t : value mod total contended
+  type ('a : immutable_data) t : value mod total contended logical
 
   external contents : ('a : immutable_data).
     'a t @ local immutable -> 'a iarray @ total immutable ghost

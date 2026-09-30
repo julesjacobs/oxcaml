@@ -342,7 +342,8 @@ let of_exp_extra (exp, _, _) =
   | Texp_refine
   | Texp_refinement _
   | Texp_value_name _
-  | Texp_let_refine _ -> id_fold
+  | Texp_let_refine _
+  | Texp_subsumption _ -> id_fold
 let of_expression e = app (Expression e) ** list_fold of_exp_extra e.exp_extra
 
 let of_pat_extra (pat, _, _) =

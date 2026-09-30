@@ -518,6 +518,7 @@ and with_bounds_types
 and mod_bounds =
   { crossing : Mode.Crossing.t;
     externality: Jkind_axis.Externality.t;
+    logicality: Jkind_axis.Logicality.t;
   }
 
 and 'd with_bounds =
@@ -999,7 +1000,6 @@ type type_declaration =
        ([@@unboxed] or [@@represent_as_float_array]), so the representation may
        have been chosen by a compiler flag. *)
     type_inductive: bool;
-    type_phantom_parameters: bool;
     (* Whether the declaration has a checked [@@inductive] guarantee. *)
     type_uid: Uid.t;
     type_unboxed_version : type_declaration option;

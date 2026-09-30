@@ -440,6 +440,10 @@ and exp_extra =
   | Texp_value_name of Ident.t
         (** A logical name for this evaluated argument, scoped to its
             lexical continuation. This adds no runtime binding. *)
+  | Texp_subsumption of { source : Types.type_expr; target : Types.type_expr }
+        (** A coercion [(e :> t)] whose refinements the verifier must prove:
+            every value of [source] is a value of [target].  No runtime
+            effect. *)
   | Texp_let_refine of Ident.t * string loc
         (** The source expression was [let refine_ x = ... in ...]. *)
 
@@ -1576,6 +1580,35 @@ type implementation = {
     against the .mli for a parameter in addition to its own .mli, it has an
     additional signature stored in [argument_interface].
 *)
+
+(** A value whose declared type has refinements that the verifier must still
+    derive from the refinements of its implementation (refinement
+    subsumption at an inclusion).  [ro_value] is the implementation's value
+    ([None] in a functor-parameter position, where only types are related),
+    inside the submodules [ro_modules] of the checked module; [ro_source] is
+    its type as instantiated by the inclusion check, and [ro_target] the
+    declared type. *)
+type refinement_obligation =
+  { ro_value : Path.t option;
+    ro_modules : string list;
+    ro_name : string;
+    ro_source : Types.type_expr;
+    ro_target : Types.type_expr;
+    ro_env : Env.t;
+    ro_value_loc : Location.t;
+    ro_declaration_loc : Location.t }
+
+type refinement_site_kind =
+  | Rsite_interface of string  (** the unit's interface file *)
+  | Rsite_constraint           (** a signature constraint *)
+  | Rsite_functor_argument     (** a functor application *)
+
+(** The obligations of one inclusion check, discharged in the verifier state
+    of that check. *)
+type refinement_site =
+  { rs_kind : refinement_site_kind;
+    rs_loc : Location.t;
+    rs_obligations : refinement_obligation list }
 
 type item_declaration =
   | Value of value_description

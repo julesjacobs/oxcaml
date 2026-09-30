@@ -267,6 +267,20 @@ let show_locs ppf (loc1, loc2) =
   show_loc "Actual declaration" ppf loc1
 
 
+(* A value that is partial only because its recursion is not structural:
+   point at the recursive call, as a [total] annotation would. *)
+let show_partial_recursion is_modal ppf (got : Types.value_description) =
+  match is_modal with
+  | Some (Mode.Value.Axis.P (Comonadic Totality)) -> begin
+      match Types.Uid.Tbl.find_opt Includecore.partial_recursion got.val_uid
+      with
+      | Some (loc, reason) ->
+          show_loc
+            ("This recursive function is partial: " ^ reason ^ ".") ppf loc
+      | None -> ()
+    end
+  | _ -> ()
+
 let dmodtype mty =
   let tmty = Out_type.tree_of_modtype ~abbrev:true mty in
   Fmt.dprintf "%a" !Oprint.out_module_type tmty
@@ -865,7 +879,7 @@ let core env id x =
       let mode1, mode2 =
         maybe_print_modes ~in_structure:true ~is_modal diff.modes
       in
-      Fmt.dprintf "@[<v>@[<hv>%s:@;<1 2>%a%t@ %s@;<1 2>%a%t@]%a%a@]"
+      Fmt.dprintf "@[<v>@[<hv>%s:@;<1 2>%a%t@ %s@;<1 2>%a%t@]%a%a%a@]"
         "Values do not match"
         !Oprint.out_sig_item
         (Out_type.tree_of_value_description id diff.got)
@@ -878,6 +892,7 @@ let core env id x =
            ~pp:(diff.got.val_loc, Structure_item (Value, id))
            "the first" "the second" env) diff.symptom
         show_locs (diff.got.val_loc, diff.expected.val_loc)
+        (show_partial_recursion is_modal) diff.got
   | Err.Modalities e ->
       Fmt.dprintf "@[<hv>%s:@;%a@]"
         ("Modalities on " ^ (Ident.name id) ^ " do not match")

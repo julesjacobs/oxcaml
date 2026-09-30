@@ -3,13 +3,13 @@
  expect;
 *)
 
-type token : void mod total contended;;
+type token : void mod total contended logical;;
 external empty : unit -> token @ unique = "%unbox_unit";;
 external consume : token @ unique -> unit @@ total =
   "caml_pref_own_bytecode" "caml_pref_own";;
 let duplicate t = consume t; consume t;;
 [%%expect{|
-type token : void mod total contended
+type token : void mod total contended logical
 external empty : unit -> token @ unique = "%unbox_unit"
 Lines 3-4, characters 0-42:
 3 | external consume : token @ unique -> unit @@ total =
@@ -94,7 +94,7 @@ Line 2, characters 23-37:
                            ^^^^^^^^^^^^^^
 Error: This type "ghost_callback" should be an instance of type
          "('a : immutable_data)"
-       The kind of ghost_callback is value non_float mod immutable
+       The kind of ghost_callback is value non_float mod immutable logical
          because of the definition of ghost_callback at line 1, characters 0-62.
        But the kind of ghost_callback must be a subkind of immutable_data
          because of the definition of cell at line 1, characters 0-31.
@@ -109,7 +109,7 @@ Line 2, characters 21-36:
                          ^^^^^^^^^^^^^^^
 Error: This type "mutable_payload" should be an instance of type
          "('a : immutable_data)"
-       The kind of mutable_payload is mutable_data
+       The kind of mutable_payload is mutable_data mod logical
          because of the definition of mutable_payload at line 1, characters 0-42.
        But the kind of mutable_payload must be a subkind of immutable_data
          because of the definition of cell at line 1, characters 0-31.
@@ -124,7 +124,7 @@ Line 2, characters 23-40:
                            ^^^^^^^^^^^^^^^^^
 Error: This type "authority_payload" should be an instance of type
          "('a : immutable_data)"
-       The kind of authority_payload is immutable_data with token
+       The kind of authority_payload is logical_data with token
          because of the definition of authority_payload at line 1, characters 0-55.
        But the kind of authority_payload must be a subkind of immutable_data
          because of the definition of cell at line 1, characters 0-31.

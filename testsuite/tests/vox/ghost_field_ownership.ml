@@ -569,7 +569,7 @@ Error: Signature mismatch:
          type t = { bp : int G.t; bt : int G.token @@ ghost; }
        is not included in
          type t : immutable_data
-       The kind of the first is immutable_data with int G.t with int G.token
+       The kind of the first is logical_data with int G.t with int G.token
          because of the definition of t at line 4, characters 2-54.
        But the kind of the first must be a subkind of immutable_data
          because of the definition of t at line 2, characters 2-25.

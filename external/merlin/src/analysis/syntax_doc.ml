@@ -171,6 +171,12 @@ let get_mod_bound_doc mod_bound =
          the OCaml heap"
     | Axis_pair (Nonmodal Externality, External) ->
       Some "Values of types of this kind are never pointers to the OCaml heap"
+    | Axis_pair (Nonmodal Logicality, Logical) ->
+      Some
+        "Values of types of this kind form a set in the mathematical sense \
+         (not recursive unless [@@inductive]), so total code may match them"
+    | Axis_pair (Nonmodal Logicality, Maybe_logical) ->
+      Some "Values of types of this kind might not form a set"
     | Everything ->
       Some
         "Synonym for \"global aliased many contended portable unyielding \

@@ -176,6 +176,7 @@ module TyVarEnv : sig
   val protect_reentrant : (unit -> 'a) -> 'a
 
   type poly_univars
+  val current_univars : unit -> poly_univars
   val with_univars : poly_univars -> (unit -> 'a) -> 'a
   (* evaluate with a locally extended set of univars *)
 
@@ -387,16 +388,35 @@ end = struct
 
   let univars = ref ([] : poly_univars)
 
+  (* A refinement predicate is translated in the middle of an enclosing type.
+     Its local variables are its own, but a global variable it introduces,
+     such as ['a] in [(e : 'a t)], is the ['a] of the enclosing binding. *)
   let protect_reentrant f =
-    Misc.protect_refs
-      [ Misc.R (type_variables, !type_variables);
-        Misc.R (used_variables, !used_variables);
-        Misc.R (used_anonymous_variables, !used_anonymous_variables);
-        Misc.R (warned_imprecise_locs, !warned_imprecise_locs);
-        Misc.R (pre_univars, !pre_univars);
-        Misc.R (univars, !univars)
-      ]
-      f
+    let outer_globals = !type_variables in
+    let keep_globals () =
+      let added =
+        TyVarMap.filter
+          (fun name _ -> not (TyVarMap.mem name outer_globals))
+          !type_variables
+      in
+      TyVarMap.union (fun _ outer _ -> Some outer) outer_globals added
+    in
+    let result =
+      try
+        Misc.protect_refs
+          [ Misc.R (used_variables, !used_variables);
+            Misc.R (used_anonymous_variables, !used_anonymous_variables);
+            Misc.R (warned_imprecise_locs, !warned_imprecise_locs);
+            Misc.R (pre_univars, !pre_univars);
+            Misc.R (univars, !univars)
+          ]
+          f
+      with exn ->
+        type_variables := outer_globals;
+        raise exn
+    in
+    type_variables := keep_globals ();
+    result
   let assert_univars uvs =
     assert (List.for_all (fun (_name, v, _stage) -> not_generic v.univar) uvs)
 
@@ -406,6 +426,8 @@ end = struct
       if String.equal name n
       then t, s
       else find_poly_univars name rest
+
+  let current_univars () = !univars
 
   let with_univars new_ones f =
     assert_univars new_ones;
@@ -1037,26 +1059,39 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
             Option.iter
               (fun binder ->
                  Language_extension.assert_enabled ~loc:binder.loc
-                   Refinement_types ();
-                 if l <> Asttypes.Nolabel then
-                   raise
-                     (Error_forward
-                        (Location.errorf ~loc:binder.loc
-                           "dependent function binders are supported only on \
-                            unlabelled arrows")))
+                   Refinement_types ())
               source_binder;
             check_arg_type arg;
             let l = transl_label l (Some arg) in
-            let arg_cty =
+            Option.iter
+              (fun binder ->
+                 if Btype.is_position l then
+                   raise
+                     (Error_forward
+                        (Location.errorf ~loc:binder.loc
+                           "dependent function binders are not supported on \
+                            call-position arguments")))
+              source_binder;
+            let arg_cty, binder_ty =
               with_local_level_generalize_structure_if
                 (Option.is_some source_binder && !Clflags.principal)
                 (fun () ->
-                  if Btype.is_position l then
-                    ctyp Ttyp_call_pos
-                      (newconstr Predef.path_lexing_position [])
-                  else
-                    transl_type env ~policy ~row_context
-                      arg_mode.mode_modes arg)
+                  let arg_cty =
+                    if Btype.is_position l then
+                      ctyp Ttyp_call_pos
+                        (newconstr Predef.path_lexing_position [])
+                    else
+                      transl_type env ~policy ~row_context
+                        arg_mode.mode_modes arg
+                  in
+                  (* An optional argument's binder denotes the option the
+                     caller passed. *)
+                  let binder_ty =
+                    if Btype.is_optional l then
+                      newconstr Predef.path_option [arg_cty.ctyp_type]
+                    else arg_cty.ctyp_type
+                  in
+                  arg_cty, binder_ty)
             in
             let arg_ty =
               if Btype.is_Tpoly arg_cty.ctyp_type then arg_cty.ctyp_type
@@ -1081,7 +1116,7 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
                       source_binder.txt
                   in
                   ( Some (binder, source_binder),
-                    !add_dependent_binder env binder arg_cty.ctyp_type
+                    !add_dependent_binder env binder binder_ty
                       source_binder.loc )
             in
             let prepared_rest, ret_cty =

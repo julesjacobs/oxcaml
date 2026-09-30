@@ -42,6 +42,7 @@ let refinement_crossings =
     ~visibility:(Axis_lattice.visibility top)
     ~staticity:(Axis_lattice.staticity top)
     ~externality:(Axis_lattice.externality top)
+    ~logicality:(Axis_lattice.logicality top)
 
 let enforce_refinement_crossings (jkind : Types.jkind_l) =
   let mod_bounds =
@@ -201,7 +202,10 @@ module Solver = struct
     | Ty of
         { args : Types.type_expr list;
           kind : ckind;
-          abstract : bool
+          abstract : bool;
+          inductive : bool
+              (** Whether the declaration is [[@@inductive]]: its checked
+                  recursion keeps it logical. See [constr_kind]. *)
         }
     | Poly of Ldd.node * Ldd.node array
 
@@ -217,25 +221,76 @@ module Solver = struct
       mode : mode;
       provenance : provenance_ctx option;
       ty_to_kind : Ldd.node TyTbl.t;
-      constr_to_coeffs : (Ldd.node * Ldd.node array) ConstrTbl.t
+      constr_to_coeffs : (Ldd.node * Ldd.node array) ConstrTbl.t;
+      constrs_in_progress : bool ConstrTbl.t;
+          (** Constructors whose kind is being computed, mapped to whether
+              recursion through them keeps logicality (only for
+              [[@@inductive]]). See Note [Logicality of recursive types]. *)
+      tys_in_progress : unit TyTbl.t ref
+          (** Circular type expressions whose kind is being computed, since the
+              innermost constructor body. *)
     }
+
+  (* Note [Logicality of recursive types]
+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     Kinds of recursive types are least fixpoints, which is right for mode
+     crossing: [type t = A | B of t] crosses portability if its fields do.
+     Logicality needs the opposite answer. [type t = Roll of (t -> int)] has
+     no set of values (Cantor), and a possibly cyclic [type t = A | B of t]
+     is not logical either (its values need not be finite). So a type is
+     logical only if it is not recursive, or it is [[@@inductive]]: a single
+     variant recursing through direct fields, whose values are finite trees.
+
+     We implement this by making every recursive occurrence count as
+     [Maybe_logical]. While the kind of a constructor is being computed, a
+     reference back to it (directly, through a mutually recursive type, or
+     through another constructor's parameter that bears on logicality)
+     returns its placeholder joined with [Maybe_logical] on the logicality
+     axis, unless the constructor is [[@@inductive]]. A reference through a
+     parameter that does not bear on logicality
+     ([type node = { next : node option Pref.t }] with
+     [Pref.t : logical_data]) is multiplied by a zero coefficient and does not
+     count. The same holds for circular type expressions such as
+     [[ `Roll of ('a -> int) ] as 'a]: re-entering one before any constructor
+     body intervenes makes it [Maybe_logical]. *)
 
   let global_ty_to_kind : Ldd.node TyTbl.t = TyTbl.create 1
 
   let global_constr_to_coeffs : (Ldd.node * Ldd.node array) ConstrTbl.t =
     ConstrTbl.create 1
 
+  let global_constrs_in_progress : bool ConstrTbl.t = ConstrTbl.create 1
+
   let create_ctx ~(mode : mode) ~(env : Env.t option)
       ~(lookup_of_env : Env.t -> Path.t -> constr_decl) =
     TyTbl.clear global_ty_to_kind;
     ConstrTbl.clear global_constr_to_coeffs;
+    ConstrTbl.clear global_constrs_in_progress;
     { env;
       lookup_of_env;
       mode;
       provenance = None;
       ty_to_kind = global_ty_to_kind;
-      constr_to_coeffs = global_constr_to_coeffs
+      constr_to_coeffs = global_constr_to_coeffs;
+      constrs_in_progress = global_constrs_in_progress;
+      tys_in_progress = ref (TyTbl.create 1)
     }
+
+  let recursive_occurrence (poly : Ldd.node) =
+    Ldd.join poly (Ldd.const Axis_lattice.logicality_only)
+
+  (* Run [f] as the body of constructor [path]: references back to [path]
+     count as recursive occurrences (see Note [Logicality of recursive types]),
+     and circular type expressions entered outside the body do not. *)
+  let in_constructor_body (ctx : ctx) (path : Path.t) ~inductive f =
+    let saved_tys = !(ctx.tys_in_progress) in
+    ctx.tys_in_progress := TyTbl.create 1;
+    ConstrTbl.add ctx.constrs_in_progress path inductive;
+    Fun.protect
+      ~finally:(fun () ->
+        ConstrTbl.remove ctx.constrs_in_progress path;
+        ctx.tys_in_progress := saved_tys)
+      f
 
   let reset_for_mode (ctx : ctx) ~(mode : mode) : ctx = { ctx with mode }
 
@@ -334,7 +389,10 @@ module Solver = struct
       Ldd.node * Ldd.node array =
     (* Return placeholder nodes stored in [constr_to_coeffs] for recursion. *)
     match ConstrTbl.find_opt ctx.constr_to_coeffs path with
-    | Some base_and_coeffs -> base_and_coeffs
+    | Some (base, coeffs) -> (
+      match ConstrTbl.find_opt ctx.constrs_in_progress path with
+      | Some false -> recursive_occurrence base, coeffs
+      | Some true | None -> base, coeffs)
     | None -> (
       match lookup_constr ctx ~min_arity path with
       | Poly (base, coeffs) ->
@@ -377,8 +435,19 @@ module Solver = struct
               else rigid_name ctx name
         in
         let rehydrate poly = Ldd.map_rigid instantiate poly in
-        let base_rhs = rehydrate base in
-        let coeffs_rhs = Array.map rehydrate coeffs in
+        let inductive =
+          match ctx.env with
+          | None -> false
+          | Some env -> (
+            match Env.find_type path env with
+            | decl -> decl.type_inductive
+            | exception Not_found -> false)
+        in
+        let base_rhs, coeffs_rhs =
+          in_constructor_body ctx path ~inductive (fun () ->
+              let base_rhs = rehydrate base in
+              base_rhs, Array.map rehydrate coeffs)
+        in
         Ldd.solve_lfp base_var base_rhs;
         Array.iter2 (fun v rhs -> Ldd.solve_lfp v rhs) coeff_vars coeffs_rhs;
         let res =
@@ -387,7 +456,7 @@ module Solver = struct
         in
         ConstrTbl.replace ctx.constr_to_coeffs path res;
         res
-      | Ty { args = params; kind = body; abstract } ->
+      | Ty { args = params; kind = body; abstract; inductive } ->
         let base_var = Ldd.new_var () in
         let coeff_vars =
           Array.init (List.length params) (fun _ -> Ldd.new_var ())
@@ -425,7 +494,9 @@ module Solver = struct
         (* CR jujacobs: potential efficiency win:
            we could still compute the kind in Right mode to keep
            the cache consistent, but we don't need to. *)
-        let body_kind = body ctx in
+        let body_kind =
+          in_constructor_body ctx path ~inductive (fun () -> body ctx)
+        in
         (* Decompose [body_kind] into a base and one coefficient
            per parameter. *)
         let base_rhs, coeffs_rhs_list =
@@ -591,7 +662,12 @@ module Solver = struct
     then Ldd.const Axis_lattice.top
     else
       match TyTbl.find_opt ctx.ty_to_kind ty with
-      | Some kind_poly -> kind_poly
+      | Some kind_poly ->
+        (* Re-entering a circular type expression: see Note [Logicality of
+           recursive types]. *)
+        if TyTbl.mem !(ctx.tys_in_progress) ty
+        then recursive_occurrence kind_poly
+        else kind_poly
       | None -> (
         let cached_provenance_kind =
           if use_tables then find_provenance_kind ctx ty else None
@@ -606,7 +682,13 @@ module Solver = struct
             let var = Ldd.new_var () in
             let placeholder = Ldd.node_of_var var in
             TyTbl.add ctx.ty_to_kind ty placeholder;
-            let kind_rhs = kind_uncached ctx ty in
+            let in_progress = !(ctx.tys_in_progress) in
+            TyTbl.replace in_progress ty ();
+            let kind_rhs =
+              Fun.protect
+                ~finally:(fun () -> TyTbl.remove in_progress ty)
+                (fun () -> kind_uncached ctx ty)
+            in
             Ldd.solve_lfp var kind_rhs;
             let kind_inlined = Ldd.inline_solved_vars placeholder in
             if Option.is_some ctx.provenance
@@ -659,9 +741,18 @@ module Solver = struct
          only for arity = 1. *)
       Ldd.sum elts ~base:Ldd.bot ~f:(fun (_lbl, t) ->
           kind ~use_tables:true child_ctx t)
-    | Types.Tarrow (_lbl, _t1, _t2, _commu) ->
-      (* Arrows use the dedicated per-axis bounds (no with-bounds). *)
-      self_provenance (Ldd.const Axis_lattice.arrow)
+    | Types.Tarrow (_lbl, t1, t2, _commu) ->
+      (* Arrows use the dedicated per-axis bounds (no with-bounds), except for
+         logicality: a function type is logical when its argument and result
+         are. *)
+      let logicality_of ty =
+        Ldd.meet
+          (Ldd.const Axis_lattice.logicality_only)
+          (kind ~use_tables:true child_ctx ty)
+      in
+      Ldd.join
+        (self_provenance (Ldd.const Axis_lattice.arrow))
+        (Ldd.join (logicality_of t1) (logicality_of t2))
     | Types.Tlink _ -> failwith "Tlink shouldn't appear in kind"
     | Types.Tsubst _ -> failwith "Tsubst shouldn't appear in kind"
     | Types.Trepr (ty, _sort_vars) -> kind ~use_tables:true ctx ty
@@ -820,6 +911,22 @@ type mode_crossing_error =
 type subjkind_error =
   | Jkind_error of Jkind.Violation.t
   | Mode_crossing_error of mode_crossing_error
+
+let subjkind_error_on_logicality = function
+  | Jkind_error { violation = Not_a_subjkind (_, super, reasons); _ } ->
+    List.exists
+      (function
+        | Jkind.Sub_failure_reason.Axis_disagreement
+            (Jkind_axis.Axis.Pack (Nonmodal Logicality)) ->
+          true
+        | _ -> false)
+      reasons
+    || Jkind.requires_logical super
+  | Jkind_error { violation = No_intersection _; _ } -> false
+  | Mode_crossing_error { violating_axes; _ } ->
+    List.exists
+      (Jkind_axis.Axis.equal (Jkind_axis.Axis.Pack (Nonmodal Logicality)))
+      violating_axes
 
 let subjkind_error_printing_env = function
   | Jkind_error _ -> None
@@ -1139,6 +1246,14 @@ let sum_record_label_contributions ~(ctx : Solver.ctx) ~(base : Ldd.node)
   Ldd.sum lbls ~base ~f:(fun (lbl : Types.label_declaration) ->
       validate_label lbl;
       let mask = Axis_lattice.mask_of_modality lbl.ld_modalities in
+      (* Total code cannot read a mutable field, so its type does not bear on
+         whether the record is logical: a mutable field holds an address, as a
+         [ref] does. Recursion through it ([Queue]'s cells) does not count. *)
+      let mask =
+        match lbl.ld_mutable with
+        | Immutable -> mask
+        | Mutable _ -> Axis_lattice.meet mask Axis_lattice.without_logicality
+      in
       Ldd.join
         (label_mutability_contribution ctx lbl)
         (Ldd.meet (Ldd.const mask) (payload_kind lbl.ld_type)))
@@ -1261,8 +1376,11 @@ let make_gadt_payload_projector ~(decl_params : Types.type_expr list)
               | None ->
                 if Hashtbl.mem local_vars id
                 then
+                  (* An existential ranges over every type of its kind,
+                     including the type being declared, so it is never a
+                     set: see Note [Logicality of recursive types]. *)
                   match Hashtbl.find_opt local_var_bounds id with
-                  | Some bound -> bound
+                  | Some bound -> Solver.recursive_occurrence bound
                   | None -> Ldd.const Axis_lattice.top
                 else Solver.node_of_name ctx name)
             | Ldd.Name.Unknown _ | Ldd.Name.Provenance _ | Ldd.Name.Atom _
@@ -1284,8 +1402,8 @@ let type_decl_allows_any_crossing (decl : Types.type_declaration) =
     Option.is_some umc_opt
   | Types.Type_abstract _ | Types.Type_open -> false
 
-let type_decl_rhs_kind_poly (ctx : Solver.ctx) (decl : Types.type_declaration) :
-    Ldd.node =
+let rec type_decl_rhs_kind_poly (ctx : Solver.ctx)
+    (decl : Types.type_declaration) : Ldd.node =
   match decl.type_manifest with
   | Some body_ty -> Solver.kind ~use_tables:true ctx body_ty
   | None -> (
@@ -1294,87 +1412,105 @@ let type_decl_rhs_kind_poly (ctx : Solver.ctx) (decl : Types.type_declaration) :
     (* For abstract types and allow_any_crossing types, derive the ikind from
        the jkind annotation instead of computing it from the type declaration's
        body. *)
-    | _ when type_decl_allows_any_crossing decl -> use_decl_jkind ()
-    | Types.Type_abstract _ | Types.Type_open -> use_decl_jkind ()
-    | Types.Type_record (lbls, rep, _umc_opt) ->
-      let base =
-        let base_lat, source =
-          match rep with
-          | Types.Record_unboxed -> Axis_lattice.immediate, "unboxed records"
-          (* CR box: This will no longer be [non_float] once we update the
+    | Types.Type_abstract _ -> use_decl_jkind ()
+    | Types.Type_open ->
+      (* A later extension constructor could carry anything, including the
+         type itself under an arrow: an open type is never logical. *)
+      Solver.recursive_occurrence (use_decl_jkind ())
+    | _ when type_decl_allows_any_crossing decl ->
+      (* An unsafe mode-crossing annotation may assert modal bounds, but not
+         logicality, which still comes from the representation. *)
+      Ldd.join
+        (Ldd.meet (use_decl_jkind ())
+           (Ldd.const Axis_lattice.without_logicality))
+        (Ldd.meet
+           (Ldd.const Axis_lattice.logicality_only)
+           (type_decl_representation_kind_poly ctx decl))
+    | _ -> type_decl_representation_kind_poly ctx decl)
+
+and type_decl_representation_kind_poly (ctx : Solver.ctx)
+    (decl : Types.type_declaration) : Ldd.node =
+  let use_decl_jkind () = Solver.ckind_of_jkind ctx decl.type_jkind in
+  match decl.type_kind with
+  | Types.Type_abstract _ | Types.Type_open -> use_decl_jkind ()
+  | Types.Type_record (lbls, rep, _umc_opt) ->
+    let base =
+      let base_lat, source =
+        match rep with
+        | Types.Record_unboxed -> Axis_lattice.immediate, "unboxed records"
+        (* CR box: This will no longer be [non_float] once we update the
              representation of singleton float64 records *)
-          | _ -> Axis_lattice.immutable_data, "boxed records"
-        in
-        Ldd.const base_lat |> decl_base_provenance ctx source
+        | _ -> Axis_lattice.immutable_data, "boxed records"
       in
-      sum_record_label_contributions ~ctx ~base
-        ~payload_kind:(fun ty -> Solver.kind ~use_tables:true ctx ty)
-        ~validate_label:no_validation lbls
-    | Types.Type_record_unboxed_product (lbls, _rep, _umc_opt) ->
-      let base =
-        Ldd.const Axis_lattice.immediate
-        |> decl_base_provenance ctx "unboxed records"
-      in
-      sum_record_label_contributions ~ctx ~base
-        ~payload_kind:(fun ty -> Solver.kind ~use_tables:true ctx ty)
-        ~validate_label:validate_immutable_unboxed_label lbls
-    | Types.Type_variant (_cstrs, Types.Variant_with_null, _umc_opt) ->
-      (* [Variant_with_null] (i.e. [or_null]) has semantics that are not
+      Ldd.const base_lat |> decl_base_provenance ctx source
+    in
+    sum_record_label_contributions ~ctx ~base
+      ~payload_kind:(fun ty -> Solver.kind ~use_tables:true ctx ty)
+      ~validate_label:no_validation lbls
+  | Types.Type_record_unboxed_product (lbls, _rep, _umc_opt) ->
+    let base =
+      Ldd.const Axis_lattice.immediate
+      |> decl_base_provenance ctx "unboxed records"
+    in
+    sum_record_label_contributions ~ctx ~base
+      ~payload_kind:(fun ty -> Solver.kind ~use_tables:true ctx ty)
+      ~validate_label:validate_immutable_unboxed_label lbls
+  | Types.Type_variant (_cstrs, Types.Variant_with_null, _umc_opt) ->
+    (* [Variant_with_null] (i.e. [or_null]) has semantics that are not
          captured by its constructors: nullability/separability and
          mode-crossing are baked into its representation. We defer to jkinds
          because ikinds cannot express this today. This deferral can be removed
          once separability and nullability become layout properties rather than
          modal axes. *)
-      use_decl_jkind ()
-    | Types.Type_variant (cstrs, rep, _umc_opt) ->
-      (* Choose base: immediate for void-only variants; otherwise immutable. *)
-      let all_args_void =
-        List.for_all
-          (fun (c : Types.constructor_declaration) ->
-            match c.cd_args with
-            | Types.Cstr_tuple args ->
-              List.for_all
-                (fun (arg : Types.constructor_argument) ->
-                  match arg.ca_sort with
-                  | Some sort -> Jkind_types.Sort.Const.all_void sort
-                  | None -> false)
-                args
-            | Types.Cstr_record lbls ->
-              List.for_all
-                (fun (lbl : Types.label_declaration) ->
-                  match lbl.ld_sort with
-                  | Some sort -> Jkind_types.Sort.Const.all_void sort
-                  | None -> false)
-                lbls)
-          cstrs
+    use_decl_jkind ()
+  | Types.Type_variant (cstrs, rep, _umc_opt) ->
+    (* Choose base: immediate for void-only variants; otherwise immutable. *)
+    let all_args_void =
+      List.for_all
+        (fun (c : Types.constructor_declaration) ->
+          match c.cd_args with
+          | Types.Cstr_tuple args ->
+            List.for_all
+              (fun (arg : Types.constructor_argument) ->
+                match arg.ca_sort with
+                | Some sort -> Jkind_types.Sort.Const.all_void sort
+                | None -> false)
+              args
+          | Types.Cstr_record lbls ->
+            List.for_all
+              (fun (lbl : Types.label_declaration) ->
+                match lbl.ld_sort with
+                | Some sort -> Jkind_types.Sort.Const.all_void sort
+                | None -> false)
+              lbls)
+        cstrs
+    in
+    let base =
+      let base_lat, source =
+        match rep with
+        | Types.Variant_unboxed -> Axis_lattice.immediate, "unboxed variants"
+        | _ ->
+          if all_args_void
+          then Axis_lattice.immediate, "enumeration variants"
+          else Axis_lattice.immutable_data, "boxed variants"
       in
-      let base =
-        let base_lat, source =
-          match rep with
-          | Types.Variant_unboxed -> Axis_lattice.immediate, "unboxed variants"
-          | _ ->
-            if all_args_void
-            then Axis_lattice.immediate, "enumeration variants"
-            else Axis_lattice.immutable_data, "boxed variants"
-        in
-        Ldd.const base_lat |> decl_base_provenance ctx source
-      in
-      let payload_kind_of_constructor =
-        make_gadt_payload_projector ~decl_params:decl.type_params ctx
-      in
-      let constructor_contrib (c : Types.constructor_declaration) =
-        let payload_kind = payload_kind_of_constructor c in
-        match c.cd_args with
-        | Types.Cstr_tuple args ->
-          Ldd.sum args ~base:Ldd.bot
-            ~f:(fun (arg : Types.constructor_argument) ->
-              let mask = Axis_lattice.mask_of_modality arg.ca_modalities in
-              Ldd.meet (Ldd.const mask) (payload_kind arg.ca_type))
-        | Types.Cstr_record lbls ->
-          sum_record_label_contributions ~ctx ~base:Ldd.bot ~payload_kind
-            ~validate_label:no_validation lbls
-      in
-      Ldd.sum cstrs ~base ~f:constructor_contrib)
+      Ldd.const base_lat |> decl_base_provenance ctx source
+    in
+    let payload_kind_of_constructor =
+      make_gadt_payload_projector ~decl_params:decl.type_params ctx
+    in
+    let constructor_contrib (c : Types.constructor_declaration) =
+      let payload_kind = payload_kind_of_constructor c in
+      match c.cd_args with
+      | Types.Cstr_tuple args ->
+        Ldd.sum args ~base:Ldd.bot ~f:(fun (arg : Types.constructor_argument) ->
+            let mask = Axis_lattice.mask_of_modality arg.ca_modalities in
+            Ldd.meet (Ldd.const mask) (payload_kind arg.ca_type))
+      | Types.Cstr_record lbls ->
+        sum_record_label_contributions ~ctx ~base:Ldd.bot ~payload_kind
+          ~validate_label:no_validation lbls
+    in
+    Ldd.sum cstrs ~base ~f:constructor_contrib
 
 let type_decl_constr_decl (decl : Types.type_declaration) : Solver.constr_decl =
   let abstract =
@@ -1383,7 +1519,8 @@ let type_decl_constr_decl (decl : Types.type_declaration) : Solver.constr_decl =
     | _ -> false
   in
   let kind ctx = type_decl_rhs_kind_poly ctx decl in
-  Solver.Ty { args = decl.type_params; kind; abstract }
+  Solver.Ty
+    { args = decl.type_params; kind; abstract; inductive = decl.type_inductive }
 
 (* Lookup function supplied to the solver.
    We prefer a stored ikind (when present) and otherwise recompute from the
@@ -1401,7 +1538,7 @@ let lookup_of_env ~(env : Env.t) (path : Path.t) : Solver.constr_decl =
        non-recursive values. *)
     let unknown = Ldd.Name.unknown (fresh_unknown_uid ()) in
     let kind : Solver.ckind = fun _ctx -> Ldd.node_of_var (Ldd.rigid unknown) in
-    Solver.Ty { args = []; kind; abstract = true }
+    Solver.Ty { args = []; kind; abstract = true; inductive = false }
   | type_decl ->
     (* Here we can switch to using the cached ikind or not. *)
     let fallback () =
@@ -1449,6 +1586,26 @@ let type_declaration_ikind ~(env : Env.t option) ~(path : Path.t) :
   let ctx = create_ctx ~mode:Solver.Normal ~env in
   let base, coeffs = Solver.constr_kind_poly ctx path in
   constructor_ikind ~base ~coeffs
+
+(* The logicality of a type constructor, read off its ikind: whether it is
+   logical when its parameters are, and for each parameter whether it bears
+   on the result. Computed with ikinds even when they are disabled, since
+   logicality has no other source. *)
+let declaration_logicality ~(env : Env.t) ~(path : Path.t) :
+    Jkind_axis.Logicality.t * bool list =
+  let ({ base; coeffs } : Types.constructor_ikind) =
+    type_declaration_ikind ~env:(Some env) ~path
+  in
+  let logicality poly = Axis_lattice.logicality (Ldd.round_up poly) in
+  ( logicality base,
+    Array.to_list coeffs
+    |> List.map (fun coeff ->
+        match logicality coeff with Maybe_logical -> true | Logical -> false) )
+
+let declaration_is_logical ~(env : Env.t) ~(path : Path.t) : bool =
+  match declaration_logicality ~env ~path with
+  | Logical, _ -> true
+  | Maybe_logical, _ -> false
 
 let type_declaration_ikind_gated ~(env : Env.t option) ~(path : Path.t) :
     Types.type_ikind =

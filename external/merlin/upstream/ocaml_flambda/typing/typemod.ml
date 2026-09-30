@@ -205,6 +205,14 @@ let rebase_modalities ~loc ~loc_md item ~md_mode ~mode modalities =
   infer_modalities pp ~loc_md item ~md_mode ~mode
 
 (** Similiar to [rebase_modalities] but lifted to signatures. *)
+(* Values bound by [include] or [open struct ... end] are bound at this point
+   of the enclosing structure or signature, like a [let] or a [val] there. *)
+let register_included_values ~level sg =
+  Ctype.register_refinement_value_scope ~level
+    (List.filter_map
+       (function Sig_value (id, _, _) -> Some id | _ -> None)
+       sg)
+
 let rebase_modalities_sg ~loc ~loc_md ~md_mode ~mode sg =
   List.map (function
     | Sig_value (id, vd, vis) ->
@@ -751,7 +759,8 @@ let params_are_constrained =
   in
   loop
 
-let rec remove_modality_and_zero_alloc_variables_sg env ~zap_modality sg =
+let rec remove_modality_and_zero_alloc_variables_sg env ~zap_modality
+    ?(zap_module_modality = zap_modality) sg =
   let sg_item = function
     | Sig_value (id, desc, vis) ->
         let val_modalities =
@@ -765,10 +774,10 @@ let rec remove_modality_and_zero_alloc_variables_sg env ~zap_modality sg =
     | Sig_module (id, pres, md, re, vis) ->
         let md_type =
           remove_modality_and_zero_alloc_variables_mty env ~zap_modality
-            md.md_type
+            ~zap_module_modality md.md_type
         in
         let md_modalities =
-          md.md_modalities |> zap_modality |> Mode.Modality.of_const
+          md.md_modalities |> zap_module_modality |> Mode.Modality.of_const
         in
         let md = {md with md_type; md_modalities} in
         Sig_module (id, pres, md, re, vis)
@@ -776,14 +785,16 @@ let rec remove_modality_and_zero_alloc_variables_sg env ~zap_modality sg =
   in
   List.map sg_item sg
 
-and remove_modality_and_zero_alloc_variables_mty env ~zap_modality mty =
+and remove_modality_and_zero_alloc_variables_mty env ~zap_modality
+    ?(zap_module_modality = zap_modality) mty =
   match mty with
   | Mty_ident _ | Mty_alias _ ->
     (* module types with names can't have inferred modalities. *)
     mty
   | Mty_signature sg ->
     Mty_signature
-      (remove_modality_and_zero_alloc_variables_sg env ~zap_modality sg)
+      (remove_modality_and_zero_alloc_variables_sg env ~zap_modality
+         ~zap_module_modality sg)
   | Mty_functor (param, mty, mm) ->
     let param : Types.functor_parameter =
       match param with
@@ -796,7 +807,8 @@ and remove_modality_and_zero_alloc_variables_mty env ~zap_modality mty =
       | Unit -> Unit
     in
     let mty =
-      remove_modality_and_zero_alloc_variables_mty env ~zap_modality mty
+      remove_modality_and_zero_alloc_variables_mty env ~zap_modality
+        ~zap_module_modality mty
     in
     Mty_functor (param, mty, mm)
   | Mty_strengthen (mty, path, alias) ->
@@ -1052,7 +1064,6 @@ module Merge = struct
               type_attributes = [];
               type_unboxed_default = false;
               type_inductive = false;
-              type_phantom_parameters = false;
               type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
               type_unboxed_version = None;
             }
@@ -2310,6 +2321,7 @@ and transl_signature ?(interface_toplevel = false) env
         apply_modalities_signature ~recursive env modalities.moda_modalities sg
     in
     let sg, newenv = Env.enter_signature ~scope sg ~mode:md_mode env in
+    register_included_values ~level:Ident.lowest_scope sg;
     Signature_group.iter
       (Signature_names.check_sig_item names loc)
       sg;
@@ -2336,6 +2348,7 @@ and transl_signature ?(interface_toplevel = false) env
               (Value.disallow_right md_mode, sig_modalities.moda_modalities))
             ~why:Signature_item
         in
+        Vox_trust.check_external env tdesc;
         Ctype.register_refinement_value_scope ~level:Ident.lowest_scope
           [tdesc.val_id];
         Signature_names.check_value names tdesc.val_loc tdesc.val_id;
@@ -3041,10 +3054,20 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
              env dependent_ids)
           signature
   and find_forbidden_recursive_signature_item env dependent_ids = function
-    | Sig_type (_, decl, _, _) when decl.type_phantom_parameters ->
+    | Sig_type (id, decl, _, _)
+      when Btype.type_kind_is_abstract decl
+           && Option.is_none decl.type_manifest
+           && Ctype.abstract_declaration_is_logical env (Path.Pident id) decl
+           && not (Ctype.jkind_is_scalar env decl.type_jkind) ->
+        (* The approximations used to type the signatures assume nothing
+           about logicality (see [Typedecl.approx_type_decl]), but a declared
+           abstract type is only checked against its implementation after the
+           signatures are fixed, where it could justify itself through the
+           recursion. *)
         Location.raise_errorf ~loc:decl.type_loc
-          "Recursive module signatures cannot assert phantom parameter \
-           guarantees."
+          "Recursive module signatures cannot declare an abstract type whose \
+           kind is logical;@ drop %a from its kind."
+          Style.inline_code "mod logical"
     | Sig_type (id, decl, _, _) when decl.type_inductive ->
         Some (`Inductive (Ident.name id))
     | Sig_module (_, _, decl, _, _) ->
@@ -3567,7 +3590,10 @@ let package_subtype env pack1 pack2 =
       Result.Error (Errortrace.Package_cannot_scrape r)
   | mty1, mty2 ->
     let loc = Location.none in
-    match Includemod.modtypes ~loc ~mark:true env ~modes:All mty1 mty2 with
+    match
+      Includemod.without_refinements (fun () ->
+        Includemod.modtypes ~loc ~mark:true env ~modes:All mty1 mty2)
+    with
     | Tcoerce_none -> Ok ()
     | c ->
         let msg =
@@ -3580,16 +3606,27 @@ let package_subtype env pack1 pack2 =
 
 let () = Ctype.package_subtype := package_subtype
 
+(* Obligations of a signature constraint or functor application are
+   discharged by the verifier where it meets the module expression. *)
+let attach_refinement_site mod_desc kind loc obligations =
+  if obligations <> [] then
+    Verification.attach_refinement_site mod_desc
+      { rs_kind = kind; rs_loc = loc; rs_obligations = obligations }
+
 let wrap_constraint_package env mark arg mty mode explicit =
   let mty1 = Subst.modtype Keep Subst.identity arg.mod_type in
   let mty2 = Subst.modtype Keep Subst.identity mty in
   let modes : Includemod.modes = Specific (arg.mod_mode, mode) in
-  let coercion =
-    try
-      Includemod.modtypes ~loc:arg.mod_loc env ~mark ~modes mty1 mty2
-    with Includemod.Error msg ->
-      raise(Error(arg.mod_loc, env, Not_included msg)) in
-  { mod_desc = Tmod_constraint(arg, mty, explicit, coercion);
+  let coercion, obligations =
+    Includemod.collect_refinements (fun () ->
+      try
+        Includemod.modtypes ~loc:arg.mod_loc env ~mark ~modes mty1 mty2
+      with Includemod.Error msg ->
+        raise(Error(arg.mod_loc, env, Not_included msg)))
+  in
+  let mod_desc = Tmod_constraint(arg, mty, explicit, coercion) in
+  attach_refinement_site mod_desc Rsite_constraint arg.mod_loc obligations;
+  { mod_desc;
     mod_type = mty;
     mod_mode = Value.disallow_right mode, None;
     mod_env = env;
@@ -3599,13 +3636,17 @@ let wrap_constraint_package env mark arg mty mode explicit =
 let wrap_constraint_with_shape env mark arg mty mode
   shape explicit =
   let modes : Includemod.modes = Specific (arg.mod_mode, mode) in
-  let coercion, shape =
-    try
-      Includemod.modtypes_constraint ~shape ~loc:arg.mod_loc env ~mark
-        ~modes arg.mod_type mty
-    with Includemod.Error msg ->
-      raise(Error(arg.mod_loc, env, Not_included msg)) in
-  { mod_desc = Tmod_constraint(arg, mty, explicit, coercion);
+  let (coercion, shape), obligations =
+    Includemod.collect_refinements (fun () ->
+      try
+        Includemod.modtypes_constraint ~shape ~loc:arg.mod_loc env ~mark
+          ~modes arg.mod_type mty
+      with Includemod.Error msg ->
+        raise(Error(arg.mod_loc, env, Not_included msg)))
+  in
+  let mod_desc = Tmod_constraint(arg, mty, explicit, coercion) in
+  attach_refinement_site mod_desc Rsite_constraint arg.mod_loc obligations;
+  { mod_desc;
     mod_type = mty;
     mod_mode = Value.disallow_right mode, None;
     mod_env = env;
@@ -4023,11 +4064,12 @@ and type_one_application ~ctx:(apply_loc,sfunct,md_f,args)
       | { arg = None; _ } -> apply_error ()
       | { loc = app_loc; attributes = app_attributes;
           arg = Some { shape = arg_shape; path = arg_path; arg } } ->
-      let coercion =
-        try Includemod.modtypes ~loc:arg.mod_loc ~mark:true env
-              arg.mod_type mty_param
-              ~modes:(Specific (arg.mod_mode, mm_param))
-        with Includemod.Error _ -> apply_error ()
+      let coercion, obligations =
+        Includemod.collect_refinements (fun () ->
+          try Includemod.modtypes ~loc:arg.mod_loc ~mark:true env
+                arg.mod_type mty_param
+                ~modes:(Specific (arg.mod_mode, mm_param))
+          with Includemod.Error _ -> apply_error ())
       in
       let mty_appl =
         match arg_path with
@@ -4104,12 +4146,16 @@ and type_one_application ~ctx:(apply_loc,sfunct,md_f,args)
               (Staticity.apply_hint (Functor_to_application funct.mod_loc)
                  funct_staticity) ]
       in
-      { mod_desc =
-          Tmod_apply
-            (funct, arg, coercion,
-             functor_application_yielding ~funct
-               ~arg_mode:(fst arg.mod_mode),
-             Staticity.disallow_left staticity);
+      let mod_desc =
+        Tmod_apply
+          (funct, arg, coercion,
+           functor_application_yielding ~funct
+             ~arg_mode:(fst arg.mod_mode),
+           Staticity.disallow_left staticity)
+      in
+      attach_refinement_site mod_desc Rsite_functor_argument app_loc
+        obligations;
+      { mod_desc;
         mod_type = mty_appl;
         mod_mode = mm_res, None;
         mod_env = env;
@@ -4168,6 +4214,7 @@ and type_open_decl_aux ?used_slot ?toplevel ~funct_body names env od =
       Env.enter_signature ~scope ~mod_shape
         (extract_sig_open env md.mod_loc md.mod_type) ~mode env
     in
+    register_included_values ~level:(Ctype.get_current_level ()) sg;
     let info, visibility =
       match toplevel with
       | Some false | None -> Some `From_open, Hidden
@@ -4234,6 +4281,7 @@ and type_structure ?(toplevel = None) ~funct_body anchor env sstr =
     let sg =
       rebase_modalities_sg ~loc:smodl.pmod_loc ~loc_md ~md_mode ~mode sg
     in
+    register_included_values ~level:(Ctype.get_current_level ()) sg;
     Signature_group.iter (Signature_names.check_sig_item names loc) sg;
     let incl =
       { incl_mod = modl;
@@ -4326,6 +4374,7 @@ and type_structure ?(toplevel = None) ~funct_body anchor env sstr =
           Typedecl.transl_value_decl env ~modal:Str_primitive
             ~why:Structure_item loc sdesc
         in
+        Vox_trust.check_external env desc;
         assert (desc.val_val.val_modalities |> Modality.is_undefined);
         let pp : Mode.Hint.pinpoint = (desc.val_loc, Expression) in
         let val_modalities =
@@ -4735,6 +4784,7 @@ let check_refinement_types_options () =
 
 let type_toplevel_phrase env sig_acc s =
   check_refinement_types_options ();
+  Verification.reset_refinement_sites ();
   Env.reset_required_globals ();
   Env.reset_probes ();
   Typecore.reset_allocations ();
@@ -5035,6 +5085,7 @@ let check_argument_type_if_given env sourcefile ~actual_staticity actual_sig
            }
 
 let type_implementation target modulename initial_env ast =
+  Verification.reset_refinement_sites ();
   let sourcefile = Unit_info.original_source_file target in
   let error e =
     raise (Error (Location.in_file sourcefile, initial_env, e))
@@ -5072,17 +5123,43 @@ let type_implementation target modulename initial_env ast =
       let simple_sg = Signature_names.simplify finalenv names sg in
       if !Clflags.print_types then begin
         remove_mode_and_jkind_variables finalenv sg;
-        let zap_modality =
+        let zap_module_modality =
           Ctype.zap_modalities_to_floor_if_modes_enabled_at Alpha
+        in
+        let zap_modality =
+          if Language_extension.(is_at_least Mode Alpha)
+             || not (Language_extension.is_enabled Refinement_types)
+          then zap_module_modality
+          else
+            (* Keep the totality and ghostliness of values, which clients
+               of the printed interface depend on. [total] implies
+               [stateless portable], so those are kept with it. *)
+            fun m ->
+              let floor = Modality.zap_to_floor m in
+              let keep ax acc =
+                Modality.Const.set ax (Modality.Const.proj ax floor) acc
+              in
+              let total =
+                not (Modality.Per_axis.is_id (Comonadic Totality)
+                       (Modality.Const.proj (Comonadic Totality) floor))
+              in
+              Modality.Const.id
+              |> keep (Comonadic Totality)
+              |> keep (Comonadic Ghostliness)
+              |> (if total then fun m ->
+                    m
+                    |> keep (Comonadic Statefulness)
+                    |> keep (Comonadic Portability)
+                  else Fun.id)
         in
         let simple_sg =
           (* Printing [.mli] from [.ml], we zap to identity modality for legacy
              compatibility. *)
           remove_modality_and_zero_alloc_variables_sg finalenv ~zap_modality
-            simple_sg
+            ~zap_module_modality simple_sg
         in
         Typecore.force_delayed_checks ();
-        Verification.run str;
+        Verification.run_unit str;
         Mode.erase_hints ();
         Typecore.optimise_allocations ();
         let shape = Shape_reduce.local_reduce Env.empty shape in
@@ -5142,14 +5219,23 @@ let type_implementation target modulename initial_env ast =
             error (Inconsistent_argument_types
                      { new_arg_type = arg_type; old_source_file = source_intf;
                        old_arg_type = arg_type_from_cmi });
-          let coercion, shape =
+          let (coercion, shape), interface_obligations =
             Profile.record_call "check_sig" (fun () ->
-              Includemod.compunit
-                initial_env ~mark:true sourcefile
-                ~modes:(Includecore.Specific
-                  ((mode, None),
-                   Persistent_env.mode_pers_mod staticity))
-                sg compiled_intf_file_name dclsig shape)
+              Includemod.collect_refinements (fun () ->
+                Includemod.compunit
+                  initial_env ~mark:true sourcefile
+                  ~modes:(Includecore.Specific
+                    ((mode, None),
+                     Persistent_env.mode_pers_mod staticity))
+                  sg compiled_intf_file_name dclsig shape))
+          in
+          let interface =
+            match interface_obligations with
+            | [] -> None
+            | obligations ->
+                Some { rs_kind = Rsite_interface source_intf;
+                       rs_loc = Location.in_file sourcefile;
+                       rs_obligations = obligations }
           in
           (* Check the _mli_ against the argument type, since the mli determines
              the visible type of the module and that's what needs to conform to
@@ -5165,7 +5251,8 @@ let type_implementation target modulename initial_env ast =
               ~actual_staticity:staticity dclsig arg_type
           in
           Typecore.force_delayed_checks ();
-          Verification.run str;
+          Verification.run_unit ?interface str;
+          Vox_trust.record_implementation ~source_file:sourcefile ~ast str;
           Mode.erase_hints ();
           Typecore.optimise_allocations ();
           (* It is important to run these checks after the inclusion test above,
@@ -5215,7 +5302,8 @@ let type_implementation target modulename initial_env ast =
               ~actual_staticity:Staticity.Dynamic simple_sg arg_type
           in
           Typecore.force_delayed_checks ();
-          Verification.run str;
+          Verification.run_unit str;
+          Vox_trust.record_implementation ~source_file:sourcefile ~ast str;
           Mode.erase_hints ();
           Typecore.optimise_allocations ();
           (* See comment above. Here the target signature contains all
@@ -5231,7 +5319,8 @@ let type_implementation target modulename initial_env ast =
             in
             let cmi =
               Profile.record_call "save_cmi" (fun () ->
-                Env.save_signature ~alerts (simple_sg, Staticity.Dynamic)
+                Env.save_signature ?vox:!Vox_trust.implementation_record
+                  ~alerts (simple_sg, Staticity.Dynamic)
                   name kind (Unit_info.cmi target))
             in
             Profile.record_call "save_cmt" (fun () ->
@@ -5573,6 +5662,22 @@ let package_units initial_env objfiles target_cmi modulename =
           let name = Import_info.name import in
           not (List.mem name unit_names))
         (Env.imports()) in
+    (* The members' records, so that a verified client of a member whose
+       verification was skipped is warned about. *)
+    let vox =
+      Vox_trust.pack_record
+        (List.map
+           (fun f ->
+              let for_pack_prefix = Compilation_unit.to_prefix modulename in
+              let artifact =
+                Unit_info.Artifact.from_filename ~for_pack_prefix f in
+              Compilation_unit.(Name.to_string (name
+                (Unit_info.Artifact.modname artifact))),
+              Vox_trust.interface_file_record
+                (Unit_info.Artifact.filename
+                   (Unit_info.companion_cmi artifact)))
+           objfiles)
+    in
     (* Write packaged signature *)
     if not !Clflags.dont_write_files then begin
       let cmi_arg_for =
@@ -5582,7 +5687,8 @@ let package_units initial_env objfiles target_cmi modulename =
       let name = Compilation_unit.name modulename in
       let kind = Cmi_format.Normal { cmi_impl = modulename; cmi_arg_for } in
       let cmi =
-        Env.save_signature_with_imports ~alerts:Misc.Stdlib.String.Map.empty
+        Env.save_signature_with_imports ?vox
+          ~alerts:Misc.Stdlib.String.Map.empty
           (sg, Staticity.Dynamic) name kind target_cmi
           (Array.of_list imports)
       in

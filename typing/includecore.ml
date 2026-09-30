@@ -471,7 +471,6 @@ type unsafe_mode_crossing_mismatch =
 type type_mismatch =
   | Arity
   | Inductiveness
-  | Phantom_parameters
   | Privacy of privacy_mismatch
   | Kind of kind_mismatch
   | Constraint of Errortrace.equality_error
@@ -487,6 +486,7 @@ type type_mismatch =
   | With_null_representation of position
   | Fixed_representation of position
   | Jkind of Ikind.subjkind_error
+  | Not_logical of Ikind.subjkind_error * string
   | Unsafe_mode_crossing of unsafe_mode_crossing_mismatch
 
 type jkind_mismatch =
@@ -868,8 +868,6 @@ let report_type_mismatch first second decl env ppf err =
   match err with
   | Arity ->
       pr "They have different arities."
-  | Phantom_parameters ->
-      pr "Their phantom parameter guarantees do not match."
   | Inductiveness ->
       pr "Their inductive guarantees differ;@ the guarantee can only be \
           hidden@ behind an abstract type."
@@ -928,6 +926,15 @@ let report_type_mismatch first second decl env ppf err =
        | None -> report ()
        | Some printing_env ->
          Printtyp.wrap_printing_env ~error:true printing_env report)
+  | Not_logical (v, reason) ->
+      let report () =
+        Ikind.report_subjkind_error_with_name ~name:first env ppf v
+      in
+      (match Ikind.subjkind_error_printing_env v with
+       | None -> report ()
+       | Some printing_env ->
+         Printtyp.wrap_printing_env ~error:true printing_env report);
+      pr "@ @[The first is not logical:@ %s.@]" reason
   | Unsafe_mode_crossing mismatch ->
     pr "They have different unsafe mode crossing behavior:@,@[<v 2>%a@]"
       (fun ppf (first, second, mismatch) ->
@@ -1698,8 +1705,6 @@ let type_declarations_consistency env decl1 decl2 =
   else if decl1.type_inductive <> decl2.type_inductive
        && (decl2.type_inductive || not (Btype.type_kind_is_abstract decl2))
   then Some Inductiveness
-  else if decl2.type_phantom_parameters && not decl1.type_phantom_parameters
-  then Some Phantom_parameters
   else match privacy_mismatch env decl1 decl2 with
     | Some err -> Some (Privacy err)
     | None -> None
@@ -1802,7 +1807,17 @@ let type_declarations ?(equality = false) ~loc env ~mark name
           (* Note that [decl2.type_jkind] is an upper bound *)
           match Ctype.check_decl_jkind env decl1 decl2.type_jkind with
            | Ok _ -> None
-           | Error v -> Some (Jkind v)
+           | Error v ->
+             let reason =
+               if Jkind.requires_logical decl2.type_jkind then
+                 Ctype.not_logical_reason ~component:true env
+                   (Btype.newgenty
+                      (Tconstr (path, decl1.type_params, ref Mnil)))
+               else None
+             in
+             match reason with
+             | Some reason -> Some (Not_logical (v, reason))
+             | None -> Some (Jkind v)
         else None
     | (Type_variant (cstrs1, rep1, umc1), Type_variant (cstrs2, rep2, umc2)) -> begin
         if mark then begin

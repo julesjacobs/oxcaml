@@ -92,7 +92,7 @@ module type S =
 module type TotalS =
   sig
     type elt
-    type t : immutable_data with elt
+    type t : logical_data with elt
     include S with type elt := elt and type t := t
     val empty: t @@ total
     val add: elt -> t -> t @@ total
@@ -161,7 +161,7 @@ module type TotalS =
 module Make(Ord: OrderedType) =
   struct
     type elt = Ord.t
-    type t = Empty | Node of {l:t; v:elt; r:t; h:int}
+    type t = Empty | Node of {l:t; v:elt; r:t; h:int} [@@inductive]
 
     (* Sets are represented by balanced binary trees (the heights of the
        children differ by at most 2 *)
@@ -713,7 +713,7 @@ module Make(Ord: OrderedType) =
 module MakePortable(Ord: sig @@ portable include OrderedType end) =
   struct
     type elt = Ord.t
-    type t = Empty | Node of {l:t; v:elt; r:t; h:int}
+    type t = Empty | Node of {l:t; v:elt; r:t; h:int} [@@inductive]
 
     (* Sets are represented by balanced binary trees (the heights of the
        children differ by at most 2 *)

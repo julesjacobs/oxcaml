@@ -162,7 +162,7 @@ val positive_axis : pair -> {r : int | r > 0} = <fun>
 
 type sum = First of int | Second of int
 
-type token
+type token : value mod logical
 type wrapped = Wrap of token
 
 let opaque_payload_injective (left @ immutable) (right @ immutable)
@@ -182,7 +182,7 @@ let disjoint (left @ immutable) (right @ immutable) :
   ();;
 [%%expect{|
 type sum = First of int | Second of int
-type token
+type token : value mod logical
 type wrapped = Wrap of token
 val opaque_payload_injective :
   (left : token) @ immutable ->
@@ -270,6 +270,9 @@ let ordinary_opaque () : {r : ordinary | r === r} =
 val ordinary_opaque : unit -> {r : ordinary | r === r} = <fun>
 |}]
 
+(* [ordinary] is recursive but not [@@inductive], so it is not logical, and
+   neither is a wrapper around it: total code (including a refinement) may not
+   match [Ordinary_wrap]. *)
 type ordinary_wrapper = Ordinary_wrap of ordinary
 
 let wrapper_first (wrapped @ immutable) (tree @ immutable) :
@@ -278,10 +281,12 @@ let wrapper_first (wrapped @ immutable) (tree @ immutable) :
   ();;
 [%%expect{|
 type ordinary_wrapper = Ordinary_wrap of ordinary
-val wrapper_first :
-  (wrapped : ordinary_wrapper) @ immutable ->
-  (tree : 'a) @ immutable ->
-  {u : unit | match wrapped with | Ordinary_wrap _ -> tree === tree} = <fun>
+Line 5, characters 25-40:
+5 |       match wrapped with Ordinary_wrap _ -> tree === tree} =
+                             ^^^^^^^^^^^^^^^
+Error: The match on a value whose type is not logical (ordinary is recursive but not [@@inductive]) is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 5, characters 6-57).
 |}]
 
 let recursive_first (tree @ immutable) (wrapped @ immutable) :
@@ -289,10 +294,12 @@ let recursive_first (tree @ immutable) (wrapped @ immutable) :
       match wrapped with Ordinary_wrap _ -> tree === tree} =
   ();;
 [%%expect{|
-val recursive_first :
-  (tree : 'a) @ immutable ->
-  (wrapped : ordinary_wrapper) @ immutable ->
-  {u : unit | match wrapped with | Ordinary_wrap _ -> tree === tree} = <fun>
+Line 3, characters 25-40:
+3 |       match wrapped with Ordinary_wrap _ -> tree === tree} =
+                             ^^^^^^^^^^^^^^^
+Error: The match on a value whose type is not logical (ordinary is recursive but not [@@inductive]) is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 3, characters 6-57).
 |}]
 
 (* Ordinary wrappers are now encoded with an opaque payload; a false claim
@@ -302,14 +309,12 @@ let wrapper_payload_unknown (wrapped @ immutable) :
       match wrapped with Ordinary_wrap tree -> tree === Ordinary_stop} =
   ();;
 [%%expect{|
-Line 4, characters 2-4:
-4 |   ();;
-      ^^
-Error: Refinement could not be proved (counterexample)
-Line 3, characters 6-69:
+Line 3, characters 25-43:
 3 |       match wrapped with Ordinary_wrap tree -> tree === Ordinary_stop} =
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  The refinement is stated here.
+                             ^^^^^^^^^^^^^^^^^^
+Error: The match on a value whose type is not logical (ordinary is recursive but not [@@inductive]) is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 3, characters 6-69).
 |}]
 
 type mutable_point = {mutable mx : int; my : int}
@@ -441,7 +446,7 @@ type nested_ordinary = Nested_stop | Nested_more of (nested_ordinary * int)
 Line 9, characters 8-29:
 9 |       | Nested_more (rest, n) -> rest === rest && n === n} =
             ^^^^^^^^^^^^^^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (nested_ordinary is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used in an expression (at lines 7-9, characters 6-57).
 |}]
@@ -463,7 +468,7 @@ type 'a nonregular =
 Line 9, characters 8-25:
 9 |       | Nonregular_more _ -> true} =
             ^^^^^^^^^^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (nonregular is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used in an expression (at lines 7-9, characters 6-33).
 |}]

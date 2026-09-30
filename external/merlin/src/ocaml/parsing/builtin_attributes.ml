@@ -125,7 +125,6 @@ let builtin_attrs =
   ; "immediate"
   ; "immediate64"
   ; "inductive"
-  ; "phantom_parameters"
   ; "boxed"
   ; "unboxed"
   ; "principal"
@@ -269,6 +268,18 @@ let attr_equals_builtin {attr_name = {txt; _}; _} s =
   (   String.length txt = 6 + String.length s
    && String.starts_with ~prefix:"ocaml." txt
    && String.ends_with ~suffix:s txt)
+
+let is_transparent_definition attrs =
+  List.exists
+    (fun a ->
+       attr_equals_builtin a "def"
+       && match a.attr_payload with
+       | PStr [{pstr_desc = Pstr_eval
+                    ({pexp_desc = Pexp_ident
+                       {txt = Longident.Lident "transparent"; _};
+                      _}, []); _}] -> true
+       | _ -> false)
+    attrs
 
 let mark_alert_used a =
   if attr_equals_builtin a "deprecated" || attr_equals_builtin a "alert"

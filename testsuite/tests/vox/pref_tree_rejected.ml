@@ -35,8 +35,7 @@ Line 5, characters 65-66:
                                                                      ^
 Error: The value "t" has type "Pref_tree.node option Pref.token"
        but an expression was expected of type "'a Pref.token"
-       The kind of Pref_tree.node option is
-           immutable_data with Pref_tree.node
+       The kind of Pref_tree.node option is logical_data with Pref_tree.node
          because it's a boxed variant type.
        But the kind of Pref_tree.node option must be a subkind of
            immutable_data.

@@ -4978,6 +4978,12 @@ module Report = struct
     | Lazy -> Some (print_article_noun Consonant "lazy expression")
     | Quote -> Some (print_article_noun Consonant "quoted expression")
     | Expression -> Some (print_article_noun Vowel "expression")
+    | Not_logical_match reason ->
+      Some
+        (fun ~definite ~capitalize ->
+          Fmt.dprintf "%t on a value whose type is not logical (%s)"
+            (print_article_noun ~definite ~capitalize Consonant "match")
+            reason)
     | Effect_match ->
       Some (print_article_noun Consonant "pattern match with effect cases")
     | Effect_try ->
@@ -6091,6 +6097,8 @@ module Portability = struct
 
   include Comonadic_gen (Obj)
 
+  let is_portable m = Const.le (Guts.get_floor m) Const.Portable
+
   let legacy = of_const Const.legacy
 
   (* CR dkalinichenko: ideally, [reading] should zap to [shareable]. *)
@@ -6116,6 +6124,8 @@ module Uniqueness = struct
   let aliased = of_const Aliased
 
   let unique = of_const Unique
+
+  let is_unique m = Const.le (Guts.get_ceil m) Const.Unique
 
   let legacy = of_const Const.legacy
 
@@ -6181,6 +6191,10 @@ module Ghostliness = struct
   let real = of_const Real
 
   let ghost = of_const Ghost
+
+  let is_ghost m = Const.le Const.Ghost (Guts.get_floor m)
+
+  let is_real m = Const.le (Guts.get_ceil m) Const.Real
 
   let legacy = of_const Const.legacy
 
