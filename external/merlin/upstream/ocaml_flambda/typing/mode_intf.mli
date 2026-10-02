@@ -461,6 +461,9 @@ module type S = sig
     end
 
     include Common_axis_pos with module Const := Const
+
+    (** Inspect the inferred mode without committing solver changes. *)
+    val is_portable : (allowed * 'r) t -> bool
   end
 
   module Uniqueness : sig
@@ -477,6 +480,10 @@ module type S = sig
     val aliased : lr
 
     val unique : lr
+
+    (** The mode is certainly bounded by [unique], for example by an annotation.
+        Does not commit solver changes. *)
+    val is_unique : ('l * allowed) t -> bool
   end
 
   module Contention : sig
@@ -583,6 +590,14 @@ module type S = sig
     val real : lr
 
     val ghost : lr
+
+    (** Inspect the inferred mode without committing solver changes: the value
+        is certainly ghost. *)
+    val is_ghost : (allowed * 'r) t -> bool
+
+    (** The mode is certainly bounded by [real], for example by an annotation.
+    *)
+    val is_real : ('l * allowed) t -> bool
   end
 
   module Visibility : sig

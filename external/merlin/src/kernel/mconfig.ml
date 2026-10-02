@@ -442,6 +442,10 @@ let ocaml_ignored_flags =
     "-dsmtlib";
     "-dsmt-resources";
     "-smt-assume-verified";
+    "-smt-solver-any-version";
+    "-smt-unused-steps-precise";
+    "-vox-library";
+    "-vox-audit";
     "-absname";
     "-alias-deps";
     "-annot";

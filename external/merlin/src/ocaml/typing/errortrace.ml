@@ -103,6 +103,19 @@ type first_class_module =
     | Package_inclusion of Format_doc.doc
     | Package_coercion of Format_doc.doc
 
+type refinement_mismatch =
+  | Invariant_refinement of Path.t option
+    (** Refinements must be equal under this invariant type constructor,
+        or in an invariant position with no constructor to blame. *)
+  | Package_refinement
+    (** Package constraints are equations, so refinements must be equal. *)
+  | Refinement_needs_proof
+    (** Refinements that differ need a proof, which this check cannot
+        request. *)
+  | Refinement_modes of type_expr * string
+    (** A value would enter this refined type at a mode that may be partial,
+        stateful or nonportable (the string). *)
+
 type ('a, 'variety) elt =
   (* Common *)
   | Diff : 'a diff -> ('a, _) elt
@@ -121,6 +134,7 @@ type ('a, 'variety) elt =
   | Unequal_var_jkinds :
       type_expr * jkind_lr * type_expr * jkind_lr -> ('a, _) elt
   | Unequal_tof_kind_jkinds : jkind_lr * jkind_lr -> ('a, _) elt
+  | Refinement : refinement_mismatch -> ('a, _) elt
 
 type ('a, 'variety) t = ('a, 'variety) elt list
 
@@ -145,6 +159,7 @@ let map_elt (type variety) f : ('a, variety) elt -> ('b, variety) elt = function
   | Bad_jkind_sort _ as x -> x
   | Unequal_var_jkinds _ as x -> x
   | Unequal_tof_kind_jkinds _ as x -> x
+  | Refinement _ as x -> x
 
 let map f t = List.map (map_elt f) t
 
