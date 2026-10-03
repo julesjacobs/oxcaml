@@ -194,6 +194,30 @@ let serialize oc base =
   Serialize.signature {map_signature; map_type_expr; map_value_description}
 *)
 
+let vox_unit flags =
+  List.find_map (function Vox record -> Some record | _ -> None) flags
+
+(* In .cmo and .cmx files, a unit's Vox record follows this marker, so that
+   files written before the record existed still read as having none. *)
+let vox_record_marker = "VoxUnit1"
+
+let output_vox_record oc (record : vox_unit option) =
+  output_string oc vox_record_marker;
+  output_value oc record
+
+let input_vox_record ic : vox_unit option =
+  let position = pos_in ic in
+  let marker =
+    try really_input_string ic (String.length vox_record_marker)
+    with End_of_file -> ""
+  in
+  if String.equal marker vox_record_marker
+  then (input_value ic : vox_unit option)
+  else begin
+    seek_in ic position;
+    None
+  end
+
 let input_cmi_lazy ic =
   let read_bytes n =
     let buf = Bytes.create n in

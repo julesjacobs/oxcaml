@@ -582,8 +582,13 @@ and core_type ctxt f x =
               (type_with_label ctxt) (l,ct1,m1)
               (return_type ctxt) (ct2,m2)
         | Some binder ->
-            pp f "@[<2>(%a : %a)%a@;->@;%a@]"
-              ident_of_name binder.txt (core_type1 ctxt) ct1
+            let label f = function
+              | Nolabel -> ()
+              | Labelled s -> pp f "%a:" ident_of_name s
+              | Optional s -> pp f "?%a:" ident_of_name s
+            in
+            pp f "@[<2>%a(%a : %a)%a@;->@;%a@]"
+              label l ident_of_name binder.txt (core_type1 ctxt) ct1
               optional_at_modes m1 (return_type ctxt) (ct2,m2)
         end
     | Ptyp_alias (ct, s, j) ->

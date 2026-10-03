@@ -195,6 +195,10 @@ val select_attributes :
     or [select_attributes]. *)
 val attr_equals_builtin : Parsetree.attribute -> string -> bool
 
+(** [is_transparent_definition attrs] is true if [attrs] contains
+    [[@def transparent]]. It does not mark the attribute used. *)
+val is_transparent_definition : Parsetree.attributes -> bool
+
 val warn_on_literal_pattern: Parsetree.attributes -> bool
 val explicit_arity: Parsetree.attributes -> bool
 

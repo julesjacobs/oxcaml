@@ -1199,12 +1199,18 @@ let implemented_parameter penv modname =
   | Some { pn_import = { imp_arg_for; _ }; _ } -> imp_arg_for
   | None -> None
 
-let make_cmi penv modname kind sign alerts =
+let vox_unit penv modname =
+  match find_import_info_in_cache penv modname with
+  | Some { imp_flags; _ } -> Cmi_format.vox_unit imp_flags
+  | None -> None
+
+let make_cmi ?vox penv modname kind sign alerts =
   let flags =
     List.concat [
       if !Clflags.recursive_types then [Cmi_format.Rectypes] else [];
       if !Clflags.opaque then [Cmi_format.Opaque] else [];
       [Alerts alerts];
+      (match vox with Some record -> [Cmi_format.Vox record] | None -> []);
     ]
   in
   let params =

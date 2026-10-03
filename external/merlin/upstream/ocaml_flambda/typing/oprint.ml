@@ -402,8 +402,10 @@ and print_out_type_1 ppf =
                 not (List.mem mode ["total"; "stateless"; "portable"]))
               am
           in
-          fprintf ppf "(%s : %a)%a" binder print_simple_out_type ty1
-            print_out_modes modes
+          print_arg_label_and_out_type ppf lab ty1
+            ~print_type:(fun ppf ty1 ->
+              fprintf ppf "(%s : %a)%a" binder print_simple_out_type ty1
+                print_out_modes modes)
       end;
       pp_print_string ppf " ->";
       pp_print_space ppf ();

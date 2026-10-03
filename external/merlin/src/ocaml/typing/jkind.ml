@@ -2428,7 +2428,18 @@ let for_unboxed_record_with_updates lbls =
       lbls
   in
   let layouts = List.map (fun (_, _, layout) -> layout) lbls in
-  Builtin.product ~why:Unboxed_record tys_modalities layouts
+  (* A ghost field has no slot (its layout is void), but its type still
+     bounds the record's mode crossing; see [add_labels_as_with_bounds] in
+     btype.ml. *)
+  List.fold_left
+    (fun jkind (lbl, ld_type, _) ->
+      if lbl.ld_ghost
+      then
+        add_field_with_bounds ~ghost:true ~modality:lbl.ld_modalities
+          ~type_expr:ld_type jkind
+      else jkind)
+    (Builtin.product ~why:Unboxed_record tys_modalities layouts)
+    lbls
 
 let for_abbreviation ~type_jkind_purely ~modality ty =
   (* CR layouts v2.8: This should really use layout_of. Internal ticket 2912. *)

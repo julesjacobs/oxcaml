@@ -502,8 +502,11 @@ let enter_ancestor_met ~loc name ~sign ~meths ~cl_num ~ty ~attrs met_env =
 let add_self_met loc id sign self_var_kind vars cl_num
       as_var ty attrs met_env =
   let check =
-    if as_var then (fun s -> Warnings.Unused_var { name = s; mutated = false })
-    else (fun s -> Warnings.Unused_var_strict { name = s; mutated = false })
+    if as_var then (fun s ->
+      Warnings.Unused_var { name = s; mutated = false; refined_unit = false })
+    else (fun s ->
+      Warnings.Unused_var_strict
+        { name = s; mutated = false; refined_unit = false })
   in
   let kind = Val_self (sign, self_var_kind, vars, cl_num) in
   let desc =

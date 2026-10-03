@@ -651,6 +651,7 @@ and expression_extra i ppf (extra, loc, attrs) =
   | Texp_refine ->
       line i ppf "Texp_refine\n"
   | Texp_refinement _ -> line i ppf "Texp_refinement\n"
+  | Texp_subsumption _ -> line i ppf "Texp_subsumption\n"
   | Texp_value_name id -> line i ppf "Texp_value_name %a\n" Ident.print id
   | Texp_let_refine (id, name) ->
       line i ppf "Texp_let_refine %a %a %s\n" Ident.print id

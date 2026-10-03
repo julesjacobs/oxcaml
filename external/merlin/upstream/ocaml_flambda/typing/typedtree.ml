@@ -269,6 +269,7 @@ and exp_extra =
   | Texp_refine
   | Texp_refinement of { source : Types.type_expr; target : Types.type_expr }
   | Texp_value_name of Ident.t
+  | Texp_subsumption of { source : Types.type_expr; target : Types.type_expr }
   | Texp_let_refine of Ident.t * string loc
 
 and arg_label = Types.arg_label =
@@ -1099,6 +1100,26 @@ type implementation = {
   argument_interface: argument_interface option;
   shape: Shape.t;
 }
+
+type refinement_obligation =
+  { ro_value : Path.t option;
+    ro_modules : string list;
+    ro_name : string;
+    ro_source : Types.type_expr;
+    ro_target : Types.type_expr;
+    ro_env : Env.t;
+    ro_value_loc : Location.t;
+    ro_declaration_loc : Location.t }
+
+type refinement_site_kind =
+  | Rsite_interface of string
+  | Rsite_constraint
+  | Rsite_functor_argument
+
+type refinement_site =
+  { rs_kind : refinement_site_kind;
+    rs_loc : Location.t;
+    rs_obligations : refinement_obligation list }
 
 type item_declaration =
   | Value of value_description

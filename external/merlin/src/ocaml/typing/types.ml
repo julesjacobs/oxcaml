@@ -1168,8 +1168,10 @@ let find_unboxed_type decl =
   | Type_record
       ([{ld_type = arg; ld_modalities = ms; _ }],
        Record_inlined (_, _, Variant_unboxed), _)
+  (* A record of one ghost field is not its field: the field has no slot
+     and the record's layout is void. *)
   | Type_record_unboxed_product
-      ([{ld_type = arg; ld_modalities = ms; _ }],
+      ([{ld_type = arg; ld_modalities = ms; ld_ghost = false; _ }],
        (Record_unboxed_product | Record_unboxed_product_undetermined), _)
   | Type_variant ([{cd_args = Cstr_tuple [{ca_type = arg; ca_modalities = ms; _}]; _}], Variant_unboxed, _)
   | Type_variant ([{cd_args = Cstr_record [{ld_type = arg; ld_modalities = ms; _}]; _}], Variant_unboxed, _) ->

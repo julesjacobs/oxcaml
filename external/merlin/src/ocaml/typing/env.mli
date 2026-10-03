@@ -655,11 +655,13 @@ val read_signature:
            Results: signature. If [add_binding] is true, creates an entry for
            the module in the environment. *)
 val save_signature:
+  ?vox:Cmi_format.vox_unit ->
   alerts:alerts -> signature * Mode.Staticity.Const.t
   -> Compilation_unit.Name.t -> Cmi_format.kind
   -> Unit_info.Artifact.t -> Cmi_format.cmi_infos_lazy
         (* Arguments: signature, module name, module kind, file name. *)
 val save_signature_with_imports:
+  ?vox:Cmi_format.vox_unit ->
   alerts:alerts -> signature * Mode.Staticity.Const.t
   -> Compilation_unit.Name.t -> Cmi_format.kind
   -> Unit_info.Artifact.t -> Import_info.t array -> Cmi_format.cmi_infos_lazy
@@ -699,6 +701,9 @@ val parameters: unit -> Global_module.Parameter_name.t list
 
 (* [is_imported_opaque md] returns true if [md] is an opaque imported module *)
 val is_imported_opaque: Compilation_unit.Name.t -> bool
+
+(* [vox_unit md] is the Vox record of the imported interface [md], if any. *)
+val vox_unit: Compilation_unit.Name.t -> Cmi_format.vox_unit option
 
 (* [register_import_as_opaque md] registers [md] as an opaque imported module *)
 val register_import_as_opaque: Compilation_unit.Name.t -> unit

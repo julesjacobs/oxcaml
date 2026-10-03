@@ -340,6 +340,7 @@ let of_exp_extra (exp, _, _) =
   | Texp_ghost_region
   | Texp_ghost
   | Texp_refine
+  | Texp_subsumption _
   | Texp_refinement _
   | Texp_value_name _
   | Texp_let_refine _ -> id_fold

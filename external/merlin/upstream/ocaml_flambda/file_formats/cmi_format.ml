@@ -15,10 +15,51 @@
 
 open Misc
 
+(* Vox: what a unit's verification assumed rather than checked. Compilers
+   with refinement types record it in the .cmi, .cmo and .cmx files of every
+   unit compiled with -extension refinement_types; see typing/vox_trust.mli. *)
+type vox_status =
+  | Vox_interface     (* compiled from an .mli; nothing to verify *)
+  | Vox_verified      (* verified, possibly by another compilation of the
+                         same source (see -smt-assume-verified) *)
+  | Vox_not_verified  (* compiled with -smt-assume-verified *)
+
+type vox_item_kind =
+  | Vox_refined_external  (* an external whose type states a refinement *)
+  | Vox_total_external    (* an external declared total *)
+  | Vox_total_cast        (* a %identity external whose result is total *)
+  | Vox_builtin           (* an external the verifier gives a built-in
+                             meaning *)
+  | Vox_cast_use          (* a definition that applies such a cast *)
+  | Vox_external          (* another external, outside the library *)
+  | Vox_unsafe            (* Obj, Marshal, an unsafe primitive, an external
+                             that returns a value of any type, -unsafe or an
+                             unsafe attribute *)
+
+type vox_item = {
+  vox_kind : vox_item_kind;
+  vox_name : string;
+  vox_location : string;  (* of the first occurrence *)
+  vox_count : int;
+}
+
+type vox_unit = {
+  vox_status : vox_status;
+  vox_library : bool;       (* compiled with -vox-library *)
+  vox_source : string;      (* hex digest of the parsed source, or "" *)
+  vox_config : string;      (* the flags that change what was verified *)
+  vox_solver : string;      (* the solver's version, if it was not the
+                               expected one (-smt-solver-any-version) *)
+  vox_imports : string list;
+      (* the units the implementation imports, which the interface may not *)
+  vox_items : vox_item list;
+}
+
 type pers_flags =
   | Rectypes
   | Alerts of alerts
   | Opaque
+  | Vox of vox_unit
 
 type kind =
   | Normal of {
@@ -156,6 +197,30 @@ let serialize oc base =
     }
   in
   Serialize.signature {map_signature; map_type_expr; map_value_description}
+
+let vox_unit flags =
+  List.find_map (function Vox record -> Some record | _ -> None) flags
+
+(* In .cmo and .cmx files, a unit's Vox record follows this marker, so that
+   files written before the record existed still read as having none. *)
+let vox_record_marker = "VoxUnit1"
+
+let output_vox_record oc (record : vox_unit option) =
+  output_string oc vox_record_marker;
+  output_value oc record
+
+let input_vox_record ic : vox_unit option =
+  let position = pos_in ic in
+  let marker =
+    try really_input_string ic (String.length vox_record_marker)
+    with End_of_file -> ""
+  in
+  if String.equal marker vox_record_marker
+  then (input_value ic : vox_unit option)
+  else begin
+    seek_in ic position;
+    None
+  end
 
 let input_cmi_lazy ic =
   let read_bytes n =

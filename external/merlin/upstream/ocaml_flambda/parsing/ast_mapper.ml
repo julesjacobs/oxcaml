@@ -1469,5 +1469,10 @@ let run_main mapper =
     prerr_endline (Printexc.to_string exn);
     exit 2
 
+let () =
+  Ast_helper.Typ.map_expression_types := fun f e ->
+    let mapper = { default_mapper with typ = (fun _ t -> f t) } in
+    mapper.expr mapper e
+
 let register_function = ref (fun _name f -> run_main f)
 let register name f = !register_function name f
