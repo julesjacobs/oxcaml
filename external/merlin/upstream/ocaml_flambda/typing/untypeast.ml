@@ -362,6 +362,8 @@ let pattern : type k . _ -> k T.general_pattern -> _ = fun sub pat ->
         Ppat_unpack { name with txt = Some name.txt }
     | { pat_extra=[Tpat_type (_path, lid), _, _attrs]; _ } ->
         Ppat_type (map_loc sub lid)
+    | { pat_extra = (Tpat_refinement _, _, _) :: rem; _ } ->
+        (sub.pat sub { pat with pat_extra = rem }).ppat_desc
     | { pat_extra= (Tpat_constraint (ct, modes), _, _attrs) :: rem; _ } ->
         let modes = Typemode.untransl_mode modes in
         Ppat_constraint (sub.pat sub { pat with pat_extra=rem },
@@ -473,6 +475,7 @@ let exp_extra sub (extra, loc, attrs) sexp =
     | Texp_borrowed -> Pexp_borrow sexp
     | Texp_ghost_region ->sexp.pexp_desc
     | Texp_refine -> Pexp_refine sexp
+    | Texp_refinement _ | Texp_value_name _ -> sexp.pexp_desc
     | Texp_let_refine (_, name) -> begin
         match sexp.pexp_desc with
         | Pexp_let (Immutable, Nonrecursive,
@@ -603,7 +606,8 @@ let expression sub exp =
                       | Texp_ghost
                       | Texp_inspected_type _ -> [], []
                       | Texp_ghost_region | Texp_borrowed | Texp_refine
-                      | Texp_let_refine _ -> [], []
+                      | Texp_let_refine _ | Texp_refinement _
+                      | Texp_value_name _ -> [], []
                     in
                     new_type_constraints @ ret_type_constraints,
                     new_mode_annotations @ ret_mode_annotations)

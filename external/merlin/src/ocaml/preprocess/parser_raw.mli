@@ -7,6 +7,7 @@ type token =
   | WHEN
   | VIRTUAL
   | VAL
+  | UNREACHABLE
   | UNDERSCORE
   | UIDENT of (string)
   | TYPE
@@ -216,6 +217,7 @@ module MenhirInterpreter : sig
     | T_WHEN : unit terminal
     | T_VIRTUAL : unit terminal
     | T_VAL : unit terminal
+    | T_UNREACHABLE : unit terminal
     | T_UNDERSCORE : unit terminal
     | T_UIDENT : (string) terminal
     | T_TYPE : unit terminal

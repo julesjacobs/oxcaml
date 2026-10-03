@@ -340,13 +340,19 @@ let of_exp_extra (exp, _, _) =
   | Texp_ghost_region
   | Texp_ghost
   | Texp_refine
+  | Texp_refinement _
+  | Texp_value_name _
   | Texp_let_refine _ -> id_fold
 let of_expression e = app (Expression e) ** list_fold of_exp_extra e.exp_extra
 
 let of_pat_extra (pat, _, _) =
   match pat with
   | Tpat_constraint (ct, modes) -> option_fold of_core_type ct ** of_modes modes
-  | Tpat_type _ | Tpat_unpack | Tpat_open _ | Tpat_inspected_type _ -> id_fold
+  | Tpat_type _
+  | Tpat_unpack
+  | Tpat_open _
+  | Tpat_inspected_type _
+  | Tpat_refinement _ -> id_fold
 
 let of_pattern (type k) (p : k general_pattern) =
   app (Pattern p) ** list_fold of_pat_extra p.pat_extra

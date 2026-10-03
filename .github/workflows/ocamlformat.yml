@@ -16,7 +16,9 @@ concurrency:
 jobs:
   check:
     name: check (${{ matrix.system }})
-    runs-on: ${{ matrix.os }}
+    runs-on: >-
+      ${{ github.repository == 'julesjacobs/oxcaml' && 'ubuntu-24.04'
+        || matrix.os }}
     permissions:
       contents: read
       pull-requests: read # read PR labels for the "skip 80ch" check

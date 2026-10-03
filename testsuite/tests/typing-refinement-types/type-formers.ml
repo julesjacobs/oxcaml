@@ -149,11 +149,7 @@ Error: Refinement could not be proved (counterexample)
 
 let no_implicit_unwrap : int = one;;
 [%%expect{|
-Line 1, characters 31-34:
-1 | let no_implicit_unwrap : int = one;;
-                                   ^^^
-Error: The value "one" has type "positive" = "{x : int | gt x 0}"
-       but an expression was expected of type "int"
+val no_implicit_unwrap : int = 1
 |}]
 
 let unwrapped = let refine_ x = one in x + 1;;
@@ -240,10 +236,7 @@ Error: "refine_" requires a known refinement type from its context
 
 let not_refined = let refine_ x = 1 in x;;
 [%%expect{|
-Line 1, characters 34-35:
-1 | let not_refined = let refine_ x = 1 in x;;
-                                      ^
-Error: the right-hand side of "let refine_" must have a known refinement type
+val not_refined : int = 1
 |}]
 
 let partial () = print_endline "partial"; 1
@@ -281,7 +274,7 @@ type nested_refine =
 Line 4, characters 25-36:
 4 |     let refine_ proof = (refine_ raw : {b : bool | b}) in
                              ^^^^^^^^^^^
-Error: This expression annotation is not yet supported in a refinement predicate
+Error: Refinement introduction is not yet supported in a refinement predicate
 |}]
 
 type box = { value : int }
@@ -324,20 +317,20 @@ val wrapped_function : total_function = <fun>
 let (stateless_wrapped @ stateless) = wrapped_function
 let (portable_wrapped @ portable) = wrapped_function;;
 [%%expect{|
-val stateless_wrapped : total_function = <fun>
-val portable_wrapped : total_function = <fun>
+val stateless_wrapped : unit -> unit = <fun>
+val portable_wrapped : unit -> unit = <fun>
 |}]
 
 let partial_function : total_function =
   refine_ (fun () -> print_endline "partial");;
 [%%expect{|
-Line 2, characters 21-34:
+Line 2, characters 2-45:
 2 |   refine_ (fun () -> print_endline "partial");;
-                         ^^^^^^^^^^^^^
-Error: The value "print_endline" is "partial"
-       but is expected to be "total"
-         because it is used inside the function at line 2, characters 10-45
-         which is expected to be "total".
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This value is "partial"
+         because it closes over the value "print_endline" at line 2, characters 21-34
+         which is "partial".
+       However, the highlighted expression is expected to be "total".
 |}]
 
 let (run_wrapped @ total) () =
@@ -674,9 +667,7 @@ val accept_alias : Result_alias.t -> unit = <fun>
 Line 4, characters 24-25:
 4 |   Result.Refined.accept x;;
                             ^
-Error: The value "x" has type
-         "Make_result(Nonzero).t" = "{x : int | Make_result(Nonzero).holds x}"
-       but an expression was expected of type "{x : int | Result.holds x}"
+Error: Refinement could not be proved (counterexample)
 |}]
 
 module Empty = struct end
@@ -723,9 +714,7 @@ let first_is_not_second (x : First.t) : Second.t = x;;
 Line 1, characters 51-52:
 1 | let first_is_not_second (x : First.t) : Second.t = x;;
                                                        ^
-Error: The value "x" has type "First.t" = "{x : int | First.holds x}"
-       but an expression was expected of type
-         "Second.t" = "{x : int | Second.holds x}"
+Error: Refinement could not be proved (counterexample)
 |}]
 
 let direct_is_not_first (x : Unstable(Empty).t) : First.t = x;;
@@ -733,8 +722,5 @@ let direct_is_not_first (x : Unstable(Empty).t) : First.t = x;;
 Line 1, characters 60-61:
 1 | let direct_is_not_first (x : Unstable(Empty).t) : First.t = x;;
                                                                 ^
-Error: The value "x" has type
-         "Unstable(Empty).t" = "{x : int | Unstable(Empty).holds x}"
-       but an expression was expected of type
-         "First.t" = "{x : int | First.holds x}"
+Error: Refinement could not be proved (counterexample)
 |}]

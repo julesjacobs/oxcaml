@@ -2738,6 +2738,7 @@ let rec quote_computation_pattern ~scopes p =
 and quote_pat_extra ~env ~scopes loc pat_lam extra =
   let extra, _, _ = extra in
   match extra with
+  | Tpat_refinement _ -> pat_lam
   | Tpat_constraint (ty, ms) ->
     let ty = Option.value ~default:(newcorevar env loc) ty in
     Pat.constraint_ loc pat_lam
@@ -3458,7 +3459,8 @@ and quote_expression_extra ~env ~scopes _stage extra lambda =
   | Texp_ghost_region -> lambda
   | Texp_borrowed ->
     Exp_desc.borrow loc (mk_exp_noattr loc lambda) |> Exp_desc.wrap
-  | Texp_refine | Texp_let_refine _ -> lambda
+  | Texp_refine | Texp_let_refine _ | Texp_refinement _ | Texp_value_name _ ->
+    lambda
 
 and update_env_with_extra ~loc extra =
   let extra, _, _ = extra in
@@ -3472,7 +3474,8 @@ and update_env_with_extra ~loc extra =
   | Texp_inspected_type _ -> ()
   | Texp_ghost_region -> ()
   | Texp_borrowed -> ()
-  | Texp_refine | Texp_let_refine _ -> ()
+  | Texp_refine | Texp_let_refine _ | Texp_refinement _ | Texp_value_name _ ->
+    ()
 
 and update_env_without_extra ~loc extra =
   let extra, _, _ = extra in
@@ -3486,7 +3489,8 @@ and update_env_without_extra ~loc extra =
   | Texp_inspected_type _ -> ()
   | Texp_ghost_region -> ()
   | Texp_borrowed -> ()
-  | Texp_refine | Texp_let_refine _ -> ()
+  | Texp_refine | Texp_let_refine _ | Texp_refinement _ | Texp_value_name _ ->
+    ()
 
 and quote_expression_desc ~scopes ~transl stage e : Exp_desc.t =
   let env = e.exp_env in

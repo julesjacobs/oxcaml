@@ -280,6 +280,7 @@ let pat_extra sub (e, loc, attrs) =
   | Tpat_type (_, lid) -> iter_loc_lid sub lid
   | Tpat_unpack -> ()
   | Tpat_open (_, lid, env) -> iter_loc_lid sub lid; sub.env sub env
+  | Tpat_refinement _ -> ()
   | Tpat_constraint (ct, ma) -> Option.iter (sub.typ sub) ct; sub.modes sub ma
   | Tpat_inspected_type (Label_disambiguation _) -> ()
   | Tpat_inspected_type (Polymorphic_parameter (Param _)) -> ()
@@ -334,7 +335,7 @@ let extra sub = function
   | Texp_poly cto -> Option.iter (sub.typ sub) cto
   | Texp_borrowed -> ()
   | Texp_ghost_region -> ()
-  | Texp_refine -> ()
+  | Texp_refine | Texp_refinement _ | Texp_value_name _ -> ()
   | Texp_let_refine (_, name) -> iter_loc sub name
   | Texp_stack -> ()
   | Texp_ghost -> ()

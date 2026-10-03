@@ -5,4 +5,5 @@ end
 module Make (X : Parameter) : sig
   type t = { x : int | X.flag }
   val value : t
+  val values : t list
 end

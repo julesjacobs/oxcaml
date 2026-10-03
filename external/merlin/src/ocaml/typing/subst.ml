@@ -95,11 +95,12 @@ type unsafe = [`Unsafe]
 type t = safe subst
 exception Module_type_path_substituted_away of Path.t * Types.module_type
 
-let rename_bound_ident s id =
+let rename_bound_ident ?scope s id =
   match s.additional_action with
   | Prepare_for_saving { prepare_ident; _ } -> prepare_ident id
   | Duplicate_variables | No_action ->
-      Ident.create_scoped ~scope:(Ident.scope id) (Ident.name id)
+      Ident.create_scoped
+        ~scope:(Option.value scope ~default:(Ident.scope id)) (Ident.name id)
 
 module Ikind_substitution = struct
   type type_lookup_result =
@@ -806,7 +807,8 @@ let rec typexp copy_scope s ty =
             match binder with
             | None -> None, typexp copy_scope s ret
             | Some binder ->
-                let binder' = rename_bound_ident s binder in
+                let binder' =
+                  rename_bound_ident ~scope:Ident.lowest_scope s binder in
                 let ret =
                   typexp copy_scope (add_bound_value binder binder' s) ret
                 in
@@ -817,12 +819,16 @@ let rec typexp copy_scope s ty =
       | Trefine
           { ref_structural_scope; ref_binder; ref_payload; ref_pred } ->
           let ref_payload = typexp copy_scope s ref_payload in
-          let ref_binder' = rename_bound_ident s ref_binder in
+          let ref_binder' =
+            rename_bound_ident ~scope:Ident.lowest_scope s ref_binder in
           (* Retained types and predicate nodes must share the same fresh
-             identities, including binders introduced inside the predicate. *)
+             identities, including binders introduced inside the predicate.
+             These binders have no free-term scope, including while the
+             retained types are copied before the enclosing refinement. *)
           let s =
             Ident.Set.fold
-              (fun id s -> add_bound_value id (rename_bound_ident s id) s)
+              (fun id s -> add_bound_value id
+                (rename_bound_ident ~scope:Ident.lowest_scope s id) s)
               (Refinement_predicate.bound_idents ref_pred)
               (add_bound_value ref_binder ref_binder' s)
           in

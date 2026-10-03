@@ -346,3 +346,11 @@ This permits erased `Slice.current`/`Slice.final` observations of a local loan.
 Runtime locality checks still prevent escaping the loan; mutable reads and
 partial computations remain rejected in ghost code. Logical equality `===`
 is available in ghost code as well as refinement predicates.
+
+### Proved unreachable branches
+
+With `-extension refinement_types`, `unreachable_ ()` checks that the current
+path implies `false`. It can inhabit any result type and is permitted in total
+and ghost code. Reachable uses are rejected in partial functions too. The
+construct elaborates to an erased refinement check followed by an assertion
+trap; the trap remains even with `-noassert`.

@@ -1103,6 +1103,7 @@ let merloc startpos ?endpos x =
 %token BORROW [@symbol "borrow_"]
 %token REFINE [@symbol "refine_"]
 %token ASSUME [@symbol "assume_"]
+%token UNREACHABLE [@symbol "unreachable_"]
 %token <char> CHAR [@cost 2] [@recovery '_']
 %token <char> HASH_CHAR [@cost 2] [@recovery '_']
 %token CLASS [@symbol "class"]
@@ -3099,6 +3100,9 @@ fun_:
       { Exp.refine ~loc:(make_loc $sloc) $2 }
   | ASSUME simple_expr %prec below_HASH
       { Exp.assume ~loc:(make_loc $sloc) $2 }
+  | UNREACHABLE LPAREN RPAREN
+      { Exp.extension ~loc:(make_loc $sloc)
+          (mkloc "vox.unreachable" (make_loc $sloc), PStr []) }
   | labeled_tuple %prec below_COMMA
       { mkexp ~loc:$sloc (Pexp_tuple $1) }
   | maybe_stack (
@@ -5699,6 +5703,7 @@ single_attr_id:
   | BORROW { "borrow_" }
   | REFINE { "refine_" }
   | ASSUME { "assume_" }
+  | UNREACHABLE { "unreachable_" }
   | CLASS { "class" }
   | CONSTRAINT { "constraint" }
   | DO { "do" }
