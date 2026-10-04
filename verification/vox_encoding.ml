@@ -104,6 +104,7 @@ module Shape_reducer = Shape_reduce.Make (struct
         String.equal unit_name "Stdlib"
         || String.equal unit_name "Stdlib__Set"
         || String.equal unit_name "Stdlib__Map"
+        || String.equal unit_name "CamlinternalMap"
         || String.equal unit_name "Stdlib__MoreLabels"
       in
       let filename = String.uncapitalize_ascii unit_name in
@@ -242,6 +243,24 @@ let is_map_type env ty =
     | _ -> false
     end
   | _ -> false
+
+let logical_map_make =
+  Path.Pdot (Path.Pident (Ident.create_persistent "Stdlib__Map"), "MakeLogical")
+
+let logical_map_key env ty =
+  match get_desc (Ctype.expand_head env ty) with
+  | Tconstr (Path.Pdot (Path.Papply (make, key), "t"), [_], _) ->
+    (* The type's originating functor matters: an ascribed wrapper can expose
+       its type while accepting an unrelated module argument. *)
+    begin match
+      ( shape_uid env Shape.Sig_component_kind.Module make,
+        shape_uid env Shape.Sig_component_kind.Module logical_map_make )
+    with
+    | Some actual, Some standard when Shape.Uid.equal actual standard ->
+      Some (Path.Pdot (key, "equal"))
+    | _ -> None
+    end
+  | _ -> None
 
 let type_key env ty =
   let rec loop visited ty =

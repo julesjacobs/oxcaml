@@ -1134,7 +1134,7 @@
   "verification/library/vox_egraph_rule_scan.ml": {
     "what": {
       "short": "The search for one rule: every assignment, every id as the root of a match, stopping at the first application that changes the graph.",
-      "long": "Verified. If the search finishes without a change, the store is unchanged and every attempt showed the rule closed at its root and assignment, which adds up to `Vox_egraph_saturation_spec.closed_rule`. Each case, root attempt and enumeration step costs one unit of fuel. For a rule with `n` variables one search tries up to `(count + 1)^n × count` matches."
+      "long": "Verified. If the search finishes without a change, the store is unchanged and every attempt showed the rule closed at its root and assignment, which adds up to `Vox_egraph_saturation_spec.closed_rule`. Each case, root attempt and enumeration step costs one unit of fuel. For a rule with `n` variables one search tries up to `(count + 1)^n \u00d7 count` matches."
     },
     "notes": [
       {
@@ -1322,32 +1322,24 @@
   },
   "verification/library/vox_flat_hashtbl_review.md": {
     "what": {
-      "short": "The flat hash table's ordered review surface: the files to read, the trusted semantics and limits, and the proof boundary and its evidence.",
-      "long": "Lists, in reading order, the interfaces and model files a reviewer must accept (`stdlib/bigint.mli`, `pref.mli`, `ghost_pref.mli`, parts of `vox_sequence.mli`, `vox_table_model.ml`, `vox_table_bits.ml`, `vox_table_storage.mli`, `vox_verified_flat_hashtbl.mli`), then the trusted semantics and the tests. Its baseline line names an earlier PR head; the catalogue page [flat-hash-table](demo:flat-hash-table) is the current summary."
+      "short": "The public map contract, its private ownership proof, trusted primitives and regression checks.",
+      "long": "Read Map.MakeLogical in the standard library, then the public table interface. Storage layout and heap equations are private; the note describes their role in the proof and identifies the trusted primitives."
     },
     "notes": [
       {
         "title": "Reading order",
-        "from": "## Ordered review files",
-        "span": 20,
+        "from": "Read `stdlib/map.mli`",
+        "span": 12,
         "kind": "what",
-        "text": "Each entry says which part of a shared interface the table's contract depends on."
+        "text": "The public contract needs the mathematical map and the table interface. Storage and ownership details are explained separately below."
       }
     ]
   },
   "verification/library/vox_flat_hashtbl_simplification.md": {
     "what": {
-      "short": "A dated working note (25 September 2026) on simplifying the flat hash table's specification and code, with a later amendment.",
-      "long": "Records the move to a finite binding model, the separation of existing-key replacement from `insert_absent_hashed`, and a rejected combined-traversal experiment. Its first section is superseded by the amendment of 26 September: `Map.t` is now abstract, with `empty`, `lookup`, `put`, `erase`, `same` and `count` and their laws. Read `vox_verified_flat_hashtbl.mli` for the current interface."
+      "short": "Notes on the shared logical-map specification and earlier implementation experiments.",
+      "long": "The current public model is Map.MakeLogical(Key). Storage conversion and bridge proofs are private. Earlier combined-probe experiments and measurements remain recorded below."
     },
-    "notes": [
-      {
-        "title": "Superseded section",
-        "from": "Superseded on 26 September 2026",
-        "span": 7,
-        "kind": "what",
-        "text": "The list model moved to `Vox_table_bindings.Make(Key).Assoc`, below the public interface."
-      }
-    ]
+    "notes": []
   }
 }

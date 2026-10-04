@@ -32,7 +32,7 @@
       "short": "Trusted externals that restate Pref's token operations with ghost tokens, so that ownership is erased and only the cell operations remain at run time.",
       "long": [
         "The types are `Pref`'s (`'a t`, `'a token`, `'a heap`, `Heap`); what changes is the mode. `own`, `empty`, `read`, `write`, `split`, `join` and `alloc` take and return their tokens `@ ghost`, and `partition` is a boxed record with two ghost fields where `Pref` uses an unboxed pair. Each is an `external` over the same C primitives in `runtime/pref.c` (`split` has its own bytecode stub, `caml_pref_ghost_split_bytecode`), so every contract here is assumed.",
-        "Code that keeps ownership only in proofs uses this module: the locks and one-shot channels, raw memory and the LZ4 buffers, the e-graph owner, the flat hash table's storage and the union–find forest. `alloc` is declared with `val` in `ghost_pref.mli` and is an `external` here, which the shared trust page lists among the trusted token operations."
+        "Code that keeps ownership only in proofs uses this module: the locks and one-shot channels, raw memory and the LZ4 buffers, the e-graph owner, the flat hash table's storage and the union\u2013find forest. `alloc` is declared with `val` in `ghost_pref.mli` and is an `external` here, which the shared trust page lists among the trusted token operations."
       ]
     },
     "notes": [
@@ -246,7 +246,7 @@
         "from": "let dispatch : (block : M.t) ->",
         "to": "{ answer; worker }",
         "kind": "what",
-        "text": "The local `Protocol` ties each job and reply to this call’s block, index and value. The returned receipt owns the selected byte and states its value. The caller receives it with `C.recv` and joins the worker through `worker`."
+        "text": "The local `Protocol` ties each job and reply to this call\u2019s block, index and value. The returned receipt owns the selected byte and states its value. The caller receives it with `C.recv` and joins the worker through `worker`."
       }
     ]
   },
@@ -290,7 +290,7 @@
       "short": "Borrowed slices and owned arrays modelled by iarrays with int indices: trusted handle primitives and verified swap, split_at, split3, parallel and with_mut.",
       "long": [
         "This is the `int`-indexed counterpart of `Borrow`: a loan's `current` and `final` models are `'a iarray`s and its laws use `Vox_iarray.slice`, `at` and `updated`. The `external`s in `Raw`, `Slice` (`length`, `get`, `set`, `snapshot`) and `Owned_array` (`of_iarray`, `into_iarray`, `get`, `set` and the unboxed `get_int`/`set_int`) are trusted contracts over `runtime/borrow.c`. The facts that link a loan to its frame and owner at `open_`, `restore`, `split`, `recombine`, `finish` and `transfer` are not in these types: the verifier adds them by primitive name in `normal_borrow_transition` ([vox_vc.ml](src:verification/vox_vc.ml)).",
-        "`Slice.swap`, `split_at`, `split3`, `finish`, `parallel` and `Owned_array.with_mut` are verified against those primitives. Only `swap` is `total`: the others create or end loans. `parallel` runs two slice callbacks, on a new domain when `spawn` is true, and returns both callbacks' postconditions on the loans' final values. Users include the iarray variant of [quicksort](demo:quicksort) (`testsuite/tests/vox/quicksort_iarray.ml`) and the [Hindley–Milner](demo:hindley-milner) inference in `hm_routed_infer.ml`, which uses `Owned_array`."
+        "`Slice.swap`, `split_at`, `split3`, `finish`, `parallel` and `Owned_array.with_mut` are verified against those primitives. Only `swap` is `total`: the others create or end loans. `parallel` runs two slice callbacks, on a new domain when `spawn` is true, and returns both callbacks' postconditions on the loans' final values. Users include the iarray variant of [quicksort](demo:quicksort) (`testsuite/tests/vox/quicksort_iarray.ml`) and the [Hindley\u2013Milner](demo:hindley-milner) inference in `hm_routed_infer.ml`, which uses `Owned_array`."
       ]
     },
     "notes": [
@@ -325,7 +325,7 @@
       "short": "Ghost credit tokens with unbounded Bigint balances: a void record with one ghost field, and verified tick, split, merge and Budget.create.",
       "long": [
         "`Make ()` defines `token` as a record whose only field, `balance`, is a ghost nonnegative `Bigint.t`, so a token has void layout and costs nothing at run time. `credits` reads the balance; `tick`, `split`, `merge` and `empty` are defined directly on the record and verified against their contracts. With unbounded balances, `merge` needs no overflow precondition, unlike `Vox_credits`, whose balance is a machine `int`.",
-        "Each application of the generative functor gives a fresh abstract `token` type; `Budget.create` issues positive credit and is withheld from `S`, so code that receives only `S` cannot mint credit. [Online union–find](demo:online-union-find) pays its fees with these tokens."
+        "Each application of the generative functor gives a fresh abstract `token` type; `Budget.create` issues positive credit and is withheld from `S`, so code that receives only `S` cannot mint credit. [Online union\u2013find](demo:online-union-find) pays its fees with these tokens."
       ]
     },
     "notes": [
@@ -340,9 +340,9 @@
   },
   "verification/library/vox_merge_sort.ml": {
     "what": {
-      "short": "Verified merge sort: split, merge and a depth-indexed recursion that spends at most size × depth comparison credits.",
+      "short": "Verified merge sort: split, merge and a depth-indexed recursion that spends at most size \u00d7 depth comparison credits.",
       "long": [
-        "`Make (O) (C) (Compare)` sorts immutable lists. `split` alternates elements into two halves of sizes ⌈n/2⌉ and ⌊n/2⌋ and proves a permutation. `merge` calls `Compare.compare` once for each element it emits while both lists are nonempty and spends at most `length left + length right` credits. `sort_at_depth size depth` requires `size <= power depth` and `size * depth` credits: it splits the token for the left half with `C.split`, recombines with `C.merge`, and pays for the final merge with the remaining `size` credits. `sort` starts it at `Vox_sort_cost.height n`, whose bound makes `budget n` enough.",
+        "`Make (O) (C) (Compare)` sorts immutable lists. `split` alternates elements into two halves of sizes \u2308n/2\u2309 and \u230an/2\u230b and proves a permutation. `merge` calls `Compare.compare` once for each element it emits while both lists are nonempty and spends at most `length left + length right` credits. `sort_at_depth size depth` requires `size <= power depth` and `size * depth` credits: it splits the token for the left half with `C.split`, recombines with `C.merge`, and pays for the final merge with the remaining `size` credits. `sort` starts it at `Vox_sort_cost.height n`, whose bound makes `budget n` enough.",
         "Everything is verified, including termination (`[@@decreases]` on the combined length and on `size`). The lemmas for one step are in [vox_merge_proofs.ml](src:verification/library/vox_merge_proofs.ml), and sortedness and permutation come from `Vox_ordered_sequence`. See [the merge sort demo](demo:merge-sort)."
       ]
     },
@@ -424,7 +424,7 @@
       "short": "The iarray theory behind Vox_iarray: at, updated, slice, swap and to_list with proved laws, For_all, and the sorting and counting theory in Int.",
       "long": [
         "`at`, `updated`, `slice`, `swap` and `to_list` are `let[@def]` definitions over three primitives. The laws (`set_read`, `updated_read`, `slice_read`, `slice_slice`, `swap_read`, the `to_list_*` bridge to `Vox_sequence`) are proved. `For_all (P)` provides `range`, `holds`, `intro`, `get` and slice and update laws. `Int` defines `sorted`, `ordered`, `count`, `bag` and `permutation` on `int iarray`s and proves, among others, `sorted_glue` (recombining partitions around a pivot) and `permutation_swap`; `permutation` is defined through `to_list` and `Vox_int_sequence.bag`.",
-        "Trusted: `get` binds `%array_safe_get` as a total function under an in-bounds refinement; `set` and `sub` are `external`s whose types give only the result length, and the verifier supplies their element-wise meaning by primitive name (`caml_vox_iarray_set`, `caml_vox_iarray_sub` in `vox_vc.ml`); `extensional` is assumed. The theory is used by [sparse arrays](demo:sparse-arrays), [e-graphs](demo:egraphs), [Hindley–Milner](demo:hindley-milner) and `Borrow_iarray`."
+        "Trusted: `get` binds `%array_safe_get` as a total function under an in-bounds refinement; `set` and `sub` are `external`s whose types give only the result length, and the verifier supplies their element-wise meaning by primitive name (`caml_vox_iarray_set`, `caml_vox_iarray_sub` in `vox_vc.ml`); `extensional` is assumed. The theory is used by [sparse arrays](demo:sparse-arrays), [e-graphs](demo:egraphs), [Hindley\u2013Milner](demo:hindley-milner) and `Borrow_iarray`."
       ]
     },
     "notes": [
@@ -720,7 +720,7 @@
         "title": "What a key must provide",
         "from": "module type Key = sig",
         "to": "end",
-        "lines": "3-14",
+        "lines": "3-8",
         "kind": "what",
         "text": "The laws are ordinary total functions, so a client proves them once, in Vox, and passes them with the key module. Hashes may collide and may be any integer; `hash_equal` is the only link between equality and hashing."
       },
@@ -728,7 +728,7 @@
         "title": "Absence from a proof per index",
         "from": "let rec (absent_intro @ total)",
         "span": 19,
-        "lines": "231-249",
+        "lines": "225-243",
         "kind": "what",
         "text": "`absent_intro` concludes `absent slots query` from a ghost function proving, for each index, that the slot there does not hold a key equal to `query`. The search's stop proofs build this function from the probe invariant."
       },
@@ -736,57 +736,17 @@
         "title": "Extensional sameness",
         "from": "let (same_intro @ total)",
         "to": "end else ())",
-        "lines": "369-389",
+        "lines": "363-383",
         "kind": "what",
         "text": "Two distinct slot lists with equal `lookup` at every query are `same`. The premise is a higher-order ghost proof; the update, insertion and migration proofs discharge their map equations through this lemma."
       }
     ]
   },
-  "verification/library/vox_table_bindings.ml": {
-    "what": {
-      "short": "The public finite-map model: association lists with one binding per Key.equal class, and proofs of the seven laws the interface exports for Map.t.",
-      "long": [
-        "`Make (Key).Assoc` defines association lists with `lookup`, `distinct`, `agrees`, `same`, `erase`, `put` and `count`, and proves their laws, including `same_count`: two distinct lists with the same bindings have the same length. The type `t = {entries : 'a Assoc.t | Assoc.distinct entries}` restricts them to distinct lists, and `lookup`, `put`, `erase`, `count` and `empty` lift the operations, with `put` and `erase` proving distinctness is preserved. The exported laws `lookup_empty`, `put_get`, `erase_get`, `count_put`, `count_erase`, `lookup_equal` and `count_nonnegative` are proved here.",
-        "Verified. [The flat hash table](demo:flat-hash-table)'s interface makes `Map.t` abstract and exports only these operations and laws; this file is the model that shows they are consistent. The distinctness invariant is what makes `count` the number of bindings, so that a client can compute `length` after `replace` or `remove`."
-      ]
-    },
-    "notes": [
-      {
-        "title": "Counting is invariant under sameness",
-        "from": "let rec (same_count @ total)",
-        "to": "same_count tail (erase right key))",
-        "lines": "233-250",
-        "kind": "what",
-        "text": "Induction on `left`: erase its first key from both lists, which keeps them distinct and agreeing and shortens each by one. The facade uses this to show that the ghost map's count equals the live slot count, whatever the binding order."
-      },
-      {
-        "title": "The public map type",
-        "from": "type ('a : immutable_data) t = {entries",
-        "to": "entries",
-        "lines": "253",
-        "kind": "what",
-        "text": "A refinement of the list type: the distinctness invariant lives in the type, so every `Map.t` a client can hold satisfies it, and the laws need not assume it."
-      }
-    ]
-  },
   "verification/library/vox_table_bindings_bridge.ml": {
     "what": {
-      "short": "Ghost compaction from the slot list to an association list, with proofs that it preserves lookup, distinctness, agreement, erase and put.",
-      "long": [
-        "`compact` drops the `None` slots, turning the storage's slot list into an association list of `Vox_table_bindings`. `lookup`, `distinct`, `agrees`, `same`, `erase` and `put` are lemmas stating that `compact` commutes with the corresponding slot-map and association-list operations; `empty` shows that an all-empty slot list compacts to `[]`.",
-        "Verified ghost code. In [the flat hash table](demo:flat-hash-table) the facade's `view` type requires `Assoc.same v.map (Bridge.compact v.storage.model.slots)`: this file is how facts proved about slots become facts about the public map."
-      ]
-    },
-    "notes": [
-      {
-        "title": "Compaction preserves lookup",
-        "from": "let[@def] rec (compact @ total)",
-        "to": "match slots with | [] -> () | _ :: tail -> lookup tail key)",
-        "lines": "6-18",
-        "kind": "what",
-        "text": "Physical holes, EMPTY or tombstone, disappear from the public model. The remaining lemmas have the same shape: unfold `compact` and the operation, then recurse on the tail."
-      }
-    ]
+      "short": "Converts table slots to Map.MakeLogical and proves that lookup, updates and extensional equality agree.",
+      "long": "The model folds live slots into a logical map. The distinguishing-key proof helper turns pointwise lookup proofs into whole-map equations. Slot order and holes remain private."
+    }
   },
   "verification/library/vox_table_read_proofs.ml": {
     "what": {
@@ -1165,7 +1125,7 @@
       "short": "The internal table driver: create, lookups, length, remove, clear, and replace, which overwrites an equal key's value or inserts, rebuilding until there is room.",
       "long": [
         "`Make (Key)` re-exports `create`, `find_opt`, `remove` and `clear` from the lower modules and defines `length`, `find` (raises `Not_found` for an absent key), `mem`, `insert_absent_hashed` and `replace`. `replace` searches once with `find_index_hashed`; on a hit it overwrites the value with `Mutation.write_existing`, keeping the stored key, and on a miss it calls `insert_absent_hashed`, which tries `Insert.try_insert_hashed` and, on failure, calls `Resize.rebuild` and retries without searching again. The local `Proof` module holds `lookup_found`, `absent_after_rebuild`, `put_after_rebuild` and `put_equal_key`.",
-        "Verified. Its contracts are stated on the internal slot model (`I.Map.same ... (I.Map.put ...)`, `I.valid`); [`vox_verified_flat_hashtbl.ml`](src:verification/library/vox_verified_flat_hashtbl.ml) bridges them to the public `Map.t`. Only normal return is specified; the retry recursion has no termination proof. This is the top of [the flat hash table](demo:flat-hash-table)'s internal module stack."
+        "Verified. Its contracts are stated on the internal slot model (`I.Map.same ... (I.Map.put ...)`, `I.valid`); [`vox_verified_flat_hashtbl.ml`](src:verification/library/vox_verified_flat_hashtbl.ml) bridges them to the public `Model.t`. Only normal return is specified; the retry recursion has no termination proof. This is the top of [the flat hash table](demo:flat-hash-table)'s internal module stack."
       ]
     },
     "notes": [
@@ -2241,7 +2201,7 @@
         "to": "W.balance s.#raw = Bigint.mul 4Z",
         "lines": "29-38",
         "kind": "what",
-        "text": "The worker's bank holds exactly `4 · B.potential capacity alpha (heap s) paths` credits, and `spent` equals `E.total events`, so ticks are the total weight of the recorded events. The mass condition (sum of ranks at most size minus components) keeps every rank below the capacity. `K.iter capacity alpha 1 1 >= capacity` and `K.below` pin `alpha` to the inverse Ackermann function of the capacity."
+        "text": "The worker's bank holds exactly `4 \u00b7 B.potential capacity alpha (heap s) paths` credits, and `spent` equals `E.total events`, so ticks are the total weight of the recorded events. The mass condition (sum of ranks at most size minus components) keeps every rank below the capacity. `K.iter capacity alpha 1 1 >= capacity` and `K.below` pin `alpha` to the inverse Ackermann function of the capacity."
       },
       {
         "title": "The amortized cost of a find",
@@ -2249,7 +2209,7 @@
         "to": "F.complete refreshed refreshed && R.all_ordered cap after refreshed} @ ghost =",
         "lines": "303-324",
         "kind": "what",
-        "text": "The worker charges `cost depth = 4d + 2`. This lemma shows the charge is at most `4 · A.release` plus `A.find_fee alpha`, and that after compression the potential is lower by exactly `A.release`. So the old bank plus the fee pays the charge and still leaves four times the new potential, which `find` splits off as the new bank."
+        "text": "The worker charges `cost depth = 4d + 2`. This lemma shows the charge is at most `4 \u00b7 A.release` plus `A.find_fee alpha`, and that after compression the potential is lower by exactly `A.release`. So the old bank plus the fee pays the charge and still leaves four times the new potential, which `find` splits off as the new bank."
       },
       {
         "title": "Growing the ghost capacity",
@@ -2260,7 +2220,7 @@
         "to": "let result = #{state; refund = divided.C.right} in",
         "lines": "212-240",
         "kind": "what",
-        "text": "The new capacity is at most twice the old one, so `K.inverse_doubling` bounds the increase of `alpha` by one. `B.reparameterize` shows that the potential grows by `(alpha' − alpha) · mass`; four times that is split off the fee and merged into the bank. The heap, the paths, `spent` and the events are unchanged."
+        "text": "The new capacity is at most twice the old one, so `K.inverse_doubling` bounds the increase of `alpha` by one. `B.reparameterize` shows that the potential grows by `(alpha' \u2212 alpha) \u00b7 mass`; four times that is split off the fee and merged into the bank. The heap, the paths, `spent` and the events are unchanged."
       }
     ]
   },
@@ -2312,8 +2272,8 @@
     "what": {
       "short": "The potential function: summed over all elements, alpha times rank for a root and the level-and-index potential for a nonroot, with its change under compression, linking and growth.",
       "long": [
-        "`value cap alpha h x` is the potential of one node: `alpha · r` for a root of rank r, and for a nonroot `Vox_union_find_potential.node_phi` of its rank and its parent's rank (0 at rank 0). `potential` sums it over the elements of the forest. This is the inverse-Ackermann potential of Tarjan's analysis (as in CLRS §21.4), on the clamped hierarchy of `Vox_ackermann`. In [online union-find](demo:online-union-find) the core's bank holds exactly four credits per unit of it (`Vox_union_find.valid`).",
-        "The lemmas give the change of the potential under each operation: `compression_potential` (full compression of a path lowers it by exactly `Vox_union_find_amortized.release`), `link_potential` (a link raises it by at most `alpha`, and only when two distinct roots of equal rank are linked), `allocate_potential` (a new `Root 0` leaves it unchanged), `nonnegative`, and `reparameterize` (a larger capacity with `alpha` raised from a to b ≤ a + 1 adds `(b − a) · mass`, where mass is the sum of ranks). Verified ghost code; the heap-level lemmas rely on the built-in meaning of `Ghost_pref.Heap`."
+        "`value cap alpha h x` is the potential of one node: `alpha \u00b7 r` for a root of rank r, and for a nonroot `Vox_union_find_potential.node_phi` of its rank and its parent's rank (0 at rank 0). `potential` sums it over the elements of the forest. This is the inverse-Ackermann potential of Tarjan's analysis (as in CLRS \u00a721.4), on the clamped hierarchy of `Vox_ackermann`. In [online union-find](demo:online-union-find) the core's bank holds exactly four credits per unit of it (`Vox_union_find.valid`).",
+        "The lemmas give the change of the potential under each operation: `compression_potential` (full compression of a path lowers it by exactly `Vox_union_find_amortized.release`), `link_potential` (a link raises it by at most `alpha`, and only when two distinct roots of equal rank are linked), `allocate_potential` (a new `Root 0` leaves it unchanged), `nonnegative`, and `reparameterize` (a larger capacity with `alpha` raised from a to b \u2264 a + 1 adds `(b \u2212 a) \u00b7 mass`, where mass is the sum of ranks). Verified ghost code; the heap-level lemmas rely on the built-in meaning of `Ghost_pref.Heap`."
       ]
     },
     "notes": [
@@ -2323,7 +2283,7 @@
         "to": "Bigint.add (value cap alpha h (M.head p)) (potential cap alpha h rest))",
         "lines": "9-19",
         "kind": "what",
-        "text": "A root of rank r holds `alpha · r`; a nonroot holds `node_phi` of its own rank and its parent's current rank, so its potential falls as its parent's rank rises. The sum runs over the heads of the ghost path list, that is, over every element once."
+        "text": "A root of rank r holds `alpha \u00b7 r`; a nonroot holds `node_phi` of its own rank and its parent's current rank, so its potential falls as its parent's rank rises. The sum runs over the heads of the ghost path list, that is, over every element once."
       },
       {
         "title": "Compression releases potential",
@@ -2339,7 +2299,7 @@
         "to": "then alpha else 0Z) else true} @ ghost =",
         "lines": "279-289",
         "kind": "what",
-        "text": "Only the winner's rank can grow, by one, which adds `alpha` to its root potential; the loser's potential drops from `alpha · r` to a nonroot's, and nodes whose parent's rank grew lose potential by `Vox_union_find_potential.compression`. The link fee `4a + 7` covers the 7 charged plus four times this increase."
+        "text": "Only the winner's rank can grow, by one, which adds `alpha` to its root potential; the loser's potential drops from `alpha \u00b7 r` to a nonroot's, and nodes whose parent's rank grew lose potential by `Vox_union_find_potential.compression`. The link fee `4a + 7` covers the 7 charged plus four times this increase."
       }
     ]
   },
@@ -2347,8 +2307,8 @@
     "what": {
       "short": "Per-node inverse-Ackermann potential: level, index and phi of a nonroot from its rank and its parent's rank, and how they change as the parent's rank grows or the capacity grows.",
       "long": [
-        "For a nonroot of rank r ≥ 1 whose parent has rank p, `node_level` is the largest k < alpha with `A_k(r) <= p`, and `node_index` the largest t in [1, r] with `A_level` iterated t times on r at most p, where A is `Vox_ackermann.iter cap`, clamped at the capacity. `node_phi` is `(alpha − level) · r − index`, and 0 at rank 0. `analyze` proves the ranges: 0 ≤ level < alpha, 1 ≤ index ≤ r and 0 ≤ phi ≤ alpha · r.",
-        "`compression` is the main per-node fact: when the parent's rank grows, the level does not fall and phi does not rise, and phi drops by at least one once the parent's rank reaches the next iterate. `repeated_level` specializes it: a node whose level recurs higher up its path loses at least one unit when it is pointed at the root. `level_cap`, `index_cap` and `reparameterize` show that level and index do not depend on the cap while ranks are below it, so a larger cap with `alpha` raised from a to b ≤ a + 1 adds exactly `(b − a) · rank` to phi. Verified ghost arithmetic over `Bigint`; used by `Vox_union_find_bank` and `Vox_union_find_path_cost` in [online union-find](demo:online-union-find)."
+        "For a nonroot of rank r \u2265 1 whose parent has rank p, `node_level` is the largest k < alpha with `A_k(r) <= p`, and `node_index` the largest t in [1, r] with `A_level` iterated t times on r at most p, where A is `Vox_ackermann.iter cap`, clamped at the capacity. `node_phi` is `(alpha \u2212 level) \u00b7 r \u2212 index`, and 0 at rank 0. `analyze` proves the ranges: 0 \u2264 level < alpha, 1 \u2264 index \u2264 r and 0 \u2264 phi \u2264 alpha \u00b7 r.",
+        "`compression` is the main per-node fact: when the parent's rank grows, the level does not fall and phi does not rise, and phi drops by at least one once the parent's rank reaches the next iterate. `repeated_level` specializes it: a node whose level recurs higher up its path loses at least one unit when it is pointed at the root. `level_cap`, `index_cap` and `reparameterize` show that level and index do not depend on the cap while ranks are below it, so a larger cap with `alpha` raised from a to b \u2264 a + 1 adds exactly `(b \u2212 a) \u00b7 rank` to phi. Verified ghost arithmetic over `Bigint`; used by `Vox_union_find_bank` and `Vox_union_find_path_cost` in [online union-find](demo:online-union-find)."
       ]
     },
     "notes": [
@@ -2374,7 +2334,7 @@
         "to": "(node_phi small a rank parent) (Bigint.mul (Bigint.sub b a) rank)} =",
         "lines": "298-304",
         "kind": "what",
-        "text": "With ranks below the smaller cap, moving to a larger cap and to `alpha` b ≤ a + 1 adds exactly `(b − a) · rank`. Summed over the forest this is `Vox_union_find_bank.reparameterize`, which fixes the credits the online layer must deposit when its epoch doubles."
+        "text": "With ranks below the smaller cap, moving to a larger cap and to `alpha` b \u2264 a + 1 adds exactly `(b \u2212 a) \u00b7 rank`. Summed over the forest this is `Vox_union_find_bank.reparameterize`, which fixes the credits the online layer must deposit when its epoch doubles."
       }
     ]
   },
@@ -2401,8 +2361,8 @@
     "what": {
       "short": "The amortized find bound: a find's charge 4d + 2 is at most four times the potential it releases plus find_fee = 4 alpha + 8; also defines the link and union fees.",
       "long": [
-        "`edges` turns a rank-ordered path of the forest into the edge list of `Vox_union_find_path_cost`, dropping nodes of rank 0, and `encode` proves that the path's depth is at most one more than the number of edges. `release` is the potential released by compressing the path. `find_bound` combines these with `Vox_union_find_path_cost.bound` to prove `Vox_union_find_worker.cost (depth p) <= 4 · release + find_fee alpha`. The fees `find_fee` (`4a + 8`), `link_fee` (`4a + 7`) and `union_fee` (`12a + 24`) are defined here and used by the core, the online layer and the fixed-capacity wrapper.",
-        "Verified ghost code, part of the cost proof of [online union-find](demo:online-union-find). The argument gives depth at most `release + alpha + 1`, hence a charge at most `4 · release + 4a + 6`, so the find fee has two credits of slack and the union fee, `2 · find_fee + link_fee + 1`, four."
+        "`edges` turns a rank-ordered path of the forest into the edge list of `Vox_union_find_path_cost`, dropping nodes of rank 0, and `encode` proves that the path's depth is at most one more than the number of edges. `release` is the potential released by compressing the path. `find_bound` combines these with `Vox_union_find_path_cost.bound` to prove `Vox_union_find_worker.cost (depth p) <= 4 \u00b7 release + find_fee alpha`. The fees `find_fee` (`4a + 8`), `link_fee` (`4a + 7`) and `union_fee` (`12a + 24`) are defined here and used by the core, the online layer and the fixed-capacity wrapper.",
+        "Verified ghost code, part of the cost proof of [online union-find](demo:online-union-find). The argument gives depth at most `release + alpha + 1`, hence a charge at most `4 \u00b7 release + 4a + 6`, so the find fee has two credits of slack and the union fee, `2 \u00b7 find_fee + link_fee + 1`, four."
       ]
     },
     "notes": [
@@ -2439,7 +2399,7 @@
     "what": {
       "short": "Mass (sum of ranks) and component count of the forest, and the invariant mass <= size - components that keeps every rank below the capacity.",
       "long": [
-        "`mass h paths` sums the ranks of all elements, roots and nonroots (a nonroot keeps the rank it had when it was linked), and `components` counts the roots. The core invariant `Vox_union_find.valid` requires `mass <= size − components`. `link_sums` shows that linking two distinct roots removes one component and adds one to the mass when their ranks are equal; `compression` shows that compression changes neither, and `allocate_sums` that allocation adds a component. `linked_capacity` concludes that after a link every rank is below the capacity: a rank is at most the mass, and the mass is at most size − 1 once there is a component.",
+        "`mass h paths` sums the ranks of all elements, roots and nonroots (a nonroot keeps the rank it had when it was linked), and `components` counts the roots. The core invariant `Vox_union_find.valid` requires `mass <= size \u2212 components`. `link_sums` shows that linking two distinct roots removes one component and adds one to the mass when their ranks are equal; `compression` shows that compression changes neither, and `allocate_sums` that allocation adds a component. `linked_capacity` concludes that after a link every rank is below the capacity: a rank is at most the mass, and the mass is at most size \u2212 1 once there is a component.",
         "The textbook analysis bounds ranks by log2 n; this proof needs only ranks below the capacity, which the rank-sum bound gives directly. The mass is also the factor in the growth of the potential when the capacity grows (`Vox_union_find_bank.reparameterize`). Verified ghost code in [online union-find](demo:online-union-find)."
       ]
     },
@@ -2450,7 +2410,7 @@
         "to": "then 1Z else 0Z) else true} @ ghost = fun h x y paths -> ghost_ (",
         "lines": "132-144",
         "kind": "what",
-        "text": "Mass grows by one only on a tie between distinct roots, while the component count falls by one on every link of distinct roots. So `mass <= size − components` is preserved."
+        "text": "Mass grows by one only on a tie between distinct roots, while the component count falls by one on every link of distinct roots. So `mass <= size \u2212 components` is preserved."
       },
       {
         "title": "Ranks stay below the capacity",
@@ -2520,7 +2480,7 @@
     "what": {
       "short": "Rank ordering is preserved by linking two roots, under admissibility conditions that include the rank-sum bound.",
       "long": [
-        "`admissible cap h x y paths` gathers what a link needs: a valid, rank-ordered forest within the capacity, two member roots, and `mass <= size − components`. `at` computes each cell of `M.linked`. `ordered` proves that each path of the forest, extended through the new parent edge, is still strictly rank-ordered below `cap` after the link, using `Vox_union_find_mass.linked_capacity` for the rank that grows; `all_ordered` lifts it to the forest. Verified ghost code, used by `Vox_union_find.link` and `Vox_union_find_bank.link_value` in [online union-find](demo:online-union-find)."
+        "`admissible cap h x y paths` gathers what a link needs: a valid, rank-ordered forest within the capacity, two member roots, and `mass <= size \u2212 components`. `at` computes each cell of `M.linked`. `ordered` proves that each path of the forest, extended through the new parent edge, is still strictly rank-ordered below `cap` after the link, using `Vox_union_find_mass.linked_capacity` for the rank that grows; `all_ordered` lifts it to the forest. Verified ghost code, used by `Vox_union_find.link` and `Vox_union_find_bank.link_value` in [online union-find](demo:online-union-find)."
       ]
     },
     "notes": [
@@ -2564,8 +2524,8 @@
     "what": {
       "short": "Online union-find under a growing ghost capacity, with saved credits for the potential increase and a private projection to the pure partition.",
       "long": [
-        "`Vox_union_find_online.Make (C)` implements [vox_union_find_online.mli](src:verification/library/vox_union_find_online.mli) and is the layer beneath `Vox_connectivity` in [online union-find](demo:online-union-find). Its state is the core `Vox_union_find.t`, a ghost credit token `savings` and a ghost `epoch` E. `valid` requires the core's capacity to be `min(E, max_int)`, E < 2 · size once the structure is nonempty, and `savings >= 8 · size − 4 · (E − 1)`. Payments are exact: `create` 1, `make_set` 11, `find` `find_fee s` and `union` `union_fee s`. Every refund from the core goes to savings, so `account` (the core's account plus savings) grows by exactly the fee.",
-        "`make_set` puts 8 of its 11 credits in savings and pays 3 to the core's `make_set`. When the structure is full (size equal to the capacity) it doubles E, takes `4 · E` (old epoch) from savings, which the invariant guarantees, and pays them to `Vox_union_find.reparameterize`, which needs at most four credits per element; the remainder returns to savings. No run-time node moves. `fee_bounds` shows `find_fee s <= 4a + 12` and `union_fee s <= 12a + 36` where a is the inverse Ackermann of any population bound at least the current size: the capacity can be up to twice that bound, and doubling raises `alpha` by at most one.",
+        "`Vox_union_find_online.Make (C)` implements [vox_union_find_online.mli](src:verification/library/vox_union_find_online.mli) and is the layer beneath `Vox_connectivity` in [online union-find](demo:online-union-find). Its state is the core `Vox_union_find.t`, a ghost credit token `savings` and a ghost `epoch` E. `valid` requires the core's capacity to be `min(E, max_int)`, E < 2 \u00b7 size once the structure is nonempty, and `savings >= 8 \u00b7 size \u2212 4 \u00b7 (E \u2212 1)`. Payments are exact: `create` 1, `make_set` 11, `find` `find_fee s` and `union` `union_fee s`. Every refund from the core goes to savings, so `account` (the core's account plus savings) grows by exactly the fee.",
+        "`make_set` puts 8 of its 11 credits in savings and pays 3 to the core's `make_set`. When the structure is full (size equal to the capacity) it doubles E, takes `4 \u00b7 E` (old epoch) from savings, which the invariant guarantees, and pays them to `Vox_union_find.reparameterize`, which needs at most four credits per element; the remainder returns to savings. No run-time node moves. `fee_bounds` shows `find_fee s <= 4a + 12` and `union_fee s <= 12a + 36` where a is the inverse Ackermann of any population bound at least the current size: the capacity can be up to twice that bound, and doubling raises `alpha` by at most one.",
         "The file also defines private forest snapshots and transitions, and `partition` projects their paths to private `Vox_partition.bindings`. `partition_valid`, `partition_size`, `partition_contains` and `partition_root` relate that projection to the online observations. `partition_added`, `partition_found` and `partition_joined` prove singleton insertion, exact model preservation by find, and class merging. `Vox_connectivity` exposes class-list snapshots and relational contracts and retains abstract forest cost observations under `Cost`. `create` checks `max_int >= 1` at run time and raises `Invalid_argument` otherwise, because `max_int` carries no refinement."
       ]
     },
@@ -2576,7 +2536,7 @@
         "to": "(Bigint.mul 4Z (Bigint.sub s.#epoch 1Z)))",
         "lines": "29-34",
         "kind": "what",
-        "text": "At a doubling, size equals E, so savings hold at least `8E − 4(E − 1) = 4E + 4`, more than the `4E` unlocked. After the doubling the epoch is 2E and each later insertion deposits 8 more, which restores the bound for the next doubling."
+        "text": "At a doubling, size equals E, so savings hold at least `8E \u2212 4(E \u2212 1) = 4E + 4`, more than the `4E` unlocked. After the doubling the epoch is 2E and each later insertion deposits 8 more, which restores the bound for the next doubling."
       },
       {
         "title": "Doubling the ghost capacity",
@@ -2759,7 +2719,7 @@
       "short": "Implementation and proofs of the incremental HTTP parser: the executable Driver simulates the public pure model.",
       "long": [
         "The public pure machine is defined in [vox_http_model.ml](src:verification/library/vox_http_model.ml). `Internal` proves its accounting, request soundness, round-trip and chunking laws. Reachability and storage invariants stay inside this implementation.",
-        "`Driver` runs the parser with reversed accumulators. Its simulation proof connects each result to the forward-order pure machine. Public `feed` executes the driver and guarantees the pure machine’s next state and remaining input. Proof calls on the execution path are erased.",
+        "`Driver` runs the parser with reversed accumulators. Its simulation proof connects each result to the forward-order pure machine. Public `feed` executes the driver and guarantees the pure machine\u2019s next state and remaining input. Proof calls on the execution path are erased.",
         "The [HTTP interface](src:verification/library/vox_http.mli) hides `Internal`, `Reverse` and `Driver`; `http_private_rejected.ml` checks that boundary."
       ]
     },
@@ -2884,9 +2844,9 @@
   },
   "verification/library/vox_rsa_number_theory.ml": {
     "what": {
-      "short": "Extended Euclid with Bézout coefficients, and from it prime cancellation, the lcm properties and uniqueness in the Chinese remainder theorem.",
+      "short": "Extended Euclid with B\u00e9zout coefficients, and from it prime cancellation, the lcm properties and uniqueness in the Chinese remainder theorem.",
       "long": [
-        "`extended_gcd` returns a ghost record `bezout = {g; x; y}` with `g = gcd a b = a * x + b * y` and `g` dividing both inputs. `no_divisors_at` and `prime_divisors` turn trial-division primality into the fact that a prime's only positive divisors are 1 and itself; `prime_coprime` gives a Bézout identity `1 = a * x + p * y`; `prime_cancel` is Euclid's lemma (for `a >= 0` with `a mod p <> 0`, if `p` divides `a * b` it divides `b`). `lcm_properties` proves `lcm` is a positive common multiple dividing every common multiple, and `crt_unique` proves that two values in [0, p * q) with the same residues modulo distinct primes are equal.",
+        "`extended_gcd` returns a ghost record `bezout = {g; x; y}` with `g = gcd a b = a * x + b * y` and `g` dividing both inputs. `no_divisors_at` and `prime_divisors` turn trial-division primality into the fact that a prime's only positive divisors are 1 and itself; `prime_coprime` gives a B\u00e9zout identity `1 = a * x + p * y`; `prime_cancel` is Euclid's lemma (for `a >= 0` with `a mod p <> 0`, if `p` divides `a * b` it divides `b`). `lcm_properties` proves `lcm` is a positive common multiple dividing every common multiple, and `crt_unique` proves that two values in [0, p * q) with the same residues modulo distinct primes are equal.",
         "Part of [RSA](demo:rsa); all functions are `@ ghost` lemmas, verified, with no externals or assumptions. `prime_cancel` suppresses the slow-refinement warning; its comment records about 15.6 million solver resource units."
       ]
     },
@@ -2940,7 +2900,7 @@
         "to": "equal_remainders b 1Z p;",
         "lines": "210-226",
         "kind": "what",
-        "text": "For `a >= 0` not divisible by prime `p`: the Bézout coefficient from `prime_coprime` is an inverse, so the multiples of `a` permute the nonzero residues, hence `power a (p - 1) * f` and `f` agree modulo `p` for `f = (p - 1)!`, and `prime_cancel` removes `f`."
+        "text": "For `a >= 0` not divisible by prime `p`: the B\u00e9zout coefficient from `prime_coprime` is an inverse, so the multiples of `a` permute the nonzero residues, hence `power a (p - 1) * f` and `f` agree modulo `p` for `f = (p - 1)!`, and `prime_cancel` removes `f`."
       },
       {
         "title": "The periodic form used by RSA",
@@ -3170,7 +3130,7 @@
         "from": "let[@def] step (core : core @ immutable total)",
         "to": "else feed (advance state b) bs",
         "kind": "what",
-        "text": "`step` rejects values outside 0–255, enforces CRLF and calls `finish_line` at each line end. `advance` charges one budget unit per byte; `feed` stops at a terminal state or returns `Limit Message_bytes` without consuming another byte when the budget is spent. The public parser contract specifies exactly this transition and returned suffix."
+        "text": "`step` rejects values outside 0\u2013255, enforces CRLF and calls `finish_line` at each line end. `advance` charges one budget unit per byte; `feed` stops at a terminal state or returns `Limit Message_bytes` without consuming another byte when the budget is spent. The public parser contract specifies exactly this transition and returned suffix."
       }
     ]
   }

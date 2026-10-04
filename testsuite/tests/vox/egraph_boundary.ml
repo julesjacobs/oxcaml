@@ -21,7 +21,7 @@
  all_modules += " vox_table_occupancy.ml vox_table_vacancy_progress.ml";
  all_modules += " vox_table_vacancy.ml vox_table_insert.ml";
  all_modules += " vox_table_migrate.ml vox_table_resize.ml";
- all_modules += " vox_verified_flat_hashtbl.mli vox_table_bindings.ml";
+ all_modules += " vox_verified_flat_hashtbl.mli";
  all_modules += " vox_table_bindings_bridge.ml";
  all_modules += " vox_table_implementation.ml";
  all_modules += " vox_verified_flat_hashtbl.ml vox_egraph_key.ml";

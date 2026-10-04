@@ -17,7 +17,7 @@
  all_modules += " vox_table_vacancy_progress.ml vox_table_vacancy.ml";
  all_modules += " vox_table_insert.ml vox_table_migrate.ml";
  all_modules += " vox_table_resize.ml vox_table_implementation.ml";
- all_modules += " vox_table_bindings.ml vox_table_bindings_bridge.ml";
+ all_modules += " vox_table_bindings_bridge.ml";
  all_modules += " vox_verified_flat_hashtbl.mli";
  all_modules += " vox_verified_flat_hashtbl.ml";
  set lib = "";
@@ -27,8 +27,7 @@
    lib = "${test_build_directory_prefix}/ocamlc.opt";
    compile_only = "true";
    ocamlc.opt;
-   src = "${lib}/pref.cmi ${lib}/ghost_pref.cmi";
-   src += " ${lib}/vox_verified_flat_hashtbl.cmi";
+   src = "${lib}/vox_verified_flat_hashtbl.cmi";
    dst = "${test_build_directory_prefix}/ocamlc.opt.public/";
    compiler_directory_suffix = ".public";
    all_modules = "flat_hashtbl_public.ml";
@@ -64,7 +63,6 @@
    binary_modules += " ${lib}/vox_table_vacancy ${lib}/vox_table_insert";
    binary_modules += " ${lib}/vox_table_migrate ${lib}/vox_table_resize";
    binary_modules += " ${lib}/vox_table_implementation";
-   binary_modules += " ${lib}/vox_table_bindings";
    binary_modules += " ${lib}/vox_table_bindings_bridge";
    binary_modules += " ${lib}/vox_verified_flat_hashtbl";
    all_modules = "flat_hashtbl_public.ml";
@@ -131,7 +129,6 @@
    binary_modules += " ${lib}/vox_table_vacancy ${lib}/vox_table_insert";
    binary_modules += " ${lib}/vox_table_migrate ${lib}/vox_table_resize";
    binary_modules += " ${lib}/vox_table_implementation";
-   binary_modules += " ${lib}/vox_table_bindings";
    binary_modules += " ${lib}/vox_table_bindings_bridge";
    binary_modules += " ${lib}/vox_verified_flat_hashtbl flat_hashtbl_public";
    run-expect;
@@ -144,8 +141,7 @@
    flags = "-extension refinement_types -O3";
    ocamlopt.opt;
    flags = "-extension refinement_types";
-   src = "${lib}/pref.cmi ${lib}/ghost_pref.cmi";
-   src += " ${lib}/vox_verified_flat_hashtbl.cmi";
+   src = "${lib}/vox_verified_flat_hashtbl.cmi";
    src += " ${lib}/vox_sequence.cmx ${lib}/vox_table_model.cmx";
    src += " ${lib}/vox_table_model_proofs.cmx";
    src += " ${lib}/vox_table_bits.cmx ${lib}/vox_table_probe.cmx";
@@ -166,7 +162,6 @@
    src += " ${lib}/vox_table_vacancy.cmx ${lib}/vox_table_insert.cmx";
    src += " ${lib}/vox_table_migrate.cmx ${lib}/vox_table_resize.cmx";
    src += " ${lib}/vox_table_implementation.cmx";
-   src += " ${lib}/vox_table_bindings.cmx";
    src += " ${lib}/vox_table_bindings_bridge.cmx";
    src += " ${lib}/vox_verified_flat_hashtbl.cmx";
    dst = "${test_build_directory_prefix}/ocamlopt.opt.public/";
@@ -210,7 +205,6 @@
    binary_modules += " ${lib}/vox_table_vacancy ${lib}/vox_table_insert";
    binary_modules += " ${lib}/vox_table_migrate ${lib}/vox_table_resize";
    binary_modules += " ${lib}/vox_table_implementation";
-   binary_modules += " ${lib}/vox_table_bindings";
    binary_modules += " ${lib}/vox_table_bindings_bridge";
    binary_modules += " ${lib}/vox_verified_flat_hashtbl";
    all_modules = "flat_hashtbl_public.ml";
@@ -270,8 +264,8 @@
 *)
 
 (* The flat hash table's boundary. With each compiler, the library is
-   compiled and flat_hashtbl_public.ml is compiled with only the Pref,
-   Ghost_pref and Vox_verified_flat_hashtbl interfaces, linked and run.
+   compiled and flat_hashtbl_public.ml is compiled with only the public
+   Vox_verified_flat_hashtbl interface, linked and run.
    flat_hashtbl_boundary_check.ml checks the client's Lambda (and, natively,
    its Cmm at the default level and at -O3, and the Cmm of the vacancy scan)
    for proof code. The library is compiled natively at -O3, as
@@ -283,9 +277,9 @@
 (* A positive control. *)
 let length_after_replace () =
   let module V = Flat_hashtbl_public.V in
-  let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let u = V.replace r.#table r.#view 1 84 r.#token in
-  V.length r.#table u.#view (borrow_ u.#token);;
+  let r : int V.created = V.create () in
+  let u = V.replace r.#table 1 84 r.#permission in
+  V.length r.#table (borrow_ u);;
 [%%expect{|
 val length_after_replace : unit -> int = <fun>
 |}]
@@ -334,23 +328,22 @@ module V = Flat_hashtbl_public.V
 |}]
 
 (* The map is abstract, and the implementation is hidden. *)
-let f : int V.Map.t = [];;
+let f : int V.Model.t = [];;
 [%%expect{|
-Line 1, characters 22-24:
-1 | let f : int V.Map.t = [];;
-                          ^^
+Line 1, characters 24-26:
+1 | let f : int V.Model.t = [];;
+                            ^^
 Error: The constructor "[]" has type "'a list"
        but an expression was expected of type
-         "int V.Map.t" =
-           "int Vox_verified_flat_hashtbl.Make(Flat_hashtbl_public.Key).Map.t"
+         "int V.Model.t" = "int Map.MakeLogical(Flat_hashtbl_public.Key).t"
 |}]
 
-let f = V.Map.Assoc.lookup;;
+let f = V.Model.Assoc.lookup;;
 [%%expect{|
-Line 1, characters 8-19:
-1 | let f = V.Map.Assoc.lookup;;
-            ^^^^^^^^^^^
-Error: Unbound module "V.Map.Assoc"
+Line 1, characters 8-21:
+1 | let f = V.Model.Assoc.lookup;;
+            ^^^^^^^^^^^^^
+Error: Unbound module "V.Model.Assoc"
 |}]
 
 let f = V.Bridge.compact;;
@@ -377,93 +370,87 @@ Line 1, characters 16-22:
 Error: Unbound module "V.Impl"
 |}]
 
-let f = V.Map.empty_same;;
+let f = V.Model.empty_same;;
 [%%expect{|
-Line 1, characters 8-24:
-1 | let f = V.Map.empty_same;;
-            ^^^^^^^^^^^^^^^^
-Error: Unbound value "V.Map.empty_same"
+Line 1, characters 8-26:
+1 | let f = V.Model.empty_same;;
+            ^^^^^^^^^^^^^^^^^^
+Error: Unbound value "V.Model.empty_same"
 |}]
 
-let f (v : int V.view) = v.storage;;
+let f (v : int V.permission) = v.storage;;
 [%%expect{|
-Line 1, characters 27-34:
-1 | let f (v : int V.view) = v.storage;;
-                               ^^^^^^^
+Line 1, characters 33-40:
+1 | let f (v : int V.permission) = v.storage;;
+                                     ^^^^^^^
 Error: Unbound record field "storage"
 |}]
 
-(* Ownership: a stale view, a lookup without ownership and a reused
-   token. *)
 let f () =
-  let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.#table r.#view 1 84 r.#token in
-  V.find_opt r.#table r.#view 1 (borrow_ changed.#token);;
+  let r : int V.created = V.create () in
+  let changed = V.replace r.#table 1 84 r.#permission in
+  V.find_opt r.#table 1 (borrow_ r.#permission);;
 [%%expect{|
-Line 4, characters 41-55:
-4 |   V.find_opt r.#table r.#view 1 (borrow_ changed.#token);;
-                                             ^^^^^^^^^^^^^^
+Line 4, characters 24-47:
+4 |   V.find_opt r.#table 1 (borrow_ r.#permission);;
+                            ^^^^^^^^^^^^^^^^^^^^^^^
+Error: This value is borrowed here,
+       but it has already been used as unique at:
+Line 3, characters 40-53:
+3 |   let changed = V.replace r.#table 1 84 r.#permission in
+                                            ^^^^^^^^^^^^^
+
+|}]
+
+let f () =
+  let r : int V.created = V.create () in
+  let other : int V.created = V.create () in
+  V.find_opt r.#table 1 (borrow_ other.#permission);;
+[%%expect{|
+Line 4, characters 33-50:
+4 |   V.find_opt r.#table 1 (borrow_ other.#permission);;
+                                     ^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_verified_flat_hashtbl.mli", line 126, characters 37-65:
+File "vox_verified_flat_hashtbl.mli", line 40, characters 30-47:
   The refinement is stated here.
 |}]
 
 let f () =
-  let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let empty = Ghost_pref.empty () in
-  V.find_opt r.#table r.#view 1 (borrow_ empty);;
+  let r : int V.created = V.create () in
+  let changed = V.replace r.#table 1 84 r.#permission in
+  V.replace r.#table 2 90 r.#permission;;
 [%%expect{|
-Line 4, characters 41-46:
-4 |   V.find_opt r.#table r.#view 1 (borrow_ empty);;
-                                             ^^^^^
-Error: Refinement could not be proved (counterexample)
-File "vox_verified_flat_hashtbl.mli", line 126, characters 37-65:
-  The refinement is stated here.
-|}]
-
-let f () =
-  let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.#table r.#view 1 84 r.#token in
-  V.replace r.#table changed.#view 2 90 r.#token;;
-[%%expect{|
-Line 4, characters 40-48:
-4 |   V.replace r.#table changed.#view 2 90 r.#token;;
-                                            ^^^^^^^^
+Line 4, characters 26-39:
+4 |   V.replace r.#table 2 90 r.#permission;;
+                              ^^^^^^^^^^^^^
 Error: This value is used here, but it has already been used as unique at:
-Line 3, characters 48-56:
-3 |   let changed = V.replace r.#table r.#view 1 84 r.#token in
-                                                    ^^^^^^^^
+Line 3, characters 40-53:
+3 |   let changed = V.replace r.#table 1 84 r.#permission in
+                                            ^^^^^^^^^^^^^
 
 |}]
 
-(* A lookup after an update, with its proof: the ghost block shows that key
-   1 is bound to 84. The true claim is accepted. *)
 let f () =
-  let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.#table r.#view 1 84 r.#token in
-  ghost_ (Flat_hashtbl_public.Key.reflexive 1;
-    V.Map.put_get (V.bindings r.#view) 1 84 1);
+  let r : int V.created = V.create () in
+  let changed = V.replace r.#table 1 84 r.#permission in
   let value : {v : int | v = 84} =
-    V.find r.#table changed.#view 1 (borrow_ changed.#token) in value;;
+    V.find r.#table 1 (borrow_ changed) in value;;
 [%%expect{|
 val f : unit -> int = <fun>
 |}]
 
-(* A false claim about a lookup: 84 is stored, 85 is claimed. *)
-let f () =
-  let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.#table r.#view 1 84 r.#token in
-  ghost_ (Flat_hashtbl_public.Key.reflexive 1;
-    V.Map.put_get (V.bindings r.#view) 1 84 1);
+let wrong_lookup () =
+  let r : int V.created = V.create () in
+  let changed = V.replace r.#table 1 84 r.#permission in
   let value : {v : int | v = 85} =
-    V.find r.#table changed.#view 1 (borrow_ changed.#token) in value;;
+    V.find r.#table 1 (borrow_ changed) in value;;
 [%%expect{|
-Line 7, characters 4-60:
-7 |     V.find r.#table changed.#view 1 (borrow_ changed.#token) in value;;
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Line 5, characters 4-39:
+5 |     V.find r.#table 1 (borrow_ changed) in value;;
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-Line 6, characters 25-31:
-6 |   let value : {v : int | v = 85} =
+Line 4, characters 25-31:
+4 |   let value : {v : int | v = 85} =
                              ^^^^^^
   The refinement is stated here.
 |}]

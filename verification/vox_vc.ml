@@ -178,6 +178,13 @@ module Symbolic_keys = Hashtbl.Make (struct
   let hash (path, sort) = Hashtbl.hash (Path.hash path, sort)
 end)
 
+type logical_map =
+  { key_sort : sort;
+    some : Constructor.t;
+    at : Function.t;
+    equal : term -> term -> term option
+  }
+
 type context =
   { poll : unit -> unit;
     encoding : Vox_encoding.context;
@@ -199,8 +206,11 @@ type context =
     iarray_reads : (sort * term * term, term) Hashtbl.t;
     map_class_sorts : (sort, sort) Hashtbl.t;
     pref_heaps : (sort, unit) Hashtbl.t;
+    finite_maps : (sort, logical_map) Hashtbl.t;
     pref_constructors :
-      (Function.t, [`Empty | `Put | `Union | `Restrict | `Exclude]) Hashtbl.t;
+      ( Function.t,
+        [`Empty | `Put | `Remove | `Union | `Restrict | `Exclude] )
+      Hashtbl.t;
     pref_observers :
       (Function.t, (Constructor.t * Constructor.t) option) Hashtbl.t;
     mutable free : value option Path.Map.t;
@@ -317,20 +327,19 @@ let at_mode mode = function
 
 (* Totality is relative to the arguments: a total, stateless [apply f x = f x]
    runs whatever effects [f] has. A call is therefore a function of its
-   arguments only when each argument is itself total and stateless at the
-   call: its type crosses both axes (data without closures), it is a function
-   value seen at such a mode, it is an identifier (or an immutable field of
-   one) whose use-site mode is, or it fills a dependent parameter, whose mode
-   is total and stateless by construction. Other arguments, such as inline
-   closures and applications returning closures or data holding them, make
-   the call opaque.
+   arguments only when each argument is itself total and stateless at the call:
+   its type crosses both axes (data without closures), it is a function value
+   seen at such a mode, it is an identifier (or an immutable field of one) whose
+   use-site mode is, or it fills a dependent parameter, whose mode is total and
+   stateless by construction. Other arguments, such as inline closures and
+   applications returning closures or data holding them, make the call opaque.
 
-   The verifier runs after typing, when every type is known, so crossing
-   ignores [-principal]: under it, [Ctype.cross_left] refuses to cross types
-   that were not principal during inference. *)
+   The verifier runs after typing, when every type is known, so crossing ignores
+   [-principal]: under it, [Ctype.cross_left] refuses to cross types that were
+   not principal during inference. *)
 let rec use_mode (e : expression) =
-  (* An immutable field has its record's mode after the field's modalities,
-     as in [Typecore]; a mutable field may since have been overwritten. *)
+  (* An immutable field has its record's mode after the field's modalities, as
+     in [Typecore]; a mutable field may since have been overwritten. *)
   let field record modalities =
     Option.map (Mode.Modality.Const.apply_left modalities) (use_mode record)
   in
@@ -338,8 +347,7 @@ let rec use_mode (e : expression) =
   | Texp_ident { mode; _ } -> Some mode
   | Texp_field { record; label = { lbl_mut = Immutable; _ } as label; _ } ->
     field record label.lbl_modalities
-  | Texp_unboxed_field { record; label; _ } ->
-    field record label.lbl_modalities
+  | Texp_unboxed_field { record; label; _ } -> field record label.lbl_modalities
   | _ -> None
 
 let logical_argument ~dependent (e : expression) value =
@@ -1449,6 +1457,13 @@ let rec pref_observe ctx budget fn heap key =
   else
     let value =
       match expose_head ctx heap with
+      | App (Ite, [condition; left; right])
+        when Hashtbl.mem ctx.finite_maps (term_sort heap) ->
+        App
+          ( Ite,
+            [ condition;
+              pref_observe ctx (budget - 1) fn left key;
+              pref_observe ctx (budget - 1) fn right key ] )
       | Call (update, [source; changed; value])
         when Hashtbl.find_opt ctx.pref_constructors update = Some `Put ->
         let old = pref_observe ctx (budget - 1) fn source key in
@@ -1464,6 +1479,16 @@ let rec pref_observe ctx budget fn heap key =
           | None -> call
         in
         App (Ite, [both Eq key changed; changed_value; old])
+      | Call (update, [source; changed])
+        when Hashtbl.find_opt ctx.pref_constructors update = Some `Remove ->
+        let old = pref_observe ctx (budget - 1) fn source key in
+        let removed =
+          match Hashtbl.find_opt ctx.pref_observers fn with
+          | Some None -> Boolean false
+          | Some (Some (_, none)) -> Construct (none, [])
+          | None -> call
+        in
+        App (Ite, [both Eq key changed; removed; old])
       | Call (op, [left; right])
         when List.mem
                (Hashtbl.find_opt ctx.pref_constructors op)
@@ -1571,15 +1596,31 @@ let pref_extensionality ctx env heap_type left right =
     in
     match data_constructor data "Some", data_constructor data "None" with
     | Some some, Some none ->
-      let diff =
-        intern_function ctx "Pref.diff" [heap_sort; heap_sort] key_sort
+      let label name =
+        (if Hashtbl.mem ctx.finite_maps heap_sort
+         then "Logical_map."
+         else "Pref.")
+        ^ name
       in
-      let key = Call (diff, [left; right]) in
+      let diff =
+        intern_function ctx (label "diff") [heap_sort; heap_sort] key_sort
+      in
+      let key =
+        match Hashtbl.find_opt ctx.finite_maps heap_sort with
+        | None -> Call (diff, [left; right])
+        | Some map ->
+          let diff =
+            intern_function ctx "Logical_map.difference_key"
+              [heap_sort; heap_sort] map.key_sort
+          in
+          comparison_class ctx ctx.map_class_sorts "Logical_map.key" heap_sort
+            (Call (diff, [left; right]))
+      in
       let at =
-        intern_function ctx "Pref.at" [heap_sort; key_sort] option_sort
+        intern_function ctx (label "at") [heap_sort; key_sort] option_sort
       in
       Hashtbl.replace ctx.pref_observers at (Some (some, none));
-      let mem = intern_function ctx "Pref.mem" [heap_sort; key_sort] Bool in
+      let mem = intern_function ctx (label "mem") [heap_sort; key_sort] Bool in
       Hashtbl.replace ctx.pref_observers mem None;
       let observe fn heap = pref_observe ctx 128 fn heap key in
       let domain heap =
@@ -1594,8 +1635,101 @@ let pref_extensionality ctx env heap_type left right =
     | _ -> None)
   | _ -> None
 
+let rec logical_map_cardinal ctx budget map =
+  let fn = intern_function ctx "Logical_map.cardinal" [term_sort map] Int in
+  let call = Call (fn, [map]) in
+  let value =
+    if budget = 0
+    then call
+    else
+      match expose_head ctx map with
+      | Call (op, [])
+        when Hashtbl.find_opt ctx.pref_constructors op = Some `Empty ->
+        Big_integer "0"
+      | Call (op, source :: key :: _)
+        when List.mem
+               (Hashtbl.find_opt ctx.pref_constructors op)
+               [Some `Put; Some `Remove] ->
+        let info = Hashtbl.find ctx.finite_maps (term_sort map) in
+        let present = Is (info.some, pref_observe ctx 128 info.at source key) in
+        let size = logical_map_cardinal ctx (budget - 1) source in
+        let adding = Hashtbl.find ctx.pref_constructors op = `Put in
+        let changed =
+          App ((if adding then Int_add else Int_sub), [size; Big_integer "1"])
+        in
+        App
+          ( Ite,
+            [ present;
+              (if adding then size else changed);
+              (if adding then changed else size) ] )
+      | App (Ite, [condition; left; right]) ->
+        App
+          ( Ite,
+            [ condition;
+              logical_map_cardinal ctx (budget - 1) left;
+              logical_map_cardinal ctx (budget - 1) right ] )
+      | _ -> call
+  in
+  observe_iarray ctx call value
+
+let logical_map_key ctx map key =
+  comparison_class ctx ctx.map_class_sorts "Logical_map.key" (term_sort map) key
+
 let operation ctx env function_type result_type name args =
   match name, args with
+  | "caml_logical_map_empty", [_] ->
+    Option.bind (sort ctx.encoding env result_type) (fun map_sort ->
+        if not (Hashtbl.mem ctx.finite_maps map_sort)
+        then None
+        else
+          let fn = intern_function ctx "Logical_map.empty" [] map_sort in
+          Hashtbl.replace ctx.pref_constructors fn `Empty;
+          scalar_value (Call (fn, [])))
+  | "caml_logical_map_add", [key; value; map] ->
+    begin match scalar key, scalar value, scalar map with
+    | Some key, Some value, Some map
+      when Hashtbl.mem ctx.finite_maps (term_sort map) ->
+      let terms = [map; logical_map_key ctx map key; value] in
+      let fn =
+        intern_function ctx "Logical_map.add" (List.map term_sort terms)
+          (term_sort map)
+      in
+      Hashtbl.replace ctx.pref_constructors fn `Put;
+      scalar_value (Call (fn, terms))
+    | _ -> None
+    end
+  | "caml_logical_map_remove", [key; map] ->
+    begin match scalar key, scalar map with
+    | Some key, Some map when Hashtbl.mem ctx.finite_maps (term_sort map) ->
+      let terms = [map; logical_map_key ctx map key] in
+      let fn =
+        intern_function ctx "Logical_map.remove" (List.map term_sort terms)
+          (term_sort map)
+      in
+      Hashtbl.replace ctx.pref_constructors fn `Remove;
+      scalar_value (Call (fn, terms))
+    | _ -> None
+    end
+  | (("caml_logical_map_find_opt" | "caml_logical_map_mem") as name), [key; map]
+    ->
+    begin match scalar key, scalar map with
+    | Some key, Some map ->
+      Option.bind
+        (Hashtbl.find_opt ctx.finite_maps (term_sort map))
+        (fun info ->
+          let key = logical_map_key ctx map key in
+          let value = pref_observe ctx 128 info.at map key in
+          scalar_value
+            (if name = "caml_logical_map_mem"
+             then Is (info.some, value)
+             else value))
+    | _ -> None
+    end
+  | "caml_logical_map_cardinal", [map] ->
+    Option.bind (scalar map) (fun map ->
+        if Hashtbl.mem ctx.finite_maps (term_sort map)
+        then scalar_value (logical_map_cardinal ctx 128 map)
+        else None)
   | "caml_pref_heap_disjoint", [left; right] ->
     begin match scalar left, scalar right with
     | Some left, Some right -> scalar_value (pref_disjoint ctx 64 left right)
@@ -2101,6 +2235,66 @@ let apply_function ctx env fn_type result_type prim fn args ~total =
       function_call ctx env fn_type fn args
     | _ -> None)
 
+let rec register_logical_maps ctx env s ty =
+  let ty = Ctype.expand_head env ty in
+  match get_desc ty with
+  | Tarrow (_, arg, result, _) ->
+    register_logical_maps ctx env s arg;
+    register_logical_maps ctx env s result
+  | Tpoly (ty, _) | Trefine { ref_payload = ty; _ } ->
+    register_logical_maps ctx env s ty
+  | Tconstr (_, [payload], _) ->
+    let model =
+      Option.bind (Vox_encoding.logical_map_key env ty) (fun path ->
+          Option.map (fun map_sort -> path, map_sort) (sort ctx.encoding env ty))
+    in
+    begin match model with
+    | Some (path, map_sort) when not (Hashtbl.mem ctx.finite_maps map_sort) ->
+      let eq_type =
+        (Subst.Lazy.force_value_description (Env.find_value path env)).val_type
+      in
+      let eq = lookup ctx s env eq_type path in
+      let option_type = Predef.type_option payload in
+      begin match
+        ( first_argument_type env eq_type,
+          data_of_type ctx env option_type,
+          sort ctx.encoding env option_type )
+      with
+      | Some key_type, Some data, Some option_sort ->
+        begin match
+          ( sort ctx.encoding env key_type,
+            data_constructor data "Some",
+            data_constructor data "None" )
+        with
+        | Some key_sort, Some some, Some none ->
+          let key = fresh_symbol key_sort "map key" in
+          let class_ =
+            comparison_class ctx ctx.map_class_sorts "Logical_map.key" map_sort
+              key
+          in
+          let at =
+            intern_function ctx "Logical_map.at"
+              [map_sort; term_sort class_]
+              option_sort
+          in
+          let equal left right =
+            scalar
+              (apply_function ctx env eq_type Predef.type_bool
+                 (primitive env path) eq
+                 [scalar_value left; scalar_value right]
+                 ~total:true)
+          in
+          Hashtbl.replace ctx.pref_observers at (Some (some, none));
+          Hashtbl.replace ctx.pref_heaps map_sort ();
+          Hashtbl.add ctx.finite_maps map_sort { key_sort; some; at; equal }
+        | _ -> ()
+        end
+      | _ -> ()
+      end
+    | _ -> ()
+    end
+  | _ -> ()
+
 (* OCaml leaves a shift by a count outside [0, 63] unspecified, and compiled
    code really differs: constant folding and the hardware give different
    results, and inlining decides which applies at each call. So every shift that
@@ -2524,6 +2718,7 @@ let rec predicate ctx env s e =
       known ctx env s body
     | Rexp_ghost body -> eval s body
     | Rexp_logical_equal (left_exp, right) ->
+      register_logical_maps ctx env s left_exp.rexp_type;
       let s, right = eval s right in
       let s, left = eval s left_exp in
       if s.dead
@@ -2626,6 +2821,7 @@ and application ctx env s e fn args =
     if s.dead
     then s, None, None
     else
+      let () = register_logical_maps ctx env s fn.rexp_type in
       let result =
         apply_function ctx env fn.rexp_type e.rexp_type prim value args
           ~total:true
@@ -3933,9 +4129,12 @@ and expression_desc ?deferred ctx s e =
         | _ -> s
       in
       let total =
-        (match fn_value with Some (Function { total; _ }) -> total | _ -> false)
+        (match fn_value with
+          | Some (Function { total; _ }) -> total
+          | _ -> false)
         && Lazy.force logical_arguments
       in
+      register_logical_maps ctx e.exp_env s fn.exp_type;
       let value =
         apply_function ctx e.exp_env fn.exp_type e.exp_type prim fn_value args
           ~total
@@ -4746,6 +4945,7 @@ let query ?indicators ctx code =
         (label, Function.arguments fn, Function.result fn)
       = Some fn
     in
+    let logical_keys = Hashtbl.create 8 in
     let seen = Term_table.create 16 and symbols = ref [] in
     let first_pass = ref (Option.is_some indicators) and deferred = ref [] in
     let rec visit term =
@@ -4772,6 +4972,39 @@ let query ?indicators ctx code =
           both Eq (Call (tag, [term])) (Big_integer (string_of_int id))
         in
         add "string literal" axiom;
+        Queue.add (axiom, !guard) pending
+      | Call (fn, [key]) when observation_function "Logical_map.key" fn ->
+        let info =
+          Hashtbl.fold
+            (fun map_sort info found ->
+              if
+                Hashtbl.find_opt ctx.map_class_sorts map_sort
+                = Some (Function.result fn)
+              then Some info
+              else found)
+            ctx.finite_maps None
+        in
+        Option.iter
+          (fun info ->
+            let previous = entries logical_keys fn in
+            Hashtbl.replace logical_keys fn (key :: previous);
+            List.iter
+              (fun other ->
+                let equivalent = both Eq term (Call (fn, [other])) in
+                List.iter
+                  (fun (left, right) ->
+                    Option.iter
+                      (fun equality ->
+                        let axiom = both Eq equality equivalent in
+                        add "logical map key equality" axiom;
+                        Queue.add (axiom, !guard) pending)
+                      (info.equal left right))
+                  [key, other; other, key])
+              (key :: previous))
+          info
+      | Call (fn, [_]) when observation_function "Logical_map.cardinal" fn ->
+        let axiom = App (Int_le, [Big_integer "0"; term]) in
+        add "logical map cardinality" axiom;
         Queue.add (axiom, !guard) pending
       | Call (fn, [pointer]) when observation_function "Pref.location" fn ->
         (* A left inverse enforces injectivity with one equation per pointer. *)
@@ -4828,6 +5061,9 @@ let query ?indicators ctx code =
                   index ) ]
         | Call (fn, [array]) when observation_function "Iarray.length" fn ->
           [(array, fun alias -> iarray_length ctx (term_sort alias) alias)]
+        | Call (fn, [map]) when observation_function "Logical_map.cardinal" fn
+          ->
+          [(map, fun alias -> logical_map_cardinal ctx 128 alias)]
         | _ -> []
       in
       List.iter
@@ -5077,6 +5313,7 @@ let context ~poll ~prove ~verify_introductions =
     iarray_reads = Hashtbl.create 16;
     map_class_sorts = Hashtbl.create 8;
     pref_heaps = Hashtbl.create 8;
+    finite_maps = Hashtbl.create 8;
     pref_constructors = Hashtbl.create 8;
     pref_observers = Hashtbl.create 8;
     free = Path.Map.empty;
@@ -5093,10 +5330,10 @@ let context ~poll ~prove ~verify_introductions =
   }
 
 (* A total, stateless function is a function of its arguments, also in units
-   that are never verified, so a shift declared total must have its count in
-   [0, 63] by its type, as in [Int.Refined]. The check is syntactic, so it
-   needs no solver: some conjunct of the count's refinement bounds it below by
-   a constant at least 0, and another above by a constant at most 63. *)
+   that are never verified, so a shift declared total must have its count in [0,
+   63] by its type, as in [Int.Refined]. The check is syntactic, so it needs no
+   solver: some conjunct of the count's refinement bounds it below by a constant
+   at least 0, and another above by a constant at most 63. *)
 let check_total_shift (vd : value_description) =
   let total =
     match vd.val_modal_info with

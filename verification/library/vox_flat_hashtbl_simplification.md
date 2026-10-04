@@ -1,37 +1,20 @@
 # Flat hash table simplification, 25 September 2026
 
-Status: compiled and locally retained dirty changes above `ec71493f35057e3631604380cec782f2f9132345`.
-Independent boundary acceptance remains with the catalogue coordinator. Nothing
-has been staged, committed, pushed or published in this continuation.
-The source review input is `research/demo-simplification-review-20260925/collections.json`,
-entry `flat-hash-table` (the entry is not in `systems.json`).
+The current public model and earlier implementation experiments are recorded
+below. See `vox_flat_hashtbl_review.md` for the specification and trusted base.
 
-## Public specification
+## Public specification (4 October 2026)
 
-`vox_verified_flat_hashtbl.mli` now defines a complete finite binding model:
-`Map.t = (Key.t * value) list`, distinct modulo `Key.equal`. Lookup, distinctness,
-agreement, extensional equality, erase, put and cardinality have visible checked
-equations. Physical holes and the separate public absence predicate are gone.
-Creation and clearing promise the exact empty binding list. Cardinality, key
-equivalence, arbitrary-query lookup, replacement/removal, capacity and exact
-heap frames remain specified. The physical model remains visible in the
-separately identified trusted storage contracts; this change does not reduce
-storage trust.
+The table now uses `Map.MakeLogical(Key)` from the standard library. The old
+custom association-list model and its seven public law functions are removed.
+The pure snapshot is obtained directly from storage; it no longer carries a
+second map recording the sequence of updates. Private bridge proofs establish
+that the storage operations implement the mathematical map operations.
 
-`vox_table_bindings.ml` implements the equations and derived elimination lemmas.
-`vox_table_bindings_bridge.ml` proves compaction preserves arbitrary-key lookup,
-distinctness, agreement/equality, erase and put. The facade proves that binding
-count equals storage live count. Compaction is ghost-only. The public CMI hides
-these bridges and storage invariants. See `vox_flat_hashtbl_review.md` for the
-ordered transitive semantic review surface and all resource/trust conventions.
-
-Superseded on 26 September 2026: `Map.t` is now abstract, and the interface
-exports `empty`, `lookup`, `put`, `erase`, `same` and `count` with their laws
-instead of the list equations. The list model moved to
-`Vox_table_bindings.Make(Key).Assoc`; the public type carries the
-distinct-list invariant, which proves `count_put`, `count_erase` and
-`same_count`. Without those laws a client could not relate `length` before
-and after an update.
+The public interface now has a table handle and a permission carrying its
+current bindings. Separate views, storage states, versions, locations and heap
+equations are private. Capacity is absent from the public contract. Reads borrow
+the permission; mutations return its replacement.
 
 ## Executable implementation and source readability
 

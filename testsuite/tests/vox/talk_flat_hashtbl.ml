@@ -16,7 +16,7 @@
  prebuilt_modules += " vox_table_vacancy_progress.ml vox_table_vacancy.ml";
  prebuilt_modules += " vox_table_insert.ml vox_table_migrate.ml";
  prebuilt_modules += " vox_table_resize.ml vox_table_implementation.ml";
- prebuilt_modules += " vox_table_bindings.ml vox_table_bindings_bridge.ml";
+ prebuilt_modules += " vox_table_bindings_bridge.ml";
  prebuilt_modules += " vox_verified_flat_hashtbl.mli";
  prebuilt_modules += " vox_verified_flat_hashtbl.ml";
  readonly_files = "talk_flat_hashtbl.ml";
@@ -42,10 +42,8 @@
       the laws as [Key] does and is accepted. A commuted [symmetric] law
       ([Commuted_table]) is also accepted, and a [symmetric] law that states
       one direction only ([One_way_table]) is rejected with a counterexample.
-   3. "Store 84, read 85", told honestly: flat_hashtbl_boundary.ml accepts
-      the true claim 84 only because its ghost block calls [Key.reflexive]
-      and [Map.put_get]; it rejects the false claim 85. Without those law
-      calls even the true claim 84 is rejected. *)
+   3. flat_hashtbl_boundary.ml accepts the true claim 84 and rejects 85
+      using the public operation contracts and automatic logical-map laws. *)
 
 #load "vox_sequence.cmo";;
 #load "vox_table_model.cmo";;
@@ -76,7 +74,6 @@
 #load "vox_table_migrate.cmo";;
 #load "vox_table_resize.cmo";;
 #load "vox_table_implementation.cmo";;
-#load "vox_table_bindings.cmo";;
 #load "vox_table_bindings_bridge.cmo";;
 #load "vox_verified_flat_hashtbl.cmo";;
 
@@ -298,40 +295,18 @@ Line 2, characters 2-46:
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: The value "One_way_key.symmetric" does not satisfy the functor's parameter.
        Refinement could not be proved (counterexample: x = 0, y = 1)
-File "vox_verified_flat_hashtbl.mli", line 21, characters 52-73:
+File "map.mli", line 487, characters 16-37:
   The refinement is stated here.
 |}]
 
-(* 3. Store 84 and claim 84, without the two law calls: rejected. *)
-module Store_84_without_laws = struct
+module Store_84 : sig val f : unit -> int end = struct
   module T = Vox_verified_flat_hashtbl.Make (Int_key)
   let f () =
-    let r : int T.created = T.create (Ghost_pref.empty ()) in
-    let changed = T.replace r.#table r.#view 1 84 r.#token in
+    let r : int T.created = T.create () in
+    let changed = T.replace r.#table 1 84 r.#permission in
     let value : {v : int | v = 84} =
-      T.find r.#table changed.#view 1 (borrow_ changed.#token) in value
+      T.find r.#table 1 (borrow_ changed) in value
 end;;
 [%%expect{|
-Line 7, characters 6-62:
-7 |       T.find r.#table changed.#view 1 (borrow_ changed.#token) in value
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
-Line 6, characters 27-33:
-6 |     let value : {v : int | v = 84} =
-                               ^^^^^^
-  The refinement is stated here.
-|}]
-
-(* With the law calls, as in flat_hashtbl_boundary.ml, 84 is accepted. *)
-module Store_84_with_laws : sig val f : unit -> int end = struct
-  module T = Vox_verified_flat_hashtbl.Make (Int_key)
-  let f () =
-    let r : int T.created = T.create (Ghost_pref.empty ()) in
-    let changed = T.replace r.#table r.#view 1 84 r.#token in
-    ghost_ (Int_key.reflexive 1; T.Map.put_get (T.bindings r.#view) 1 84 1);
-    let value : {v : int | v = 84} =
-      T.find r.#table changed.#view 1 (borrow_ changed.#token) in value
-end;;
-[%%expect{|
-module Store_84_with_laws : sig val f : unit -> int end
+module Store_84 : sig val f : unit -> int end
 |}]

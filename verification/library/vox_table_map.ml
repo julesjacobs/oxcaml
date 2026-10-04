@@ -1,14 +1,8 @@
 module S = Vox_sequence
 
 module type Key = sig
-  type t : logical_data
-  val equal : t -> t -> bool @@ total
+  include Map.EquatableType
   val hash : t -> int @@ total
-  val reflexive : (x : t) -> {u : unit | equal x x} @@ total
-  val symmetric : (x : t) -> (y : t) -> {u : unit | equal x y = equal y x}
-    @@ total
-  val transitive : (x : t) -> (y : t) -> (z : t) ->
-    {u : unit | not (equal x y && equal y z) || equal x z} @@ total
   val hash_equal : (x : t) -> (y : t) ->
     {u : unit | not (equal x y) || hash x = hash y} @@ total
 end

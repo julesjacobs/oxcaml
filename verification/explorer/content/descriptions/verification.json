@@ -506,7 +506,7 @@
   "verification/library/vox_verified_flat_hashtbl.mli": {
     "what": {
       "short": "The public interface of the verified flat hash table: Make (Key) is open addressing with SIMD group probing, specified against an abstract finite map.",
-      "long": "A table is an aliasable handle plus ghost state: a view (a snapshot of one version) and a ghost token owning its heap location. Postconditions describe normal returns; the interface lists the exceptions. See [the demo page](demo:flat-hash-table)."
+      "long": "A table has an aliasable handle and an erased permission carrying its current finite map. Reads borrow that permission; mutations return its replacement. Capacity, storage state and heap equations are private. Contracts describe normal return. See [the demo page](demo:flat-hash-table)."
     }
   },
   "verification/library/vox_verified_flat_hashtbl.ml": {

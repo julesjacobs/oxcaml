@@ -87,6 +87,18 @@ CAMLprim value caml_pref_alloc_step_bytecode(value initial, value token)
 
 CAMLprim value caml_pref_own(void) { return Val_unit; }
 CAMLprim value caml_pref_own_bytecode(value token) { return Val_unit; }
+/* Logical maps have no runtime contents: their results are ghost values.
+   These symbols let code retain the primitive functions as values. */
+CAMLprim value caml_logical_map_empty(value unit) { return Val_unit; }
+CAMLprim value caml_logical_map_find_opt(value key, value map) { return Val_unit; }
+CAMLprim value caml_logical_map_mem(value key, value map) { return Val_unit; }
+CAMLprim value caml_logical_map_add(value key, value data, value map)
+{ return Val_unit; }
+CAMLprim value caml_logical_map_remove(value key, value map) { return Val_unit; }
+CAMLprim value caml_logical_map_cardinal(value map) { return Val_unit; }
+CAMLprim value caml_logical_map_difference(value left, value right)
+{ return Val_unit; }
+
 CAMLprim value caml_pref_heap_empty(value unit) { return Val_unit; }
 CAMLprim value caml_pref_heap_mem(value heap, value cell) { return Val_unit; }
 CAMLprim value caml_pref_heap_at(value heap, value cell) { return Val_unit; }

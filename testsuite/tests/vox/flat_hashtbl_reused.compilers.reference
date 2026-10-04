@@ -1,8 +1,8 @@
-File "flat_hashtbl_reused.ml", line 7, characters 40-48:
-7 |   V.replace r.#table changed.#view 2 90 r.#token
-                                            ^^^^^^^^
+File "flat_hashtbl_reused.ml", line 5, characters 26-39:
+5 |   V.replace r.#table 2 90 r.#permission
+                              ^^^^^^^^^^^^^
 Error: This value is used here, but it has already been used as unique at:
-File "flat_hashtbl_reused.ml", line 6, characters 48-56:
-6 |   let changed = V.replace r.#table r.#view 1 84 r.#token in
-                                                    ^^^^^^^^
+File "flat_hashtbl_reused.ml", line 4, characters 41-54:
+4 |   let _changed = V.replace r.#table 1 84 r.#permission in
+                                             ^^^^^^^^^^^^^
   

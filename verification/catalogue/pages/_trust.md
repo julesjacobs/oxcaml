@@ -28,6 +28,7 @@ The checker gives these operations a fixed meaning instead of deriving it from c
 - `Vox_sequence.length` is the length of a list.
 - The operations of `Set.MakeTotal` and `Map.MakeTotal` are the finite-set and finite-map operations, with elements identified up to the ordering's equivalence.
 - Ghost heaps. `Pref.Heap` is a finite map from locations to values: `empty`, `mem`, `at`, `put`, `union`, `restrict` and `exclude` have their pointwise meaning, locations are distinct, and two heaps that agree everywhere are equal. `verification/library/vox_pref_semantics.ml` checks the pointwise equations. Of the heap laws in `verification/library/pref.mli`, `put_union_law`, `commute_law`, `exclude_put_law` and `exclude_union_law` are proved; `put_law`, `union_law`, `domain_law`, `union_domain_law`, `partition_law` and `split_law` are stated, not proved.
+- `Map.MakeLogical`: erased finite maps modulo the supplied key equality. The checker supplies lookup, membership, update, cardinality and extensional equality; `Proof.difference` assumes a distinguishing key exists for unequal maps. The key equivalence laws and the table-to-map bridge are checked.
 - Borrowed slices. Opening, restoring, splitting, recombining, transferring and finishing a borrow relate the current and final contents of the slices involved; `finish` sets the final contents to the current ones.
 - Distinct string literals are distinct values, and `raise` does not return.
 
@@ -53,7 +54,7 @@ A few standard-library functions are made total by a cast, `external trust_total
 
 - `List` (`stdlib/list.ml`): `concat_map`, `merge`, `stable_sort`, `sort`, `fast_sort`, `sort_uniq`, `to_seq`, and `Refined.hd` and `Refined.tl` (which apply the partial `hd` and `tl` to a list whose refinement says it is not empty). The other `List` functions are checked total.
 - `Iarray` (`stdlib/iarray.ml`): `iter`, `iteri`, `to_list`, `fold_left`, `fold_right`, `exists`, `for_all`, `equal`, `compare`, `find_opt`, `find_index`, `find_map`, `find_mapi`, `sort`, `stable_sort`, `fast_sort`, `to_seq` and `to_seqi`.
-- `Set.MakeTotal` and `Map.MakeTotal` and their `Refined` modules (`stdlib/set.ml`, `stdlib/map.ml`): every function, through `Set.Make` and `Map.Make`. That they implement finite sets and maps also rests on the laws of the ordering (`Set.TotalOrderedType`).
+- `Set.MakeTotal` and `Map.MakeTotal` and their `Refined` modules (`stdlib/set.ml`, `stdlib/camlinternalMap.ml`): every function, through `Set.Make` and `Map.Make`. That they implement finite sets and maps also rests on the laws of the ordering (`Set.TotalOrderedType`).
 
 ## The toolchain
 

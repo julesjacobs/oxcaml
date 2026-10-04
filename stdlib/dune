@@ -152,6 +152,7 @@
   list.mli
   listLabels.ml
   listLabels.mli
+  camlinternalMap.ml
   map.ml
   map.mli
   marshal.ml
@@ -577,6 +578,10 @@
   .stdlib.objs/native/stdlib.cmx
   .stdlib.objs/byte/camlinternalAtomic.cmi
   .stdlib.objs/byte/camlinternalComprehension.cmi
+  .stdlib.objs/byte/camlinternalMap.cmi
+  .stdlib.objs/byte/camlinternalMap.cms
+  .stdlib.objs/byte/camlinternalMap.cmt
+  .stdlib.objs/native/camlinternalMap.cmx
   .stdlib.objs/byte/camlinternalMod.cmi
   .stdlib.objs/byte/camlinternalFormatBasics.cmi
   .stdlib.objs/byte/camlinternalLazy.cmi

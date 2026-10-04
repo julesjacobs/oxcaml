@@ -17,8 +17,6 @@ module Key = struct
 end
 
 module V = Vox_verified_flat_hashtbl.Make (Key)
-module P = Ghost_pref
-module H = P.Heap
 module Standard = Hashtbl.Make (Key)
 
 let work_factor = if Array.length Sys.argv > 3 then int_of_string Sys.argv.(3)
@@ -45,70 +43,50 @@ let report name payload n operation count (bytes, time) =
 let rec fill : ('a : immutable_data).
     (table : 'a V.t) @ immutable -> (values : 'a iarray) @ immutable -> (index
       : int) ->
-    (view : 'a V.view) @ immutable ->
-    (token : {t : 'a V.state P.token | H.at (P.own t)
-      (V.location table) === Some
-      (V.version view)})
-      @ unique read_write ghost ->
-    {r : 'a V.updated | H.at (P.own r.#token) (V.location table) === Some (V.version r.#view)} @
-        unique =
-  fun table values index view token ->
-    if index >= Iarray.length values then #{V.view; token} else begin
-      let changed = V.replace table view (key index) (Iarray.get values index)
-        token in
-      fill table values (index + 1) changed.#view changed.#token
+    (p : {p : 'a V.permission | V.owner p === table}) @ unique read_write ->
+    {q : 'a V.permission | V.owner q === table} @ unique =
+  fun table values index p ->
+    if index >= Iarray.length values then p else begin
+      let changed = V.replace table (key index) (Iarray.get values index)
+        p in
+      fill table values (index + 1) changed
     end
 
 let rec churn : ('a : immutable_data).
     (table : 'a V.t) @ immutable -> (values : 'a iarray) @ immutable -> (index
       : int) -> (offset : int) ->
-    (view : 'a V.view) @ immutable ->
-    (token : {t : 'a V.state P.token | H.at (P.own t)
-      (V.location table) === Some
-      (V.version view)})
-      @ unique read_write ghost ->
-    {r : 'a V.updated | H.at (P.own r.#token) (V.location table) === Some (V.version r.#view)} @
-        unique =
-  fun table values index offset view token ->
-    if index >= Iarray.length values then #{V.view; token} else begin
-      let removed = V.remove table view (key (index + offset)) token in
-      let changed = V.replace table removed.#view
-        (key (index + Iarray.length values - offset))
-        (Iarray.get values index) removed.#token in
-      churn table values (index + 1) offset changed.#view changed.#token
+    (p : {p : 'a V.permission | V.owner p === table}) @ unique read_write ->
+    {q : 'a V.permission | V.owner q === table} @ unique =
+  fun table values index offset p ->
+    if index >= Iarray.length values then p else begin
+      let removed = V.remove table (key (index + offset)) p in
+      let changed =
+        V.replace table (key (index + Iarray.length values - offset))
+          (Iarray.get values index) removed in
+      churn table values (index + 1) offset changed
     end
 
 let rec churn_rounds : ('a : immutable_data).
     (table : 'a V.t) @ immutable -> (values : 'a iarray) @ immutable -> (index
       : int) -> (offset : int) ->
-    (view : 'a V.view) @ immutable ->
-    (token : {t : 'a V.state P.token | H.at (P.own t)
-      (V.location table) === Some
-      (V.version view)})
-      @ unique read_write ghost ->
-    {r : 'a V.updated | H.at (P.own r.#token) (V.location table) === Some (V.version r.#view)} @
-        unique =
-  fun table values index offset view token ->
-    if index = 0 then #{V.view; token} else
-    let changed = churn table values 0 offset view token in
+    (p : {p : 'a V.permission | V.owner p === table}) @ unique read_write ->
+    {q : 'a V.permission | V.owner q === table} @ unique =
+  fun table values index offset p ->
+    if index = 0 then p else
+    let changed = churn table values 0 offset p in
     churn_rounds table values (index - 1) (Iarray.length values - offset)
-      changed.#view changed.#token
+      changed
 
 let rec replace_rounds : ('a : immutable_data).
     (table : 'a V.t) @ immutable -> (values : 'a iarray) @ immutable -> (index
       : int) ->
-    (view : 'a V.view) @ immutable ->
-    (token : {t : 'a V.state P.token | H.at (P.own t)
-      (V.location table) === Some
-      (V.version view)})
-      @ unique read_write ghost ->
-    {r : 'a V.updated | H.at (P.own r.#token) (V.location table) === Some (V.version r.#view)} @
-        unique =
-  fun table values index view token ->
-    if index = 0 then #{V.view; token} else
-    let changed = fill table values 0 view token in
+    (p : {p : 'a V.permission | V.owner p === table}) @ unique read_write ->
+    {q : 'a V.permission | V.owner q === table} @ unique =
+  fun table values index p ->
+    if index = 0 then p else
+    let changed = fill table values 0 p in
     replace_rounds table values (index - 1)
-      changed.#view changed.#token
+      changed
 
 let verified : ('a : immutable_data).
     string -> string -> ('a iarray) @ immutable -> unit = fun name payload
@@ -117,15 +95,15 @@ let verified : ('a : immutable_data).
   let batches = max 1 (100000 * work_factor / n) in
   let timing = stamp () in
   for _batch = 1 to batches do
-    let r : 'a V.created = V.create (P.empty ()) in
-    let _ = fill r.#table values 0 r.#view r.#token in
+    let r : 'a V.created = V.create () in
+    let _ = fill r.#table values 0 r.#permission in
     ignore (Sys.opaque_identity r.#table)
   done;
   report name payload n "build" (batches * n) timing;
-  let r : 'a V.created = V.create (P.empty ()) in
-  let built = fill r.#table values 0 r.#view r.#token in
+  let r : 'a V.created = V.create () in
+  let built = fill r.#table values 0 r.#permission in
   for i = 0 to n - 1 do
-    assert (V.find r.#table built.#view (key i) (borrow_ built.#token) =
+    assert (V.find r.#table (key i) (borrow_ built) =
       (Iarray.get values i))
   done;
   let hits, misses = queries n in
@@ -135,7 +113,7 @@ let verified : ('a : immutable_data).
   for _round = 1 to rounds do
     for i = 0 to n - 1 do
       ignore (Sys.opaque_identity
-        (V.find r.#table built.#view (Iarray.get hits i) (borrow_ built.#token)))
+        (V.find r.#table (Iarray.get hits i) (borrow_ built)))
     done
   done;
   report name payload n "hit" iterations timing;
@@ -143,7 +121,7 @@ let verified : ('a : immutable_data).
   let found = ref 0 in
   for _round = 1 to rounds do
     for i = 0 to n - 1 do
-      if V.mem r.#table built.#view (Iarray.get misses i) (borrow_ built.#token)
+      if V.mem r.#table (Iarray.get misses i) (borrow_ built)
         then
         incr found
     done
@@ -151,18 +129,18 @@ let verified : ('a : immutable_data).
   report name payload n "miss" iterations timing;
   assert (!found = 0);
   let timing = stamp () in
-  let built = replace_rounds r.#table values batches built.#view built.#token in
+  let built = replace_rounds r.#table values batches built in
   report name payload n "replace" (batches * n) timing;
   let timing = stamp () in
   let changed = churn_rounds r.#table values batches 0
-    built.#view built.#token in
+    built in
   report name payload n "churn" (2 * n * batches) timing;
   let offset = if batches mod 2 = 0 then 0 else n in
   for i = 0 to n - 1 do
-    assert (not (V.mem r.#table changed.#view (key (i + n - offset))
-      (borrow_ changed.#token)));
-    assert (V.find r.#table changed.#view (key (i + offset)) (borrow_
-      changed.#token) = (Iarray.get values i))
+    assert (not (V.mem r.#table (key (i + n - offset))
+      (borrow_ changed)));
+    assert (V.find r.#table (key (i + offset)) (borrow_
+      changed) = (Iarray.get values i))
   done
 
 let standard payload values =

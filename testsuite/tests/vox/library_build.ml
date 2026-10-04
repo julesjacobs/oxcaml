@@ -78,7 +78,7 @@
  readonly_files += " vox_table_occupancy.ml vox_table_vacancy_progress.ml";
  readonly_files += " vox_table_vacancy.ml vox_table_insert.ml";
  readonly_files += " vox_table_migrate.ml vox_table_resize.ml";
- readonly_files += " vox_table_implementation.ml vox_table_bindings.ml";
+ readonly_files += " vox_table_implementation.ml";
  readonly_files += " vox_table_bindings_bridge.ml";
  readonly_files += " vox_verified_flat_hashtbl.mli";
  readonly_files += " vox_verified_flat_hashtbl.ml vox_traversal.mli";
@@ -176,7 +176,7 @@
    all_modules += " vox_table_vacancy_progress.ml vox_table_vacancy.ml";
    all_modules += " vox_table_insert.ml vox_table_migrate.ml";
    all_modules += " vox_table_resize.ml vox_table_implementation.ml";
-   all_modules += " vox_table_bindings.ml vox_table_bindings_bridge.ml";
+   all_modules += " vox_table_bindings_bridge.ml";
    all_modules += " vox_verified_flat_hashtbl.mli";
    all_modules += " vox_verified_flat_hashtbl.ml";
    ocamlc.opt;
@@ -304,7 +304,7 @@
    all_modules += " vox_table_vacancy_progress.ml vox_table_vacancy.ml";
    all_modules += " vox_table_insert.ml vox_table_migrate.ml";
    all_modules += " vox_table_resize.ml vox_table_implementation.ml";
-   all_modules += " vox_table_bindings.ml vox_table_bindings_bridge.ml";
+   all_modules += " vox_table_bindings_bridge.ml";
    all_modules += " vox_verified_flat_hashtbl.mli";
    all_modules += " vox_verified_flat_hashtbl.ml";
    ocamlopt.opt;

@@ -175,8 +175,9 @@ rejections, and integer and ranked-record clients.
 
 ## Flat hash table
 
-`Vox_verified_flat_hashtbl.Make` exposes an abstract finite map with its laws, abstract snapshots
-and normal-return ownership contracts. Start with the
+`Vox_verified_flat_hashtbl.Make` uses `Map.MakeLogical(Key)` to specify its
+bindings. An erased permission carries the current map and controls access;
+reads borrow it, and mutations return its replacement. Start with the
 [ordered review surface](vox_flat_hashtbl_review.md); the public-only client
 check is `testsuite/tests/vox/flat_hashtbl_boundary.ml`.
 
