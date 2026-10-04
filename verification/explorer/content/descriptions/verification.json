@@ -527,12 +527,15 @@
   },
   "verification/library/vox_union_find_online.mli": {
     "what": {
-      "short": "Online union-find over a growing set of elements, with snapshots of the partition as ghost observations."
+      "short": "Online union-find over a growing set of elements, with private forest snapshots, partition projection laws, and exact cost accounting."
     }
   },
   "verification/library/vox_connectivity.mli": {
     "what": {
-      "short": "The public connectivity interface over online union-find: a growing partition with membership and roots, its proof representation hidden."
+      "short": "Imperative union-find whose contracts establish the pure snapshot relations empty, added, same and joined.",
+      "long": [
+        "Partition exposes concrete class-list snapshots and relational transitions. model maps an owned state to a snapshot. find returns the representative and preserves all pure observations. Cost separately specifies exact events, credits and inverse-Ackermann fee bounds. Forest paths and rank-based representative choice remain private."
+      ]
     }
   },
   "verification/library/vox_sat.mli": {

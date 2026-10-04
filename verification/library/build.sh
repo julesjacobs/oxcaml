@@ -17,7 +17,11 @@ modules=(vox_sequence vox_http_spec vox_http vox_int_sequence vox_iarray vox_str
          vox_union_find_mass vox_union_find_link vox_union_find_worker
          vox_union_find_amortized vox_union_find_bank vox_union_find_spec
          vox_union_find_events vox_union_find vox_union_find_complexity
-         vox_union_find_simple vox_union_find_online vox_connectivity
+         vox_union_find_simple vox_partition
+         vox_partition_classes vox_partition_classes_proof
+         vox_partition_classes_bridge vox_partition_transport_proof
+         vox_partition_classes_group
+         vox_union_find_partition_proof vox_union_find_online vox_connectivity
          vox_union_find_online_cost
          raw_memory
          vox_lz4_spec_storage vox_lz4_spec_parse vox_lz4_spec_decode

@@ -2,101 +2,117 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- prebuilt_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_big_credits.mli vox_big_credits.ml vox_ackermann.ml vox_union_find_potential.ml vox_union_find_levels.ml vox_union_find_path_cost.ml vox_union_find_model.ml vox_union_find_forest.ml vox_union_find_rank.ml vox_union_find_mass.ml vox_union_find_link.ml vox_union_find_worker.ml vox_union_find_amortized.ml vox_union_find_bank.ml vox_union_find_spec.ml vox_union_find_events.mli vox_union_find_events.ml vox_union_find.mli vox_union_find.ml vox_union_find_online.mli vox_union_find_online.ml vox_connectivity.mli vox_connectivity.ml vox_union_find_online_cost.ml";
+ prebuilt_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_big_credits.mli vox_big_credits.ml vox_ackermann.ml vox_union_find_potential.ml vox_union_find_levels.ml vox_union_find_path_cost.ml vox_union_find_model.ml vox_union_find_forest.ml vox_union_find_rank.ml vox_union_find_mass.ml vox_union_find_link.ml vox_union_find_worker.ml vox_union_find_amortized.ml vox_union_find_bank.ml vox_union_find_spec.ml vox_union_find_events.mli vox_union_find_events.ml vox_union_find.mli vox_union_find.ml vox_partition.ml vox_partition_classes.ml vox_partition_classes_proof.ml vox_partition_classes_bridge.ml vox_partition_transport_proof.ml vox_partition_classes_group.ml vox_union_find_partition_proof.ml vox_union_find_online.mli vox_union_find_online.ml vox_connectivity.mli vox_connectivity.ml vox_union_find_online_cost.ml";
  { bytecode; }
 *)
 
 module C = Vox_big_credits.Make ()
 module U = Vox_connectivity.Make (C)
+module P = Vox_connectivity.Partition
+module Laws = Vox_partition_classes_proof
+module Cost = U.Cost
 module K = Vox_ackermann
 module Q = Vox_union_find_online_cost
 module E = Vox_union_find_events
 
+let (snapshot_representative @ total)
+    (p : U.elem P.t) (x : U.elem) :
+    {u : unit | if P.contains p x then
+      P.connected p x (P.representative p x) else true} @ ghost = ghost_ (
+  Laws.representative_law p x;
+  P.connected_def p x (P.representative p x); ())
+
 let (charged_work @ total)
     (state : U.t @ local immutable total ghost forkable unyielding) :
-    {u : unit | Vox_union_find_events.total (U.events state) <= U.account state} @ ghost =
-  ghost_ (U.event_cost state; U.account_bounds state; ())
+    {u : unit | Vox_union_find_events.total (Cost.events state) <= Cost.account state} @ ghost =
+  ghost_ (Cost.event_cost state; Cost.account_bounds state; ())
 
 type funded = #{ state : U.t; wallet : C.token @@ ghost total }
 type result = #{ value : U.elem @@ aliased; owned : funded }
 let[@def] budget (s : funded @ local immutable total ghost forkable unyielding) =
-  ghost_ (Bigint.add (U.account s.#state) (C.credits s.#wallet))
+  ghost_ (Bigint.add (Cost.account s.#state) (C.credits s.#wallet))
 let[@def] available (s : funded @ local immutable total ghost forkable unyielding) =
   ghost_ (C.credits s.#wallet)
 
 let (fee_bounds @ total) :
     (state : U.t) @ local immutable total ghost forkable unyielding ->
-    {u : unit | if U.size state <= 8Z then
-      U.find_fee state <= 44Z && U.union_fee state <= 132Z else true} @ ghost =
+    {u : unit | if P.size (U.model state) <= 8Z then
+      Cost.find_fee state <= 44Z && Cost.union_fee state <= 132Z else true} @ ghost =
     fun state -> ghost_ (
   let population = 8Z in
   let alpha = K.inverse population in
-  U.fee_bounds (borrow_ state) population alpha;
+  Cost.fee_bounds (borrow_ state) population alpha;
   ())
 
 let create : (fee : {b : C.token | C.credits b >= 1Z}) @ unique total ghost ->
-    {s : funded | let fee = fee in U.size s.#state = 0Z && budget s = C.credits fee &&
-      available s = Bigint.sub (C.credits fee) 1Z && U.ticks s.#state = 1Z} @ unique =
+    {s : funded | let fee = fee in P.size (U.model s.#state) = 0Z && budget s = C.credits fee &&
+      available s = Bigint.sub (C.credits fee) 1Z && Cost.ticks s.#state = 1Z} @ unique =
     fun fee ->
   let fee = fee in
   let split = C.split 1Z fee in
   let state = U.create split.C.left in
-  ghost_ (U.event_cost (borrow_ state);
+  ghost_ (Laws.empty_size (U.model (borrow_ state));
+    Cost.event_cost (borrow_ state);
     E.total_def [E.Initialize]; E.total_def []; E.weight_def E.Initialize);
   let owned = #{state; wallet = split.C.right} in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
   owned
 
 let allocate :
-    (owned : {s : funded | U.size s.#state < Bigint.of_int max_int && available s >= 11Z})
+    (owned : {s : funded | P.size (U.model s.#state) < Bigint.of_int max_int && available s >= 11Z})
       @ unique read_write total ->
-    {r : result | let owned = owned in U.size r.#owned.#state = Bigint.add (U.size owned.#state) 1Z && U.contains (U.snapshot r.#owned.#state) r.#value &&
-      U.added (U.snapshot owned.#state) (U.snapshot r.#owned.#state) r.#value &&
+    {r : result | let owned = owned in P.size (U.model r.#owned.#state) = Bigint.add (P.size (U.model owned.#state)) 1Z && P.contains (U.model r.#owned.#state) r.#value &&
+      not (P.contains (U.model owned.#state) r.#value) &&
+      P.added (U.model owned.#state) (U.model r.#owned.#state) r.#value &&
       budget r.#owned = budget owned &&
       available r.#owned >= Bigint.sub (available owned) 11Z &&
-      U.ticks r.#owned.#state = Bigint.add (U.ticks owned.#state) 3Z} @ unique =
+      Cost.ticks r.#owned.#state = Bigint.add (Cost.ticks owned.#state) 3Z} @ unique =
     fun owned ->
   let owned = owned in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned);
-    U.event_cost (borrow_ owned.#state));
-  let history = ghost_ (U.events (borrow_ owned.#state)) in
+    Cost.event_cost (borrow_ owned.#state));
+  let history = ghost_ (Cost.events (borrow_ owned.#state)) in
   let amount = ghost_ (11Z) in
   let wallet = owned.#wallet in let state = owned.#state in
   let split = C.split amount wallet in
+  let before = ghost_ (U.model (borrow_ state)) in
   let r = U.make_set state split.C.left in
   let #{U.value; state} = r in
-  ghost_ (U.event_cost (borrow_ state);
+  ghost_ (Laws.added_law before (U.model (borrow_ state)) value value;
+    Cost.event_cost (borrow_ state);
     E.total_def (E.Allocate :: history); E.weight_def E.Allocate);
   let owned = #{state; wallet = split.C.right} in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
   let r = #{value; owned} in r
 
 let join : (x : U.elem) @ immutable -> (y : U.elem) @ immutable ->
-    (owned : {s : funded | U.size s.#state <= 8Z && U.contains (U.snapshot s.#state) x && U.contains (U.snapshot s.#state) y && available s >= 132Z})
+    (owned : {s : funded | P.size (U.model s.#state) <= 8Z && P.contains (U.model s.#state) x && P.contains (U.model s.#state) y && available s >= 132Z})
       @ unique read_write total ->
-    {r : result | let owned = owned in U.size r.#owned.#state = U.size owned.#state &&
-      U.joined (U.snapshot owned.#state) (U.snapshot r.#owned.#state) x y r.#value &&
+    {r : result | let owned = owned in P.size (U.model r.#owned.#state) = P.size (U.model owned.#state) &&
+      P.joined (U.model owned.#state) (U.model r.#owned.#state) x y r.#value &&
       budget r.#owned = budget owned &&
       available r.#owned >= Bigint.sub (available owned) 132Z &&
-      (let p = U.snapshot owned.#state in
-        U.ticks r.#owned.#state = Bigint.add (U.ticks owned.#state)
+      (let p = Cost.snapshot owned.#state in
+        Cost.ticks r.#owned.#state = Bigint.add (Cost.ticks owned.#state)
           (Bigint.add 12Z (Bigint.mul 4Z
-            (Bigint.add (U.depth p x) (U.depth (U.compressed p x) y)))))} @ unique =
+            (Bigint.add (Cost.depth p x) (Cost.depth (Cost.compressed p x) y)))))} @ unique =
     fun x y owned ->
   let owned = owned in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned);
-    U.observations (borrow_ owned.#state); fee_bounds (borrow_ owned.#state);
-    U.event_cost (borrow_ owned.#state));
-  let history = ghost_ (U.events (borrow_ owned.#state)) in
-  let p = ghost_ (U.snapshot (borrow_ owned.#state)) in
-  let amount = ghost_ (U.union_fee (borrow_ owned.#state)) in
+    Cost.observations (borrow_ owned.#state); fee_bounds (borrow_ owned.#state);
+    Cost.event_cost (borrow_ owned.#state));
+  let history = ghost_ (Cost.events (borrow_ owned.#state)) in
+  let p = ghost_ (Cost.snapshot (borrow_ owned.#state)) in
+  let amount = ghost_ (Cost.union_fee (borrow_ owned.#state)) in
   let wallet = owned.#wallet in let state = owned.#state in
   let split = C.split amount wallet in
+  let before = ghost_ (U.model (borrow_ state)) in
   let r = U.union x y state split.C.left in
   let #{U.value; state} = r in
-  ghost_ (U.event_cost (borrow_ state);
-    let first = E.Find (U.depth p x) in
-    let second = E.Find (U.depth (U.compressed p x) y) in
+  ghost_ (Laws.joined_law before (U.model (borrow_ state)) x y value x;
+    Cost.event_cost (borrow_ state);
+    let first = E.Find (Cost.depth p x) in
+    let second = E.Find (Cost.depth (Cost.compressed p x) y) in
     E.total_def (E.Union :: E.Link :: second :: first :: history);
     E.total_def (E.Link :: second :: first :: history);
     E.total_def (second :: first :: history);
@@ -108,29 +124,31 @@ let join : (x : U.elem) @ immutable -> (y : U.elem) @ immutable ->
   let r = #{value; owned} in r
 
 let find : (x : U.elem) @ immutable ->
-    (owned : {s : funded | U.size s.#state <= 8Z && U.contains (U.snapshot s.#state) x && available s >= 44Z})
+    (owned : {s : funded | P.size (U.model s.#state) <= 8Z && P.contains (U.model s.#state) x && available s >= 44Z})
       @ unique read_write total ->
-    {r : result | let owned = owned in U.size r.#owned.#state = U.size owned.#state && r.#value === U.root (U.snapshot owned.#state) x &&
-      U.found (U.snapshot owned.#state) (U.snapshot r.#owned.#state) x &&
+    {r : result | let owned = owned in P.size (U.model r.#owned.#state) = P.size (U.model owned.#state) && r.#value === P.representative (U.model owned.#state) x &&
+      P.same (U.model owned.#state) (U.model r.#owned.#state) &&
       budget r.#owned = budget owned &&
       available r.#owned >= Bigint.sub (available owned) 44Z &&
-      U.ticks r.#owned.#state = Bigint.add (U.ticks owned.#state)
-        (Bigint.add 2Z (Bigint.mul 4Z (U.depth (U.snapshot owned.#state) x)))}
+      Cost.ticks r.#owned.#state = Bigint.add (Cost.ticks owned.#state)
+        (Bigint.add 2Z (Bigint.mul 4Z (Cost.depth (Cost.snapshot owned.#state) x)))}
       @ unique =
     fun x owned ->
   let owned = owned in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned);
-    U.observations (borrow_ owned.#state); fee_bounds (borrow_ owned.#state);
-    U.event_cost (borrow_ owned.#state));
-  let history = ghost_ (U.events (borrow_ owned.#state)) in
-  let p = ghost_ (U.snapshot (borrow_ owned.#state)) in
-  let amount = ghost_ (U.find_fee (borrow_ owned.#state)) in
+    Cost.observations (borrow_ owned.#state); fee_bounds (borrow_ owned.#state);
+    Cost.event_cost (borrow_ owned.#state));
+  let history = ghost_ (Cost.events (borrow_ owned.#state)) in
+  let p = ghost_ (Cost.snapshot (borrow_ owned.#state)) in
+  let amount = ghost_ (Cost.find_fee (borrow_ owned.#state)) in
   let wallet = owned.#wallet in let state = owned.#state in
   let split = C.split amount wallet in
+  let before = ghost_ (U.model (borrow_ state)) in
   let r = U.find x state split.C.left in
   let #{U.value; state} = r in
-  ghost_ (U.event_cost (borrow_ state);
-    E.total_def (E.Find (U.depth p x) :: history); E.weight_def (E.Find (U.depth p x)));
+  ghost_ (Laws.same_law before (U.model (borrow_ state)) x;
+    Cost.event_cost (borrow_ state);
+    E.total_def (E.Find (Cost.depth p x) :: history); E.weight_def (E.Find (Cost.depth p x)));
   let owned = #{state; wallet = split.C.right} in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
   let r = #{value; owned} in r
@@ -139,8 +157,8 @@ let initially_empty (x : U.elem @ immutable) =
   let amount = ghost_ 1Z in
   let fee = C.Budget.create amount in
   let state = U.create fee in
-  ghost_ (U.empty_law (borrow_ state) x);
-  let proof : {u : unit | not (U.contains (U.snapshot state) x)} = () in
+  ghost_ (Laws.empty_law (U.model (borrow_ state)) x);
+  let proof : {u : unit | not (P.contains (U.model state) x)} = () in
   let _ = proof in ()
 
 let run () =
@@ -148,183 +166,230 @@ let run () =
   let initial = ghost_ 1000Z in
   let wallet = C.Budget.create initial in
   let owned = create wallet in
-  let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let before = ghost_ (U.model (borrow_ owned.#state)) in
   let r = allocate owned in
   let #{value = x0; owned} = r in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
-  let account1 = ghost_ (U.account (borrow_ owned.#state)) in
-  let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let account1 = ghost_ (Cost.account (borrow_ owned.#state)) in
   ghost_ (
-    U.added_law before after x0 x0;
+    Laws.added_law before (U.model (borrow_ owned.#state)) x0 x0;
     ());
-  let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let before = ghost_ (U.model (borrow_ owned.#state)) in
   let r = allocate owned in
   let #{value = x1; owned} = r in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
-  let account2 = ghost_ (U.account (borrow_ owned.#state)) in
-  let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let account2 = ghost_ (Cost.account (borrow_ owned.#state)) in
   ghost_ (
-    U.added_law before after x1 x0;
+    Laws.added_law before (U.model (borrow_ owned.#state)) x1 x1;
+    Laws.added_law before (U.model (borrow_ owned.#state)) x1 x0;
     ());
-  let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let before = ghost_ (U.model (borrow_ owned.#state)) in
   let r = allocate owned in
   let #{value = x2; owned} = r in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
-  let account3 = ghost_ (U.account (borrow_ owned.#state)) in
-  let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let account3 = ghost_ (Cost.account (borrow_ owned.#state)) in
   ghost_ (
-    U.added_law before after x2 x0;
-    U.added_law before after x2 x1;
+    Laws.added_law before (U.model (borrow_ owned.#state)) x2 x2;
+    Laws.added_law before (U.model (borrow_ owned.#state)) x2 x0;
+    Laws.added_law before (U.model (borrow_ owned.#state)) x2 x1;
     ());
-  let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let before = ghost_ (U.model (borrow_ owned.#state)) in
   let r = allocate owned in
   let #{value = x3; owned} = r in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
-  let account4 = ghost_ (U.account (borrow_ owned.#state)) in
-  let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let account4 = ghost_ (Cost.account (borrow_ owned.#state)) in
   ghost_ (
-    U.added_law before after x3 x0;
-    U.added_law before after x3 x1;
-    U.added_law before after x3 x2;
+    Laws.added_law before (U.model (borrow_ owned.#state)) x3 x3;
+    Laws.added_law before (U.model (borrow_ owned.#state)) x3 x0;
+    Laws.added_law before (U.model (borrow_ owned.#state)) x3 x1;
+    Laws.added_law before (U.model (borrow_ owned.#state)) x3 x2;
     ());
-  let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let before = ghost_ (U.model (borrow_ owned.#state)) in
   let r = allocate owned in
   let #{value = x4; owned} = r in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
-  let account5 = ghost_ (U.account (borrow_ owned.#state)) in
-  let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let account5 = ghost_ (Cost.account (borrow_ owned.#state)) in
   ghost_ (
-    U.added_law before after x4 x0;
-    U.added_law before after x4 x1;
-    U.added_law before after x4 x2;
-    U.added_law before after x4 x3;
+    Laws.added_law before (U.model (borrow_ owned.#state)) x4 x4;
+    Laws.added_law before (U.model (borrow_ owned.#state)) x4 x0;
+    Laws.added_law before (U.model (borrow_ owned.#state)) x4 x1;
+    Laws.added_law before (U.model (borrow_ owned.#state)) x4 x2;
+    Laws.added_law before (U.model (borrow_ owned.#state)) x4 x3;
     ());
-  let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
-  let work6 = ghost_ (Bigint.add (U.depth before x0)
-    (U.depth (U.compressed before x0) x1)) in
-  ghost_ (U.depth_law before x0; U.depth_law (U.compressed before x0) x1);
+  let before = ghost_ (U.model (borrow_ owned.#state)) in
+  let cost_before = ghost_ (Cost.snapshot (borrow_ owned.#state)) in
+  let work6 = ghost_ (Bigint.add (Cost.depth cost_before x0)
+    (Cost.depth (Cost.compressed cost_before x0) x1)) in
+  ghost_ (Cost.depth_law cost_before x0; Cost.depth_law (Cost.compressed cost_before x0) x1);
   let r = join x0 x1 owned in
   let #{value = merged; owned} = r in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
-  let account6 = ghost_ (U.account (borrow_ owned.#state)) in
-  let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let account6 = ghost_ (Cost.account (borrow_ owned.#state)) in
   ghost_ (
-    U.joined_law before after x0 x1 merged x0;
-    U.joined_law before after x0 x1 merged x1;
-    U.joined_law before after x0 x1 merged x2;
-    U.joined_law before after x0 x1 merged x3;
-    U.joined_law before after x0 x1 merged x4;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x0 x1 merged x0;
+    Laws.joined_connected before (U.model (borrow_ owned.#state)) x0 x1 merged x0 x3;
+    Laws.joined_connected before (U.model (borrow_ owned.#state)) x0 x1 merged x0 x4;
+    P.connected_def before x0 x0;
+    P.connected_def before x0 x1;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x0 x1 merged x1;
+    P.connected_def before x1 x0;
+    P.connected_def before x1 x1;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x0 x1 merged x2;
+    P.connected_def before x2 x0;
+    P.connected_def before x2 x1;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x0 x1 merged x3;
+    P.connected_def before x3 x0;
+    P.connected_def before x3 x1;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x0 x1 merged x4;
+    P.connected_def before x0 merged;
+    P.connected_def before x1 merged;
+    Laws.representative_law before merged;
+    Laws.representative_law before x4;
+    P.connected_def before x4 x0;
+    P.connected_def before x4 x1;
     ());
-  let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
-  let work7 = ghost_ (Bigint.add (U.depth before x2)
-    (U.depth (U.compressed before x2) x3)) in
-  ghost_ (U.depth_law before x2; U.depth_law (U.compressed before x2) x3);
+  let before = ghost_ (U.model (borrow_ owned.#state)) in
+  let cost_before = ghost_ (Cost.snapshot (borrow_ owned.#state)) in
+  let work7 = ghost_ (Bigint.add (Cost.depth cost_before x2)
+    (Cost.depth (Cost.compressed cost_before x2) x3)) in
+  ghost_ (Cost.depth_law cost_before x2; Cost.depth_law (Cost.compressed cost_before x2) x3);
   let r = join x2 x3 owned in
   let #{value = merged; owned} = r in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
-  let account7 = ghost_ (U.account (borrow_ owned.#state)) in
-  let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let account7 = ghost_ (Cost.account (borrow_ owned.#state)) in
   ghost_ (
-    U.joined_law before after x2 x3 merged x0;
-    U.joined_law before after x2 x3 merged x1;
-    U.joined_law before after x2 x3 merged x2;
-    U.joined_law before after x2 x3 merged x3;
-    U.joined_law before after x2 x3 merged x4;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x2 x3 merged x0;
+    Laws.joined_connected before (U.model (borrow_ owned.#state)) x2 x3 merged x0 x3;
+    Laws.joined_connected before (U.model (borrow_ owned.#state)) x2 x3 merged x0 x4;
+    P.connected_def before x0 x2;
+    P.connected_def before x0 x3;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x2 x3 merged x1;
+    P.connected_def before x1 x2;
+    P.connected_def before x1 x3;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x2 x3 merged x2;
+    P.connected_def before x2 x2;
+    P.connected_def before x2 x3;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x2 x3 merged x3;
+    P.connected_def before x3 x2;
+    P.connected_def before x3 x3;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x2 x3 merged x4;
+    P.connected_def before x2 merged;
+    P.connected_def before x3 merged;
+    Laws.representative_law before merged;
+    Laws.representative_law before x4;
+    P.connected_def before x4 x2;
+    P.connected_def before x4 x3;
     ());
-  let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
-  let work8 = ghost_ (Bigint.add (U.depth before x1)
-    (U.depth (U.compressed before x1) x2)) in
-  ghost_ (U.depth_law before x1; U.depth_law (U.compressed before x1) x2);
+  let before = ghost_ (U.model (borrow_ owned.#state)) in
+  let cost_before = ghost_ (Cost.snapshot (borrow_ owned.#state)) in
+  let work8 = ghost_ (Bigint.add (Cost.depth cost_before x1)
+    (Cost.depth (Cost.compressed cost_before x1) x2)) in
+  ghost_ (Cost.depth_law cost_before x1; Cost.depth_law (Cost.compressed cost_before x1) x2);
   let r = join x1 x2 owned in
   let #{value = merged; owned} = r in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
-  let account8 = ghost_ (U.account (borrow_ owned.#state)) in
-  let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let account8 = ghost_ (Cost.account (borrow_ owned.#state)) in
   ghost_ (
-    U.joined_law before after x1 x2 merged x0;
-    U.joined_law before after x1 x2 merged x3;
-    U.joined_law before after x1 x2 merged x4;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x1 x2 merged x0;
+    Laws.joined_connected before (U.model (borrow_ owned.#state)) x1 x2 merged x0 x3;
+    Laws.joined_connected before (U.model (borrow_ owned.#state)) x1 x2 merged x0 x4;
+    P.connected_def before x0 x1;
+    P.connected_def before x0 x2;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x1 x2 merged x3;
+    P.connected_def before x3 x1;
+    P.connected_def before x3 x2;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x1 x2 merged x4;
+    P.connected_def before x1 merged;
+    P.connected_def before x2 merged;
+    Laws.representative_law before merged;
+    Laws.representative_law before x4;
+    P.connected_def before x4 x1;
+    P.connected_def before x4 x2;
     ());
-  let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
-  let work9 = ghost_ (Bigint.add (U.depth before x0)
-    (U.depth (U.compressed before x0) x3)) in
-  ghost_ (U.depth_law before x0; U.depth_law (U.compressed before x0) x3);
+  let before = ghost_ (U.model (borrow_ owned.#state)) in
+  let cost_before = ghost_ (Cost.snapshot (borrow_ owned.#state)) in
+  let work9 = ghost_ (Bigint.add (Cost.depth cost_before x0)
+    (Cost.depth (Cost.compressed cost_before x0) x3)) in
+  ghost_ (Cost.depth_law cost_before x0; Cost.depth_law (Cost.compressed cost_before x0) x3);
   let r = join x0 x3 owned in
   let #{value = merged; owned} = r in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
-  let account9 = ghost_ (U.account (borrow_ owned.#state)) in
-  let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let account9 = ghost_ (Cost.account (borrow_ owned.#state)) in
   ghost_ (
-    U.joined_law before after x0 x3 merged x0;
-    U.joined_law before after x0 x3 merged x3;
-    U.joined_law before after x0 x3 merged x4;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x0 x3 merged x0;
+    Laws.joined_connected before (U.model (borrow_ owned.#state)) x0 x3 merged x0 x3;
+    Laws.joined_connected before (U.model (borrow_ owned.#state)) x0 x3 merged x0 x4;
+    P.connected_def before x0 x0;
+    P.connected_def before x0 x3;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x0 x3 merged x3;
+    P.connected_def before x3 x0;
+    P.connected_def before x3 x3;
+    Laws.joined_law before (U.model (borrow_ owned.#state)) x0 x3 merged x4;
+    P.connected_def before x0 merged;
+    P.connected_def before x3 merged;
+    Laws.representative_law before merged;
+    Laws.representative_law before x4;
+    P.connected_def before x4 x0;
+    P.connected_def before x4 x3;
     ());
-  ghost_ (U.connected_def (U.snapshot (borrow_ owned.#state)) x0 x3;
-    U.connected_def (U.snapshot (borrow_ owned.#state)) x0 x4);
-  let proof : {u : unit | U.connected (U.snapshot owned.#state) x0 x3 &&
-    not (U.connected (U.snapshot owned.#state) x0 x4)} = () in
+  let proof : {u : unit | P.same before (U.model owned.#state)} = () in
   let _ = proof in
-  let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
-  let work10 = ghost_ (U.depth before x0) in
-  ghost_ (U.depth_law before x0);
+  ghost_ (P.connected_def (U.model (borrow_ owned.#state)) x0 x3;
+    P.connected_def (U.model (borrow_ owned.#state)) x0 x4);
+  let proof : {u : unit | P.connected (U.model owned.#state) x0 x3 &&
+    not (P.connected (U.model owned.#state) x0 x4)} = () in
+  let _ = proof in
+  let cost_before = ghost_ (Cost.snapshot (borrow_ owned.#state)) in
+  let work10 = ghost_ (Cost.depth cost_before x0) in
+  ghost_ (Cost.depth_law cost_before x0);
+  let before = ghost_ (U.model (borrow_ owned.#state)) in
   let r = find x0 owned in
   let #{value = root0; owned} = r in
+  ghost_ (Laws.same_law before (U.model (borrow_ owned.#state)) x0;
+    Laws.same_law before (U.model (borrow_ owned.#state)) x3;
+    Laws.same_law before (U.model (borrow_ owned.#state)) x4);
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
-  let account10 = ghost_ (U.account (borrow_ owned.#state)) in
-  let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
-  ghost_ (
-    U.found_law before after x0 x0;
-    U.found_law before after x0 x3;
-    U.found_law before after x0 x4;
-    ());
-  let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
-  let work11 = ghost_ (U.depth before x3) in
-  ghost_ (U.depth_law before x3);
+  let account10 = ghost_ (Cost.account (borrow_ owned.#state)) in
+  let cost_before = ghost_ (Cost.snapshot (borrow_ owned.#state)) in
+  let work11 = ghost_ (Cost.depth cost_before x3) in
+  ghost_ (Cost.depth_law cost_before x3);
+  let before = ghost_ (U.model (borrow_ owned.#state)) in
   let r = find x3 owned in
   let #{value = root3; owned} = r in
+  ghost_ (Laws.same_law before (U.model (borrow_ owned.#state)) x0;
+    Laws.same_law before (U.model (borrow_ owned.#state)) x3;
+    Laws.same_law before (U.model (borrow_ owned.#state)) x4;
+    Laws.same_law before (U.model (borrow_ owned.#state)) root0);
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
-  let account11 = ghost_ (U.account (borrow_ owned.#state)) in
-  let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
-  ghost_ (
-    U.found_law before after x3 x0;
-    U.found_law before after x3 x3;
-    U.found_law before after x3 x4;
-    ());
-  (* A returned representative is a member and its own root, so a find of it
-     follows no links. *)
-  ghost_ (U.root_law (borrow_ owned.#state) x0;
-    U.root_law (borrow_ owned.#state) root0);
-  let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
-  let ticks11 = ghost_ (U.ticks (borrow_ owned.#state)) in
+  let account11 = ghost_ (Cost.account (borrow_ owned.#state)) in
+  ghost_ (Laws.representative_law (U.model (borrow_ owned.#state)) x0;
+    Laws.representative_law (U.model (borrow_ owned.#state)) root0;
+    Cost.root_depth (borrow_ owned.#state) root0);
+  let ticks11 = ghost_ (Cost.ticks (borrow_ owned.#state)) in
+  let before = ghost_ (U.model (borrow_ owned.#state)) in
   let r = find root0 owned in
   let #{value = again; owned} = r in
-  let account12 = ghost_ (U.account (borrow_ owned.#state)) in
-  let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
-  ghost_ (
-    U.found_law before after root0 x0;
-    U.found_law before after root0 x3;
-    U.found_law before after root0 x4;
-    ());
+  ghost_ (Laws.same_law before (U.model (borrow_ owned.#state)) x0;
+    Laws.same_law before (U.model (borrow_ owned.#state)) x3;
+    Laws.same_law before (U.model (borrow_ owned.#state)) x4);
+  let account12 = ghost_ (Cost.account (borrow_ owned.#state)) in
   let proof : {u : unit | again === root0 &&
-    U.ticks owned.#state = Bigint.add ticks11 2Z} = () in
+    Cost.ticks owned.#state = Bigint.add ticks11 2Z} = () in
   let _ = proof in
-  (* The whole run: one creation, five allocations, four unions (each two
-     finds, a link and its own step) and three finds cost 70 ticks plus four
-     per parent link followed. *)
   let work = ghost_ (Bigint.add (Bigint.add (Bigint.add work6 work7)
     (Bigint.add work8 work9)) (Bigint.add work10 work11)) in
   let proof : {u : unit |
-    U.ticks owned.#state = Bigint.add 70Z (Bigint.mul 4Z work) &&
+    Cost.ticks owned.#state = Bigint.add 70Z (Bigint.mul 4Z work) &&
     work >= 0Z} = () in
   let _ = proof in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned);
-    C.nonnegative (borrow_ owned.#wallet); U.account_bounds (borrow_ owned.#state);
-    U.connected_def (U.snapshot (borrow_ owned.#state)) x0 x3;
-    U.connected_def (U.snapshot (borrow_ owned.#state)) x0 x4);
+    C.nonnegative (borrow_ owned.#wallet); Cost.account_bounds (borrow_ owned.#state);
+    P.connected_def (U.model (borrow_ owned.#state)) x0 x3;
+    P.connected_def (U.model (borrow_ owned.#state)) x0 x4);
   let proof : {u : unit | root0 === root3 &&
-    U.connected (U.snapshot owned.#state) x0 x3 &&
-    not (U.connected (U.snapshot owned.#state) x0 x4) &&
-    U.ticks owned.#state <= initial} = () in
+    P.connected (U.model owned.#state) x0 x3 &&
+    not (P.connected (U.model owned.#state) x0 x4) &&
+    Cost.ticks owned.#state <= initial} = () in
   let _ = proof in
   ghost_ (
     let trace12 : Q.step list = [] in
@@ -418,7 +483,7 @@ let run () =
     Q.same_def Q.Union Q.Union;
     let u = () in
     let _checked = (u : {u : unit | Q.trace 8Z 1Z trace0}) in
-    Q.sequence 8Z trace0 (U.ticks (borrow_ owned.#state));
+    Q.sequence 8Z trace0 (Cost.ticks (borrow_ owned.#state));
     let u = () in
     let _proof = (u : {u : unit |
       Bigint.add 70Z (Bigint.mul 4Z work) <= Q.budget 8Z 5Z 3Z 4Z}) in ());

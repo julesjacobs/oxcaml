@@ -488,11 +488,108 @@ module Make (C : Vox_big_credits.S) = struct
     U.union_semantics x y q (borrow_ state.#core);
     ())
 
+  module Partition = Vox_partition
+  module Partition_proof = Vox_union_find_partition_proof
+
+  let[@def] partition (p : snapshot @ immutable) = ghost_ (
+    Partition_proof.project p.paths)
+
+  let (partition_valid @ total) :
+      (state : t) @ local immutable total ghost forkable unyielding ->
+      {u : unit | if valid state then
+        Partition.valid (partition (snapshot state)) else true} @ ghost =
+    fun state -> ghost_ (
+      snapshot_valid state;
+      let p = snapshot state in
+      sound_def p; partition_def p;
+      Partition_proof.valid p.memory p.paths)
+
+  let (partition_size @ total) :
+      (state : t) @ local immutable total ghost forkable unyielding ->
+      {u : unit | Partition.size (partition (snapshot state)) = size state}
+      @ ghost = fun state -> ghost_ (
+    snapshot_def state; partition_def (snapshot state); size_def state;
+    Partition_proof.size (contents state))
+
+  let (partition_contains @ total) : (p : snapshot) @ immutable ->
+      (x : elem) @ immutable ->
+      {u : unit | Partition.contains (partition p) x = contains p x}
+      @ ghost = fun p x -> ghost_ (
+    partition_def p; contains_def p x;
+    Partition_proof.contains p.paths x)
+
+  let (partition_root @ total) : (p : snapshot) @ immutable ->
+      (x : elem) @ immutable ->
+      {u : unit | Partition.representative (partition p) x === root p x}
+      @ ghost = fun p x -> ghost_ (
+    partition_def p; root_def p x;
+    Partition_proof.root p.paths x)
+
+  let (partition_added @ total) : (before : snapshot) @ immutable ->
+      (after : snapshot) @ immutable -> (x : elem) @ immutable ->
+      {u : unit | if added before after x then
+        not (Partition.contains (partition before) x) &&
+        partition after === Partition.add_singleton (partition before) x
+        else true} @ ghost = fun before after x -> ghost_ (
+    added_law before after x x;
+    partition_contains before x;
+    added_def before after x;
+    partition_def before; partition_def after;
+    Partition_proof.project_def (M.Stop x :: before.paths);
+    M.head_def (M.Stop x); M.root_def (M.Stop x);
+    Partition.add_singleton_def (partition before) x)
+
+  let (partition_found @ total) : (before : snapshot) @ immutable ->
+      (after : snapshot) @ immutable -> (x : elem) @ immutable ->
+      {u : unit | if found before after x then
+        partition after === partition before else true} @ ghost =
+    fun before after x -> ghost_ (
+      found_def before after x; sound_def before;
+      contains_def before x;
+      F.lookup_valid before.memory x before.paths;
+      partition_def before; partition_def after;
+      Partition_proof.refresh before.memory
+        (F.lookup x before.paths) before.paths)
+
+  let (partition_joined @ total) : (before : snapshot) @ immutable ->
+      (after : snapshot) @ immutable -> (x : elem) @ immutable ->
+      (y : elem) @ immutable -> (r : elem) @ immutable ->
+      {u : unit | if joined before after x y r then
+        (r === Partition.representative (partition before) x ||
+          r === Partition.representative (partition before) y) &&
+        partition after === Partition.merge_classes (partition before) x y r
+        else true} @ ghost = fun before after x y r -> ghost_ (
+    joined_law before after x y r x;
+    partition_root before x; partition_root before y;
+    joined_def before after x y r; sound_def before;
+    contains_def before x; contains_def before y;
+    let h = before.memory in let paths = before.paths in
+    let px = F.lookup x paths in
+    F.lookup_valid h x paths;
+    R.lookup_ordered before.capacity h paths x;
+    R.bounds before.capacity h px;
+    M.terminal h px; M.is_root_def h (M.root px);
+    R.weight_def h (M.root px); M.rank_def h (M.root px);
+    F.representative_def x paths;
+    S.find_paths_def paths x; S.find_heap_def h paths x;
+    let first = S.find_paths paths x in
+    let middle = S.find_heap h paths x in
+    let py = F.lookup y first in
+    M.compressed_rank h px (M.root px);
+    M.compressed_rank middle py (M.root px);
+    S.find_heap_def middle first y;
+    partition_def before; partition_def after;
+    Partition_proof.union h paths x y)
+
   let create_connectivity : (fee : {b : C.token | C.credits b = 1Z}) @ unique
     total ghost ->
       {s : t | valid s && size s = 0Z && account s = 1Z &&
+        partition (snapshot s) === [] &&
         events s === [E.Initialize]} @ unique = fun fee ->
     let result = create fee in
+    ghost_ (snapshot_def (borrow_ result);
+      partition_def (snapshot (borrow_ result));
+      Partition_proof.project_def []; ());
     result
 
   let make_set_connectivity :

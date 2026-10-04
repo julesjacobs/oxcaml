@@ -185,9 +185,48 @@ module Make (C : Vox_big_credits.S) : sig
             S.union_root (heap state) (contents state) x y else representative q state)
         else true} @ ghost @@ total
 
+  val partition : snapshot @ immutable ->
+    elem Vox_partition.bindings @ immutable ghost @@ total
+  val partition_valid :
+    (state : t) @ local immutable total ghost forkable unyielding ->
+    {u : unit | if valid state then
+      Vox_partition.valid (partition (snapshot state)) else true}
+    @ ghost @@ total
+  val partition_size :
+    (state : t) @ local immutable total ghost forkable unyielding ->
+    {u : unit | Vox_partition.size (partition (snapshot state)) = size state}
+    @ ghost @@ total
+  val partition_contains : (p : snapshot) @ immutable ->
+    (x : elem) @ immutable ->
+    {u : unit | Vox_partition.contains (partition p) x = contains p x}
+    @ ghost @@ total
+  val partition_root : (p : snapshot) @ immutable ->
+    (x : elem) @ immutable ->
+    {u : unit | Vox_partition.representative (partition p) x === root p x}
+    @ ghost @@ total
+  val partition_added : (before : snapshot) @ immutable ->
+    (after : snapshot) @ immutable -> (x : elem) @ immutable ->
+    {u : unit | if added before after x then
+      not (Vox_partition.contains (partition before) x) &&
+      partition after === Vox_partition.add_singleton (partition before) x
+      else true} @ ghost @@ total
+  val partition_found : (before : snapshot) @ immutable ->
+    (after : snapshot) @ immutable -> (x : elem) @ immutable ->
+    {u : unit | if found before after x then
+      partition after === partition before else true} @ ghost @@ total
+  val partition_joined : (before : snapshot) @ immutable ->
+    (after : snapshot) @ immutable -> (x : elem) @ immutable ->
+    (y : elem) @ immutable -> (r : elem) @ immutable ->
+    {u : unit | if joined before after x y r then
+      (r === Vox_partition.representative (partition before) x ||
+        r === Vox_partition.representative (partition before) y) &&
+      partition after === Vox_partition.merge_classes (partition before) x y r
+      else true} @ ghost @@ total
+
   val create_connectivity : (fee : {b : C.token | C.credits b = 1Z}) @ unique
     total ghost ->
       {s : t | valid s && size s = 0Z && account s = 1Z &&
+        partition (snapshot s) === [] &&
         events s === [E.Initialize]} @ unique
 
   val make_set_connectivity :

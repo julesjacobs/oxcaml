@@ -5,7 +5,7 @@
     "flat table": "All claims read from verification/library/vox_table_*.ml at HEAD of worktrees/explorer-20260928; runtime/pref.c (caml_vox_table_* stubs, match16 wrappers, caml_vox_table_exchange) and backend/cmm_builtins.ml (native lowering of caml_vox_table_match16*). Context: verification/catalogue/pages/flat-hash-table.md, verification/library/vox_flat_hashtbl_review.md and vox_flat_hashtbl_simplification.md, tours/flat-hash-table.json, research/mastery-20260927/demos-data-structures.md (code wins where they differ).",
     "LZ4 specification and general proofs": "Read at HEAD of worktree explorer-20260928: all 25 files described here; vox_lz4_review_boundary.md and vox_lz4_general_roundtrip.md (reading order and trusted base); verification/catalogue/pages/lz4.md; verification/library/build.sh (module list); call sites found by grep in verification/library and testsuite/tests/vox (vox_lz4_streaming.ml, vox_lz4_streaming_codec.ml, vox_lz4_string_codec.ml, vox_lz4_decode_bytes_roundtrip.ml, vox_lz4_checked_api.ml, lz4_fast_reference.ml, lz4_model.ml, lz4_overlap.ml, lz4_general_encode.ml); mastery report demos-algorithms.md section 3.12.",
     "LZ4 implementation": "Code at HEAD of worktrees/explorer-20260928 (verification/library/vox_lz4*.ml, runtime/pref.c caml_raw_memory_copy_string); module-use claims from grep over verification/library and testsuite/tests/vox; verification/catalogue/pages/lz4.md; vox_lz4_review_boundary.md; vox_lz4_general_roundtrip.md; mastery demos-algorithms.md section 3.12.",
-    "union-find": "Read at HEAD of the explorer worktree: every vox_union_find*.ml/.mli file listed, vox_connectivity.ml, vox_big_credits.ml/.mli, vox_ackermann.ml (names only), ghost_pref.ml, pref.mli; module references by grep over verification/library and testsuite/tests/vox. Context: verification/catalogue/pages/online-union-find.md, _trust.md, verification/library/README.md (Union-find time credits), research/mastery-20260927/time-credits.md and demos-data-structures.md. Where these disagree with the code, the code was followed.",
+    "union-find": "Read at HEAD of the explorer worktree: every vox_union_find*.ml/.mli file listed, vox_connectivity.ml, vox_big_credits.ml/.mli, vox_ackermann.ml (names only), ghost_pref.ml, pref.mli; module references by grep over verification/library and testsuite/tests/vox. Context: verification/catalogue/pages/online-union-find.md, _trust.md, verification/library/README.md (Union-find time credits), research/mastery-20260927/time-credits.md and demos-data-structures.md. Where these disagree with the code, the code was followed. Pure partition definitions, laws, projection and imperative contracts re-read from working-tree sources on 4 October 2026.",
     "HTTP, RSA, diff": "Code at HEAD of worktrees/explorer-20260928: verification/library/vox_http*.ml(i), vox_rsa*.ml(i), vox_diff*.ml(i) and their .md files; verification/library/build.sh (module list); testsuite/tests/vox/rsa.ml, diff.ml, http_parser.ml, http_private_rejected.ml (TEST headers); catalogue pages http.md, rsa.md, myers-diff.md, _trust.md."
   },
   "verification/library/vox_parallel.ml": {
@@ -2556,11 +2556,11 @@
   },
   "verification/library/vox_union_find_online.ml": {
     "what": {
-      "short": "Online union-find: the core under a ghost epoch that doubles when full, with saved credits that pay for the potential's increase, and the snapshot laws of the public interface.",
+      "short": "Online union-find under a growing ghost capacity, with saved credits for the potential increase and a private projection to the pure partition.",
       "long": [
         "`Vox_union_find_online.Make (C)` implements [vox_union_find_online.mli](src:verification/library/vox_union_find_online.mli) and is the layer beneath `Vox_connectivity` in [online union-find](demo:online-union-find). Its state is the core `Vox_union_find.t`, a ghost credit token `savings` and a ghost `epoch` E. `valid` requires the core's capacity to be `min(E, max_int)`, E < 2 · size once the structure is nonempty, and `savings >= 8 · size − 4 · (E − 1)`. Payments are exact: `create` 1, `make_set` 11, `find` `find_fee s` and `union` `union_fee s`. Every refund from the core goes to savings, so `account` (the core's account plus savings) grows by exactly the fee.",
         "`make_set` puts 8 of its 11 credits in savings and pays 3 to the core's `make_set`. When the structure is full (size equal to the capacity) it doubles E, takes `4 · E` (old epoch) from savings, which the invariant guarantees, and pays them to `Vox_union_find.reparameterize`, which needs at most four credits per element; the remainder returns to savings. No run-time node moves. `fee_bounds` shows `find_fee s <= 4a + 12` and `union_fee s <= 12a + 36` where a is the inverse Ackermann of any population bound at least the current size: the capacity can be up to twice that bound, and doubling raises `alpha` by at most one.",
-        "The file also defines the snapshot (`snapshot`, `contains`, `root`, `depth`, `compressed`), the transitions `added`, `found` and `joined` with their laws (`added_law`, `found_law`, `joined_law`, `root_law`, `empty_law`), and the `_connectivity` wrappers that `Vox_connectivity` calls. Verified. `create` checks `max_int >= 1` at run time and raises `Invalid_argument` otherwise, because `max_int` carries no refinement."
+        "The file also defines private forest snapshots and transitions, and `partition` projects their paths to private `Vox_partition.bindings`. `partition_valid`, `partition_size`, `partition_contains` and `partition_root` relate that projection to the online observations. `partition_added`, `partition_found` and `partition_joined` prove singleton insertion, exact model preservation by find, and class merging. `Vox_connectivity` exposes class-list snapshots and relational contracts and retains abstract forest cost observations under `Cost`. `create` checks `max_int >= 1` at run time and raises `Invalid_argument` otherwise, because `max_int` carries no refinement."
       ]
     },
     "notes": [
@@ -3110,5 +3110,54 @@
         "text": "`bounded_length` checks both inputs against 1,000,000, stopping after at most 1,000,001 cells; the initial entry is snaked and `search` starts with the ghost budget `minimum_cost old fresh`. `M.lower_bound`, `apply_source` and `script_bounds` run in `ghost_` and give the exact cost, `apply old s === Some fresh`, and the length bound."
       }
     ]
+  },
+  "verification/library/vox_partition.ml": {
+    "what": {
+      "short": "Private member/representative bindings used to connect the forest proof to the public class-list model.",
+      "long": [
+        "The public definitions are in vox_partition_classes.ml. The private binding model supports pointwise compression and linking proofs; grouping converts it to classes while preserving all partition observations and transition relations."
+      ]
+    }
+  },
+  "verification/library/vox_union_find_partition_proof.ml": {
+    "what": {
+      "short": "Private proof that the path forest projects to the pure partition and that imperative updates implement its operations.",
+      "long": [
+        "`project` maps each path to `(head, root)`. The observation lemmas preserve membership, representatives and size; `valid` proves a valid pure partition from a valid complete forest. `add_singleton` relates allocation to the pure singleton operation. `refresh` and `find` prove exact projection equality after compression. `join` relates linking to `redirect`, and `union` composes the two finds and link to prove `merge_classes`. `Vox_union_find_online` uses these lemmas to connect its private forest transitions to the public transition relations in [online union-find](demo:online-union-find)."
+      ]
+    }
+  },
+  "verification/library/vox_connectivity.ml": {
+    "what": {
+      "short": "Implements imperative union-find through a pure relational snapshot specification and a separate Cost interface.",
+      "long": [
+        "model projects the owned forest to a pure snapshot. create establishes empty; make_set establishes added; find returns the representative and establishes same; union establishes joined. The implementation chooses representatives by rank, while the public relation allows any member of the merged class. Cost retains exact events, charged work and inverse-Ackermann fee bounds."
+      ]
+    }
+  },
+  "verification/library/vox_partition_classes.ml": {
+    "what": {
+      "short": "Public pure partition snapshots as lists of (representative, others), with distinct members and relational transitions."
+    }
+  },
+  "verification/library/vox_partition_classes_proof.ml": {
+    "what": {
+      "short": "Derived laws for the concrete class-list partition model, separate from its definitions."
+    }
+  },
+  "verification/library/vox_partition_classes_bridge.ml": {
+    "what": {
+      "short": "Verified correspondence between class lists and member/representative bindings."
+    }
+  },
+  "verification/library/vox_partition_classes_group.ml": {
+    "what": {
+      "short": "Private grouping of member/representative bindings into distinct classes, preserving observations and transitions."
+    }
+  },
+  "verification/library/vox_partition_transport_proof.ml": {
+    "what": {
+      "short": "Proof that binding transitions respect equality of partition observations."
+    }
   }
 }
