@@ -14,7 +14,8 @@ let () =
   let before = ghost_ (L.Owned.model (borrow_ list)) in
   let nodes = L.Owned.observe (borrow_ list) in
   let reversed : {s : L.Owned.t |
-    L.Owned.model s === L.rev_append before L.Nil} = L.Owned.reverse list in
+    L.contents (L.Owned.model s) === L.rev_onto (L.contents before) []
+    && L.Owned.model s === L.rev_append before L.Nil} = L.Owned.reverse list in
   let actual = L.Owned.observe (borrow_ reversed) in
   ghost_ (L.nodes_rev_append before L.Nil; L.nodes_def L.Nil;
     (() : {u : unit | actual === L.rev_onto nodes []}));
@@ -27,11 +28,12 @@ let () =
   let tree = T.Owned.branch 1 left (T.Owned.leaf 3) in
   let before = ghost_ (T.Owned.model (borrow_ tree)) in
   let _original = T.Owned.observe (borrow_ tree) in
-  let mirrored : {s : T.Owned.t | T.Owned.model s === T.flipped before} =
+  let mirrored : {s : T.Owned.t |
+    T.shape_of (T.Owned.model s) === T.mirror_shape (T.shape_of before)
+    && T.Owned.model s === T.flipped before} =
     T.Owned.mirror tree in
   let actual = T.Owned.observe (borrow_ mirrored) in
   ghost_ (
-    T.shape_flipped before;
     (match before with
      | T.Branch (_, l, r) ->
        T.shape_of_def before; T.shape_of_def l;

@@ -68,7 +68,6 @@ Line 7, characters 28-40:
   The refinement is stated here.
 |}]
 
-(* Mirroring a tree mirrors its shape. *)
 module Unmirrored_shape = struct
   let (claim @ total) (tree : tree @ immutable) :
       {u : unit | shape_of (flipped tree) === shape_of tree} @ ghost =

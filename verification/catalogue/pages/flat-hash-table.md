@@ -1,7 +1,7 @@
 title: Flat hash table
 blurb: A mutable hash table proved to act as a finite map: lookups return the map's answer, updates are map updates and `length` is its size.
 status: owner-review
-date: 27 September 2026
+date: 4 October 2026
 sources:
   - verification/library/vox_verified_flat_hashtbl.mli — Public interface
   - verification/library/vox_verified_flat_hashtbl.ml — Implementation: the functor and the abstract map
@@ -14,7 +14,41 @@ sources:
 ---
 `Vox_verified_flat_hashtbl.Make` is a mutable open-addressing hash table whose operations are proved to act on a finite map: lookups return the map's answer, `replace` and `remove` return exactly `put` and `erase` of the previous map, and `length` is the number of bindings. The proof covers probing, replacement, deletion and rebuilding. The SIMD mask routines, the storage primitives and the checker itself are trusted.
 
-Keys and values must be `immutable_data`. Every operation except `create` takes two extra arguments that the compiler erases: a view of the table and a permission token. `create` takes only a token. Only normal return is specified; termination, running time and concurrent use are not.
+Keys must have kind `logical_data`; values must have kind `immutable_data`. Every operation except `create` takes two extra arguments that the compiler erases: a view of the table and a permission token. `create` takes only a token. Only normal return is specified; termination, running time and concurrent use are not.
+
+## Interface
+
+`Pref.Heap` is a finite map from locations to values, `P.own token` is the heap a token owns, and `Ghost_pref` provides erased tokens: `empty` makes one that owns nothing, and `split` and `join` divide and recombine ownership. `Bigint` is unbounded integers, used for sizes.
+
+Every operation except `create` requires `current table view (P.own token)`: the token owns the table's location at the version recorded by the view. Reads borrow that token; mutations consume it and return a token with the new version at the same location, preserving all other locations. `current_def` states the exact equation. The `[@@def transparent]` annotation makes that checked equation available wherever the predicate is used.
+
+`Map` gives the content model independently of storage: `lookup` observes a binding, `put` replaces one, `erase` removes one, and `count` counts bindings. Its laws state the result at every query key and the change in count. Equal keys have equal lookups. Maps built by different update sequences need not be logically equal; their bindings are compared through `lookup`.
+
+Read the binding laws first, then the snapshot/access equation, then the
+operations. The key-equivalence laws are in the complete
+[interface](src:verification/library/vox_verified_flat_hashtbl.mli).
+
+@code verification/library/vox_verified_flat_hashtbl.mli "  module Map : sig" "  end"
+
+@code verification/library/vox_verified_flat_hashtbl.mli "  (** {1 Table snapshots and ownership} *)" "  (** {1 Operations} *)"
+
+@code verification/library/vox_verified_flat_hashtbl.mli "  val create :" "end"
+
+## Trusted base
+
+- SIMD group matching: the NEON and SSE2 routines in `runtime/vox_control.c` (or its scalar fallback, used on other targets) and their native lowering in `backend/cmm_builtins.ml` are assumed to return the sixteen-lane masks specified by `vox_table_model.ml`, which is checked OCaml.
+- Storage: allocation, typed slot access, bulk clearing and backing replacement are assumed to meet `vox_table_storage.mli` (implemented in `runtime/pref.c`).
+- Count-trailing-zeros (`caml_vox_int_ctz` in `runtime/vox_control.c`, and its native lowering) is assumed to return the index of the lowest set bit of a nonzero 63-bit integer, and 63 for zero. The checker gives the primitive this meaning directly (`verification/vox_encoding.ml`).
+
+## Scope
+
+- Operations: `create`, `length`, `find_opt`, `find`, `mem`, `replace`, `remove` and `clear`. There is no iteration, fold, copy or presized `create`.
+- Capacity is 16 to 2^30 slots. `find` raises `Not_found` for an absent key; `replace` raises `Invalid_argument` beyond 2^30 slots; any operation can raise `Out_of_memory` or `Stack_overflow`.
+- A mutation that raises loses the token it consumed, so the table cannot be used afterwards. `find` only borrows its token, so the table stays usable after `Not_found`.
+- Keys have kind `logical_data` and values have kind `immutable_data`, as stated by the interface.
+- `Key.equal` and `Key.hash` must be Vox-checked `total` functions supplied with proofs of four laws. Hash functions from existing libraries, such as those derived by ppx_hash, are not declared `total` and cannot be passed as they are.
+- Callers need not enable `-extension refinement_types` unless they write refinements or proofs.
+- No termination, running-time, concurrency or memory-reclamation theorem.
 
 ## Client example
 
@@ -79,30 +113,6 @@ The test requires 13 such programs to be rejected, each with its exact error. Si
 ```
 
 The test checks that this client makes no call through a closure of the functor instance (`caml_apply`), that it calls `Vox_table_search` directly, and that neither this nor the default build calls an ownership primitive or lemma. Erased values that the optimizer cannot drop are passed as a placeholder constant (48059), for example to the function that rebuilds the table.
-
-## Interface
-
-`Pref.Heap` is a finite map from locations to values, `P.own token` is the heap a token owns, and `Ghost_pref` provides erased tokens: `empty` makes one that owns nothing, and `split` and `join` divide and recombine ownership. `Bigint` is unbounded integers, used for sizes.
-
-Every operation except `create` requires `current table view (P.own token)`: the token's heap holds `version view` at `location table`, so the view is the table's current version and the token owns the table. `current` is declared `[@@def transparent]`. Wherever it is applied to all its arguments, the checker assumes its definition lemma `current_def` at that point, as if the caller had called it. The name therefore only shortens the contracts: a client proves exactly what it would if the body were written out, never calls `current_def`, and trusts nothing new, because `current_def` is checked against the implementation's definition like any other exported value. The public client writes the body out in its own contracts and passes those tokens to the table unchanged.
-
-@code verification/library/vox_verified_flat_hashtbl.mli
-
-## Trusted base
-
-- SIMD group matching: the NEON and SSE2 routines in `runtime/vox_control.c` (or its scalar fallback, used on other targets) and their native lowering in `backend/cmm_builtins.ml` are assumed to return the sixteen-lane masks specified by `vox_table_model.ml`, which is checked OCaml.
-- Storage: allocation, typed slot access, bulk clearing and backing replacement are assumed to meet `vox_table_storage.mli` (implemented in `runtime/pref.c`).
-- Count-trailing-zeros (`caml_vox_int_ctz` in `runtime/vox_control.c`, and its native lowering) is assumed to return the index of the lowest set bit of a nonzero 63-bit integer, and 63 for zero. The checker gives the primitive this meaning directly (`verification/vox_encoding.ml`).
-
-## Scope
-
-- Operations: `create`, `length`, `find_opt`, `find`, `mem`, `replace`, `remove` and `clear`. There is no iteration, fold, copy or presized `create`.
-- Capacity is 16 to 2^30 slots. `find` raises `Not_found` for an absent key; `replace` raises `Invalid_argument` beyond 2^30 slots; any operation can raise `Out_of_memory` or `Stack_overflow`.
-- A mutation that raises loses the token it consumed, so the table cannot be used afterwards. `find` only borrows its token, so the table stays usable after `Not_found`.
-- Keys and values are `immutable_data`, so mutable records and closures cannot be stored.
-- `Key.equal` and `Key.hash` must be Vox-checked `total` functions supplied with proofs of four laws. Hash functions from existing libraries, such as those derived by ppx_hash, are not declared `total` and cannot be passed as they are.
-- Callers need not enable `-extension refinement_types` unless they write refinements or proofs.
-- No termination, running-time, concurrency or memory-reclamation theorem.
 
 ## Performance
 

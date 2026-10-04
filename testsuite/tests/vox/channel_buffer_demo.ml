@@ -55,4 +55,40 @@ let run () =
     Domain.join worker_right;
     print_endline "Both ownership tokens returned; buffer freed."
 
-let () = run ()
+let run_complete_heap () =
+  let allocation = M.malloc 2 (P.empty ()) in
+  match allocation.value with
+  | None -> failwith "Could not allocate the demo buffer"
+  | Some block ->
+    let initial = ghost_ (P.own (borrow_ allocation.state)) in
+    ghost_ (M.allocated_covers block (H.empty ());
+      M.covers_get initial block 0 2 0;
+      M.covers_get initial block 0 2 1);
+    let value : M.byte = 75 in
+    let permission = M.write block 1 value allocation.state in
+    let initialized = ghost_ (P.own (borrow_ permission)) in
+    let receipt = fill {block; index = 0; permission} 79 in
+    ghost_ (
+      let receipt = borrow_ receipt in
+      M.location_law block block 0 1;
+      (() : {u : unit | H.at (P.own receipt.slot.permission)
+        (M.location block 1) === Some (Some value)}));
+    let first, slot = read_receipt receipt in
+    let second = M.read block 1 (borrow_ slot.permission) in
+    let first : {v : int | v = 79} = first in
+    let second : {v : int | v = 75} = second in
+    assert (first = 79 && second = 75);
+    ghost_ (
+      M.write_covers initial block 0 2 1 75;
+      M.write_covers initialized block 0 2 0 79;
+      M.location_law block block 1 (-1);
+      M.location_law block block 0 (-1);
+      M.footprint_at block (-1);
+      let key = M.location block (-1) in
+      let _ = H.mem (H.union (M.footprint block) (H.empty ())) key in
+      let _ = H.mem initial key in
+      let _ = H.mem initialized key in
+      let _ = H.mem (P.own (borrow_ slot.permission)) key in ());
+    let _ = M.free block slot.permission in ()
+
+let () = run (); run_complete_heap ()

@@ -1,5 +1,40 @@
-open Vox_sequence
+(** Integer sorting specification: nondecreasing order and preservation of
+    every element multiplicity. These laws completely characterize both
+    predicates; the remaining declarations support proofs about updates. *)
 
+val sorted : int list -> bool @@ total
+
+val sorted_adjacent : (values : int list) ->
+  {u : unit | sorted values ===
+    (match values with
+     | [] -> true
+     | head :: tail -> match tail with
+       | [] -> true
+       | next :: _ -> head <= next && sorted tail)} @@ total
+
+val count : int list -> int -> Bigint.t @@ total
+
+val count_def : (values : int list) -> (target : int) ->
+  {u : unit | count values target ===
+    (match values with [] -> 0Z | head :: tail ->
+      Bigint.add (if head = target then 1Z else 0Z) (count tail target))} @@
+        total
+
+val permutation : int list -> int list -> bool @ ghost @@ total
+
+val permutation_count : (before : int list) -> (after : int list) -> (target :
+  int) ->
+    {u : unit | if permutation before after then count before target === count
+      after target
+      else true} @@ total
+
+val count_extensional : (left : int list) -> (right : int list) ->
+    ((target : int) ->
+      {u : unit | count left target === count right target}) @ total ->
+    {u : unit | permutation left right} @@ total
+
+(** Proof support: bags, bounds, slices and updates. *)
+open Vox_sequence
 
 type multiset : logical_data
 
@@ -15,7 +50,7 @@ val all : int list -> int -> bool -> bool @@ total
 val all_le : int list -> int -> bool @@ total
 val all_ge : int list -> int -> bool @@ total
 val range : int list -> int -> bool -> Bigint.t -> Bigint.t -> bool @@ total
-val sorted : int list -> bool @@ total
+
 val all_def : (values : int list) -> (bound : int) -> (lower : bool) ->
   {u : unit | all values bound lower ===
     (match values with [] -> true | head :: tail ->
@@ -38,16 +73,10 @@ val sorted_def : (values : int list) ->
     (match values with [] -> true | head :: tail ->
       all tail head false && sorted tail)} @@ total
 val bag : int list -> multiset @@ total
-val permutation : int list -> int list -> bool @ ghost @@ total
+
 val permutation_def : (left : int list) -> (right : int list) ->
   {u : unit | permutation left right ===
     ghost_ (bag left === bag right)} @@ total
-val count : int list -> int -> Bigint.t @@ total
-val count_def : (values : int list) -> (target : int) ->
-  {u : unit | count values target ===
-    (match values with [] -> 0Z | head :: tail ->
-      Bigint.add (if head = target then 1Z else 0Z) (count tail target))} @@
-        total
 
 val element_at : (values : int list) -> (index : Bigint.t) ->
     {u : unit | if 0Z <= index && index < length values then
@@ -179,21 +208,10 @@ val sub_one : (values : int list) -> (index : Bigint.t) ->
         true} @@
         total
 
-val permutation_count : (before : int list) -> (after : int list) -> (target :
-  int) ->
-    {u : unit | if permutation before after then count before target === count
-      after target
-      else true} @@ total
-
 val multiplicity : multiset -> int -> Bigint.t @@ total
 
 val count_nonnegative : (values : int list) -> (target : int) ->
     {u : unit | 0Z <= count values target} @@ total
-
-val count_extensional : (left : int list) -> (right : int list) ->
-    ((target : int) ->
-      {u : unit | count left target === count right target}) @ total ->
-    {u : unit | permutation left right} @@ total
 
 val bag_multiplicity : (values : int list) -> (target : int) ->
     {u : unit | multiplicity (bag values) target === count values target} @@
@@ -257,11 +275,3 @@ val sorted_set : (values : int list) -> (index : Bigint.t) ->
       && (Bigint.add index 1Z = length values ||
         value <= element values (Bigint.add index 1Z)) then
       sorted (set values index value) else true} @@ total
-
-val sorted_adjacent : (values : int list) ->
-  {u : unit | sorted values ===
-    (match values with
-     | [] -> true
-     | head :: tail -> match tail with
-       | [] -> true
-       | next :: _ -> head <= next && sorted tail)} @@ total

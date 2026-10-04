@@ -41,31 +41,18 @@ val compile : (term : D.term) @ immutable -> (configuration : M.layout) @ immuta
     | Compiled artifact ->
       source artifact === term && layout artifact === configuration} @ immutable
 
-(* [Type_error]: the program has no type. *)
-val untypable : (rejection : rejection) @ immutable -> (ty : Copy_spec.ty) @ immutable ->
-  (typing : D.typing) @ immutable ->
-  {u : unit | reason rejection === Type_error
-    && D.typed D.Z D.Empty_context (program rejection) (D.embed ty) typing} ->
-  {u : unit | false} @ ghost @@ total
-
-(* [Entry_type_mismatch]: the program has no type [Word64 -> Word64]. *)
-val no_entry_type : (rejection : rejection) @ immutable -> (typing : D.typing) @ immutable ->
-  {u : unit | reason rejection === Entry_type_mismatch
-    && D.typed D.Z D.Empty_context (program rejection) (D.Function (D.Word64, D.Word64)) typing} ->
-  {u : unit | false} @ ghost @@ total
-
 (* The theorems below hold for every [input]. [Wasm_binary_execution.run]
    sets the module's exported global [payload] to [input] and calls its
    exported function [run]; the source program is [source artifact] applied
    to [input]. *)
+val static_validity : (artifact : artifact) @ immutable ->
+  {u : unit | Wasm_static_module.bytes_valid (bytes artifact)} @ ghost @@ total
+
 val safe : (artifact : artifact) @ immutable -> (input : W.t) @ immutable -> (prefix : C.count) @ immutable ->
   {u : unit | match Wasm_binary_execution.run prefix (bytes artifact) input
       (C.Succ (layout artifact).M.host_capacity) with
     Wasm_binary_execution.Result (Wasm_calls.Running _)
     | Wasm_binary_execution.Result (Wasm_calls.Finished _) -> true | _ -> false} @ ghost @@ total
-
-val static_validity : (artifact : artifact) @ immutable ->
-  {u : unit | Wasm_static_module.bytes_valid (bytes artifact)} @ ghost @@ total
 
 val reflection : (artifact : artifact) @ immutable -> (input : W.t) @ immutable -> (prefix : C.count) @ immutable ->
   (after : Wasm_global_execution.state) @ immutable -> (word : W.t) @ immutable ->
@@ -96,3 +83,18 @@ val exhaustion : (artifact : artifact) @ immutable -> (input : W.t) @ immutable 
     && M.exhausted after} ->
   {witness : M.exhaustion | M.honest_exhaustion (bytes artifact) input
     (C.Succ (layout artifact).M.host_capacity) after witness} @ immutable ghost @@ total
+
+(* Type-error evidence. *)
+
+(* [Type_error]: the program has no type. *)
+val untypable : (rejection : rejection) @ immutable -> (ty : Hm_inference_model.ty) @ immutable ->
+  (typing : D.typing) @ immutable ->
+  {u : unit | reason rejection === Type_error
+    && D.typed D.Z D.Empty_context (program rejection) (D.embed ty) typing} ->
+  {u : unit | false} @ ghost @@ total
+
+(* [Entry_type_mismatch]: the program has no type [Word64 -> Word64]. *)
+val no_entry_type : (rejection : rejection) @ immutable -> (typing : D.typing) @ immutable ->
+  {u : unit | reason rejection === Entry_type_mismatch
+    && D.typed D.Z D.Empty_context (program rejection) (D.Function (D.Word64, D.Word64)) typing} ->
+  {u : unit | false} @ ghost @@ total

@@ -11,20 +11,19 @@
   ],
   "stops": [
     {
+      "title": "The specification: evaluation and unsatisfiability",
+      "path": "verification/library/vox_sat_spec.ml",
+      "from": "type literal",
+      "to": "  else None",
+      "text": "The contract is written with `let[@def]` definitions in `Vox_sat_spec`. Each also generates a lemma, such as `check_def`, stating its equation, and the checker unfolds a definition only where a proof applies that lemma. `rejects_extensions prefix remaining formula` enumerates the `2^remaining` extensions of `prefix` by appending `false` and `true`, with `[@@decreases remaining]` as its termination measure, so `unsatisfiable n formula` says literally that each of the `2^n` assignments of length `n` falsifies the formula. `classify_input` sets the limits: at most 256 variables, 4,096 clauses and 65,536 literal occurrences. The first two exist because the proofs index variables and input clauses with machine `int`s; no proof uses the literal limit, which is checked at the entry and nowhere else."
+    },
+    {
       "title": "The public interface",
       "path": "verification/library/vox_cdcl_total.mli",
       "from": "(** Complete CDCL on every accepted input",
       "to": "| Unknown -> false} @@ total",
       "lines": "39-49",
       "text": "`solve_complete n formula` is declared `@@ total`: the checker proves that it terminates without raising on every input. Its result type is the theorem. On an input that `classify_input` accepts, the answer is `Sat` with an assignment that `check` accepts, or `Unsat` with `unsatisfiable n formula`; the arm `Unknown -> false` says the solver never gives up. The `report` also carries `statistics` (decisions, conflicts, learned clauses, backjumps), which the contract does not constrain, so the contract alone cannot tell this solver from an enumeration of all assignments. The bounded `solve fuel`, above, has the same contract except that it may return `Unknown`, which implies only `statistics.steps = fuel`."
-    },
-    {
-      "title": "The specification: evaluation and unsatisfiability",
-      "path": "verification/library/vox_sat_spec.ml",
-      "from": "let[@def] check n formula assignment",
-      "to": "  else None",
-      "lines": "68-100",
-      "text": "The contract is written with `let[@def]` definitions in `Vox_sat_spec`. Each also generates a lemma, such as `check_def`, stating its equation, and the checker unfolds a definition only where a proof applies that lemma. `rejects_extensions prefix remaining formula` enumerates the `2^remaining` extensions of `prefix` by appending `false` and `true`, with `[@@decreases remaining]` as its termination measure, so `unsatisfiable n formula` says literally that each of the `2^n` assignments of length `n` falsifies the formula. `classify_input` sets the limits: at most 256 variables, 4,096 clauses and 65,536 literal occurrences. The first two exist because the proofs index variables and input clauses with machine `int`s; no proof uses the literal limit, which is checked at the entry and nowhere else."
     },
     {
       "title": "A client that uses both answers",

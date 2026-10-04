@@ -11,19 +11,17 @@
   ],
   "stops": [
     {
-      "title": "The interface: two functions and six theorems",
+      "title": "The interface: two functions and seven theorems",
       "path": "testsuite/tests/vox/dfa_equivalence_core.mli",
       "from": "module Dfa_equivalence : sig",
-      "to": "end",
-      "lines": "1-42",
-      "text": "`compare` and `reduce` are opaque total functions, and what a client may know about them is stated as separate theorems. Each theorem is a total function returning `unit` refined by its statement, so a client calls it inside `ghost_` to obtain the fact. `compare_equal` and `comparison_witness` hold for any tables: `Equivalent` means equal runs on every word, and `Inequivalent` comes with an erased word (`int list Ghost.t`) on which the runs differ. `compare_complete` and `reduce_complete` say when an answer is guaranteed: valid tables with at most 64 edges per row, and a product of row counts within `limit` for `compare`, or at most 64 rows for `reduce`. `reduce_minimum` takes the agreement of `source` with another machine as a total function from words to proofs, a universally quantified premise, and concludes that the result has no more rows than `other` if `other` is valid."
+      "text": "`compare` and `reduce` are opaque total functions, and what a client may know about them is stated as separate theorems. Each theorem is a total function returning `unit` refined by its statement, so a client calls it inside `ghost_` to obtain the fact. `compare_equal` and `comparison_witness` hold for any tables: `Equivalent` means equal runs on every word, and `Inequivalent` comes with an erased word (`int list Ghost.t`) on which the runs differ. `reduce_valid` guarantees that every returned machine is valid, including outside the completeness limits. `compare_complete` and `reduce_complete` say when an answer is guaranteed: valid tables with at most 64 edges per row, and a product of row counts within `limit` for `compare`, or at most 64 rows for `reduce`. `reduce_minimum` takes the agreement of `source` with another machine as a total function from words to proofs, a universally quantified premise, and concludes that the result has no more rows than `other` if `other` is valid.",
+      "span": 45
     },
     {
       "title": "Tables and their runs",
       "path": "testsuite/tests/vox/dfa_semantics.ml",
       "from": "let[@def] rec view (table : (int * bool * row) list) (state : int) =",
       "to": "execute machine initial word",
-      "lines": "71-96",
       "text": "A machine is a plain table: an initial state id and rows `(id, accepting, (edges, default))`; state ids and letters are `int`s. `view` finds a state's row, and a missing state reads as a non-accepting row whose every letter leads to state 0. `step` follows the first edge labelled with the letter, or else the default, and `run` executes a word from the initial state. `valid`, just above, requires that the initial state and every target and default exist, and that state ids and the letters of each row are unique. Below, `state_size` counts rows as a `Bigint`, reachable or not, and `labels_bounded` requires at most 64 edges per row, counted by `list_size`, which saturates at 129."
     },
     {
@@ -31,15 +29,20 @@
       "path": "testsuite/tests/vox/dfa_public_client.ml",
       "from": "let (minimum @ total)",
       "to": "  ()",
-      "lines": "34-44",
       "text": "The public client is compiled against the `Dfa_semantics` and `Dfa_equivalence_core` interfaces only. `minimum` restates `reduce_minimum` for any `source`, `limit` and `other`; its `agreement` argument is a total function that returns, for each word, a `unit` refined by `run source word === run other word`. The body is one ghost call, and the theorem does the work. The last lines of the file run the code: comparing a one-row machine with itself gives `Equivalent`, and its reduction rejects the word `[7]`."
+    },
+    {
+      "title": "Allowed representations with the same meaning",
+      "path": "testsuite/tests/vox/dfa_public_client.ml",
+      "from": "open Dfa_semantics",
+      "text": "The public client checks two unequal tables differing only in the single state identifier (0 versus 7) are `Equivalent` and agree on several words. Minimization specifies validity, language and minimum row count; state numbering and row order are permitted choices.",
+      "span": 79
     },
     {
       "title": "A rejected client",
       "path": "testsuite/tests/vox/dfa_boundary.ml",
       "from": "(* Two machines need not agree on a word. *)",
       "to": "|}]",
-      "lines": "264-278",
       "text": "`dfa_boundary.ml` checks these phrases against the public interfaces as an expect test. Claiming that two arbitrary machines agree on a word fails with a counterexample. The phrases above it fail because `check_reduction`, the definition lemma `compare_def` and the module `Dfa_equivalence_proof` are not visible to clients. The `valid other` premise of `reduce_minimum` is needed: a one-row table whose default points at a missing state accepts exactly the words of even length, because the missing state reads as a rejecting row that leads back to state 0, while the smallest valid machine for that language has two rows."
     },
     {
@@ -47,7 +50,6 @@
       "path": "testsuite/tests/vox/dfa_equivalence_proof.ml",
       "from": "type decision = Equal of relation | Different of int list | Limit",
       "to": "external equal_int : int -> int -> bool @@ total",
-      "lines": "245-251",
       "text": "Inside `Dfa_proof`, a comparison ends in a `decision`: `Equal r` with a relation between states, `Different w` with a word on which the machines differ, or `Limit`. A `reduction_certificate` is a relation, an access word for each state and a separating word for each pair of states. The searches return their answer in a record `proved` whose `result_proof` field is `Ghost.t`, so decisions and certificates exist for the checker and are erased. The two `external`s here, and `same_int` further down, alias the primitives `%greaterequal` and `%equal` at `int`; the checker gives them the meaning of `>=` and `=`, and they are all this demo adds to the shared trusted base."
     },
     {
@@ -55,7 +57,6 @@
       "path": "testsuite/tests/vox/dfa_equivalence_proof.ml",
       "from": "let[@def] rec related (pair : int * int) (relation : relation) =",
       "to": "all_closed left right relation relation",
-      "lines": "823-852",
       "text": "`check left right relation` accepts a relation that contains the pair of initial states and is closed: in every related pair, the two states agree on acceptance, their defaults are related, and their successors on every letter listed in either row are related. Letters listed in neither row follow the defaults, so this covers every letter. `check_agrees`, further down, proves by induction on the word that such a relation makes the two runs equal, which gives `compare_equal`. The relation is an ordinary bisimulation, with no up-to technique. `check_reduction` reuses `check` between a machine and its reduction and adds `all_access` and `all_separated` for the access and separating words."
     },
     {
@@ -63,7 +64,6 @@
       "path": "testsuite/tests/vox/dfa_equivalence_proof.ml",
       "from": "let rec (search_pairs_loop @ total) :",
       "to": "else true} @ total immutable contended =",
-      "lines": "4153-4193",
       "text": "`compare` runs this worklist search over pairs of states, starting from the initial pair. Each pending pair carries a ghost word that reaches it in both machines (`Pair_trace`), so a pair that disagrees on acceptance yields that word as the `Different` certificate, and an empty worklist makes the pairs seen the `Equal` relation. For letters on neither row, the search pushes one pair of successors under a letter that `missing_letter` finds outside both rows. Termination uses the ghost `int` `remaining` as fuel, with the invariant that fuel plus pairs seen equals `limit` plus pending pairs, and `[@@decreases let fuel = remaining in fuel]`; the only runtime counter is `pair_count`. The contract says `Limit` cannot happen when both tables are valid with at most 64 edges per row and the product of their row counts is within `limit`."
     },
     {
@@ -71,7 +71,6 @@
       "path": "testsuite/tests/vox/dfa_equivalence_proof.ml",
       "from": "let search_result = reachable_states_initial source limit in",
       "to": "let result = Some packet in result",
-      "lines": "7474-7506",
       "text": "`reduce` is `minimize_proved` without its ghost half. It collects the reachable states, splits them by acceptance with `initial_partition`, and runs `refine_to_stable`, Moore's partition refinement, whose termination measure is a ghost `Bigint`, the number of pairs of states in the same class. `quotient_raw` then builds one row per class. `minimization_certificate` builds the certificate inside `ghost_`; its separating words come from running the pair search of the previous stop in ghost code on two states of the source (`compare_states`, through `distinguish_classes`). `reduce_preserves` and `reduce_minimum` read the certificate back out of the erased `result_proof`."
     },
     {
@@ -79,7 +78,6 @@
       "path": "testsuite/tests/vox/dfa_equivalence_proof.ml",
       "from": "let (minimum_count_semantic @ total) (source : machine)",
       "to": "ghost_ (state_size_via_ids other);",
-      "lines": "1714-1737",
       "text": "`reduce_minimum` rests on this pigeonhole argument, the Myhill–Nerode bound for this table format. `image_ids` maps each state of the reduced machine to the state of `other` that its access word reaches. `distinct_images`, above, shows the map is injective: two distinct states have a separating word, so their access words followed by it get different answers, and `other`, which agrees with the reduced machine on every word, must reach different states. `image_ids_included` shows that the images are rows of `other`, which needs `valid other`, and `included_bound` bounds the length of a duplicate-free list by that of a list containing it."
     },
     {
@@ -87,7 +85,6 @@
       "path": "testsuite/tests/vox/dfa_boundary_check.ml",
       "from": "let proof = dump \"dfa_equivalence_proof\" in",
       "to": "[ \"sound\"; \"complete\"; \"lower_matches\"; \"lower_valid\" ] ];",
-      "lines": "14-43",
       "text": "[`dfa_boundary.ml`](src:testsuite/tests/vox/dfa_boundary.ml) compiles every DFA and regex unit with `-drawlambda` under both compilers, compiles and runs the public clients against the public interfaces only, and runs this program on the dumps. Following direct calls from `compare` and `reduce` must not reach any listed certificate-building function, such as `minimization_certificate` or `compare_states`. The theorem functions of `Dfa_equivalence_core` and `Regex_language` must make no calls at all. It also checks that `state_size` counts rows without building the list of state ids. Running time, memory and stack depth are not proved."
     }
   ]

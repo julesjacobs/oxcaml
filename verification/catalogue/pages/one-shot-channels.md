@@ -1,7 +1,7 @@
 title: One-shot channels
 blurb: A single-use channel between domains, checked so that the receiver takes the payload out of the shared cell only after the sender has put it there; the payload keeps its type and refinements.
 status: owner-review
-date: 27 September 2026
+date: 4 October 2026
 sources:
   - verification/library/one_shot.mli — Public interface
   - verification/library/one_shot.ml — Implementation: the flag invariant and the two compare-and-set steps
@@ -23,33 +23,19 @@ A client learns what the payload type says: `recv` returns a value of that type,
 
 The interface itself has no refinements and records no history. For an unrefined type such as `int` it does not say that the value received is the value sent; a singleton refinement type recovers that, as in the example below. `recv` may spin forever. Nothing is proved about progress, fairness or linearizability. Contracts describe normal return: a dropped endpoint or an exception can leave the payload undelivered, and nothing is proved about reclaiming it. The steps at the flag are checked against the `Verified_atomic` and `Unique_cell` contracts listed on the shared page. That those contracts hold for concurrent execution on the OCaml runtime is assumed, together with the items under Trusted base; it is not derived from a memory model.
 
-## Client example
-
-The public client, which uses only `one_shot.mli`; `concurrency_boundary.ml` also compiles it with only the libraries' `.cmi` (and `.cmx`) files present. `(n : int) -> {r : int | r = n}` names the argument and refines the result: `{r : int | p}` is `int` restricted to values satisfying `p`. The channel's payload type is the singleton `{v : int | v = n}`. The checker proves `n` has that type at `send`, and the result of `recv` has it, which proves the result type of `roundtrip`. The test runs in bytecode and native code.
-
-@code testsuite/tests/vox/one_shot_public_client.ml "let roundtrip" "One_shot.recv rx"
-
-## A rejected program
-
-Sending a value that does not satisfy the payload refinement is a type error. `C` is `One_shot`, and the `[%%expect]` block holds the compiler's message as the test records it.
-
-@code testsuite/tests/vox/one_shot_rejected.ml "let bad_value () =" "|}]"
-
-The same test rejects nine more programs: sending or receiving twice on one endpoint, using a receiver as a sender, claiming `n = 42` for a receive at plain `int`, using an endpoint after sending it as a payload, sending an `int ref`, reading the hidden `cell` field, and taking from an empty `Unique_cell.Slot` or filling one twice. `concurrency_boundary.ml` compiles 15 more programs against the public `.cmi` files only and requires each to fail with its exact error; four are about channels (a reused sender, a false payload, a false buffer receipt and a hidden module), the rest about locks.
-
 ## Interface
 
 @code verification/library/one_shot.mli
 
 `('a : value mod portable contended)` is a kind: the payload may be shared between domains without a lock, which excludes `int ref`. Mutable state travels as a `Pref` cell or `Raw_memory` buffer together with its ghost permission, which the compiler erases. `@ unique` means the caller gives up the value.
 
-The buffer protocol's interface follows. `P.token` is a ghost permission and `P.own t` the finite map of locations it owns. `H.at h l` is `Some c` when `h` owns location `l` with contents `c`; a byte's contents are `None` until it is written. `===` is logical equality. The types are concrete. `fill` is the worker's step: it writes `value` at byte `index`. `dispatch` starts a domain, sends it the slot and its permission on one channel, and returns the receiver of a second channel on which the worker sends the filled slot back. `read_receipt` reads the byte, proved equal to `expected`, and returns it with the slot.
+The buffer protocol's interface defines the owned byte and receipt before the operations. `P.token` is a ghost permission and `P.own t` the finite map of locations it owns. `H.at h l` is `Some c` when `h` owns location `l` with contents `c`; a byte's contents are `None` until it is written. `===` is logical equality. The types are concrete. `fill` is the worker's step: it writes `value` at byte `index`. `dispatch` starts a domain, sends it the slot and its permission on one channel, and returns the receiver of a second channel on which the worker sends the filled slot back. `dispatch` promises the selected byte value. `fill` changes exactly that byte in the complete input heap. `read_receipt` reads the byte, proved equal to `expected`, and returns it with the same complete heap.
 
 @code verification/library/channel_buffer.mli
 
-The buffer client splits the permission for a two-byte buffer into one token per byte, hands each byte to its own worker, and reads both receipts. The checker proves that the results are the bytes the workers were asked to write, 79 and 75 (the client prints `OK`). The client then joins the permissions and frees the buffer.
+The buffer client sends one token per byte to two workers. A separate call to `fill` uses a complete two-byte token: it writes byte 0 and proves byte 1 is unchanged before freeing the buffer.
 
-@code testsuite/tests/vox/channel_buffer_demo.ml 25-32
+@code testsuite/tests/vox/channel_buffer_demo.ml "let run_complete_heap () =" "    let _ = M.free block slot.permission in ()"
 
 ## Trusted base
 
@@ -64,9 +50,23 @@ The buffer client splits the permission for a two-byte buffer into one token per
 - `recv` spins with `Domain.cpu_relax` until the payload is published and does not return if it never is.
 - Payload types must be `value mod portable contended`.
 - For a payload type without a refinement, the interface does not relate the received value to the sent one.
-- `Channel_buffer.fill` and `dispatch` accept a permission that may own more than the selected byte, but return ownership of that byte only; the rest is lost to the caller, although the implementation keeps it. `read_receipt` returns the slot without the fact about its value. The client splits out single bytes first.
+- `Channel_buffer.fill` preserves every other owned location; `read_receipt` preserves the heap. `dispatch` exports the selected byte value, without a complete-heap equation.
 - Contracts describe normal return. Dropped endpoints, exceptions and cancellation can prevent delivery; there is no recovery or leak-freedom guarantee.
 - `one_shot_parallel.ml` runs 200 round trips between two domains with forced collections, passes nested endpoints and a `Pref` cell with its permission, and checks the values with runtime assertions. It and `channel_buffer_demo.ml` run in bytecode only. These runs are tests, not proofs of progress or of the runtime.
+
+## Client example
+
+The public client, which uses only `one_shot.mli`; `concurrency_boundary.ml` also compiles it with only the libraries' `.cmi` (and `.cmx`) files present. `(n : int) -> {r : int | r = n}` names the argument and refines the result: `{r : int | p}` is `int` restricted to values satisfying `p`. The channel's payload type is the singleton `{v : int | v = n}`. The checker proves `n` has that type at `send`, and the result of `recv` has it, which proves the result type of `roundtrip`. The test runs in bytecode and native code.
+
+@code testsuite/tests/vox/one_shot_public_client.ml "let roundtrip" "One_shot.recv rx"
+
+## A rejected program
+
+Sending a value that does not satisfy the payload refinement is a type error. `C` is `One_shot`, and the `[%%expect]` block holds the compiler's message as the test records it.
+
+@code testsuite/tests/vox/one_shot_rejected.ml "let bad_value () =" "|}]"
+
+The same test rejects nine more programs: sending or receiving twice on one endpoint, using a receiver as a sender, claiming `n = 42` for a receive at plain `int`, using an endpoint after sending it as a payload, sending an `int ref`, reading the hidden `cell` field, and taking from an empty `Unique_cell.Slot` or filling one twice. `concurrency_boundary.ml` compiles 15 more programs against the public `.cmi` files only and requires each to fail with its exact error; four are about channels (a reused sender, a false payload, a false buffer receipt and a hidden module), the rest about locks.
 
 ## Reproduce
 

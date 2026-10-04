@@ -404,7 +404,7 @@ Line 4, characters 41-55:
 4 |   V.find_opt r.#table r.#view 1 (borrow_ changed.#token);;
                                              ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_verified_flat_hashtbl.mli", line 158, characters 37-65:
+File "vox_verified_flat_hashtbl.mli", line 126, characters 37-65:
   The refinement is stated here.
 |}]
 
@@ -417,7 +417,7 @@ Line 4, characters 41-46:
 4 |   V.find_opt r.#table r.#view 1 (borrow_ empty);;
                                              ^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_verified_flat_hashtbl.mli", line 158, characters 37-65:
+File "vox_verified_flat_hashtbl.mli", line 126, characters 37-65:
   The refinement is stated here.
 |}]
 

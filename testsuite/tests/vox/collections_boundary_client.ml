@@ -51,13 +51,39 @@ let (set_commutes @ total) (source : Avl_sets.t) (a : int) (b : int) :
   in
   Avl_sets.extensional left right members
 
+let (set_duplicate_size @ total) (source : Avl_sets.t) (value : int) :
+    {u : unit | Avl_sets.size (Avl_sets.add value (Avl_sets.add value source))
+      === Avl_sets.size (Avl_sets.add value source)} =
+  let once = Avl_sets.add value source in
+  Avl_sets.lookup_add value value source;
+  Avl_sets.size_add value once
+
+let (set_pair_size @ total) : (first : int) -> (second : int) ->
+    {u : unit | first <> second} @ ghost ->
+    {u : unit | Avl_sets.size
+      (Avl_sets.add second (Avl_sets.add first Avl_sets.empty)) === 2Z} =
+  fun first second different ->
+  different;
+  let empty = Avl_sets.empty in
+  Avl_sets.extensional empty empty (fun _element -> ());
+  Avl_sets.size_zero empty;
+  Avl_sets.lookup_empty first;
+  Avl_sets.size_add first empty;
+  let once = Avl_sets.add first empty in
+  Avl_sets.lookup_empty second;
+  Avl_sets.lookup_add second first empty;
+  Avl_sets.size_add second once
+
 let () =
   let input = [: 3; 1; 3; min_int; max_int; 3 :] in
   let sequential = sort_count false input 3 in
   let parallel = sort_count true input 3 in
   assert (Iarray.to_list sequential = [min_int; 1; 3; 3; 3; max_int]);
   assert (Iarray.to_list parallel = Iarray.to_list sequential);
-  ghost_ (set_commutes Avl_sets.empty 1 2);
+  ghost_ (
+    set_commutes Avl_sets.empty 1 2;
+    set_duplicate_size Avl_sets.empty 1;
+    set_pair_size 1 2 ());
   let present = set_union (Avl_sets.add 1 Avl_sets.empty)
     (Avl_sets.add 2 Avl_sets.empty) 2 in
   assert present;

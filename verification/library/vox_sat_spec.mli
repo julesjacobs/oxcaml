@@ -101,8 +101,7 @@ val valid_formula_def : (n : int) -> (formula : formula) ->
 
 (** {2 Size limits} *)
 
-(** [clauses_fit remaining formula]: [formula] has at most [remaining]
-    clauses. *)
+(** For [remaining >= 0], [formula] has at most [remaining] clauses. *)
 val clauses_fit : int -> formula -> bool @@ total
 val clauses_fit_def : (remaining : int) -> (formula : formula) ->
   {u : unit | clauses_fit remaining formula ===
@@ -111,8 +110,8 @@ val clauses_fit_def : (remaining : int) -> (formula : formula) ->
      | _ :: rest -> remaining > 0 && clauses_fit (remaining - 1) rest)}
   @@ total
 
-(** [Some (remaining - length clause)] if that is not negative, else
-    [None]. *)
+(** Consumes one unit per literal; [None] if a literal has no budget.
+    An empty clause returns [Some remaining], even for a negative budget. *)
 val consume_literals : int -> literal list -> int option @@ total
 val consume_literals_def : (remaining : int) -> (clause : literal list) ->
   {u : unit | consume_literals remaining clause ===
@@ -122,8 +121,8 @@ val consume_literals_def : (remaining : int) -> (clause : literal list) ->
        if remaining <= 0 then None
        else consume_literals (remaining - 1) rest)} @@ total
 
-(** [literals_fit remaining formula]: [formula] has at most [remaining]
-    literal occurrences in all. *)
+(** For [remaining >= 0], [formula] has at most [remaining] literal
+    occurrences in all. *)
 val literals_fit : int -> formula -> bool @@ total
 val literals_fit_def : (remaining : int) -> (formula : formula) ->
   {u : unit | literals_fit remaining formula ===

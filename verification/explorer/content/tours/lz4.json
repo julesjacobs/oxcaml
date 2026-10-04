@@ -1,6 +1,5 @@
 {
   "_about": "Demo tour of Vox_lz4. Sources: verification/catalogue/pages/lz4.md (its sources: list is the backbone), research/mastery-20260927/runtime-checks-testing.md section 8 (total classifiers with error values), research/mastery-20260927/refinement-types.md sections 3.3 and 5.3 (labelled and optional dependent binders), verification/library/vox_lz4_review_boundary.md, and the code at HEAD (8479634adc).",
-  "_sources_stop2": "Optional binders: typing/typetexp.ml ('An optional argument's binder denotes the option the caller passed'), typing/typecore.ml (a defaulted optional parameter cannot be named); substitution of Some e / None at application is refinement-types.md 3.3 item 4, observed in testsuite/tests/vox/lz4_boundary.ml (invalid, default, explicit).",
   "id": "lz4",
   "title": "LZ4 block compression",
   "kind": "demo",
@@ -11,6 +10,14 @@
     "The [catalogue page](demo:lz4) states the claim, the trusted base and the scope."
   ],
   "stops": [
+    {
+      "title": "The two relations in the contracts",
+      "path": "verification/library/vox_lz4_spec.ml",
+      "from": "type decoded = (string, decode_error) result",
+      "to": "from_source model))",
+      "lines": "19-42",
+      "text": "`matches_model` runs the decoder model over the wire bytes with fuel equal to their length, requires the capacity to be in range, and compares the model with the value returned: an `Error` must carry the model's error kind, `Invalid_capacity` never matches, and `Ok output` must have the model's length and bytes. The reason and offset inside `Malformed` are left unspecified. `compresses` says that the wire bytes lay out, in the format `wire_matches_plan` fixes, the matches that the compressor model `from_source` chooses. Both are `[@def]` definitions, and the generated lemmas `matches_model_def` and `compresses_def` state their equations for proofs that need the bodies."
+    },
     {
       "title": "Compression and the checked decoder",
       "path": "verification/library/vox_lz4.mli",
@@ -44,14 +51,6 @@
       "text": "This client claims that decoding at capacity 0 never reports a malformed block. The claim is false, since the empty string is a malformed block, and the checker rejects it at the call. The phrases around it test the same contracts from both sides: a claim that `compress` returns its input is rejected, the three uses of `decompress` below are accepted with exactly the facts its refinement gives, and a claim that the default capacity is 0 is rejected. Earlier phrases reject a runtime use of the erased `Vox_string_view.contents` and references to the hidden `Vox_lz4_spec_decode` and `Vox_lz4.C`."
     },
     {
-      "title": "The two relations in the contracts",
-      "path": "verification/library/vox_lz4_spec.ml",
-      "from": "type decoded = (string, decode_error) result",
-      "to": "from_source model))",
-      "lines": "15-36",
-      "text": "`matches_model` runs the decoder model over the wire bytes with fuel equal to their length, requires the capacity to be in range, and compares the model with the value returned: an `Error` must carry the model's error kind, `Invalid_capacity` never matches, and `Ok output` must have the model's length and bytes. The reason and offset inside `Malformed` are left unspecified. `compresses` says that the wire bytes lay out, in the format `wire_matches_plan` fixes, the matches that the compressor model `from_source` chooses. Both are `[@def]` definitions, and the generated lemmas `matches_model_def` and `compresses_def` state their equations for proofs that need the bodies."
-    },
-    {
       "title": "The decoder model: a total classifier",
       "path": "verification/library/vox_lz4_spec_decode_bytes.ml",
       "from": "let[@def] rec (decode_model @ total)",
@@ -72,7 +71,7 @@
       "path": "verification/library/vox_lz4_string_decode.ml",
       "from": "let decode_string : (wire : string) ->",
       "to": "let decoded : decoded = Ok output in",
-      "lines": "270-308",
+      "lines": "270-309",
       "text": "`decode` allocates a raw buffer of `capacity` bytes and runs `decode_sequences`, which returns each malformed case as an error value and whose contract ties its result to a second decoder model, `Vox_lz4_spec_decode.decode_model`, stated over raw memory and the token's heap. `Bytes_proof.decode` relates that model to the pure byte model of the public specification, and `Copy.copy_prefix` copies the decoded prefix into a string. `copy_prefix` is a trusted external, an allocation and a `memcpy` in `runtime/pref.c`; the buffer's `malloc`, `read`, `write` and `free` are the trusted externals of [`raw_memory.mli`](src:verification/library/raw_memory.mli), which check no bounds, so the refinements on their indices are what keep every access in bounds. The `try` releases the buffer before re-raising a failure of the copy, and the comment says why the handler cannot release it itself: the uniqueness analysis does not know that `raise` leaves."
     },
     {
@@ -91,5 +90,6 @@
       "lines": "1-11",
       "text": "[`lz4_boundary.ml`](src:testsuite/tests/vox/lz4_boundary.ml) compiles the codec with both compilers, natively at `-O3`, then compiles the public client with `-dlambda` against the public `.cmi` files, and this program checks the client's Lambda. It must mention no specification module and make exactly two calls into `Vox_lz4`, to `compress` and `decompress_verified`: the ghost call of `roundtrip` is erased. The same test runs the rejected phrases and checks buffer release and finalizer reclamation after simulated `Out_of_memory` exits. Agreement with liblz4 is tested outside the suite by `verification/benchmarks/lz4_interop.py`; the models are the definition of LZ4 here, and nothing proves that they agree with liblz4."
     }
-  ]
+  ],
+  "_sources_stop3": "Optional binders: typing/typetexp.ml ('An optional argument's binder denotes the option the caller passed'), typing/typecore.ml (a defaulted optional parameter cannot be named); substitution of Some e / None at application is refinement-types.md 3.3 item 4, observed in testsuite/tests/vox/lz4_boundary.ml (invalid, default, explicit)."
 }

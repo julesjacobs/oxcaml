@@ -47,6 +47,11 @@ module Dfa_equivalence = struct
       : {word : int list | if compare left right limit === Inequivalent then
           run left word <> run right word else true}) in
     let result : int list Ghost.t = { ghost = witness } in result
+  let (reduce_valid @ total) (source : machine) (limit : int) :
+      {u : unit | match reduce source limit with
+        | None -> true | Some candidate -> valid candidate} =
+    ghost_ (reduce_def source limit; Dfa_proof.reduce_valid source limit);
+    ()
   let (reduce_complete @ total) (source : machine) (limit : int) :
       {u : unit | if valid source && labels_bounded source &&
         0 < limit && limit <= 64 &&

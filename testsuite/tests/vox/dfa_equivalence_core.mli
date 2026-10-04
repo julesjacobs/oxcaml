@@ -19,6 +19,9 @@ module Dfa_equivalence : sig
     {witness : int list Ghost.t | if compare left right limit === Inequivalent then
       run left witness.ghost <> run right witness.ghost else true} @@ total
   val reduce : machine -> int -> machine option @ total @@ total
+  val reduce_valid : (source : machine) -> (limit : int) ->
+    {u : unit | match reduce source limit with
+      | None -> true | Some candidate -> valid candidate} @@ total
   val reduce_complete : (source : machine) -> (limit : int) ->
     {u : unit | if valid source && labels_bounded source &&
       0 < limit && limit <= 64 &&

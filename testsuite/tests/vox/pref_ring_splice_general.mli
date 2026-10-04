@@ -1,6 +1,8 @@
 open Pref_ring
 open Pref_ring_general
 
+(** {1 Model definitions} *)
+
 val spliced : node option Pref.heap @ immutable -> node @ immutable -> node @ immutable ->
   node @ immutable -> node @ immutable -> node @ immutable -> node @ immutable -> node option Pref.heap @ ghost @@ total
 val spliced_def : (h : node option Pref.heap) @ immutable -> (left : node) @ immutable ->
@@ -9,6 +11,8 @@ val spliced_def : (h : node option Pref.heap) @ immutable -> (left : node) @ imm
   {u : unit | spliced h left first final right destination_left destination_right ===
     (ghost_ (connected (connected (connected h left right) destination_left first)
       final destination_right))} @@ total
+
+(** {1 Operations with explicit ownership} *)
 
 val splice : (s : node) @ immutable ghost -> (t : node) @ immutable ghost ->
     (prefix : node list) @ immutable ghost -> (first : node) @ immutable ->
@@ -34,6 +38,8 @@ val splice : (s : node) @ immutable ghost -> (t : node) @ immutable ghost ->
 type paired = #{source : node @@ aliased; destination : node @@ aliased;
   source_nodes : node list @@ aliased ghost; destination_nodes : node list @@ aliased ghost;
   state : node option Pref.token}
+
+(** {1 Owned pair of rings} *)
 
 module Owned : sig
   type t : value & value & void & void & void

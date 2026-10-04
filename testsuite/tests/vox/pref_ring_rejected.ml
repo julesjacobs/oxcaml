@@ -34,7 +34,7 @@ Line 16, characters 34-35:
 16 |     let t = remove s left s right t in t
                                        ^
 Error: Refinement could not be proved (counterexample)
-File "pref_ring.mli", line 169, characters 9-29:
+File "pref_ring.mli", line 187, characters 9-29:
   The refinement is stated here.
 |}, Principal{|
 Line 9, characters 59-60:

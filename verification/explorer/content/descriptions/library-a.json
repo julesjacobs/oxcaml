@@ -229,7 +229,7 @@
     "what": {
       "short": "Sends ownership of one raw-memory byte to a worker domain over one-shot channels and gets back a receipt that records the byte written.",
       "long": [
-        "An `owned` slot is a `Raw_memory` block, an in-bounds index and a ghost token that owns that byte. `fill` writes a byte and returns a `filled` receipt, whose refinement says the token's heap holds exactly `expected` at that location. `dispatch` creates two `One_shot` channels, spawns a domain that receives the job, fills the byte and sends the receipt back, and returns the pending answer with the domain handle; `read_receipt` reads the byte back and proves it equals `expected`.",
+        "An owned slot is a raw-memory block, an in-bounds index and a ghost token that owns that byte. `fill` writes the byte and returns a receipt, preserving the rest of the owned heap. `dispatch` sends a slot to a worker and returns a one-shot receiver for its filled receipt. `read_receipt` reads the promised value and returns the slot with its heap unchanged.",
         "The code is verified against the `One_shot`, `Raw_memory` and `Ghost_pref` contracts. It is the byte-buffer protocol of [the one-shot channel demo](demo:one-shot-channels), run by `testsuite/tests/vox/channel_buffer_demo.ml`."
       ]
     },
@@ -238,17 +238,15 @@
         "title": "A receipt carries the written byte",
         "from": "type owned : value mod portable contended = {s : slot | 0 <= s.index",
         "to": "  | _ -> false}",
-        "lines": "11-19",
         "kind": "what",
         "text": "`owned` ties the ghost permission to the byte's location; `filled` adds that the owned heap binds it to `Some expected`. Both are refinement types, so they cross domains as channel payloads with their facts intact."
       },
       {
         "title": "Channel types refined by the call's arguments",
         "from": "let dispatch : (block : M.t) ->",
-        "to": "  { answer; worker }",
-        "lines": "45-68",
+        "to": "{ answer; worker }",
         "kind": "what",
-        "text": "The local module `Protocol` refines the job and reply types by this call's `block`, `index` and `value`, so the worker must return a receipt for exactly that byte and value. The worker domain is spawned with `Domain.Safe.spawn`; joining it is left to the caller through `worker`."
+        "text": "The local `Protocol` ties each job and reply to this call’s block, index and value. The returned receipt owns the selected byte and states its value. The caller receives it with `C.recv` and joins the worker through `worker`."
       }
     ]
   },
@@ -1194,7 +1192,7 @@
       "short": "The top of the LZ4 specification: the error types and the two relations the public contracts use, matches_model for decoding and compresses for compression.",
       "long": [
         "The entry point of the [LZ4](demo:lz4) specification and the first of the ten files a reviewer must read to know what `Vox_lz4`'s contracts mean. It defines the public error types (`malformed`, `decode_error` with `Malformed`, `Output_limit`, `Invalid_capacity`), the result type `decoded`, and two `let[@def]` relations, each of which also yields a `_def` equation lemma for proofs.",
-        "`matches_model wire capacity result` runs `Vox_lz4_spec_decode_bytes.decode_model` on the wire's contents (input position 0, no previous match, fuel equal to the wire length, output count 0) and requires the capacity to lie in 0 to 4,194,304, the result's error kind to equal the model's status, and on `Ok output` the string length to equal the model's count and every byte to agree via `matches_bytes`. The `malformed` reason and position are left unconstrained. `compresses source wire` is false above 4,194,304 source bytes and otherwise says that the wire is exactly the layout (`Vox_lz4_spec_wire.wire_matches_plan`) of the plan chosen by `Vox_lz4_spec_scan.from_source`.",
+        "`matches_model wire capacity result` uses `Vox_lz4_spec_decode_bytes.decode_block` on the wire's contents and requires the capacity to lie in 0 to 4,194,304, the result's error kind to equal the model's status, and on `Ok output` the string length to equal the model's count and every byte to agree via `matches_bytes`. The `malformed` reason and position are left unconstrained. `compresses source wire` is false above 4,194,304 source bytes and otherwise says that the wire is exactly the layout (`Vox_lz4_spec_wire.wire_matches_plan`) of the plan chosen by `Vox_lz4_spec_scan.from_source`.",
         "Both relations are ghost definitions: the verifier checks that they are total and well typed, and their meaning is what the reviewer accepts as the definition of LZ4 here. [vox_lz4.mli](src:verification/library/vox_lz4.mli) states its contracts in terms of these two relations."
       ]
     },
@@ -1203,7 +1201,7 @@
         "title": "The decoder relation",
         "from": "let[@def] (matches_model @ total)",
         "to": "model.count model.reversed)",
-        "lines": "17-30",
+        "lines": "21-33",
         "kind": "what",
         "text": "The public decoder contract. Only the error kind is compared with the model, so `Malformed`'s reason and position are unspecified; `Invalid_capacity` never satisfies the relation, and a successful result must have the model's length and bytes."
       },
@@ -1211,7 +1209,7 @@
         "title": "The compression relation",
         "from": "let[@def] (compresses @ total)",
         "to": "Vox_lz4_spec_scan.from_source model))",
-        "lines": "32-36",
+        "lines": "35-42",
         "kind": "what",
         "text": "Compression is specified as byte identity with the wire layout of one plan, the compressor model's `from_source`. Any other valid encoding of the source fails this relation."
       }
@@ -1248,7 +1246,7 @@
     "what": {
       "short": "LZ4 specification: the decoder model, a total function giving status, byte count and the decoded bytes (in reverse) for every input block and capacity.",
       "long": [
-        "The decoder half of the [LZ4](demo:lz4) specification, and the file `Vox_lz4_spec.matches_model` calls. `decode_model` walks the block one sequence at a time and returns a `model_result` of `kind`, `count` and the ghost list `reversed` of output bytes, most recent first. Helpers: `at_distance` (the byte `distance` positions back), `copy_bytes` (a match copy, one byte at a time, so overlapping copies read bytes they just wrote), `literal_bytes`, and `matches_bytes`, which compares a reversed byte list with the first `count` elements of an array.",
+        "The decoder half of the [LZ4](demo:lz4) specification, and the file `Vox_lz4_spec.matches_model` calls. `decode_block` fixes the initial decoder state; its worker `decode_model` walks the block one sequence at a time and returns a `model_result` of `kind`, `count` and the ghost list `reversed` of output bytes, most recent first. Helpers: `at_distance` (the byte `distance` positions back), `copy_bytes` (a match copy, one byte at a time, so overlapping copies read bytes they just wrote), `literal_bytes`, and `matches_bytes`, which compares a reversed byte list with the first `count` elements of an array.",
         "Every decision of a decoder is fixed here: an empty or exhausted input is `Malformed`; a length past 4,194,304 or a literal or match run that does not fit the capacity is `Output_limit`; a truncated length, literal run or offset, a zero offset or one reaching before the output start is `Malformed`. The last sequence must have a zero low nibble and, if the block has a match, at least five literals and a last match that starts at least 12 bytes before the end. These are ghost definitions checked for totality; the reviewer accepts them as the meaning of decoding.",
         "The implementation is proved against the heap model in [vox_lz4_spec_decode.ml](src:verification/library/vox_lz4_spec_decode.ml), which has the same control structure; `Vox_lz4_decode_bytes_proof` relates the two models."
       ]
@@ -1274,7 +1272,7 @@
         "title": "Observation of the output",
         "from": "let[@def] rec (matches_bytes @ total)",
         "to": "&& matches_bytes values (count - 1) rest)",
-        "lines": "94-103",
+        "lines": "98-107",
         "kind": "what",
         "text": "Relates the reversed model list to an output array: the list's head is element `count - 1`, and the list has exactly `count` elements."
       }
@@ -1282,9 +1280,9 @@
   },
   "verification/library/vox_lz4_spec_bytes.ml": {
     "what": {
-      "short": "LZ4 specification: bounded source access, length-extension byte counts and contents, literal tokens and per-byte wire predicates.",
+      "short": "LZ4 specification: bounded source access, source-distance equality, length extensions, literal tokens and per-byte wire predicates.",
       "long": [
-        "Part of the ten-file [LZ4](demo:lz4) specification, used by the wire layout in `vox_lz4_spec_wire.ml`. It defines `source_at` (an `option`-valued bounded read), `literal_token` (the token of a final literal run), `extension_count` (how many length-extension bytes a remaining length needs: one per full 255, plus a final byte), `extension_bytes` (the wire holds 255s and then the remainder), `literal_bytes` (the wire copies a range of the source) and `wire_byte` (the wire holds a given byte at a position).",
+        "Part of the ten-file [LZ4](demo:lz4) specification, used by the wire layout in `vox_lz4_spec_wire.ml`. It defines `source_at` (an `option`-valued bounded read), `literal_token` (the token of a final literal run), `extension_count` (how many length-extension bytes a remaining length needs: one per full 255, plus a final byte), `extension_bytes` (the wire holds 255s and then the remainder), `literal_bytes` (the wire copies a range of the source) and `wire_byte` (the wire holds a given byte at a position). `source_matches_distance source index distance n` compares the source observations at `index + k` and `index + k - distance` for each of the next `n` positions.",
         "`same_char` is trusted: an `external ... = \"%eq\"` declared total whose contract says it returns `left === right`. The other definitions are checked; the `extension_count` refinement bounds are proved."
       ]
     },
@@ -1361,7 +1359,7 @@
       "short": "LZ4 specification: a plan is a list of matches (position, distance, length), and valid_plan states LZ4's constraints on each match.",
       "long": [
         "Part of the ten-file [LZ4](demo:lz4) specification. `sequence` is a record `{position; distance; length}`, and `plan` is `End | Sequence of sequence * plan` (`[@@inductive]`, so the verifier can reason about it by structure). Literal runs are implicit: the literals of a sequence are the source bytes from the previous match's end (the `anchor`) to its `position`.",
-        "`valid_plan source anchor plan` requires, for each match, that it starts at or after the anchor and at most 12 bytes before the end, that its distance is 1 to 65,535 and reaches no earlier than the source start, that its length is at least 4 and leaves the last five bytes as literals, and that the source bytes really repeat at that distance (`Vox_lz4_spec_match.source_matches_distance`). It is a ghost definition checked for totality."
+        "`valid_plan source anchor plan` requires, for each match, that it starts at or after the anchor and at most 12 bytes before the end, that its distance is 1 to 65,535 and reaches no earlier than the source start, that its length is at least 4 and leaves the last five bytes as literals, and that the source bytes really repeat at that distance (`Vox_lz4_spec_bytes.source_matches_distance`). It is a ghost definition checked for totality."
       ]
     },
     "notes": [
@@ -1377,26 +1375,18 @@
   },
   "verification/library/vox_lz4_spec_match.ml": {
     "what": {
-      "short": "LZ4 specification: byte equality at a distance, the maximal match search, candidate validation (choose_match) and the four-byte multiplicative hash.",
+      "short": "LZ4 specification: maximal match search, candidate validation and the four-byte multiplicative hash.",
       "long": [
-        "Part of the ten-file [LZ4](demo:lz4) specification; it fixes how the compressor model hashes and matches. `source_matches_distance source index distance n` says the `n` bytes at `index` equal those `distance` bytes earlier. `scan_match` and `match_length` extend a match byte by byte up to a limit and return the maximal length. `choose_match source position limit hint` treats `hint` as a candidate earlier position: it returns `None` if the hint is negative, at or after `position`, more than 65,535 back, or if fewer than 4 bytes match, and otherwise the distance and maximal length. `hash_bytes` packs four bytes little-endian into an `int32`, multiplies by `0x9e3779b1l`, shifts right by 16 and returns the result, so hashes are 16-bit; `hash4` applies it at a position.",
-        "Trusted: the six `int32` externals (`int32_of_int`, `int32_to_int`, `int32_or`, `int32_mul`, `int32_lsl`, `int32_lsr`) are declared total with no contract, so nothing is proved about the values they compute; `hash_bytes` therefore falls back to 0 if the result is outside 0 to 65,535, which keeps its refinement provable, and `choose_match` checks every match against the source bytes, whatever the hash. The rest is checked. The body of `source_matches_distance_extend` is proof evidence that `vox_lz4_review_boundary.md` excludes from the review surface; its signature and termination are checked."
+        "Part of the ten-file [LZ4](demo:lz4) specification; it fixes how the compressor model hashes and matches. The source-distance equality predicate is defined in [`vox_lz4_spec_bytes.ml`](src:verification/library/vox_lz4_spec_bytes.ml). `scan_match` and `match_length` extend a match byte by byte up to a limit and return the maximal length. `choose_match source position limit hint` treats `hint` as a candidate earlier position: it returns `None` if the hint is negative, at or after `position`, more than 65,535 back, or if fewer than 4 bytes match, and otherwise the distance and maximal length. `hash_bytes` packs four bytes little-endian into an `int32`, multiplies by `0x9e3779b1l`, shifts right by 16 and returns the result, so hashes are 16-bit; `hash4` applies it at a position.",
+        "Trusted: the six `int32` externals (`int32_of_int`, `int32_to_int`, `int32_or`, `int32_mul`, `int32_lsl`, `int32_lsr`) are declared total with no contract, so nothing is proved about the values they compute; `hash_bytes` therefore falls back to 0 if the result is outside 0 to 65,535, which keeps its refinement provable, and `choose_match` checks every match against the source bytes, whatever the hash. The rest is checked. The scanner calls the checked extension lemma in [`vox_lz4_match_proof.ml`](src:verification/library/vox_lz4_match_proof.ml) only in ghost code."
       ]
     },
     "notes": [
       {
-        "title": "Excluded proof body",
-        "from": "let rec (source_matches_distance_extend @ total)",
-        "to": "[@@decreases count]",
-        "lines": "11-32",
-        "kind": "what",
-        "text": "The one proof in the specification files: extending a match by one equal byte gives a match one byte longer. The review boundary lists this body as outside the human-review surface; it is ghost code with a checked signature and termination measure and makes no semantic choice."
-      },
-      {
         "title": "Candidate validation",
         "from": "(* The hint can be arbitrary",
         "to": "else Some { distance; length }",
-        "lines": "81-101",
+        "lines": "51-71",
         "kind": "what",
         "text": "The hash table lookup supplies `hint`, but the result's refinement is proved from the source bytes alone. This is why the general round-trip theorem holds for arbitrary hints, and so for any hash function."
       },
@@ -1404,9 +1394,25 @@
         "title": "The hash",
         "from": "let (hash_bytes @ total)",
         "to": "if 0 <= hash && hash < 65536 then hash else 0",
-        "lines": "103-114",
+        "lines": "73-84",
         "kind": "what",
         "text": "A Fibonacci-style multiplicative hash of the little-endian 32-bit word, keeping the top 16 bits. The final range check never changes the value at run time; it exists because the `int32` primitives carry no contract."
+      }
+    ]
+  },
+  "verification/library/vox_lz4_match_proof.ml": {
+    "what": {
+      "short": "Proof that a matching source run extends by one equal byte, used by the LZ4 model and executable scanner.",
+      "long": "`source_matches_distance_extend` is a ghost induction over the existing match length. Its contract uses the source-distance equality predicate from `Vox_lz4_spec_bytes`; it contributes no model definition or scanner choice."
+    },
+    "notes": [
+      {
+        "title": "Extending a matching run",
+        "from": "let rec (source_matches_distance_extend @ total)",
+        "to": "[@@decreases count]",
+        "lines": "3-24",
+        "kind": "what",
+        "text": "The source-distance equality predicate is defined in `Vox_lz4_spec_bytes`. This lemma proves that a matching run extends by one byte when the next source bytes agree; its body is ghost code, checked for its contract and termination."
       }
     ]
   },
@@ -1845,7 +1851,7 @@
           "Bytes_proof.observations",
           "B.release"
         ],
-        "lines": "292-310",
+        "lines": "293-311",
         "kind": "what",
         "text": "On success the used prefix is copied once by the trusted `copy_prefix`, whose `prefix_matches` result `Bytes_proof.observations` converts into the pure model's `matches_bytes`, which is what `matches_model` requires. The buffer is released on every normal exit and before re-raising a copy failure."
       }
@@ -1974,7 +1980,7 @@
     "what": {
       "short": "String versions of the specification's match search and hash (scan_match, match_length, choose_match, hash4), each proved equal to its Vox_lz4_spec_match counterpart.",
       "long": [
-        "Each function reads the input `string` through `Vox_string_view.get` with the ghost `model = V.contents source`, and its result is refined to equal the `Vox_lz4_spec_match` function of the same name (`scan_match`, `match_length`, `choose_match`, `hash4`). `choose_match` also returns the facts the encoder needs: distance from 1 to 65,535 and at most `position`, length from 4 to `limit`, and `source_matches_distance`. `scan_match` uses the lemma `Vox_lz4_spec_match.source_matches_distance_extend`, whose proof body the review boundary document excludes from human review (the compiler still checks it). `hash4` calls `Vox_lz4_spec_match.hash_bytes`, whose `int32` primitives are declared total without contracts.",
+        "Each function reads the input `string` through `Vox_string_view.get` with the ghost `model = V.contents source`, and its result is refined to equal the `Vox_lz4_spec_match` function of the same name (`scan_match`, `match_length`, `choose_match`, `hash4`). `choose_match` also returns the facts the encoder needs: distance from 1 to 65,535 and at most `position`, length from 4 to `limit`, and `source_matches_distance`. `scan_match` uses the lemma `Vox_lz4_match_proof.source_matches_distance_extend`, whose proof body the review boundary document excludes from human review (the compiler still checks it). `hash4` calls `Vox_lz4_spec_match.hash_bytes`, whose `int32` primitives are declared total without contracts.",
         "Verified. On the public path of [the LZ4 demo](demo:lz4): `Vox_lz4_streaming.scan` calls `hash4` and `choose_match`. `Vox_lz4_string_scan` uses it too."
       ]
     },
@@ -2075,7 +2081,7 @@
         "title": "roundtrip: the public theorem",
         "from": "let (roundtrip @ total) :",
         "to": "capacity decoded;",
-        "lines": "387-403",
+        "lines": "388-404",
         "kind": "what",
         "text": "This is the statement exported as `Vox_lz4.roundtrip`. Unfolding `compresses` gives `wire_matches_plan` for the plan `Vox_lz4_spec_scan.from_source`, and `wire_roundtrip` does the rest."
       }
@@ -2203,9 +2209,9 @@
   },
   "verification/library/vox_lz4_review_boundary.md": {
     "what": {
-      "short": "Reviewer's guide to the LZ4 demo: reading order of the ten specification modules, the one excluded proof body, and every trusted primitive and runtime mechanism.",
+      "short": "Review guide to the LZ4 demo: specification modules, separate proof support, and the trusted primitives and runtime mechanisms.",
       "long": [
-        "Documentation for [the LZ4 demo](demo:lz4). It lists the ten semantic modules (`vox_lz4_spec.ml` through `vox_lz4_spec_scan.ml`) in reading order; excludes from human review one compiler-checked proof body, `source_matches_distance_extend` in `vox_lz4_spec_match.ml`; names the transitive semantic primitives (`vox_string_view.mli`, `vox_sequence.mli`, `vox_iarray.mli`, byte conversion in `vox_lz4_spec_parse.ml`, the hash word primitives) and the executable ownership contracts to review (`pref.mli`, `ghost_pref.mli`, `raw_memory.mli`, `borrow_iarray.mli`, `vox_lz4_string_copy.mli`) with their C and backend implementations. It also states the 4 MiB domain, the normal-return scope of the specification, the GC finalizer that reclaims raw buffers after exceptions, and the tests (`lz4_boundary.ml`, `lz4_finalizers.ml`) that check a public-only client.",
+        "Documentation for [the LZ4 demo](demo:lz4). It lists the ten semantic modules (`vox_lz4_spec.ml` through `vox_lz4_spec_scan.ml`) in reading order; locates the checked extension lemma in the separate `vox_lz4_match_proof.ml` module; names the transitive semantic primitives (`vox_string_view.mli`, `vox_sequence.mli`, `vox_iarray.mli`, byte conversion in `vox_lz4_spec_parse.ml`, the hash word primitives) and the executable ownership contracts to review (`pref.mli`, `ghost_pref.mli`, `raw_memory.mli`, `borrow_iarray.mli`, `vox_lz4_string_copy.mli`) with their C and backend implementations. It also states the 4 MiB domain, the normal-return scope of the specification, the GC finalizer that reclaims raw buffers after exceptions, and the tests (`lz4_boundary.ml`, `lz4_finalizers.ml`) that check a public-only client.",
         "Two details differ from the code at HEAD. It calls `Vox_lz4_decode_bytes_proof.initial_observations` the checked equivalence theorem; the decoder invokes the lemmas `decode` and `observations` directly, and `initial_observations` has no caller. It omits the `char_of_byte` external in `vox_lz4_snapshot.ml`, which the public codec never calls and which the catalogue page does list."
       ]
     }
@@ -2697,8 +2703,8 @@
     "what": {
       "short": "Reader's guide to the HTTP demo: review order, the supported request subset, streaming, budget and error conventions, the public laws, and the trust boundary.",
       "long": [
-        "Documentation for [the HTTP parser](demo:http). It gives the order in which a reviewer should read the semantic surface (`vox_http_spec.mli`, `vox_http.mli`, `vox_sequence.mli`, `stdlib/bigint.mli`), describes the supported wire language (request line, header lines, Content-Length framing, every Transfer-Encoding rejected), the 16,384-byte message budget and 8,192-byte body limit, the error precedence, and each public law in prose.",
-        "It also explains the implementation structure of [vox_http.ml](src:verification/library/vox_http.ml): a private forward model carries the grammar and wire proofs, and `Driver` is proved to simulate it. It records the two behaviors that are implemented and tested but stated by no law: `Malformed Invalid_crlf` and `Limit Message_bytes` when the budget runs out before a request completes."
+        "Documentation for [the HTTP parser](demo:http). The review order begins with the grammar in `vox_http_spec.ml`, the pure machine in `vox_http_model.ml` and the contracts in `vox_http.mli`. It describes Content-Length framing, rejection of every Transfer-Encoding, the 16,384-byte message budget, the 8,192-byte body limit and error precedence.",
+        "The public transition specifies CRLF failures and message-budget exhaustion exactly. The guide also explains the private simulation connecting the executable Driver to that model, the derived public laws and the trust boundary."
       ]
     }
   },
@@ -2715,7 +2721,7 @@
         "title": "Framing and its error precedence",
         "from": "let[@def] rec frame_fields",
         "to": "else frame_fields headers None 0",
-        "lines": "91-116",
+        "lines": "96-119",
         "kind": "what",
         "text": "`framing` first rejects any Transfer-Encoding (with a separate error when Content-Length is also present), then `frame_fields` walks the header lines in order: it requires exactly one nonempty Host, parses each Content-Length with `content_length`, and rejects disagreeing repeats. The result is `Length n`, `Bad e` or `Too_large r`; the parser reports exactly this outcome when it reaches the empty line."
       },
@@ -2723,7 +2729,7 @@
         "title": "well_formed",
         "from": "let[@def] rec safe_line",
         "to": "fits 16384 (serialize request)",
-        "lines": "130-153",
+        "lines": "133-156",
         "kind": "what",
         "text": "The predicate the soundness and completeness laws are stated with: a valid request line and header lines with no CR, LF or out-of-range byte, framing that yields `Length n`, a body of exactly `n` bytes, and a serialization of at most 16,384 bytes. `sized` and `fits` count by recursion on the list, so the budget is stated without `Bigint`."
       }
@@ -2731,18 +2737,18 @@
   },
   "verification/library/vox_http_spec.mli": {
     "what": {
-      "short": "The HTTP request grammar stated as one checked equation per definition (token_def, framing_def, well_formed_def and so on), the file a reviewer reads first.",
+      "short": "The HTTP request grammar stated as one checked equation per definition (token_def, framing_def, well_formed_def and so on).",
       "long": [
-        "For each definition in [vox_http_spec.ml](src:verification/library/vox_http_spec.ml) this interface declares the function `@@ total` and a lemma `<name>_def` whose refinement is its defining equation; the types are repeated verbatim. The compiler checks the implementation against it, so the equations are verified facts. `content_lengths_match` is declared with a `bool @ ghost` result, so only proof code can use it.",
-        "The catalogue page and `vox_http.md` put this file first in the review order of [the HTTP parser](demo:http): together with `vox_http.mli` it is the whole semantic surface of the demo's claims."
+        "For each definition in [vox_http_spec.ml](src:verification/library/vox_http_spec.ml) this interface declares the function `@@ total` and a lemma `<name>_def` whose refinement is its defining equation. The compiler checks the implementation against it, so the equations are verified facts. `content_lengths_match` is declared with a `bool @ ghost` result, so only proof code can use it.",
+        "The [HTTP catalogue page](demo:http) shows the shorter definitions from `vox_http_spec.ml`. These checked equations expose the same meanings to clients that see only the interfaces."
       ]
     },
     "notes": [
       {
         "title": "The equation for well_formed",
         "from": "val well_formed_def",
-        "to": "(fits 16384 (serialize request))",
-        "lines": "243-247",
+        "to": "&& fits 16384 (serialize request))} @@ total",
+        "lines": "299-306",
         "kind": "what",
         "text": "The predicate that the public soundness law guarantees for every `Complete request` and that the completeness law `roundtrip` assumes. Every name it mentions has its own `_def` equation earlier in this file."
       }
@@ -2750,27 +2756,18 @@
   },
   "verification/library/vox_http.ml": {
     "what": {
-      "short": "Implementation and proofs of the incremental HTTP parser: a forward reference model, the executable Driver, a simulation proof between them, and the public laws.",
+      "short": "Implementation and proofs of the incremental HTTP parser: the executable Driver simulates the public pure model.",
       "long": [
-        "`Internal` is a forward model: a state `{core; budget}` whose `core` is `Line`, `Body`, `Complete`, `Malformed` or `Limit`, the byte transition `step`, the budgeted `advance`, and `feed`; accumulators grow at the end with `S.append`. Its proofs are the substance of the demo: `accounting` and `suffix_preservation` (exact byte accounting), `chunking_invariance`, the reachable-state invariant `reachable` (built from `valid_core` and `core_wire`) preserved by `feed_reachable`, soundness in `accepted_input`, completeness in `roundtrip` (through the unbudgeted `drain`, `serializer_core_roundtrip` and `feed_matches_drain`), `header_outcome`, and the line-error lemmas. `Reverse` proves the list-reversal facts, including `involution`.",
-        "`Driver` is the code that runs. Its `push` and `consume` are the same machine with line, header and body accumulators consed in reverse and reversed once when complete. `Driver.model` maps a driver state to a model state, `simulation` proves that `consume` followed by `model` equals `Internal.feed` on the model, and `Driver.involution` (`model (model s) === s`) makes `model` injective, which is how equalities such as chunking invariance transfer from the model to driver states. The public `state` is `Internal.state` refined by `good (Driver.model machine)`; `run` executes only `Driver.consume`, and every model and proof call on that path is inside `ghost_`. The public wrappers (`initial`, `feed`, `parse`, `transition`, the observations and the laws) derive each law from its model counterpart through `feed_machine` and `machine_injective`.",
-        "All of it is verified: there are no externals, no `assume_` and no statement without proof. It belongs to [the HTTP parser](demo:http); [vox_http.mli](src:verification/library/vox_http.mli) seals `Internal`, `Reverse` and `Driver`, which `http_private_rejected.ml` checks. `build.sh` verifies this module without `-principal`."
+        "The public pure machine is defined in [vox_http_model.ml](src:verification/library/vox_http_model.ml). `Internal` proves its accounting, request soundness, round-trip and chunking laws. Reachability and storage invariants stay inside this implementation.",
+        "`Driver` runs the parser with reversed accumulators. Its simulation proof connects each result to the forward-order pure machine. Public `feed` executes the driver and guarantees the pure machine’s next state and remaining input. Proof calls on the execution path are erased.",
+        "The [HTTP interface](src:verification/library/vox_http.mli) hides `Internal`, `Reverse` and `Driver`; `http_private_rejected.ml` checks that boundary."
       ]
     },
     "notes": [
       {
-        "title": "The forward model's byte transition",
-        "from": "let[@def] step (core : core @ immutable total)",
-        "to": "else feed (advance state b) bs",
-        "lines": "37-62",
-        "kind": "what",
-        "text": "`step` rejects values outside 0-255, enforces CRLF, and calls `finish_line` at each line end; `advance` charges one budget unit per byte, and `feed` stops at a terminal core or returns `Limit Message_bytes` without consuming the byte when the budget is spent. This model is what the proofs reason about; the running code is `Driver`."
-      },
-      {
         "title": "The reachable-state invariant",
         "from": "let[@def] valid_core core",
         "to": "&& (if observed state.core then core_wire state.core === prefix",
-        "lines": "394-431",
         "kind": "what",
         "text": "`reachable state prefix` says the budget accounts for exactly `prefix`, the accumulated lines and headers are valid, and, while no error has occurred, `core_wire` of the state is the consumed prefix itself. `feed_reachable` preserves it, and `reachable_completion` turns it into `well_formed request && serialize request === prefix` for a completed state."
       },
@@ -2778,7 +2775,6 @@
         "title": "Chunking invariance in the model",
         "from": "let rec (chunking_invariance @ total)",
         "to": "chunking_invariance (advance state b) bs right;",
-        "lines": "253-274",
         "kind": "what",
         "text": "Feeding `left @ right` equals feeding `left` and then the leftover followed by `right`, proved by induction on `left` for every state, including terminal and budget-exhausted ones. The public `chunking_invariance` transfers this to driver states through `feed_machine` and `machine_injective`."
       },
@@ -2789,7 +2785,6 @@
           "let (roundtrip @ total)"
         ],
         "to": "  else ())",
-        "lines": "364-385",
         "kind": "what",
         "text": "For a `well_formed` request, `serializer_core_roundtrip` shows the unbudgeted `drain` reaches `Complete request` on `serialize request`; `feed_matches_drain` shows the budgeted `feed` agrees because the request fits the budget; `chunking_invariance` and terminal preservation then add an arbitrary suffix, which is returned unconsumed."
       },
@@ -2797,7 +2792,6 @@
         "title": "Soundness for arbitrary input",
         "from": "let (accepted_input @ total)",
         "to": "initial_def (); suffix_preservation start input;",
-        "lines": "849-867",
         "kind": "what",
         "text": "From `initial ()` and any input, the reached state is `reachable` for the consumed prefix, so a completed request is `well_formed`, its serialization is exactly the consumed bytes, and it followed by the returned rest is the input. No assumption about where the input came from is involved."
       },
@@ -2805,25 +2799,22 @@
         "title": "Driver: the executable machine",
         "from": "let[@def] push (c : core @ immutable total)",
         "to": "else consume {core = push state.core b",
-        "lines": "1209-1231",
         "kind": "what",
-        "text": "`push` mirrors `Internal.step` with accumulators consed at the head and `Reverse.rev` applied once when a line or body completes; `consume` mirrors `Internal.feed`. The public `feed` runs `consume`, so this is the parser's running code."
+        "text": "`push` mirrors `Model.step` with accumulators consed at the head and `Reverse.rev` applied once when a line or body completes; `consume` mirrors `Model.feed`. The public `feed` runs `consume`, so this is the parser's running code."
       },
       {
         "title": "Simulation of the model by the driver",
         "from": "let rec (simulation @ total)",
         "to": "simulation next bs; ()))",
-        "lines": "1261-1281",
         "kind": "what",
-        "text": "For every driver state and input, `model` of the state `consume` reaches equals the state `Internal.feed` reaches from `model s`, and the leftover inputs are equal; the per-byte step is `step_simulation`. This lemma connects every model theorem to the code that runs."
+        "text": "For every driver state and input, `model` of the state `consume` reaches equals the state `Model.feed` reaches from `model s`, and the leftover inputs are equal; the per-byte step is `step_simulation`. This lemma connects every model theorem to the code that runs."
       },
       {
         "title": "The public feed",
         "from": "let (run @ total) (state : state)",
         "to": "  run state input",
-        "lines": "1473-1493",
         "kind": "what",
-        "text": "`run` executes `Driver.consume` and packs the result into the refined `state` type, whose invariant `good` follows from `feed_good`; the proof calls are all in `ghost_`. Its result satisfies `transition`, the relation whose equation `transition_def` in the interface states accounting, the returned suffix, `processed` and completion soundness."
+        "text": "`run` executes `Driver.consume` and returns its state and untouched suffix. The erased simulation proof establishes the single public contract: these observations equal the result of `Model.feed`."
       }
     ]
   },
@@ -3111,6 +3102,12 @@
       }
     ]
   },
+  "verification/library/vox_sort_cost.mli": {
+    "what": {
+      "short": "Merge-sort comparison budget and logarithmic-height laws, stated separately from their proofs.",
+      "long": "The equations define `height`, `power` and `budget`; `height_bound` and `height_minimal` characterize the ceiling of the base-two logarithm for positive sizes. The implementation proves these laws and supplies the ghost `bounded_int` helper used when splitting credit tokens."
+    }
+  },
   "verification/library/vox_partition.ml": {
     "what": {
       "short": "Private member/representative bindings used to connect the forest proof to the public class-list model.",
@@ -3159,5 +3156,22 @@
     "what": {
       "short": "Proof that binding transitions respect equality of partition observations."
     }
+  },
+  "verification/library/vox_http_model.ml": {
+    "what": {
+      "short": "Pure incremental HTTP semantics: forward-order state, exact byte transitions, budget exhaustion and the untouched input suffix.",
+      "long": [
+        "Defines the semantic machine used by [vox_http.mli](src:verification/library/vox_http.mli). Line grammar and framing come from [vox_http_spec.ml](src:verification/library/vox_http_spec.ml). The executable parser uses reversed accumulators; its simulation proofs remain private in [vox_http.ml](src:verification/library/vox_http.ml)."
+      ]
+    },
+    "notes": [
+      {
+        "title": "The forward model's byte transition",
+        "from": "let[@def] step (core : core @ immutable total)",
+        "to": "else feed (advance state b) bs",
+        "kind": "what",
+        "text": "`step` rejects values outside 0–255, enforces CRLF and calls `finish_line` at each line end. `advance` charges one budget unit per byte; `feed` stops at a terminal state or returns `Limit Message_bytes` without consuming another byte when the budget is spent. The public parser contract specifies exactly this transition and returned suffix."
+      }
+    ]
   }
 }

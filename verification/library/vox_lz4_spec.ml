@@ -1,3 +1,7 @@
+(** Observable behavior of independent raw LZ4 blocks. The decoder relation
+    fixes successful bytes and the error class; diagnostic details are free.
+    The compressor relation fixes the wire bytes of the specified scan. *)
+
 type malformed =
   | Empty_block
   | Truncated_length
@@ -16,9 +20,8 @@ type decoded = (string, decode_error) result
 
 let[@def] (matches_model @ total) (wire : string @ immutable)
     (capacity : int) (result : decoded @ immutable) = ghost_ (
-  let model = Vox_lz4_spec_decode_bytes.decode_model
-    (Vox_string_view.contents wire) 0 (-1)
-    (Iarray.length (Vox_string_view.contents wire)) capacity 0 [] in
+  let model = Vox_lz4_spec_decode_bytes.decode_block
+    (Vox_string_view.contents wire) capacity in
   0 <= capacity && capacity <= 4194304
   && match result with
      | Error (Malformed _) -> model.kind === Vox_lz4_spec_parse.Malformed
@@ -33,4 +36,7 @@ let[@def] (compresses @ total) (source : string @ immutable)
     (wire : string @ immutable) = ghost_ (
   let model = Vox_string_view.contents source in
   if Iarray.length model > 4194304 then false
-  else Vox_lz4_spec_wire.wire_matches_plan model (Vox_string_view.contents wire) 0 0 (Vox_lz4_spec_scan.from_source model))
+  else
+    Vox_lz4_spec_wire.wire_matches_plan model
+      (Vox_string_view.contents wire) 0 0
+      (Vox_lz4_spec_scan.from_source model))

@@ -1,49 +1,11 @@
-(** A flat hash table verified against an abstract finite map.
+(** A mutable flat hash table observed as a finite map of bindings.
+    Keys have kind [logical_data]; values have kind [immutable_data].
 
-    [Make (Key)] is a mutable open-addressing hash table that probes in
-    groups of sixteen slots with SIMD control-byte matching. Each operation's
-    contract states its result in terms of [Map], an abstract finite map
-    from keys (up to [Key.equal]) to values. Keys and values must be
-    [immutable_data]. In contracts, [===] is logical equality at any type
-    and [=] is ordinary equality on integers.
-
-    {2 Ghost state}
-
-    A table is a runtime handle [table : 'a t] together with ghost state,
-    which the compiler checks and then erases:
-
-    - [location table] is the ghost heap location at which tokens record
-      this table's storage. It stays the same for the table's lifetime,
-      including when the storage is rebuilt. The handle itself is immutable
-      and may be aliased.
-    - A view ['a view] is an immutable snapshot of one version of the table.
-      [bindings view] is its contents, [capacity view] its slot count and
-      [version view] its exact storage state.
-    - A token ['a state P.token] is affine ownership of a heap. Reads borrow
-      a token whose heap holds [version view] at [location table]
-      ([current table view heap]). Mutations consume such a token and return
-      a new view and a token whose heap differs only at [location table].
-      [create] takes only a token.
-
-    A view grants no access by itself: an operation accepts it only with a
-    token whose heap holds its [version]. After a mutation, use the returned
-    view. Views and tokens carry no runtime data.
-
-    {2 Normal return and exceptions}
-
-    Each postcondition describes a normal return; exceptional behaviour is
-    not checked. By the code:
-
-    - [find] raises [Not_found] if the key has no binding.
-    - [replace] raises [Invalid_argument] if the table would need more than
-      2{^30} slots.
-    - Any operation can raise [Out_of_memory] or [Stack_overflow], and
-      asynchronous exceptions can arrive as usual.
-
-    A mutation that raises loses the token it consumed, together with any
-    other ownership that token carried: the table can no longer be used.
-    Split off ownership that must survive before the call. Termination,
-    running time, memory reclamation and concurrent use are not specified. *)
+    Handles may be aliased. An erased [view] records the bindings and storage
+    version. Reads borrow an ownership token for that version; mutations
+    consume it and return a new view and token. [current] defines this access
+    requirement. Contracts describe normal return; a mutation that raises
+    consumes its token. *)
 
 module P = Ghost_pref
 module H = P.Heap
@@ -65,6 +27,8 @@ module type Key = sig
 end
 
 module Make (Key : Key) : sig
+  (** {1 Finite-map model} *)
+
   (** Finite maps from keys to values, specified only by the laws below.
       [count] is the number of bindings. [===] compares maps as values:
       maps with the same bindings built by different updates need not be
@@ -106,6 +70,8 @@ module Make (Key : Key) : sig
       (map : 'a t) -> {u : unit | 0Z <= count map} @ ghost @@ total
   end
 
+  (** {1 Table snapshots and ownership} *)
+
   type ('a : immutable_data) t : logical_data with 'a
   type ('a : immutable_data) state : logical_data
     with 'a @@ global many total immutable
@@ -139,6 +105,8 @@ module Make (Key : Key) : sig
     view : 'a view @@ aliased immutable;
     token : 'a state P.token @@ ghost;
   }
+
+  (** {1 Operations} *)
 
   (** A new empty table of capacity 16 at a fresh location. *)
   val create : ('a : immutable_data).

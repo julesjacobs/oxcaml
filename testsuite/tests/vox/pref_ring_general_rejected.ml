@@ -33,7 +33,7 @@ Line 5, characters 24-25:
 5 |     reverse sentinel ns t
                             ^
 Error: Refinement could not be proved (counterexample)
-File "pref_ring_general.mli", line 20, characters 6-32:
+File "pref_ring_general.mli", line 24, characters 6-32:
   The refinement is stated here.
 |}, Principal{|
 Line 3, characters 56-57:
@@ -72,7 +72,7 @@ Line 17, characters 35-40:
 17 |     S.splice s t prefix first rest final suffix destination_prefix
                                         ^^^^^
 Error: Refinement could not be proved (counterexample)
-File "pref_ring_splice_general.mli", line 16, characters 25-46:
+File "pref_ring_splice_general.mli", line 20, characters 25-46:
   The refinement is stated here.
 |}, Principal{|
 Line 10, characters 23-28:
@@ -112,7 +112,7 @@ Line 19, characters 6-22:
 19 |       destination_left destination_suffix state
            ^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "pref_ring_splice_general.mli", line 19, characters 36-67:
+File "pref_ring_splice_general.mli", line 23, characters 36-67:
   The refinement is stated here.
 |}, Principal{|
 Line 11, characters 23-28:
@@ -184,7 +184,7 @@ Line 5, characters 38-43:
 5 |     Owned.insert prefix left suffix 0 state
                                           ^^^^^
 Error: Refinement could not be proved (counterexample)
-File "pref_ring_general.mli", line 84, characters 8-45:
+File "pref_ring_general.mli", line 90, characters 8-45:
   The refinement is stated here.
 |}]
 
@@ -221,7 +221,7 @@ Line 5, characters 33-38:
 5 |     Owned.remove prefix n suffix state
                                      ^^^^^
 Error: Refinement could not be proved (counterexample)
-File "pref_ring_general.mli", line 94, characters 28-71:
+File "pref_ring_general.mli", line 100, characters 28-71:
   The refinement is stated here.
 |}]
 

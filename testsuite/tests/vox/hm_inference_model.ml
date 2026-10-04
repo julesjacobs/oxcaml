@@ -1,9 +1,19 @@
+type variable = Hm_declarative.variable
+
+type ty = Copy_spec.ty =
+  | Variable of variable
+  | Boolean
+  | Word64
+  | List_type of ty
+  | Function of ty * ty
+[@@inductive]
+
 let[@def] rec (substitute @ total)
-    (delta : (Copy_spec.node Pref.t @ immutable total -> Copy_spec.ty @ immutable total) @ total)
-    (ty : Copy_spec.ty @ immutable) =
+    (delta : (variable @ immutable total -> ty @ immutable total) @ total)
+    (ty : ty @ immutable) =
   match ty with
-  | Copy_spec.Variable p -> delta p
-  | Copy_spec.Boolean -> Copy_spec.Boolean
-  | Copy_spec.Word64 -> Copy_spec.Word64
-  | Copy_spec.List_type a -> Copy_spec.List_type (substitute delta a)
-  | Copy_spec.Function (a, b) -> Copy_spec.Function (substitute delta a, substitute delta b)
+  | Variable p -> delta p
+  | Boolean -> Boolean
+  | Word64 -> Word64
+  | List_type a -> List_type (substitute delta a)
+  | Function (a, b) -> Function (substitute delta a, substitute delta b)

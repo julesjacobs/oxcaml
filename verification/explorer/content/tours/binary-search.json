@@ -11,44 +11,46 @@
   ],
   "stops": [
     {
-      "title": "The interface: searches specified by the elements",
-      "path": "testsuite/tests/vox/sorted_array.mli",
-      "from": "type t : immutable_data",
-      "to": "&& range_spec array value first past} @@ total",
-      "lines": "1-19",
-      "text": "`t` is abstract. `length` and `at` are the observers and also the run-time accessors; `occurs`, `occurs_between`, `range_spec` and `edited` are total functions used in the contracts, and the `_equation` lemmas at the end of the file define them in terms of `length` and `at`. `mem` returns exactly `occurs array value`. `equal_range` returns `(first, past)` such that the elements before `first` are less than the value, those up to `past - 1` equal it, and the rest are greater. The searches are `@@ total`: they terminate without raising, whatever the array."
+      "title": "The pure sequence edit model",
+      "path": "testsuite/tests/vox/sorted_array_model.ml",
+      "from": "module S = Vox_sequence",
+      "span": 9,
+      "text": "Insertion is `take position source` followed by the value and `drop position source`. Removal joins the prefix with the suffix after the removed position. These are pure functions over sequences; the public edit predicates require exact equality of `contents` with these outputs. Position bounds and sortedness constrain the permitted choices."
     },
     {
-      "title": "Updates, and how a client learns that arrays are sorted",
+      "title": "The model and the search contracts",
       "path": "testsuite/tests/vox/sorted_array.mli",
-      "from": "(* Raises [Invalid_argument] if the result would be longer than an array",
-      "to": "{u : unit | at array left <= at array right} @@ total",
-      "lines": "21-45",
-      "text": "`insert` has no precondition. It returns a position and an array one longer, related to the source by `edited`, which `edited_at` unfolds index by index. `remove_at` takes a ghost argument of type `{u : unit | ...}`, a proof that the position is in bounds; a caller passes `()` and the checker proves the predicate. Neither is `@@ total`, and their contracts describe normal return: `insert` raises `Invalid_argument` if the result would be too long. `ordered` is the lemma that exposes sortedness, `at array left <= at array right` for indices in bounds."
+      "from": "val contents :",
+      "to": "&& not (occurs_between array value (index + 1) (length array))} @@ total",
+      "text": "`contents` is the full immutable sequence observation; `contents_length` and `contents_at` tie it to run-time length and indexing. Sortedness is given by `ordered`. The equations for `occurs_between` and `range_spec` give the search meaning: membership, unique equal-value boundaries and first/last matching indices. Insertion and removal are exact sequence equalities to the pure model, with valid positions and length changes."
+    },
+    {
+      "title": "Insertion and removal preserve every other element",
+      "path": "testsuite/tests/vox/sorted_array.mli",
+      "from": "val insert :",
+      "to": "&& not (occurs_between source value 0 position)}",
+      "text": "`insert` returns a valid position and an array whose `contents` equals the model insertion; it may choose any position compatible with sortedness. `remove_at` requires a valid position and returns the model removal. `remove_one` removes the first matching position or returns `None` exactly for absence. `inserted_at` and `removed_at` are derived pointwise consequences; the Boolean element traversal is private proof machinery."
     },
     {
       "title": "A client proof",
       "path": "testsuite/tests/vox/sorted_array_client.ml",
       "from": "let round_trip :",
       "to": "  result",
-      "lines": "29-49",
-      "text": "`round_trip` inserts `value`, removes the element at the returned position, and proves that the element at `index` is unchanged. `length_bounds` gives `0 < length source + 1`, so the position is a valid index of the longer array, and the ghost block applies `edited_at` to the removal and then to the insertion. The same file checks every operation at run time against a list model on all 121 sequences of length at most four over three values, and `insert_twice` shows that repeated insertion needs no proof from the client."
+      "text": "`round_trip` inserts a value and removes the returned position. It proves equality of the entire observed sequence with the source by unfolding the model and using the checked sequence laws for splitting append and composing drops. The derived pointwise lemmas retain its indexed observation guarantee. The client also checks every operation against lists on 121 sequences, including duplicates."
     },
     {
       "title": "A rejected client: a failed search is not membership",
       "path": "testsuite/tests/vox/sorted_array_rejected.ml",
       "from": "let invalid_search_result",
       "to": "The refinement is stated here.",
-      "lines": "39-51",
       "text": "`(() : {u : unit | p})` asks the checker to prove `p` at that point. When `find_first` returns `None` its contract gives `not (occurs source value)`, so the claim that the value occurs is rejected. This expect test compiles `sorted_array.mli` with `-principal` and checks four rejections: this one, removing index 0 from `empty` (the error points at `remove_at`'s ghost bounds argument), using an `int iarray` as a `Sorted_array.t`, and claiming that `insert` puts the new element at position 0."
     },
     {
       "title": "The abstraction: a refined iarray",
       "path": "testsuite/tests/vox/sorted_array.ml",
       "from": "type t = {array : int iarray |",
-      "to": "Arrays.edited source result position value inserting 0 (Iarray.length result)",
-      "lines": "3-28",
-      "text": "Behind the signature, `t` is `int iarray` refined by two facts: the array is sorted, and `length + 1` does not wrap around. Because `t` is abstract, every array a client holds was built here, so each constructor must prove the refinement and every operation may assume it. The specification functions are `let[@def]` definitions over `Sorted_array_proofs.Arrays`, so each has a `_def` lemma, and the exported `_equation` lemmas are proved from those; clients see only the equations. `contents` is a ghost view as a `Vox_sequence.t`, which no operation contract uses."
+      "to": "&& contents result === M.remove (contents source) (Bigint.of_int position))",
+      "text": "The representation is a refined integer array: sorted and with length-plus-one not wrapping. `contents` is the immutable sequence observation. The edit predicates use the pure sequence model; `edited` is a private element traversal used only by `edited_contents` to bridge the existing array-copy proof to exact sequence equality. No client needs its Boolean insertion/deletion flag or recursive suffix invariant."
     },
     {
       "title": "The search, over any predicate",

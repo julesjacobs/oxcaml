@@ -1,5 +1,7 @@
 open Pref_ring
 
+(** {1 Model definitions} *)
+
 val append : node list @ immutable -> node list @ immutable -> node list @ ghost @@ total
 val append_def : (xs : node list) @ immutable -> (ys : node list) @ immutable ->
   {u : unit | append xs ys === (ghost_ (match xs with
@@ -13,6 +15,8 @@ val last : node @ immutable -> node list @ immutable -> node @ ghost @@ total
 val last_def : (fallback : node) @ immutable -> (ns : node list) @ immutable ->
   {u : unit | last fallback ns === (ghost_ (match ns with
     | [] -> fallback | n :: rest -> last n rest))} @@ total
+
+(** {1 Operations with explicit ownership} *)
 
 val reverse : (sentinel : node) @ immutable ->
     (ns : node list) @ immutable ghost ->
@@ -46,6 +50,8 @@ val remove : (sentinel : node) @ immutable ->
 
 type built = { sentinel : node @@ aliased; nodes : node list @@ aliased ghost;
   state : node option Pref.token }
+
+(** {1 Owned ring} *)
 
 module Owned : sig
   type t : (value & void & void) mod logical
@@ -97,7 +103,9 @@ module Owned : sig
         heap next === removed (heap state) (last (sentinel state) prefix) n
           (head suffix (sentinel state))} @ unique
 
-end
+end (* Owned *)
+
+(** {1 Proof support} *)
 
 (** Facts about the ring predicates, shared with [Pref_ring_splice_general].
     [chain h ns] states that consecutive nodes of [ns] are linked both ways. *)

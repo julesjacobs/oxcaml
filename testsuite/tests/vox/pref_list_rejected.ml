@@ -72,7 +72,6 @@ Error: The value "t" has type "Pref_list.node option Pref.token"
            immutable_data.
 |}]
 
-(* Reversal reverses the values; they are not unchanged. *)
 module Unreversed_values = struct
   let (claim @ total) (xs : model @ immutable) :
       {u : unit | contents (rev_append xs Nil) === contents xs} @ ghost =
@@ -89,7 +88,6 @@ Line 3, characters 18-62:
   The refinement is stated here.
 |}]
 
-(* The nodes of a list carry its values in order, not reversed. *)
 module Reversed_nodes = struct
   let (claim @ total) (xs : model @ immutable) :
       {u : unit | node_values (nodes xs) === rev_onto (contents xs) []} @ ghost =

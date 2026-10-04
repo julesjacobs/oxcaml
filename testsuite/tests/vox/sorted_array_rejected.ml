@@ -1,10 +1,12 @@
 (* TEST
  has-z3;
  source_directories = "${test_source_directory}/../../../verification/library";
- readonly_files = "vox_sequence.mli sorted_array.mli";
+ readonly_files = "vox_sequence.mli sorted_array_model.ml sorted_array.mli";
  setup-ocamlc.opt-build-env;
  flags = "-extension refinement_types -principal";
  module = "vox_sequence.mli";
+ ocamlc.opt;
+ module = "sorted_array_model.ml";
  ocamlc.opt;
  module = "sorted_array.mli";
  ocamlc.opt;
@@ -32,7 +34,7 @@ Line 4, characters 51-53:
 4 |   let result = Sorted_array.remove_at source index () in
                                                        ^^
 Error: Refinement could not be proved (counterexample)
-File "sorted_array.mli", line 29, characters 31-55:
+File "sorted_array.mli", line 105, characters 31-55:
   The refinement is stated here.
 |}]
 

@@ -27,7 +27,8 @@ python3 verification/explorer/content.py --show   # also where every range resol
 ```
 
 It checks against the commit `HEAD` (use `--revision REV` for another, or
-`--working-tree` to check patterns against uncommitted source edits). A
+`--working-tree` to check patterns against uncommitted source edits, including
+untracked files that are not ignored). A
 build with an error fails, so a later revision that moves or deletes the
 code a range points at is caught.
 

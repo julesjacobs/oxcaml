@@ -433,7 +433,7 @@
   },
   "verification/library/channel_buffer.mli": {
     "what": {
-      "short": "Part of the one-shot channels demo: a worker domain fills a raw-memory byte it owns and returns the slot's ownership with a receipt through a One_shot channel."
+      "short": "An owned byte, a receipt stating its value, and operations to fill it, dispatch the work, and read the receipt."
     }
   },
   "verification/library/concurrency-boundary.md": {
@@ -470,7 +470,7 @@
   },
   "verification/library/vox_int_sequence.mli": {
     "what": {
-      "short": "Integer sequences: bounds, sortedness, multisets and permutations, with the laws used by the sorting demos."
+      "short": "Integer sorting semantics: adjacent nondecreasing order and preservation of every multiplicity, followed by derived bounds and update lemmas."
     }
   },
   "verification/library/vox_iarray.mli": {
@@ -516,7 +516,7 @@
   },
   "verification/library/vox_merge_sort.mli": {
     "what": {
-      "short": "Merge sort over a total preorder, proved sorted and a permutation, with at most n times ceil(log2 n) comparisons, each paid with a credit."
+      "short": "Sorting over a total preorder, preserving every multiplicity within a verified credit budget; comparison calls each consume one credit."
     }
   },
   "verification/library/vox_union_find.mli": {
@@ -560,7 +560,7 @@
   },
   "verification/library/vox_http.mli": {
     "what": {
-      "short": "An incremental HTTP/1.1 request parser verified against the grammar in Vox_http_spec, independent of how the input is split into chunks."
+      "short": "An incremental HTTP/1.1 parser whose state and remaining input follow the exact pure machine in Vox_http_model, independently of chunk boundaries."
     }
   },
   "verification/library/vox_rsa.mli": {

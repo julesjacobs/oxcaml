@@ -235,9 +235,13 @@ class Parser:
 
 def closure(source, parser, scope):
     """The files reachable from the scope's roots: [(path, raw, syntax)]."""
-    listed = subprocess.run(['git', '-C', str(source.root), 'ls-tree', '-r', '--name-only',
-                             source.commit, '--', *SEARCHED],
+    listing = (['ls-files', '--cached', '--others', '--exclude-standard']
+               if source.working_tree
+               else ['ls-tree', '-r', '--name-only', source.commit])
+    listed = subprocess.run(['git', '-C', str(source.root), *listing, '--', *SEARCHED],
                             check=True, capture_output=True, text=True).stdout.splitlines()
+    if source.working_tree:
+        listed = [p for p in listed if (source.root / p).is_file()]
     paths = [p for p in listed if Path(p).suffix in ('.ml', '.mli') and str(Path(p).parent) in SEARCHED]
     index = {}
     for p in paths:

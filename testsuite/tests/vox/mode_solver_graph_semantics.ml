@@ -29,3 +29,11 @@ let[@def] rec (scoped_exists @ total) (count : unit list) depth graph =
   match count with
   | [] -> scoped_graph depth graph
   | _ :: rest -> scoped_exists rest (depth + 1) graph
+
+let[@def] (subsumes @ total) env guard obligations =
+  (not (models (Global :: env) guard)
+   || models_exists [()] (Global :: env) obligations)
+  && (not (models (Regional :: env) guard)
+      || models_exists [()] (Regional :: env) obligations)
+  && (not (models (Local :: env) guard)
+      || models_exists [()] (Local :: env) obligations)

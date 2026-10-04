@@ -3,7 +3,7 @@
   "files": [
     {
       "path": "verification/library/vox_egraph_language_spec.ml",
-      "sha256": "ac2e471a2d3e0b3c477275bddb4ba290586a8ba9506174763e4fc628b15a99b6",
+      "sha256": "e683a9af1b52a2b46997de0dab1094854077ffd197ef91cc6b49387e92f27c19",
       "role": "semantic_definitions",
       "declarations": [
         {
@@ -59,8 +59,8 @@
           "kind": "let",
           "name": "eval",
           "start_line": 56,
-          "end_line": 76,
-          "code": "let[@def] rec (eval @ total) (expr : expr @ immutable)\n    (env : env @ immutable) =\n  match expr with\n  | Int_lit value -> Int_value value\n  | Bool_lit value -> Bool_value value\n  | Int_input -> Int_value env.int_input\n  | Bool_input -> Bool_value env.bool_input\n  | Add (left, right) ->\n    Int_value (as_int (eval left env) + as_int (eval right env))\n  | Eq_int (left, right) ->\n    Bool_value (as_int (eval left env) = as_int (eval right env))\n  | Int_if (condition, yes, no) ->\n    let choose_yes = as_bool (eval condition env) in\n    let yes_value = as_int (eval yes env) in\n    let no_value = as_int (eval no env) in\n    Int_value (if choose_yes then yes_value else no_value)\n  | Bool_if (condition, yes, no) ->\n    let choose_yes = as_bool (eval condition env) in\n    let yes_value = as_bool (eval yes env) in\n    let no_value = as_bool (eval no env) in\n    Bool_value (if choose_yes then yes_value else no_value)"
+          "end_line": 72,
+          "code": "let[@def] rec (eval @ total) (expr : expr @ immutable)\n    (env : env @ immutable) =\n  match expr with\n  | Int_lit value -> Int_value value\n  | Bool_lit value -> Bool_value value\n  | Int_input -> Int_value env.int_input\n  | Bool_input -> Bool_value env.bool_input\n  | Add (left, right) ->\n    Int_value (as_int (eval left env) + as_int (eval right env))\n  | Eq_int (left, right) ->\n    Bool_value (as_int (eval left env) = as_int (eval right env))\n  | Int_if (condition, yes, no) ->\n    Int_value (if as_bool (eval condition env)\n      then as_int (eval yes env) else as_int (eval no env))\n  | Bool_if (condition, yes, no) ->\n    Bool_value (if as_bool (eval condition env)\n      then as_bool (eval yes env) else as_bool (eval no env))"
         }
       ]
     },
@@ -178,7 +178,7 @@
     },
     {
       "path": "verification/library/vox_egraph_derivation_spec.ml",
-      "sha256": "7c12e34cc1fbc231c9f2d9e6e5f76ecea97863f183907f4edfd93c426ce53c8a",
+      "sha256": "3da36ea43ed069323379530de9c5e35b11c6e5a606b2e1be3ce2f7f2167cfd86",
       "role": "semantic_definitions",
       "declarations": [
         {
@@ -227,8 +227,8 @@
           "kind": "let",
           "name": "valid",
           "start_line": 70,
-          "end_line": 95,
-          "code": "let[@def] rec (valid @ total) (rules : R.t @ immutable)\n    (proof : evidence @ immutable) = ghost_ (\n  match proof with\n  | Refl expr -> (match L.sort expr with Some _ -> true | None -> false)\n  | Sym child -> valid rules child\n  | Trans (first, second) ->\n    valid rules first && valid rules second && right first === left second\n  | Add_cong (a, b) ->\n    valid rules a && valid rules b && L.sort (left a) === Some L.Integer &&\n    L.sort (left b) === Some L.Integer\n  | Eq_cong (a, b) ->\n    valid rules a && valid rules b && L.sort (left a) === Some L.Integer &&\n    L.sort (left b) === Some L.Integer\n  | Int_if_cong (c, y, n) ->\n    valid rules c && valid rules y && valid rules n &&\n    L.sort (left c) === Some L.Boolean &&\n    L.sort (left y) === Some L.Integer &&\n    L.sort (left n) === Some L.Integer\n  | Bool_if_cong (c, y, n) ->\n    valid rules c && valid rules y && valid rules n &&\n    L.sort (left c) === Some L.Boolean &&\n    L.sort (left y) === Some L.Boolean &&\n    L.sort (left n) === Some L.Boolean\n  | Rule (index, rule, subst) ->\n    R.lookup_rule rules index === Some rule &&\n    R.rule_valid rule && R.subst_valid rule.vars subst)"
+          "end_line": 92,
+          "code": "let[@def] rec (valid @ total) (rules : R.t @ immutable)\n    (proof : evidence @ immutable) = ghost_ (\n  match proof with\n  | Refl expr -> (match L.sort expr with Some _ -> true | None -> false)\n  | Sym child -> valid rules child\n  | Trans (first, second) ->\n    valid rules first && valid rules second && right first === left second\n  | Add_cong (a, b) | Eq_cong (a, b) ->\n    valid rules a && valid rules b && L.sort (left a) === Some L.Integer &&\n    L.sort (left b) === Some L.Integer\n  | Int_if_cong (c, y, n) ->\n    valid rules c && valid rules y && valid rules n &&\n    L.sort (left c) === Some L.Boolean &&\n    L.sort (left y) === Some L.Integer &&\n    L.sort (left n) === Some L.Integer\n  | Bool_if_cong (c, y, n) ->\n    valid rules c && valid rules y && valid rules n &&\n    L.sort (left c) === Some L.Boolean &&\n    L.sort (left y) === Some L.Boolean &&\n    L.sort (left n) === Some L.Boolean\n  | Rule (index, rule, subst) ->\n    R.lookup_rule rules index === Some rule &&\n    R.rule_valid rule && R.subst_valid rule.vars subst)"
         }
       ]
     },
@@ -654,162 +654,169 @@
     },
     {
       "path": "verification/library/vox_egraph_rule_handle.mli",
-      "sha256": "05374bc7d72515ec232cbc04728aebc6b52e1e0866716ce4c152a79982acb2f9",
+      "sha256": "27b37303913f7911b9e253ddba495950c72a1da8b1437e842fabe30da3f8de6d",
       "role": "public_contracts",
       "declarations": [
         {
           "kind": "module",
           "name": "Preserves",
-          "start_line": 29,
-          "end_line": 29,
+          "start_line": 7,
+          "end_line": 7,
           "code": "module Preserves = Vox_egraph_preservation_spec"
         },
         {
           "kind": "module",
           "name": "R",
-          "start_line": 30,
-          "end_line": 30,
+          "start_line": 8,
+          "end_line": 8,
           "code": "module R = Vox_egraph_rule_spec"
         },
         {
           "kind": "module",
           "name": "Q",
-          "start_line": 31,
-          "end_line": 31,
+          "start_line": 9,
+          "end_line": 9,
           "code": "module Q = Vox_egraph_match_spec"
         },
         {
           "kind": "module",
           "name": "L",
-          "start_line": 32,
-          "end_line": 32,
+          "start_line": 10,
+          "end_line": 10,
           "code": "module L = Vox_egraph_language_spec"
         },
         {
           "kind": "module",
           "name": "Snapshot",
-          "start_line": 33,
-          "end_line": 33,
+          "start_line": 11,
+          "end_line": 11,
           "code": "module Snapshot = Vox_egraph_snapshot_spec"
         },
         {
           "kind": "type",
           "name": "t",
-          "start_line": 35,
-          "end_line": 35,
+          "start_line": 13,
+          "end_line": 13,
           "code": "type t : value mod logical"
         },
         {
           "kind": "val",
           "name": "model",
-          "start_line": 37,
-          "end_line": 37,
+          "start_line": 15,
+          "end_line": 15,
           "code": "val model : t @ local immutable -> Q.graph @ immutable ghost @@ total"
         },
         {
           "kind": "val",
           "name": "rules",
-          "start_line": 38,
-          "end_line": 38,
+          "start_line": 16,
+          "end_line": 16,
           "code": "val rules : t @ local immutable -> R.t @ immutable ghost @@ total"
         },
         {
           "kind": "val",
           "name": "create",
-          "start_line": 40,
-          "end_line": 41,
+          "start_line": 18,
+          "end_line": 19,
           "code": "val create : (input_rules : {rs : R.t | R.valid rs}) @ immutable ->\n    {state : t | (model state).count = 0 && rules state === input_rules} @ unique"
         },
         {
           "kind": "type",
           "name": "admit_result",
-          "start_line": 43,
-          "end_line": 43,
+          "start_line": 21,
+          "end_line": 21,
           "code": "type admit_result = #{id : int option @@ aliased; state : t}"
         },
         {
           "kind": "val",
           "name": "admit",
-          "start_line": 45,
-          "end_line": 52,
-          "code": "val admit : (state : t) @ unique -> (expr : L.expr) @ immutable ->\n    {r : admit_result | rules r.#state === rules state &&\n      Preserves.extends (model state) (model r.#state) &&\n      (model r.#state).count >= (model state).count &&\n      (match r.#id with\n       | None -> L.sort expr === None || (model r.#state).count = 512\n       | Some id -> 0 <= id && id < (model r.#state).count &&\n         Snapshot.origin (model r.#state) id === Some expr)} @ unique"
+          "start_line": 23,
+          "end_line": 29,
+          "code": "val admit : (state : t) @ unique -> (expr : L.expr) @ immutable ->\n    {r : admit_result | rules r.#state === rules state &&\n      Preserves.extends (model state) (model r.#state) &&\n      (match r.#id with\n       | None -> L.sort expr === None || (model r.#state).count = 512\n       | Some id -> 0 <= id && id < (model r.#state).count &&\n         Snapshot.origin (model r.#state) id === Some expr)} @ unique"
         },
         {
           "kind": "module",
           "name": "E",
-          "start_line": 54,
-          "end_line": 54,
+          "start_line": 31,
+          "end_line": 31,
           "code": "module E = Vox_egraph_derivation_spec"
         },
         {
           "kind": "module",
           "name": "Fixed",
-          "start_line": 55,
-          "end_line": 55,
+          "start_line": 32,
+          "end_line": 32,
           "code": "module Fixed = Vox_egraph_fixedpoint_spec"
         },
         {
           "kind": "type",
           "name": "equality",
-          "start_line": 57,
-          "end_line": 57,
+          "start_line": 34,
+          "end_line": 34,
           "code": "type equality = Equal | Not_proved | Invalid_input | Node_limit"
         },
         {
           "kind": "type",
           "name": "query_result",
-          "start_line": 58,
-          "end_line": 58,
+          "start_line": 35,
+          "end_line": 35,
           "code": "type query_result = #{status : equality; state : t; proof : E.evidence option @@ ghost aliased}"
         },
         {
           "kind": "val",
           "name": "query",
-          "start_line": 60,
-          "end_line": 69,
+          "start_line": 37,
+          "end_line": 46,
           "code": "val query : (state : t) @ unique -> (left : L.expr) @ immutable -> (right : L.expr) @ immutable ->\n    {r : query_result | rules r.#state === rules state &&\n      Preserves.extends (model state) (model r.#state) &&\n      (match r.#status, r.#proof with\n       | Equal, Some proof -> E.valid (rules state) proof &&\n         E.left proof === left && E.right proof === right\n       | Not_proved, None -> true\n       | Invalid_input, None -> L.sort left === None || L.sort right === None\n       | Node_limit, None -> (model r.#state).count = 512\n       | _ -> false)} @ unique"
         },
         {
           "kind": "type",
           "name": "saturation_status",
-          "start_line": 71,
-          "end_line": 71,
+          "start_line": 48,
+          "end_line": 48,
           "code": "type saturation_status = Fixed_point | Saturation_node_limit | Search_limit | Rebuild_limit | Round_limit"
         },
         {
           "kind": "type",
           "name": "saturation_result",
-          "start_line": 72,
-          "end_line": 72,
+          "start_line": 49,
+          "end_line": 49,
           "code": "type saturation_result = #{status : saturation_status; fuel : int; state : t}"
         },
         {
           "kind": "val",
           "name": "saturate",
-          "start_line": 74,
-          "end_line": 83,
+          "start_line": 51,
+          "end_line": 60,
           "code": "val saturate : (state : t) @ unique -> (rounds : int) -> (rebuild_passes : int) ->\n    (fuel : {f : int | 0 <= f && f <= 4611686018427387903}) ->\n    {r : saturation_result | rules r.#state === rules state &&\n      Preserves.extends (model state) (model r.#state) &&\n      0 <= r.#fuel && r.#fuel <= fuel &&\n      (match r.#status with\n       | Fixed_point -> Fixed.fixed (model r.#state) (rules state)\n       | Saturation_node_limit -> (model r.#state).count = 512\n       | Search_limit -> r.#fuel = 0\n       | Rebuild_limit | Round_limit -> true)} @ unique"
-        },
-        {
-          "kind": "val",
-          "name": "preserved_origin",
-          "start_line": 85,
-          "end_line": 87,
-          "code": "val preserved_origin : (before : Q.graph) @ immutable -> (after : Q.graph) @ immutable -> (id : int) ->\n    {u : unit | Preserves.extends before after && 0 <= id && id < before.count} ->\n    {u : unit | Snapshot.origin before id === Snapshot.origin after id} @ ghost @@ total"
         },
         {
           "kind": "type",
           "name": "class_result",
-          "start_line": 89,
-          "end_line": 89,
+          "start_line": 62,
+          "end_line": 62,
           "code": "type class_result = #{equal : bool; state : t; proof : E.evidence option @@ ghost aliased}"
         },
         {
           "kind": "val",
           "name": "same_class",
-          "start_line": 91,
-          "end_line": 100,
-          "code": "val same_class : (state : t) @ unique ->\n    (a : {i : int | 0 <= i && i < (model state).count}) ->\n    (b : {i : int | 0 <= i && i < (model state).count}) ->\n    {r : class_result | model r.#state === model state && rules r.#state === rules state &&\n      r.#equal = Q.same (model state) a b &&\n      (match r.#proof with\n       | None -> not r.#equal\n       | Some proof -> r.#equal && E.valid (rules state) proof &&\n         Snapshot.origin (model state) a === Some (E.left proof) &&\n         Snapshot.origin (model state) b === Some (E.right proof))} @ unique @@ total"
+          "start_line": 64,
+          "end_line": 75,
+          "code": "val same_class : (state : t) @ unique ->\n    (a : {i : int | 0 <= i && i < (model state).count}) ->\n    (b : {i : int | 0 <= i && i < (model state).count}) ->\n    {r : class_result | model r.#state === model state && rules r.#state === rules state &&\n      r.#equal = Q.same (model state) a b && (a <> b || r.#equal) &&\n      (match r.#proof with\n       | None -> not r.#equal\n       | Some proof -> r.#equal && E.valid (rules state) proof &&\n         Snapshot.origin (model state) a === Some (E.left proof) &&\n         Snapshot.origin (model state) b === Some (E.right proof))} @ unique @@ total\n\n(* Observation lemmas. *)"
+        },
+        {
+          "kind": "val",
+          "name": "model_bounds",
+          "start_line": 77,
+          "end_line": 82,
+          "code": "val model_bounds :\n    (state : t) @ local immutable total ghost forkable unyielding ->\n    {u : unit | 0 <= (model state).count && (model state).count <= 512\n      && (model state).count <= Iarray.length (model state).nodes\n      && (model state).count <= Iarray.length (model state).classes\n      && R.valid (rules state)} @ ghost @@ total"
+        },
+        {
+          "kind": "val",
+          "name": "preserved_origin",
+          "start_line": 84,
+          "end_line": 86,
+          "code": "val preserved_origin : (before : Q.graph) @ immutable -> (after : Q.graph) @ immutable -> (id : int) ->\n    {u : unit | Preserves.extends before after && 0 <= id && id < before.count} ->\n    {u : unit | Snapshot.origin before id === Snapshot.origin after id} @ ghost @@ total"
         }
       ]
     }

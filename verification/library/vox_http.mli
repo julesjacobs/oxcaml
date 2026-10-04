@@ -18,6 +18,7 @@
 open Vox_http_spec
 
 module S := Vox_sequence
+module Model = Vox_http_model
 
 type state : logical_data
 
@@ -26,20 +27,58 @@ type result : immutable_data mod total = { state : state; rest : bytes }
 
 (** {2 Observations} *)
 
+(** Forward-order semantic state; storage and simulation invariants are private. *)
+val model : state -> Model.state @ ghost @@ total
 val status : state -> status @@ total
 
-(** The number of bytes spent on the current request, at most 16,384. *)
+(** Bytes spent on the current request, at most 16,384. *)
 val total_consumed : state -> int @@ total
-
-(** The bytes consumed between two states. *)
 val consumed : state -> state -> int @@ total
+
+(** Consumed bytes, or [[]] after an error. *)
+val processed : state -> bytes @ ghost @@ total
+
+(** {2 Parsing} *)
+
+val initial : unit ->
+  {state : state | status state === Incomplete
+    && total_consumed state = 0 && processed state === []
+    && model state === Model.initial ()} @@ total
+
+(** Feed one chunk according to the pure incremental model. *)
+val feed : (state : state) -> (input : bytes) ->
+  {result : result | let answer = Model.feed (model state) input in
+    model result.state === answer.state && result.rest === answer.rest}
+  @@ total
+
+(** Parses a request from the start of [input]: [feed (initial ()) input],
+    with the facts about a completed request stated directly. *)
+val parse : (input : bytes) ->
+  {result : result |
+    result === feed (initial ()) input
+    && (match status result.state with
+        | Complete request -> well_formed request
+          && S.take (Bigint.of_int (consumed (initial ()) result.state)) input
+            === serialize request
+          && input === S.append (serialize request) result.rest
+        | _ -> true)} @@ total
+
+(** {2 Derived observation laws} *)
+
+val status_equation : (state : state) ->
+  {u : unit | status state === Model.status (model state).core} @ ghost @@ total
+
+val total_consumed_equation : (state : state) ->
+  {u : unit | total_consumed state = 16384 - (model state).budget} @ ghost
+  @@ total
+
 val consumed_def : (before : state) -> (after : state) ->
   {u : unit | consumed before after ===
     total_consumed after - total_consumed before} @@ total
 
-(** The bytes consumed for the current request, or [[]] after an error.
-    Erased: it exists only in proofs. *)
-val processed : state -> bytes @ ghost @@ total
+val processed_equation : (state : state) ->
+  {u : unit | processed state === Model.core_wire (model state).core} @ ghost
+  @@ total
 
 (** What the observations mean in every state. *)
 val state_sound : (state : state) ->
@@ -51,59 +90,6 @@ val state_sound : (state : state) ->
           && serialize request === processed state
           && S.length (processed state) === Bigint.of_int (total_consumed state)
         | Malformed _ | Limit _ -> processed state === [])} @ ghost @@ total
-
-(** {2 Parsing} *)
-
-val initial : unit ->
-  {state : state | status state === Incomplete
-    && total_consumed state = 0 && processed state === []} @@ total
-
-(** [transition state input result]: what one call of [feed] guarantees.
-    It consumes a prefix of [input] and returns the rest, stays within the
-    budget, consumes all of [input] unless it reaches a terminal status,
-    extends [processed] by the consumed bytes while no error occurs, and
-    completes only with a [well_formed] request whose serialization is
-    [processed]. *)
-val transition : state -> bytes -> result -> bool @ ghost @@ total
-val transition_def : (state : state) -> (input : bytes) -> (result : result) ->
-  {u : unit | transition state input result === ghost_ (
-    total_consumed state <= total_consumed result.state
-    && total_consumed result.state <= 16384
-    && S.length input === Bigint.add
-      (Bigint.of_int (consumed state result.state)) (S.length result.rest)
-    && S.drop (Bigint.of_int (consumed state result.state)) input
-      === result.rest
-    && S.append
-      (S.take (Bigint.of_int (consumed state result.state)) input)
-      result.rest === input
-    && (match status result.state with
-        | Incomplete -> result.rest === [] | _ -> true)
-    && (match status result.state with
-        | Incomplete | Complete _ -> processed result.state ===
-            S.append (processed state)
-              (S.take (Bigint.of_int (consumed state result.state)) input)
-        | Malformed _ | Limit _ -> true)
-    && (match status result.state with
-        | Complete request -> well_formed request
-          && serialize request === processed result.state
-        | _ -> true))} @@ total
-
-(** Feeds one chunk. *)
-val feed : (state : state) -> (input : bytes) ->
-  {result : result | transition state input result} @@ total
-
-(** Parses a request from the start of [input]: [feed (initial ()) input],
-    with the facts about a completed request stated directly. *)
-val parse : (input : bytes) ->
-  {result : result |
-    result === feed (initial ()) input
-    && transition (initial ()) input result
-    && (match status result.state with
-        | Complete request -> well_formed request
-          && S.take (Bigint.of_int (consumed (initial ()) result.state)) input
-            === serialize request
-          && input === S.append (serialize request) result.rest
-        | _ -> true)} @@ total
 
 (** {2 Laws of [feed]} *)
 

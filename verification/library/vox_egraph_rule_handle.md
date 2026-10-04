@@ -38,6 +38,8 @@ origins, preservation through every public operation, and total `same_class`.
 The latter returns true exactly for equal model class labels and supplies an
 erased valid derivation between their reconstructed origins. A successful
 `query` supplies a derivation between the exact two caller expressions.
+Every id compares equal to itself. `model_bounds` states that the count is
+between 0 and 512, both model arrays cover it, and the rules remain valid.
 
 `Fixed_point` means every typed assignment of allocated IDs (with -1 for unused
 variables) and every allocated root satisfies each supplied rule, and all

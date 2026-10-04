@@ -457,6 +457,26 @@ module List_proofs = struct
         size_nonnegative tail;
         ()
 
+    let rec (size_add_repr @ total) : (element : int) -> (xs : repr) ->
+        {u : unit | if valid xs then size_repr (add_repr element xs) ===
+          (if lookup_repr element xs then size_repr xs
+           else Bigint.add (size_repr xs) 1Z) else true} =
+      fun element xs ->
+      if valid xs then (
+        valid_def xs;
+        add_repr_def element xs;
+        lookup_repr_def element xs;
+        size_repr_def xs;
+        let result = add_repr element xs in
+        size_repr_def result;
+        match xs with
+        | Nil -> ()
+        | Cons (head, tail) ->
+          if element = head then ()
+          else if element < head then lookup_below element head tail
+          else size_add_repr element tail)
+      else ()
+
     let rec (size_zero_repr @ total) :
         (xs : repr) ->
         {u : unit |
@@ -2769,6 +2789,46 @@ module Validity_proofs : sig
         List_proofs.same_repr_reflexive left_elements;
         equal_def left right;
         ()
+
+      let (size_nonnegative @ total) (set : t) :
+          {u : unit | 0Z <= size set} =
+        let tree = set in
+        size_def set;
+        Operations.count_tree_correct tree;
+        List_proofs.size_nonnegative (elements tree)
+
+      let (size_add @ total) : (element : int) -> (set : t) ->
+          {u : unit | size (add element set) ===
+            (if lookup element set then size set
+             else Bigint.add (size set) 1Z)} =
+        fun element set ->
+        let tree = set in
+        let _model_result_tree = Operations.add element tree () in
+        let result = add element set in
+        add_def element set;
+        let result_tree = result in
+        Element_proofs.elements_valid tree ();
+        Element_proofs.lookup_tree_elements element tree ();
+        lookup_def element set;
+        size_def set;
+        size_def result;
+        Operations.count_tree_correct tree;
+        Operations.count_tree_correct result_tree;
+        List_proofs.size_add_repr element (elements tree)
+
+      let (equal_size @ total) (left : t) (right : t) :
+          {u : unit | if equal left right then size left === size right
+            else true} =
+        if equal left right then (
+          let left_tree = left in
+          let right_tree = right in
+          equal_def left right;
+          List_proofs.same_repr_equal (elements left_tree) (elements right_tree);
+          size_def left;
+          size_def right;
+          Operations.count_tree_correct left_tree;
+          Operations.count_tree_correct right_tree)
+        else ()
 
       (* [size] is the length of the element list ([count_tree_correct]).
          [equal set empty] unfolds to [same_repr] of that list and [Nil],

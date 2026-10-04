@@ -10,7 +10,7 @@
  readonly_files += " borrow.mli borrow.ml vox_parallel.mli vox_parallel.ml";
  readonly_files += " functional_queue.mli";
  readonly_files += " functional_queue.ml int_set_intf.mli avl_sets.mli";
- readonly_files += " avl_sets.ml sorted_array_proofs.ml sorted_array.mli";
+ readonly_files += " avl_sets.ml sorted_array_proofs.ml sorted_array_model.ml sorted_array.mli";
  readonly_files += " sorted_array.ml quicksort_model.ml quicksort.mli";
  readonly_files += " quicksort.ml sparse_overlay.mli sparse_overlay.ml";
  {
@@ -82,6 +82,9 @@
    module = "sorted_array_proofs.ml";
    ocamlc.opt;
    flags = "${default_flags}";
+   module = "sorted_array_model.ml";
+   compiler_output2 = "${lib}/sorted_array_model.output";
+   ocamlc.opt;
    compiler_output2 = "${lib}/sorted_array.mli.output";
    module = "sorted_array.mli";
    ocamlc.opt;
@@ -115,7 +118,7 @@
    src = "${lib}/vox_sequence.cmi ${lib}/vox_int_sequence.cmi";
    src += " ${lib}/vox_iarray.cmi ${lib}/borrow.cmi";
    src += " ${lib}/functional_queue.cmi ${lib}/int_set_intf.cmi";
-   src += " ${lib}/avl_sets.cmi ${lib}/sorted_array.cmi";
+   src += " ${lib}/avl_sets.cmi ${lib}/sorted_array_model.cmi ${lib}/sorted_array.cmi";
    src += " ${lib}/quicksort.cmi ${lib}/sparse_overlay.cmi";
    dst = "${lib}.public/";
    compiler_directory_suffix = ".public";
@@ -133,7 +136,7 @@
    binary_modules = "${lib}/vox_sequence ${lib}/vox_int_sequence";
    binary_modules += " ${lib}/vox_iarray ${lib}/borrow ${lib}/vox_parallel";
    binary_modules += " ${lib}/functional_queue ${lib}/avl_sets";
-   binary_modules += " ${lib}/sorted_array_proofs ${lib}/sorted_array";
+   binary_modules += " ${lib}/sorted_array_proofs ${lib}/sorted_array_model ${lib}/sorted_array";
    binary_modules += " ${lib}/quicksort_model ${lib}/quicksort";
    binary_modules += " ${lib}/sparse_overlay";
    all_modules = "queue_client.ml";
@@ -224,7 +227,7 @@
    binary_modules = "${lib}/vox_sequence ${lib}/vox_int_sequence";
    binary_modules += " ${lib}/vox_iarray ${lib}/borrow ${lib}/vox_parallel";
    binary_modules += " ${lib}/functional_queue ${lib}/avl_sets";
-   binary_modules += " ${lib}/sorted_array_proofs ${lib}/sorted_array";
+   binary_modules += " ${lib}/sorted_array_proofs ${lib}/sorted_array_model ${lib}/sorted_array";
    binary_modules += " ${lib}/quicksort_model ${lib}/quicksort";
    binary_modules += " ${lib}/sparse_overlay";
    run-expect;
@@ -299,6 +302,9 @@
    module = "sorted_array_proofs.ml";
    ocamlopt.opt;
    flags = "${default_flags}";
+   module = "sorted_array_model.ml";
+   compiler_output2 = "${lib}/sorted_array_model.output";
+   ocamlopt.opt;
    compiler_output2 = "${lib}/sorted_array.mli.output";
    module = "sorted_array.mli";
    ocamlopt.opt;
@@ -332,13 +338,13 @@
    src = "${lib}/vox_sequence.cmi ${lib}/vox_int_sequence.cmi";
    src += " ${lib}/vox_iarray.cmi ${lib}/borrow.cmi";
    src += " ${lib}/functional_queue.cmi ${lib}/int_set_intf.cmi";
-   src += " ${lib}/avl_sets.cmi ${lib}/sorted_array.cmi";
+   src += " ${lib}/avl_sets.cmi ${lib}/sorted_array_model.cmi ${lib}/sorted_array.cmi";
    src += " ${lib}/quicksort.cmi ${lib}/sparse_overlay.cmi";
    src += " ${lib}/vox_sequence.cmx ${lib}/vox_int_sequence.cmx";
    src += " ${lib}/vox_iarray.cmx ${lib}/borrow.cmx ${lib}/vox_parallel.cmx";
    src += " ${lib}/functional_queue.cmx ${lib}/avl_sets.cmx";
    src += " ${lib}/sorted_array_proofs.cmx";
-   src += " ${lib}/sorted_array.cmx ${lib}/quicksort_model.cmx";
+   src += " ${lib}/sorted_array_model.cmx ${lib}/sorted_array.cmx ${lib}/quicksort_model.cmx";
    src += " ${lib}/quicksort.cmx ${lib}/sparse_overlay.cmx";
    dst = "${lib}.public/";
    compiler_directory_suffix = ".public";
@@ -356,7 +362,7 @@
    binary_modules = "${lib}/vox_sequence ${lib}/vox_int_sequence";
    binary_modules += " ${lib}/vox_iarray ${lib}/borrow ${lib}/vox_parallel";
    binary_modules += " ${lib}/functional_queue ${lib}/avl_sets";
-   binary_modules += " ${lib}/sorted_array_proofs ${lib}/sorted_array";
+   binary_modules += " ${lib}/sorted_array_proofs ${lib}/sorted_array_model ${lib}/sorted_array";
    binary_modules += " ${lib}/quicksort_model ${lib}/quicksort";
    binary_modules += " ${lib}/sparse_overlay";
    all_modules = "queue_client.ml";
@@ -513,6 +519,9 @@
    module = "sorted_array_proofs.ml";
    ocamlc.opt;
    flags = "${principal_flags}";
+   module = "sorted_array_model.ml";
+   compiler_output2 = "${lib}/sorted_array_model.output";
+   ocamlc.opt;
    compiler_output2 = "${lib}/sorted_array.mli.output";
    module = "sorted_array.mli";
    ocamlc.opt;
@@ -538,7 +547,7 @@
    src = "${lib}/vox_sequence.cmi ${lib}/vox_int_sequence.cmi";
    src += " ${lib}/vox_iarray.cmi ${lib}/borrow.cmi";
    src += " ${lib}/functional_queue.cmi ${lib}/int_set_intf.cmi";
-   src += " ${lib}/avl_sets.cmi ${lib}/sorted_array.cmi";
+   src += " ${lib}/avl_sets.cmi ${lib}/sorted_array_model.cmi ${lib}/sorted_array.cmi";
    src += " ${lib}/quicksort.cmi";
    dst = "${lib}.public/";
    compiler_directory_suffix = ".principal.public";
@@ -555,7 +564,7 @@
    binary_modules = "${lib}/vox_sequence ${lib}/vox_int_sequence";
    binary_modules += " ${lib}/vox_iarray ${lib}/borrow ${lib}/vox_parallel";
    binary_modules += " ${lib}/functional_queue ${lib}/avl_sets";
-   binary_modules += " ${lib}/sorted_array_proofs ${lib}/sorted_array";
+   binary_modules += " ${lib}/sorted_array_proofs ${lib}/sorted_array_model ${lib}/sorted_array";
    binary_modules += " ${lib}/quicksort_model ${lib}/quicksort";
    all_modules = "queue_client.ml";
    program = "${lib}.public/queue_client.exe";
@@ -702,6 +711,9 @@
    module = "sorted_array_proofs.ml";
    ocamlopt.opt;
    flags = "${principal_flags}";
+   module = "sorted_array_model.ml";
+   compiler_output2 = "${lib}/sorted_array_model.output";
+   ocamlopt.opt;
    compiler_output2 = "${lib}/sorted_array.mli.output";
    module = "sorted_array.mli";
    ocamlopt.opt;
@@ -727,13 +739,13 @@
    src = "${lib}/vox_sequence.cmi ${lib}/vox_int_sequence.cmi";
    src += " ${lib}/vox_iarray.cmi ${lib}/borrow.cmi";
    src += " ${lib}/functional_queue.cmi ${lib}/int_set_intf.cmi";
-   src += " ${lib}/avl_sets.cmi ${lib}/sorted_array.cmi";
+   src += " ${lib}/avl_sets.cmi ${lib}/sorted_array_model.cmi ${lib}/sorted_array.cmi";
    src += " ${lib}/quicksort.cmi ${lib}/vox_sequence.cmx";
    src += " ${lib}/vox_int_sequence.cmx ${lib}/vox_iarray.cmx";
    src += " ${lib}/borrow.cmx ${lib}/vox_parallel.cmx";
    src += " ${lib}/functional_queue.cmx";
    src += " ${lib}/avl_sets.cmx ${lib}/sorted_array_proofs.cmx";
-   src += " ${lib}/sorted_array.cmx ${lib}/quicksort_model.cmx";
+   src += " ${lib}/sorted_array_model.cmx ${lib}/sorted_array.cmx ${lib}/quicksort_model.cmx";
    src += " ${lib}/quicksort.cmx";
    dst = "${lib}.public/";
    compiler_directory_suffix = ".principal.public";
@@ -750,7 +762,7 @@
    binary_modules = "${lib}/vox_sequence ${lib}/vox_int_sequence";
    binary_modules += " ${lib}/vox_iarray ${lib}/borrow ${lib}/vox_parallel";
    binary_modules += " ${lib}/functional_queue ${lib}/avl_sets";
-   binary_modules += " ${lib}/sorted_array_proofs ${lib}/sorted_array";
+   binary_modules += " ${lib}/sorted_array_proofs ${lib}/sorted_array_model ${lib}/sorted_array";
    binary_modules += " ${lib}/quicksort_model ${lib}/quicksort";
    all_modules = "queue_client.ml";
    program = "${lib}.public/queue_client.exe";
@@ -918,7 +930,7 @@ Line 5, characters 40-43:
 5 |   let _ = Sorted_array.remove_at a zero (u) in ();;
                                             ^^^
 Error: Refinement could not be proved (counterexample)
-File "sorted_array.mli", line 29, characters 31-55:
+File "sorted_array.mli", line 105, characters 31-55:
   The refinement is stated here.
 |}]
 
@@ -1069,7 +1081,7 @@ Line 6, characters 31-37:
 6 |   let _ = Sparse_overlay.get a (zero) in ();;
                                    ^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "sparse_overlay.mli", line 10, characters 43-61:
+File "sparse_overlay.mli", line 18, characters 43-61:
   The refinement is stated here.
 |}]
 

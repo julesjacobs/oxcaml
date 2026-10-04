@@ -144,3 +144,22 @@ let () =
   assert (result = Some (Done 496));
   Printf.printf "boundaries=passed\n"
 ;;
+
+let (allocated_code_valid @ total) program physical :
+    {u : unit | match allocate program physical with
+      | None -> true
+      | Some allocation ->
+        length allocation.code = length program.code
+        && all_valid_instructions physical (length allocation.code)
+             allocation.code} @ ghost =
+  ghost_ (allocation_domain program physical)
+
+let () =
+  assert (observable_equal (Running (0, [1])) (Running (0, [99])));
+  assert (not (observable_equal (Running (0, [1])) (Running (1, [1]))));
+  let unreachable = {registers = 2; inputs = [];
+    code = [Return (Imm 7); Move (1, Imm 9, 1)]} in
+  match allocate unreachable 1 with
+  | None -> assert false
+  | Some allocation ->
+    assert (all_valid_instructions 1 (length allocation.code) allocation.code)

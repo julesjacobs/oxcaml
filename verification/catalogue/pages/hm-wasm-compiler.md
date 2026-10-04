@@ -1,17 +1,21 @@
 title: HM-to-WebAssembly compiler
-blurb: A compiler from the Hindley–Milner language to WebAssembly bytes, proved against a WebAssembly model to emit one valid module that, for every 64-bit input passed at run time, cannot trap and returns only the source program's result on that input; it rejects a closed program of the stated shape that has a type word → word only for reasons that concern the layout and the compiled program, which are not characterized. Checked runs show it compiling eight example programs that then return the right word in the model and in Node.
+blurb: A compiler from a small ML to WebAssembly, proved to emit valid bytes, run safely, and agree with source results, with explicit heap and stack exhaustion.
 status: owner-review
-date: 27 September 2026
+date: 4 October 2026
 sources:
   - testsuite/tests/vox/hmc_compilation.mli — Public interface
   - testsuite/tests/vox/hmc_compilation_model.ml — Layout validity, results, the resource premise and honest exhaustion
   - testsuite/tests/vox/hmc_layout.ml — The memory layout
   - testsuite/tests/vox/hmc_source_semantics.ml — Source semantics: an environment machine
-  - testsuite/tests/vox/hm_interpreter_typing.ml — Source values
+  - testsuite/tests/vox/hmc_source_values.ml — Source values
+  - testsuite/tests/vox/hmc_word64.ml — Source word arithmetic
   - testsuite/tests/vox/hm_declarative.ml — Source terms
   - testsuite/tests/vox/hmc_failed_guard_model.ml — The heap and stack guard instructions
   - testsuite/tests/vox/wasm_binary_execution.ml — WebAssembly model: decode, instantiate and run a module
   - testsuite/tests/vox/wasm_calls.ml — WebAssembly model: execution with calls
+  - testsuite/tests/vox/wasm_binary_module.ml — WebAssembly model: module decoding
+  - testsuite/tests/vox/wasm_instance_control.ml — WebAssembly model: instruction execution
+  - testsuite/tests/vox/wasm_static_control.ml — WebAssembly model: body validation
   - testsuite/tests/vox/wasm_instruction.ml — WebAssembly model: the instruction subset and its encoding
   - testsuite/tests/vox/wasm_static_module.ml — WebAssembly model: validation
   - testsuite/tests/vox/wasm_differential.ml — Differential test of the WebAssembly model against Node
@@ -31,22 +35,110 @@ sources:
   - testsuite/tests/vox/hmc_wasm_relayout_demo.ml — Runs the internal stages on sample programs, and the internal compiler on the identity, in the model
   - testsuite/tests/vox/hmc_wasm_program_state_fixture.ml — The sample programs of that test and its run of the internal compiler
 ---
-`Hmc_compilation.compile` takes a closed term of the language of the [Hindley–Milner page](hindley-milner.html), a memory layout and an initial memory image. It returns a rejection or an artifact whose `bytes` are a WebAssembly module. The module takes a 64-bit input when it runs: the host sets the module's exported mutable global `payload` to the input and then calls its exported function `run`, as in `instance.exports.payload.value = 4n; instance.exports.run()`. The module computes the term applied to that input. The theorems are stated against a model of WebAssembly that is part of the demo: the 43 `wasm_*.ml` files, 2,582 lines, on which the theorem statements depend. For every artifact and every input word `w`:
+`Hmc_compilation.compile` takes an ML term, a memory layout and an initial
+memory image. It returns a rejection or a WebAssembly module. The host sets
+the exported `payload` global to a 64-bit input and calls `run`; the module
+computes the source term applied to that input. One module serves every input.
+The guarantees are about the demo's concrete WebAssembly model:
 
-- `static_validity`: the bytes pass the model's validation.
-- `safe`: at every step count, running the bytes on `w` has decoded and instantiated the module, set `payload` to `w` and has neither trapped, failed a type check, exceeded the host call depth nor reached an instruction outside the model.
-- `reflection`: if the module run on `w` finishes returning a word, the source program applied to `w`, run by the source machine, returns the same word.
-- `preservation`: if the source program applied to `w` returns a word, the module run on `w` finishes, either returning that word or reporting heap or stack exhaustion.
-- `normal`: if in addition the layout meets the resource premise `sufficient`, the module run on `w` returns the word.
-- `exhaustion`: a reported exhaustion happened at one of the emitted memory guards, when the requested space exceeded the space left.
+- `static_validity`: the bytes pass validation.
+- `safe`: execution stays running or finishes, without trapping or failing a type check.
+- `reflection`: every returned word is the source result on that input.
+- `preservation`: when the source returns, the module returns the same word or reports exhaustion.
+- `normal`: with the resource premise `sufficient`, it returns the word.
+- `exhaustion`: reported exhaustion follows a heap or stack guard that found too little space.
 
-Because the input is not known when compiling, one module must be right for every input. A compiler that ran the source program during compilation and emitted a module returning the answer would not satisfy these theorems.
+Compilation infers types, specializes polymorphic functions, converts closures,
+builds a control-flow graph, marks self tail calls and lowers to WebAssembly.
+The proofs compose across these passes. The initial frame is built for input
+0; a five-instruction prologue installs the runtime input, and the proof
+relates that frame to the source application.
 
-`compile` also says why it rejects a program. A rejection carries a `reason` and the rejected `program`. `Unbound_variable` means the term is not closed. `Non_callable_outer_binding` and `Non_callable_entry` mean that a top-level `let` binds, or the program ends in, something other than a `fun` or recursive function (`M.outer_callable`, `M.entry_callable`). `Unsupported_polymorphic_local_let` means the program has a `let` inside a binding or the entry (`M.no_local_let` fails), and `Invalid_annotation` never happens. The lemmas `untypable` and `no_entry_type` show that `Type_error` and `Entry_type_mismatch` reject only terms with no type at all, or no type `word → word`; they are the [Hindley–Milner page](hindley-milner.html)'s `rejected` theorem carried through the compiler. So a client can prove that a closed term of this shape with a typing at `word → word` is either compiled or rejected for one of the three reasons that concern the layout and the compiled program.
+The interface characterizes source rejections, with two qualifications:
+`Unsupported_polymorphic_local_let` establishes only that a local `let`
+exists, and the three layout/initialization/encoding rejections are not
+characterized. Acceptance is not guaranteed. `normal` uses a conservative
+budget based on source steps; the example runs below show successful runs
+beyond that budget. A module with a full initial heap could make the premise
+false and report exhaustion on every input. `compile` is not proved to
+terminate. The model's agreement with engines is tested, not proved.
 
-The compiler infers types with the verified [Hindley–Milner inference](hindley-milner.html), rebuilds a typed derivation, specializes polymorphic functions, converts closures, builds a control-flow graph, marks tail calls and lowers to WebAssembly. Every stage is proved in the same composition and connected to the theorems above; no intermediate invariant is assumed. The stages' own contracts are internal and are not part of the interface. The module's initial memory holds the entry function's first frame, built for the input 0; a five-instruction prologue of the exported function stores the run's input in that frame (the payload of its first environment cell) and resets `payload`. The proof shows that the memory after the prologue is the one the compiler would have built for that input, so every later stage's proof applies to it unchanged.
+## Interface
 
-Not proved: when `compile` rejects for `Layout_rejected`, `Initialization_exhausted` or `Encoding_rejected`. These depend on the layout, memory image and page count and on the compiled program (its largest frame, its closure table, its compiled globals and its encoding), which is not a function of the source in the proofs because the inference is not proved deterministic; so an implementation that rejected every program for one of these reasons would still satisfy the interface; the example runs below check that this one compiles eight programs. The meaning of `Unsupported_polymorphic_local_let` is weaker than its name: a monomorphic local `let` is admitted and a polymorphic one is not, but whether a local `let` is generalized depends on the inferred derivation, so the interface only says that some local `let` exists. The resource premise of `normal` grows linearly with the number of source steps, whatever the program uses, so `normal` applies only to short runs (see Scope); of the example runs below, it covers only the identity's. A premise stated on the source run (the cells it allocates after closure conversion and its depth of calls that are not self tail calls) would need each simulation between the passes to carry those counts; it was not attempted. The premise also reads the initial heap pointer from the emitted module's globals, so an implementation could make it false by emitting a module whose heap is already full, and then always stop at a failed heap guard; `exhaustion` requires the guard to have failed, not the source program to need the space. For a source program that does not return, a finished run is not proved to be either a return or an exhaustion. The WebAssembly model's agreement with the standard and with engines is tested, not proved (see Trusted base), and `compile` is not proved to terminate.
+`compile` produces WebAssembly bytes or a rejection. A compiled artifact
+keeps its source and layout as erased observations. The main guarantees are
+validation, safe execution, and agreement with the source result; `normal`
+also needs the stated resource premise. Type-error evidence follows these
+contracts in the interface.
+
+@code testsuite/tests/vox/hmc_compilation.mli
+
+The source observation applies the compiled program to a runtime input and
+runs the source machine for a number of steps:
+
+@code testsuite/tests/vox/hmc_compilation_model.ml "let[@def] (source_returns @ total)" "type execution ="
+
+`returned` reads the status, tag and payload globals of a finished module:
+
+@code testsuite/tests/vox/hmc_compilation_model.ml "let[@def] (returned @ total)" "| _ -> false)"
+
+The source machine evaluates functions, recursive functions, `let`, lists,
+conditionals and word primitives with explicit environments and continuations.
+Its full [values](src:testsuite/tests/vox/hmc_source_values.ml)
+and [execution definitions](src:testsuite/tests/vox/hmc_source_semantics.ml)
+are pure. Its step function defines each source operation:
+
+@code testsuite/tests/vox/hmc_source_semantics.ml "let[@def] (step @ total)" "| _ -> Stuck))"
+
+Source terms and typing are on the [Hindley–Milner page](hindley-milner.html).
+[Word arithmetic](src:testsuite/tests/vox/hmc_word64.ml) adds and
+subtracts modulo 2^64; proofs start after its `Proofs` marker.
+
+For resources, the [layout](src:testsuite/tests/vox/hmc_layout.ml)
+gives memory regions and stack capacities. `valid_layout` requires ordered
+regions and an initial memory image reaching the heap limit:
+
+@code testsuite/tests/vox/hmc_compilation_model.ml "let[@def] (valid_layout @ total)" "&& not (Hmc_linear_bytes.drop memory layout.heap_limit === None))"
+
+`normal` requires `sufficient`, which reserves stack and heap space for the
+source step count. Its complete arithmetic is shown because it materially
+limits the guarantee:
+
+@code testsuite/tests/vox/hmc_compilation_model.ml "let[@def] rec (stack_fits @ total)" "type exhaustion ="
+
+[Rejection predicates and the exhaustion witness](src:testsuite/tests/vox/hmc_compilation_model.ml)
+complete the model. `honest_exhaustion` requires a finished exhaustion to
+follow a failed heap or stack guard, rather than merely have the right status.
+
+The target contract uses a concrete WebAssembly model.
+[Loading and running bytes](src:testsuite/tests/vox/wasm_binary_execution.ml)
+sets the exported `payload` global to the input and calls `run`, for at most
+the given number of steps. It depends on
+[decoding](src:testsuite/tests/vox/wasm_binary_module.ml),
+[execution with calls](src:testsuite/tests/vox/wasm_calls.ml), and
+[instruction execution](src:testsuite/tests/vox/wasm_instance_control.ml).
+[Validation](src:testsuite/tests/vox/wasm_static_module.ml) checks
+the decoded module with the [instruction and stack checker](src:testsuite/tests/vox/wasm_static_control.ml).
+These are semantic definitions; source-execution proofs are separately in
+`hmc_source_proofs.ml` and value-typing proofs in `hm_interpreter_typing.ml`.
+
+## Trusted base
+
+- The WebAssembly model: the 43 `wasm_*.ml` files (2,582 lines) that define decoding, validation and execution of the emitted subset. The theorems are about this model; its agreement with the WebAssembly specification and with engines is not proved. It is tested: `wasm_differential.ml` generates modules in the model's subset, variants with one mutation (most of them invalid), modules with a corrupted byte, and valid modules outside the subset, with its own encoder, which shares no code with the model's. For each module it checks that the model and Node agree on validity and, when both run the module, on trap or return, the returned value, every global and every byte of final memory. On 100,000 modules (seed 1, Node 22) there was no disagreement. The model has none of the implementation limits that the JavaScript API sets for engines, so it validates, for example, a function with more than 50,000 locals, which Node rejects. It decodes and validates `i32.mul`, `i32.and`, `i32.or`, `i64.and`, `i64.or`, `i64.shl` and `i64.shr_u` but stops with `Not_supported` when it reaches one; `safe` rules this out for the compiler's output. The example modules above also agree with Node on all 15 runs.
+- The engine that runs the bytes: loading, allocation of the memory and table, and the host call depth it allows.
+- `wasm_u32.ml` declares `divide` and `remainder` as `external` (`%divint`, `%modint`) with a nonzero-divisor precondition; the checker gives them OCaml's truncating meaning.
+- What the [Hindley–Milner page](hindley-milner.html) lists: the `Vox_iarray` externals and `raise_any`.
+
+## Scope
+
+- Source programs: a sequence of top-level `let`s whose right-hand sides are syntactically `fun` or recursive-function terms, which may be polymorphic, ending in such a term whose type has `word → word` as an instance. `let` inside a function must be monomorphic. Other programs are rejected (`Non_callable_outer_binding`, `Non_callable_entry`, `Unsupported_polymorphic_local_let`, `Entry_type_mismatch`), as are unbound variables and type errors. The interface states the meaning of each rejection, except that for a local `let` it states only that one exists.
+- The input is one 64-bit word passed at run time in the exported global `payload`, and the result is one 64-bit word, read from the exported globals `tag` and `payload` after `run` returns the status. The prologue that reads the input takes five of the model's steps, which the step counts in the theorems include. Each run is one call of `run` on a freshly instantiated module; calling `run` again on the same instance is not covered.
+- One linear memory of `pages` pages, whose whole initial image is in the module's data section. The caller must supply a layout with `table_base` ≤ `frame_base` ≤ `stack_base` ≤ `heap_base` ≤ `heap_limit` and `frame_base` ≤ 4,294,967,216, and a memory image of at least `heap_limit` bytes. The emitted image must be exactly `pages` × 65,536 bytes with `pages` < 65,536. `Layout_rejected`, `Initialization_exhausted` and `Encoding_rejected` report a layout, initial heap or encoding that does not fit.
+- Resource premise: for a source run of n machine steps, `sufficient` asks for 2(n+1) stack frames and 32(n+1)·(`stack_base` − `frame_base`) bytes of heap above the initial heap pointer, and `stack_base` − `frame_base` ≤ 268,435,455. With a 16-frame stack, as in the presentation's worked example, the stack part covers source runs of at most 7 steps (applying `λx. x` to the input takes 7), and the heap part needs 16·(`stack_base` − `frame_base`) bytes for each of 16 internal steps, 512 KiB for the presentation's 2 KiB current-frame region, more than its heap; so `sufficient` holds for no run in that layout. The identity meets it with a 128-byte region and a 64 KiB heap (see Example runs). Longer runs are covered by `preservation`, which allows exhaustion, and the example runs show modules returning after millions of steps within ordinary limits. Heap and stack exhaustion are reported, not trapped.
+- Only normal return of `compile`: it may fail to terminate and may raise what the inference raises. There is no bound on compile time or on the size of the output.
+- The output is a `Wasm_u32.bytes` list with one cons cell per byte, and the capacities in the layout are unary naturals.
+- Only a recursive function's call to itself in tail position is compiled as a jump. Every other call, in tail position or not, keeps a stack frame until it returns, and a curried recursive function's calls are calls of closures. There is no garbage collector: every closure and list cell stays on the heap until the run ends. The backend does not optimize (see How the emitted module runs).
+- `hmc_compilation_examples.ml` runs `Hmc_compilation.compile` on the example programs above. `hmc_wasm_relayout_demo.ml` runs the internal stages on further sample programs, and runs the internal `Hmc_compiler.compile`, which `Hmc_compilation.compile` wraps, on the identity, executing one module on the inputs 0, 42 and 2^64 − 1 (`binary_prefixes` in `hmc_wasm_program_state_fixture.ml`). Both execute the result in the model.
 
 ## How the emitted module runs
 
@@ -101,43 +193,6 @@ Claiming a normal return without the resource premise is rejected, because `norm
 @text testsuite/tests/vox/hmc_compilation_rejected.ml "Line 8, characters 84-86:" "The refinement is stated here."
 
 The same test checks that the proof evidence inside an artifact cannot be read: `out.evidence` is an unbound field.
-
-## Interface
-
-@code testsuite/tests/vox/hmc_compilation.mli
-
-`artifact` is abstract; its `source` and `layout` are erased. `Wasm_binary_execution.run k bytes w c` decodes `bytes`, checks the memory and table limits, sets the exported global `payload` to `w` (which fails unless it is a mutable 64-bit global), starts the exported function `run` and runs at most `k` steps, stopping early if it finishes or fails, with host call depth `c`. It returns `Rejected` or the state reached: `Running`, `Finished`, `Trap`, `Type_error`, `Host_limit` or `Not_supported`. `Wasm_static_module.bytes_valid` is validation. The model covers the instructions the compiler emits: 32- and 64-bit constants and integer operations, locals, globals, 32- and 64-bit loads and stores, blocks, loops, conditionals, branches, and direct and indirect calls.
-
-@code testsuite/tests/vox/hmc_compilation_model.ml
-
-@code testsuite/tests/vox/hmc_layout.ml
-
-`returned` requires `run` to have returned 1 and reads the result from the module's globals: status 1, tag 1 and the word as payload. `exhausted` requires `run` to have returned 2 (heap) or 3 (stack). The layout gives addresses in linear memory, a stack capacity in frames and a host call depth (the theorems run with one more than `host_capacity`); `valid_layout` orders the regions and requires the memory image to reach `heap_limit`. The source machine and its values:
-
-@code testsuite/tests/vox/hm_interpreter_typing.ml "type value =" "[@@inductive]"
-
-@code testsuite/tests/vox/hmc_source_semantics.ml
-
-`Hmc_word64` adds and subtracts modulo 2^64.
-
-## Trusted base
-
-- The WebAssembly model: the 43 `wasm_*.ml` files (2,582 lines) that define decoding, validation and execution of the emitted subset. The theorems are about this model; its agreement with the WebAssembly specification and with engines is not proved. It is tested: `wasm_differential.ml` generates modules in the model's subset, variants with one mutation (most of them invalid), modules with a corrupted byte, and valid modules outside the subset, with its own encoder, which shares no code with the model's. For each module it checks that the model and Node agree on validity and, when both run the module, on trap or return, the returned value, every global and every byte of final memory. On 100,000 modules (seed 1, Node 22) there was no disagreement. The model has none of the implementation limits that the JavaScript API sets for engines, so it validates, for example, a function with more than 50,000 locals, which Node rejects. It decodes and validates `i32.mul`, `i32.and`, `i32.or`, `i64.and`, `i64.or`, `i64.shl` and `i64.shr_u` but stops with `Not_supported` when it reaches one; `safe` rules this out for the compiler's output. The example modules above also agree with Node on all 15 runs.
-- The engine that runs the bytes: loading, allocation of the memory and table, and the host call depth it allows.
-- `wasm_u32.ml` declares `divide` and `remainder` as `external` (`%divint`, `%modint`) with a nonzero-divisor precondition; the checker gives them OCaml's truncating meaning.
-- What the [Hindley–Milner page](hindley-milner.html) lists: the `Vox_iarray` externals and `raise_any`.
-
-## Scope
-
-- Source programs: a sequence of top-level `let`s whose right-hand sides are syntactically `fun` or recursive-function terms, which may be polymorphic, ending in such a term whose type has `word → word` as an instance. `let` inside a function must be monomorphic. Other programs are rejected (`Non_callable_outer_binding`, `Non_callable_entry`, `Unsupported_polymorphic_local_let`, `Entry_type_mismatch`), as are unbound variables and type errors. The interface states the meaning of each rejection, except that for a local `let` it states only that one exists.
-- The input is one 64-bit word passed at run time in the exported global `payload`, and the result is one 64-bit word, read from the exported globals `tag` and `payload` after `run` returns the status. The prologue that reads the input takes five of the model's steps, which the step counts in the theorems include. Each run is one call of `run` on a freshly instantiated module; calling `run` again on the same instance is not covered.
-- One linear memory of `pages` pages, whose whole initial image is in the module's data section. The caller must supply a layout with `table_base` ≤ `frame_base` ≤ `stack_base` ≤ `heap_base` ≤ `heap_limit` and `frame_base` ≤ 4,294,967,216, and a memory image of at least `heap_limit` bytes. The emitted image must be exactly `pages` × 65,536 bytes with `pages` < 65,536. `Layout_rejected`, `Initialization_exhausted` and `Encoding_rejected` report a layout, initial heap or encoding that does not fit.
-- Resource premise: for a source run of n machine steps, `sufficient` asks for 2(n+1) stack frames and 32(n+1)·(`stack_base` − `frame_base`) bytes of heap above the initial heap pointer, and `stack_base` − `frame_base` ≤ 268,435,455. With a 16-frame stack, as in the presentation's worked example, the stack part covers source runs of at most 7 steps (applying `λx. x` to the input takes 7), and the heap part needs 16·(`stack_base` − `frame_base`) bytes for each of 16 internal steps, 512 KiB for the presentation's 2 KiB current-frame region, more than its heap; so `sufficient` holds for no run in that layout. The identity meets it with a 128-byte region and a 64 KiB heap (see Example runs). Longer runs are covered by `preservation`, which allows exhaustion, and the example runs show modules returning after millions of steps within ordinary limits. Heap and stack exhaustion are reported, not trapped.
-- Only normal return of `compile`: it may fail to terminate and may raise what the inference raises. There is no bound on compile time or on the size of the output.
-- The output is a `Wasm_u32.bytes` list with one cons cell per byte, and the capacities in the layout are unary naturals.
-- Only a recursive function's call to itself in tail position is compiled as a jump. Every other call, in tail position or not, keeps a stack frame until it returns, and a curried recursive function's calls are calls of closures. There is no garbage collector: every closure and list cell stays on the heap until the run ends. The backend does not optimize (see How the emitted module runs).
-- `hmc_compilation_examples.ml` runs `Hmc_compilation.compile` on the example programs above. `hmc_wasm_relayout_demo.ml` runs the internal stages on further sample programs, and runs the internal `Hmc_compiler.compile`, which `Hmc_compilation.compile` wraps, on the identity, executing one module on the inputs 0, 42 and 2^64 − 1 (`binary_prefixes` in `hmc_wasm_program_state_fixture.ml`). Both execute the result in the model.
-- The compiler, with the inference it uses, is 764 files and about 72,900 lines in `testsuite/tests/vox`.
 
 ## Reproduce
 

@@ -7,7 +7,7 @@
   "demo": "constant-folding",
   "order": 14,
   "summary": [
-    "`Expression_folding` folds constants in expressions built from integer literals, one input and addition, and proves that folding preserves evaluation, with `int` addition wrapping on overflow. It is the smallest demo with a real theorem: fourteen lines of interface, forty-seven of implementation and proof. The tour ends in the checker, at the SMT definition that gives `+` its meaning.",
+    "`Expression_folding` folds constants in expressions built from integer literals, one input and addition, and proves that folding preserves evaluation, with `int` addition wrapping on overflow. The result has no addition of two literals or addition with a zero literal on either side. The tour ends in the checker, at the SMT definition that gives `+` its meaning.",
     "The [catalogue page](demo:constant-folding) states the claim, the trusted base and the scope."
   ],
   "stops": [
@@ -15,32 +15,38 @@
       "title": "The interface: an evaluator and a theorem",
       "path": "testsuite/tests/vox/expression_folding.mli",
       "from": "type t = Lit of int | Input | Add of t * t [@@inductive]",
-      "to": "{result : int | result === eval expression input} @@ total",
-      "lines": "1-14",
-      "text": "`t` is declared `[@@inductive]`: its values are finite trees, so a total function may recurse on subterms, and a recursive lemma is a proof by induction. `eval` is specified by `eval_def`, whose type is its recursive equation; the `+` in that equation is OCaml's 63-bit `int` addition, which wraps. `fold_correct` is the theorem, for every expression and every input. `eval_folded` evaluates `fold expression` and returns the result at a type refined to equal `eval expression input`. Nothing is said about the shape of `fold`'s result, so an identity `fold` would also meet this interface."
+      "text": "`t` is declared `[@@inductive]`: its values are finite trees, so a total function may recurse on subterms, and a recursive lemma is a proof by induction. `eval` is specified by `eval_def`, whose type is its recursive equation; the `+` in that equation is OCaml's 63-bit `int` addition, which wraps. `fold_correct` is the theorem, for every expression and every input. `eval_folded` evaluates `fold expression` and returns the result at a type refined to equal `eval expression input`. `folded` requires every subtree to contain no addition of two literals or addition with a zero literal on either side, and `fold_is_folded` proves it for the result of `fold`. The exact output tree and its size remain unspecified.",
+      "span": 25
     },
     {
       "title": "What int addition means, stated over big integers",
       "path": "verification/library/vox_machine_semantics.mli",
       "from": "val signed : Bigint.t -> Bigint.t @@ total",
-      "to": ["val add : (left : int)", "@ ghost @@ total"],
-      "lines": "1-12",
-      "text": "The folding proof needs no statement about overflow: both sides of its equations use the same `+`. A client that wants to talk about overflow uses `Vox_machine_semantics`, which restates the checker's built-in meaning of `int` over `Bigint.t`, the unbounded integers. `add` says that `Bigint.of_int (left + right)` is the mathematical sum mapped into [-2^62, 2^62) by `signed`. The lemmas are `@ ghost`, so calls to them are erased. Each proof in [`vox_machine_semantics.ml`](src:verification/library/vox_machine_semantics.ml) is a single `signed_def` call, from which the solver proves the lemma by its own encoding of `int`; the module adds no assumption."
+      "text": "The folding proof needs no statement about overflow: both sides of its equations use the same `+`. A client that wants to talk about overflow uses `Vox_machine_semantics`, which restates the checker's built-in meaning of `int` over `Bigint.t`, the unbounded integers. `add` says that `Bigint.of_int (left + right)` is the mathematical sum mapped into [-2^62, 2^62) by `signed`. The lemmas are `@ ghost`, so calls to them are erased. Each proof in [`vox_machine_semantics.ml`](src:verification/library/vox_machine_semantics.ml) is a single `signed_def` call, from which the solver proves the lemma by its own encoding of `int`; the module adds no assumption.",
+      "span": 18
     },
     {
       "title": "A client: overflow is inside the theorem",
       "path": "testsuite/tests/vox/folding_semantics_client.ml",
       "from": "open Expression_folding",
       "to": "assert (eval_folded expression 39 = 42)",
-      "lines": "9-33",
       "text": "The client compiles against `expression_folding.mli`. `add_folded` builds `Add (Lit left, Lit right)`, unfolds `eval_def` at its three nodes and calls `M.add`, which turns the refinement of `eval_folded`'s result into a statement about wrapped `Bigint` addition. `preserves` uses the theorem directly, with `fold_correct` in `ghost_`. The assertions run as bytecode and as native code: `max_int + 1` folds and evaluates to `min_int`, and `min_int + (-1)` to `max_int`."
+    },
+    {
+      "title": "Allowed representations with the same meaning",
+      "path": "testsuite/tests/vox/folding_semantics_client.ml",
+      "from": "(* TEST",
+      "text": "The public client proves two distinct folded trees, `Add (Input, Lit 1)` and `Add (Lit 1, Input)`, evaluate equally for every input. The interface permits either output when its preservation and folded-result guarantees hold; it does not choose an exact tree.",
+      "span": 52
     },
     {
       "title": "Rejected: a wrong rule, and a recursion that does not descend",
       "path": "testsuite/tests/vox/expression_folding_rejected.ml",
       "from": "(* A wrong folding rule: the equations of [eval] do not give it. *)",
-      "to": ["(* A total evaluator must recurse", "|}]"],
-      "lines": "16-60",
+      "to": [
+        "(* A total evaluator must recurse",
+        "|}]"
+      ],
       "text": "The test compiles only `expression_folding.mli` and then these expect phrases, so both are checked against the interface alone. `bad_fold` claims that `Add (Lit a, Lit b)` may be folded to `Lit (a - b)`. With the four `eval_def` instances in hand the claim reduces to `a - b = a + b`, and the solver returns a counterexample; the error points at the refinement. `No_descent` declares an evaluator `total` whose `Add` case recurses on the whole expression, and the totality check rejects it: the recursive argument is not a known proper descendant."
     },
     {
@@ -48,7 +54,6 @@
       "path": "testsuite/tests/vox/expression_folding.ml",
       "from": "let[@def] rec eval expression input =",
       "to": "eval_def result input",
-      "lines": "3-23",
       "text": "The implementation carries no mode annotations: the checker infers that `eval`, `add` and `fold` are total and checks that against the `@@ total` declarations in the interface. `let[@def] rec eval` generates `eval_def`, the equation the interface exports. The smart constructor `add` sums two literals and drops an added `Lit 0`. `add_correct` proves that it preserves evaluation by unfolding `add`, then `eval` at both arguments and at the result: the literal case holds because both sides compute the same `a + b`, and the `Lit 0` cases use the solver's knowledge that `0 + x = x` in wrapping arithmetic."
     },
     {
@@ -56,15 +61,13 @@
       "path": "testsuite/tests/vox/expression_folding.ml",
       "from": "let[@def] rec fold expression : t =",
       "to": "add_correct (fold left) (fold right) input",
-      "lines": "25-41",
-      "text": "`fold` rebuilds the tree bottom up through `add`. It does not reassociate, so `Add (Lit 1, Add (Input, Lit 2))` is left as it is. `fold_correct` unfolds `fold` and `eval` at the current node, takes its two recursive calls as the induction hypotheses for the children, and closes the `Add` case with `add_correct` on the folded children. The recursion is structural on an `[@@inductive]` type, which is what makes the recursive calls valid hypotheses. There is no certificate and no search: the solver only combines the ground facts these calls produce."
+      "text": "`fold` rebuilds the tree bottom up through `add`. The structural theorem `fold_is_folded` uses `add_folded` to prove that every result satisfies `folded`. It does not reassociate, so `Add (Lit 1, Add (Input, Lit 2))` is left as it is. `fold_correct` unfolds `fold` and `eval` at the current node, takes its two recursive calls as the induction hypotheses for the children, and closes the `Add` case with `add_correct` on the folded children. The recursion is structural on an `[@@inductive]` type, which is what makes the recursive calls valid hypotheses. There is no certificate and no search: the solver only combines the ground facts these calls produce."
     },
     {
       "title": "Erasure: the proof is ghost code",
       "path": "testsuite/tests/vox/expression_folding.ml",
       "from": "let eval_folded expression input :",
       "to": "  result",
-      "lines": "43-47",
       "text": "`eval_folded` runs `fold` and `eval` and returns the value at the refined type; the call to `fold_correct` is in `ghost_`, so it is checked and then erased. `fold_correct` is not declared `@ ghost`, so it is an ordinary function: called outside `ghost_`, it would recompute `fold` at run time and return `()`. Unlike the collection demos, this demo has no test that inspects its emitted code, and its erasure rests on `ghost_` alone."
     },
     {
@@ -72,7 +75,6 @@
       "path": "verification/vox_smt.ml",
       "from": "if uses Add && not has_bitwise",
       "to": "maximum modulus minimum modulus);",
-      "lines": "974-981",
       "focus": "verification/",
       "text": "The demo adds nothing to the trusted base; what its claim about wrapping rests on is the checker's meaning of `int`. `Stdlib.( + )` is the primitive `%addint`, which [`vox_encoding.ml`](src:verification/vox_encoding.ml) maps to the SMT operator `Add` of sort `Int63`. In a query without bitwise operations, `Add` is printed as this `int63_add`: addition on SMT `Int` with one correction by 2^63, which is exact because every `int` term carries a range assertion for [-2^62, 2^62). A query with a bitwise operation uses 63-bit bit-vectors and `bvadd` instead. Every `external` that names `%addint` gets this meaning, which is sound because the compiler implements `%` primitives itself; a C primitive's meaning, such as `Bigint`'s, belongs only to the library's own declaration of it."
     }

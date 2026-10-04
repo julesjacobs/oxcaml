@@ -48,7 +48,7 @@ module Make (C : Cell) : sig @@ portable
     {r : (bool, C.payload) Ghost_pref.step |
       if r.value then owned a (Ghost_pref.own r.state)
       else Ghost_pref.own r.state === Ghost_pref.Heap.empty ()} @ unique
-  (** Release consumes full cell authority and restores it to the lock. *)
+  (** Consume full cell authority; return empty caller authority. *)
   val release : (a : t) ->
     {t : C.payload Ghost_pref.token | owned a (Ghost_pref.own t)} @ unique ghost ->
     {t : C.payload Ghost_pref.token |

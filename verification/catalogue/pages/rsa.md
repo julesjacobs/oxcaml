@@ -1,7 +1,7 @@
 title: Textbook RSA
 blurb: Modular exponentiation on unbounded integers, proved to compute `a^e mod n`, and the RSA round trip proved for any two distinct primes and any message below their product.
 status: owner-review
-date: 27 September 2026
+date: 4 October 2026
 sources:
   - verification/library/vox_rsa.mli — Public interface
   - verification/library/vox_rsa_spec.ml — Definitions of `power`, `prime`, `gcd`, `lcm`, `lambda` and `valid_key`
@@ -18,27 +18,15 @@ sources:
 
 This is the arithmetic of textbook RSA only: there is no key generation, efficient primality test, padding or signature scheme, and no claim about security, constant-time execution or running time. There are no size bounds and no error results: the operations have preconditions instead, and `roundtrip_correct` states a conditional theorem about any integers.
 
-## Client example
-
-The public-only client. `open Bigint` makes `t` the type `Bigint.t` and the arithmetic operators act on it; `0Z` is a `Bigint.t` literal. `(f @ total)` declares that `f` terminates without effects, and `{m : t | p}` is the type `t` refined by the predicate `p`. `ghost_ (...)` is proof code, checked and then erased. `Spec.valid_key_def` and `Spec.prime_def` state the definitions of `valid_key` and `prime`; the client calls them so that the checker can prove `n > 0Z`, which `encrypt` requires. `(() : {u : unit | p})` asks the checker to prove `p` at that point. `crt_equivalence` proves that `decrypt_crt` agrees with ordinary decryption, which it runs only in ghost code.
-
-@code testsuite/tests/vox/rsa_public_client.ml "open Bigint" "  crt"
-
-## A rejected program
-
-A zero modulus violates `modexp`'s precondition `n > 0Z`. The test is an expect test: the expected compiler output follows the program.
-
-@code testsuite/tests/vox/rsa_rejected.ml "let zero_modulus () =" "|}]"
-
-The same test rejects a negative exponent and four round trips whose key or message breaks one condition: `p = q`, `e * d - 1` not a multiple of `lambda p q`, a message equal to `p * q`, and a composite `p`. Each of the four is followed by an accepted call that differs only in that input, so the rejection is caused by that input. It also checks that the proof helpers are not exported.
-
 ## Interface
 
-@code verification/library/vox_rsa.mli
-
-`Spec` is `Vox_rsa_spec`, whose definitions are:
+The contracts are in `vox_rsa.mli`; their mathematical definitions are all in `vox_rsa_spec.ml`. Modular arithmetic, Fermat and CRT proof code is in the separate arithmetic, number-theory and proof modules listed below.
 
 @code verification/library/vox_rsa_spec.ml
+
+The contracts use these definitions through `Spec = Vox_rsa_spec`:
+
+@code verification/library/vox_rsa.mli
 
 `let[@def]` also generates the lemmas `power_def`, `prime_def` and so on, which state each definition's equation; each `[@@decreases ...]` gives a recursive definition's termination measure. `Bigint`'s `/` and `mod` are Euclidean, so `mod` by a positive number is never negative.
 
@@ -54,6 +42,20 @@ Nothing beyond the shared base.
 - `modexp` branches on the bits of the exponent; the number of squarings is logarithmic in the exponent, but no running-time theorem is stated.
 - `@@ total` means termination in the checker's model; memory and time are not bounded.
 - One lemma, `prime_cancel` in `vox_rsa_number_theory.ml`, suppresses the slow-refinement warning: on macOS (arm64) its proof uses about 16 million solver resource units, against a warning threshold of 1 million and a limit of 40 million. Counts differ between platforms; on x86-64, `reduce_power` in `vox_rsa_arithmetic.ml` also passes the threshold (about 7 million).
+
+## Client example
+
+The public-only client. `open Bigint` makes `t` the type `Bigint.t` and the arithmetic operators act on it; `0Z` is a `Bigint.t` literal. `(f @ total)` declares that `f` terminates without effects, and `{m : t | p}` is the type `t` refined by the predicate `p`. `ghost_ (...)` is proof code, checked and then erased. `Spec.valid_key_def` and `Spec.prime_def` state the definitions of `valid_key` and `prime`; the client calls them so that the checker can prove `n > 0Z`, which `encrypt` requires. `(() : {u : unit | p})` asks the checker to prove `p` at that point. `crt_equivalence` proves that `decrypt_crt` agrees with ordinary decryption, which it runs only in ghost code.
+
+@code testsuite/tests/vox/rsa_public_client.ml "open Bigint" "  crt"
+
+## A rejected program
+
+A zero modulus violates `modexp`'s precondition `n > 0Z`. The test is an expect test: the expected compiler output follows the program.
+
+@code testsuite/tests/vox/rsa_rejected.ml "let zero_modulus () =" "|}]"
+
+The same test rejects a negative exponent and four round trips whose key or message breaks one condition: `p = q`, `e * d - 1` not a multiple of `lambda p q`, a message equal to `p * q`, and a composite `p`. Each of the four is followed by an accepted call that differs only in that input, so the rejection is caused by that input. It also checks that the proof helpers are not exported.
 
 ## Reproduce
 

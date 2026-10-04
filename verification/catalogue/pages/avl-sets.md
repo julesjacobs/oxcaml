@@ -1,7 +1,7 @@
 title: AVL sets
 blurb: Persistent AVL trees of integers proved to act as sets: membership after `add` and `union` is exact, and `equal` holds exactly when two sets have the same members.
 status: owner-review
-date: 27 September 2026
+date: 4 October 2026
 sources:
   - testsuite/tests/vox/int_set_intf.mli — Public signatures `Operations` and `Extensional`
   - testsuite/tests/vox/avl_sets.mli — The module's interface, `Extensional`
@@ -13,19 +13,7 @@ sources:
 ---
 `Avl_sets` is a persistent set of `int`s stored as an AVL tree. Its interface is stated in terms of membership alone: `lookup x empty` is false, `lookup x (add y s)` is `x = y || lookup x s`, and `lookup x (union s t)` is `lookup x s || lookup x t`. `equal s t` is true exactly when `s` and `t` have the same members, which can hold for trees of different shape. Inside the implementation, every operation is proved to keep the tree ordered and balanced with correct cached heights, and to agree with a sorted-list model. The abstract type `t` hides both the tree and these invariants.
 
-`size` is specified only at zero: `size s = 0Z` exactly when `s` is empty. An implementation returning `1Z` or `-1Z` for every nonempty set would satisfy the interface. The implementation counts nodes, and proves internally that the count is the length of the element list, but that theorem is not exported. There is no `remove`, iteration or conversion to a list, and no bound on running time or tree height is stated.
-
-## Client example
-
-From a client that sees only the public interface. `@ total` marks a function that terminates without raising or touching mutable state; only such functions can appear in refinements. `{u : unit | p}` is `unit` refined by the predicate `p`, so a total function returning it is a lemma proving `p`. `===` is logical equality. `extensional` takes a function proving that two sets agree on every `query` and concludes that they are `equal`. The client calls `set_commutes` inside `ghost_ (...)`, which marks proof code: it is checked and then erased.
-
-@code testsuite/tests/vox/collections_boundary_client.ml "let (set_commutes @ total)" "Avl_sets.extensional left right members"
-
-## A rejected program
-
-`equal` is not structural equality. This client assumes `equal a b` and claims `a === b`. It is compiled against the public interface only.
-
-@code testsuite/tests/vox/collections_boundary.ml "(* avl_structural_equality *)" "|}]"
+`size` is nonnegative and is zero exactly for the empty set. Adding a member already present leaves `size` unchanged; adding a new member increases it by one. Equal sets have equal sizes. These laws specify the number of distinct members while keeping the implementation's sorted-list model private. There is no `remove`, iteration or conversion to a list, and no bound on running time or tree height is stated.
 
 ## Interface
 
@@ -33,7 +21,7 @@ From a client that sees only the public interface. `@ total` marks a function th
 
 @code testsuite/tests/vox/int_set_intf.mli "module type Extensional = sig" "end"
 
-`avl_sets.mli` is the single line `include Int_set_intf.Extensional`. `(x : a) -> b` names the argument so that `b` can mention it, and `@@ total` declares a value total. The premise of `extensional` must itself be a total function, marked `@ total`. `Bigint.t` is the type of unbounded integers and `0Z` is a `Bigint` literal. The same file defines a third signature, `Canonical`, in which sets with the same members are logically equal; `Avl_sets` does not implement it.
+`avl_sets.mli` is the single line `include Int_set_intf.Extensional`. `(x : a) -> b` names the argument so that `b` can mention it, and `@@ total` declares a value total. The premise of `extensional` must itself be a total function, marked `@ total`. `Bigint.t` is the type of unbounded integers and `0Z` is a `Bigint` literal. After `Extensional`, the same file defines a third signature, `Canonical`, in which sets with the same members are logically equal; `Avl_sets` does not implement it.
 
 ## Trusted base
 
@@ -42,12 +30,30 @@ From a client that sees only the public interface. `@ total` marks a function th
 
 ## Scope
 
-- Operations: `empty`, `lookup`, `add`, `union`, `size` and `equal`, with the laws `lookup_empty`, `lookup_add`, `lookup_union`, `equal_lookup`, `extensional` and `size_zero`. There is no `remove`, `fold`, iteration, minimum or conversion to a list.
+- Operations: `empty`, `lookup`, `add`, `union`, `size` and `equal`, with membership, extensionality and cardinality laws. There is no `remove`, `fold`, iteration, minimum or conversion to a list.
 - Elements are `int`; there is no functor over an ordered type.
-- `size` is specified only at zero (see above).
+- `size_add` gives the exact cardinality change on insertion, and `equal_size` makes cardinality independent of representation. No equation for the size of a union is exported.
 - `union s t` inserts the elements of `s` into `t` one at a time; it does not split and join trees. `equal` builds the in-order element lists of both trees and compares them. The lists are built with an `append` that is not tail-recursive, so `equal` takes O(n log n) time on balanced trees and stack depth linear in the number of elements.
 - Cached heights and `size` are `Bigint.t` values, so rebuilding an internal node calls the C runtime (`Bigint.add`) to compute its height; a new leaf gets the literal `1Z`. With unbounded integers the proof needs no overflow argument.
 - Every function in the interface is `total`. No running-time, height or allocation bound is exported.
+
+## Client example
+
+From a client that sees only the public interface. `@ total` marks a function that terminates without raising or touching mutable state; only such functions can appear in refinements. `{u : unit | p}` is `unit` refined by the predicate `p`, so a total function returning it is a lemma proving `p`. `===` is logical equality. `extensional` takes a function proving that two sets agree on every `query` and concludes that they are `equal`. The client calls these laws inside `ghost_ (...)`, which marks proof code: it is checked and then erased.
+
+@code testsuite/tests/vox/collections_boundary_client.ml "let (set_commutes @ total)" "Avl_sets.extensional left right members"
+
+The same public-only client proves that duplicate insertion preserves size
+and two distinct insertions into `empty` give size two:
+
+@code testsuite/tests/vox/collections_boundary_client.ml "let (set_duplicate_size @ total)" "  Avl_sets.size_add second once"
+
+
+## A rejected program
+
+`equal` is not structural equality. This client assumes `equal a b` and claims `a === b`. It is compiled against the public interface only.
+
+@code testsuite/tests/vox/collections_boundary.ml "(* avl_structural_equality *)" "|}]"
 
 ## Reproduce
 

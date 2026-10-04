@@ -193,7 +193,7 @@ Line 7, characters 32-37:
 7 |   Vox_egraph_rule_handle.create rules;;
                                     ^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_egraph_rule_handle.mli", line 40, characters 40-50:
+File "vox_egraph_rule_handle.mli", line 18, characters 40-50:
   The refinement is stated here.
 |}]
 

@@ -52,3 +52,13 @@ let[@def] (wire_byte @ total) (wire : char iarray @ immutable)
   match source_at wire position with
   | Some c -> Vox_lz4_spec_parse.byte_of_char c = value
   | None -> false)
+
+let[@def] rec (source_matches_distance @ total)
+    (source : char iarray @ immutable) (index : int)
+    (distance : int) (remaining : int) = ghost_ (
+  if remaining <= 0 then true
+  else
+    source_at source index === source_at source (index - distance)
+    && source_matches_distance source (index + 1) distance
+         (remaining - 1))
+[@@decreases remaining]

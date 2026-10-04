@@ -12,31 +12,33 @@ checker. All correctness-only work in `parse` is inside `ghost_`.
 
 Read these files in order; this is the complete semantic review surface:
 
-1. [`vox_http_spec.mli`](vox_http_spec.mli): request and outcome types and
-   complete checked definition equations for every character, token, line,
+1. [`vox_http_spec.ml`](vox_http_spec.ml): request and outcome types and
+   definitions for every character, token, line,
    header and decimal operation; framing and its error precedence;
    serialization; byte/body/message bounds; `well_formed`; and the complete
    recursive meaning of `content_lengths_match`. Every semantic helper has a
-   defining equation here. [`vox_http_spec.ml`](vox_http_spec.ml) implements
-   those equations and is checked against this signature; no additional
-   semantic definition is hidden in its body. Neither file contains parser
+   definition here. [`vox_http_spec.mli`](vox_http_spec.mli) exports the same
+   definitions as checked equations for clients. Neither file contains parser
    states, invariants, induction helpers, or implementation aliases.
-2. [`vox_http.mli`](vox_http.mli): the sealed executable API, state observations,
-   the complete checked `transition_def` equation shared by `feed` and `parse`,
-   and all public laws. Every predicate refers to definitions in the first
-   file or to the observation laws here. `state` is abstract. Its only
+2. [`vox_http_model.ml`](vox_http_model.ml): the complete pure forward-order
+   state machine, including CRLF errors, budget exhaustion, the exact suffix,
+   and definitions of the observations. The private proof module uses these definitions directly.
+3. [`vox_http.mli`](vox_http.mli): the sealed executable API, state observations,
+   exact model equations for `initial` and `feed`, followed by the derived
+   observation, chunking and grammar laws. Every semantic dependency is
+   defined in the preceding files or by the observation equations here. `state` is abstract. Its only
    constructors are `initial` and `feed`; callers supply ordinary input bytes,
    never an invariant or proof object.
-3. [`vox_sequence.mli`](vox_sequence.mli): the `t` alias and the complete
+4. [`vox_sequence.mli`](vox_sequence.mli): the `t` alias and the complete
    `length_def`, `append_def`, `take_def`, and `drop_def` characterizations,
    together with their operation signatures. These are the only sequence
    operations used by public HTTP claims and semantic definitions. Sequence
    induction lemmas and their implementations do not change those meanings.
-4. [`stdlib/bigint.mli`](../../stdlib/bigint.mli): unbounded signed integers,
+5. [`stdlib/bigint.mli`](../../stdlib/bigint.mli): unbounded signed integers,
    signed `of_int`, addition, subtraction and numeric comparison, used by
    sequence characterizations and consumed-byte equations. Ordinary byte and
    budget arithmetic uses Vox's signed 63-bit machine-integer semantics.
-5. This document: supported subset, error and resource conventions, totality
+6. This document: supported subset, error and resource conventions, totality
    convention, and the trusted boundary described below.
 
 `total_consumed` counts bytes spent on the current request, starting at zero;
@@ -50,8 +52,8 @@ accounting and the returned suffix remain exact. These equations characterize
 the observations over all constructible states without exposing a parser
 representation or storing a runtime history.
 
-[`vox_http.ml`](vox_http.ml) is behind the checked interface: concrete phases,
-accumulators, the reachable-state invariant, its transition proofs, and proof
+[`vox_http.ml`](vox_http.ml) is behind the checked interface: reversed
+accumulators, the reachable-state invariant, transition proofs and proof
 helpers are private. `Vox_http.Internal` is inaccessible to clients. Both the
 ordinary parser state and the sealed state type contain no proof certificate;
 the latter is an erased refinement of the former. Public wrappers erase their
@@ -59,12 +61,13 @@ proof calls and invoke the same byte driver. Its line, body, and pending-header
 accumulators use cons; lines, headers, and bodies are reversed once when each
 is complete. Headers remain in wire order while receiving a body.
 
-A private forward-state model retains the grammar and wire proofs. `Driver`
+The public forward-state model fixes the semantics; private proofs establish
+the grammar and wire laws. `Driver`
 proves each byte transition and complete feed simulate that model, including
 all errors, budget outcomes and suffixes. Reversal is involutive, so model
 state equality implies driver state equality for the chunking law. Model
 conversion and simulation calls occur only in ghost blocks on the parsing
-path. No model aliases expose the implementation through the interface.
+path.
 
 ## Supported wire language
 
@@ -131,9 +134,7 @@ beyond the bound.
 - `parse input`: for arbitrary input, a completed request satisfies
   `well_formed`. Its serialization is exactly the consumed prefix, and that
   serialization followed by the remaining suffix reconstructs the input.
-- `feed state input`: preserves exact per-call accounting and the `processed`
-  observation; completion guarantees `well_formed` and serialization of all
-  consumed chunks. The implementation carries its invariant automatically
+- `feed state input`: returns the state and suffix specified by the pure model. The implementation carries its invariant automatically
   behind the abstract state type. No public premise refers to that invariant.
 - `body_agreement`: from `well_formed`, derive absence of Transfer-Encoding
   and a body length at most 8,192 matching every decoded Content-Length field.
@@ -168,16 +169,13 @@ beyond the bound.
   feeding the first result's unconsumed suffix followed by `b`. This applies
   to incomplete input, completion, malformed input, and limits. Induction
   extends it to any finite chunk partition.
-- The complete public `transition_def` equation, shared by `feed` and `parse`,
-  equates the consumed count with the input length minus
-  the returned suffix length, identifies the suffix by `drop`, and reconstructs
-  the input by concatenating its consumed prefix with that suffix.
 
-Two outcomes described above are implemented but stated by no law:
-`Malformed Invalid_crlf` for a bare LF or a CR not followed by LF, and
-`Limit Message_bytes` when the budget runs out before a request completes,
-whether inside a line or in the body. `http_parser.ml` tests both, the second
-inside a header line and in the body.
+
+The exact public model equations specify `Malformed Invalid_crlf` for a bare
+LF or a CR not followed by LF, and `Limit Message_bytes` when an incomplete
+state with no budget receives another byte. The latter returns that byte
+unconsumed. `http_parser.ml` proves these outcomes through the public model
+and tests budget exhaustion inside a header line and in the body.
 
 The serializer proof uses induction over forward-model byte transitions, lines,
 headers, and body, connected to the executable driver by simulation. Its unbudgeted `drain` helper is connected to `feed` by
@@ -210,9 +208,9 @@ The rejected fixtures prevent a client from claiming that parsing discards a
 pipelined suffix or that every accepted body is empty, reject false claims
 about the line-error laws, and reject access to private implementation
 helpers. The separately compiled positive clients
-import only `Vox_http_spec` and `Vox_http` (plus the public sequence interface).
-They derive every former explicit feed/parse clause from `transition_def` and
-prove soundness for arbitrary input, two-chunk reconstruction without
+import `Vox_http_spec`, `Vox_http_model` and `Vox_http` (plus the public
+sequence interface).
+They prove soundness for arbitrary input, two-chunk reconstruction without
 invariant arguments, serializer roundtrip, and byte-parser TE rejection. The
 streaming demo prints each incomplete/completed state, and the test compares
 that output with a reference. The positive fixture includes a

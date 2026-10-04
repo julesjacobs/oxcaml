@@ -298,7 +298,7 @@ Line 2, characters 2-46:
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: The value "One_way_key.symmetric" does not satisfy the functor's parameter.
        Refinement could not be proved (counterexample: x = 0, y = 1)
-File "vox_verified_flat_hashtbl.mli", line 59, characters 52-73:
+File "vox_verified_flat_hashtbl.mli", line 21, characters 52-73:
   The refinement is stated here.
 |}]
 

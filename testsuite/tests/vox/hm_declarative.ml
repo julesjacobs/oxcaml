@@ -1,5 +1,6 @@
 type index = Z | S of index [@@inductive]
-type mono = Parameter of index | Free of Copy_spec.node Pref.t
+type variable = Copy_spec.node Pref.t
+type mono = Parameter of index | Free of variable
   | Boolean | Word64 | List_type of mono | Function of mono * mono [@@inductive]
 type scheme = Forall of index * mono [@@inductive]
 type arguments = No_arguments | Argument of mono * arguments [@@inductive]

@@ -102,13 +102,16 @@ let () =
   match id with
   | None -> assert false
   | Some a ->
+    let before = ghost_ (G.model (borrow_ state)) in
     let #{G.id; state} = G.admit state (L.Bool_lit false) in
+    ghost_ (G.Preserves.extends_def before (G.model (borrow_ state)));
     match id with
     | None -> assert false
     | Some b ->
       let #{G.equal; state; proof = _} = G.same_class state a b in
       assert (not equal);
       let #{G.equal; state = _; proof} = G.same_class state a a in
+      ghost_ (let _ : {u : unit | equal} = () in ());
       assert equal;
       ghost_ (
         match proof with
@@ -121,6 +124,12 @@ let () =
   let rules = R.No_rules in
   if not (R.valid rules) then assert false else
   let state = G.create rules in
+  ghost_ (
+    G.model_bounds (borrow_ state);
+    let view = G.model (borrow_ state) in
+    let observed_rules = G.rules (borrow_ state) in
+    let _ : {u : unit | 0 <= view.count && view.count <= 512
+      && R.valid observed_rules} = () in ());
   let size = Obj.size (Obj.repr state) in
   let expected = if Sys.backend_type = Sys.Native then 2 else 3 in
   assert (size = expected)

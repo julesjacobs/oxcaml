@@ -1,17 +1,24 @@
 @@ portable
 
-(** A nonnegative integer reference guarded by a strong sequentially
-    consistent lock. Failure transfers no reference authority. Normal-return
+(** A nonnegative integer reference guarded by a lock using strong sequentially
+    consistent atomics. Failure transfers no reference authority. Normal-return
     safety only: no fairness, exception recovery or termination guarantee. *)
+(** {1 Protected reference} *)
+
 type t : logical_data
 val location : t @ immutable -> int Ghost_pref.t @ immutable @@ total
-val owned : t @ immutable -> int Ghost_pref.heap @ immutable -> bool @ ghost @@ total
-val owned_def : (a : t) @ immutable -> (h : int Ghost_pref.heap) @ immutable ->
+val owned : t @ immutable -> int Ghost_pref.heap @ immutable ->
+  bool @ ghost @@ total
+val owned_def : (a : t) @ immutable ->
+  (h : int Ghost_pref.heap) @ immutable ->
   {u : unit | owned a h === (ghost_ (
     match Ghost_pref.Heap.at h (location a) with
     | None -> false
     | Some x -> 0 <= x && h === Ghost_pref.Heap.put
         (Ghost_pref.Heap.empty ()) (location a) x))} @@ total
+
+(** {1 Operations} *)
+
 val make : {n : int | 0 <= n} -> t
 val try_acquire : (a : t) ->
   {r : (bool, int) Ghost_pref.step |

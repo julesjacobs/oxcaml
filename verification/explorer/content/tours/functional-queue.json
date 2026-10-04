@@ -19,7 +19,7 @@
         "val dequeue",
         "@@ total"
       ],
-      "lines": "3-18",
+      "lines": "4-19",
       "text": "`t` is abstract, and `contents` is its only observation, declared `@@ total` so that refinements may mention it. The refinement of `empty` says its contents are `[]`, and `enqueue` appends `[value]` at the end. `dequeue` takes a queue refined by `(contents q === []) === false`, a nonempty queue, and returns a pair whose head and tail's contents rebuild `contents q`. The interface exports no equation for `contents` itself: a client knows the contents of a queue only through these three refinements, which determine it for every queue a client can build. Elements must be `immutable_data`, which excludes closures and records with mutable fields."
     },
     {

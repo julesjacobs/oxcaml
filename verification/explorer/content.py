@@ -23,15 +23,21 @@ RANGE_WARN = 150
 
 
 class Repo:
-    """The tracked files of the repository at one commit (or the working
-    tree), read lazily."""
+    """Files at one commit, or tracked and unignored working-tree files,
+    read lazily."""
 
     def __init__(self, root, revision='HEAD', working_tree=False):
         self.root = Path(root)
         self.working_tree = working_tree
         self.commit = git(self.root, 'rev-parse', revision).strip()
-        listing = git(self.root, 'ls-tree', '-r', '-z', '--name-only', self.commit)
-        self.paths = set(p for p in listing.split('\0') if p)
+        if working_tree:
+            listing = git(self.root, 'ls-files', '-z', '--cached', '--others',
+                          '--exclude-standard')
+            self.paths = {p for p in listing.split('\0')
+                          if p and (self.root / p).is_file()}
+        else:
+            listing = git(self.root, 'ls-tree', '-r', '-z', '--name-only', self.commit)
+            self.paths = {p for p in listing.split('\0') if p}
         self.dirs = {'/'}
         for p in self.paths:
             parts = p.split('/')

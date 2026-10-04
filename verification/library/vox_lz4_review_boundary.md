@@ -19,14 +19,13 @@ The complete allocation-independent semantic definitions are in these files:
    literal appends, overlapping match appends, exact parser/capacity/terminal
    decisions, the total decoder and its output-byte observation predicate.
 4. `vox_lz4_spec_bytes.ml`: bounded source access, length-extension encoding,
-   literal bytes and individual wire bytes.
+   literal bytes, individual wire bytes and source-distance equality.
 5. `vox_lz4_spec_wire.ml`: exact wire layout of each sequence and terminal run.
 6. `vox_lz4_spec_token.ml`: token and little-endian offset encoding.
 7. `vox_lz4_spec_plan.ml`: sequence/plan types and validity, including the final
    five literal bytes and twelve-byte last-match restriction.
-8. `vox_lz4_spec_match.ml`: source-distance equality, maximal match search,
-   candidate validation and the four-byte hash. The exclusion below applies
-   to its one embedded proof body.
+8. `vox_lz4_spec_match.ml`: maximal match search, candidate validation
+   and the four-byte hash.
 9. `vox_lz4_spec_hashes.ml`: immutable most-recent-position table lookup.
 10. `vox_lz4_spec_scan.ml`: exact visited positions, hash-table updates, match
     jumps and termination measure of the compressor model.
@@ -35,18 +34,13 @@ The definitions fix the actual scanner's wire output and every successful
 output byte. None of these modules uses a raw allocation, location or heap.
 The result has one discriminator and contains no allocation witness.
 
-## Explicit proof-body exclusion
+## Proofs
 
-In `vox_lz4_spec_match.ml`, the body of
-`source_matches_distance_extend` (from `fun source index distance count` through
-its `[@@decreases count]`) is outside the human-review surface. It is checked
-proof-irrelevant ghost evidence. Its signature states a derived consequence of
-the fully visible `source_matches_distance` equation; it introduces no assumption
-or semantic choice. The compiler checks the body and termination. All other
-computational definitions in the ten semantic modules remain in the review
-surface, including `scan_match`, `match_length`, `choose_match`, `hash_bytes`,
-`hash4`, and their exact source/length/position conditions. No scanner behavior is
-hidden by this exclusion.
+`vox_lz4_match_proof.ml` proves that a source-distance match extends by one
+byte when the next source bytes agree. The scanner uses this lemma only in
+ghost code. The matching relation is defined in `vox_lz4_spec_bytes.ml`;
+all scanner choices remain in `vox_lz4_spec_match.ml` and
+`vox_lz4_spec_scan.ml`.
 
 ## Transitive semantic primitives and assumptions
 

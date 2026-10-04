@@ -38,16 +38,17 @@ STATUS = {'reviewed': 'Reviewed', 'owner-review': 'Ready for owner review',
 HERE = Path(__file__).resolve().parent
 
 
-def inline(s):
+def inline(s, resolve_link=lambda url: url):
     out, cursor = [], 0
     for m in re.finditer(r'`([^`]+)`|\*\*([^*]+)\*\*|\[([^\]]+)\]\(([^)\s]+)\)', s):
         out.append(esc(s[cursor:m.start()]))
         if m[1] is not None:
             out.append('<code>' + esc(m[1]) + '</code>')
         elif m[2] is not None:
-            out.append('<strong>' + inline(m[2]) + '</strong>')
+            out.append('<strong>' + inline(m[2], resolve_link) + '</strong>')
         else:
-            out.append('<a href="' + esc(m[4]) + '">' + inline(m[3]) + '</a>')
+            out.append('<a href="' + esc(resolve_link(m[4])) + '">'
+                       + inline(m[3], resolve_link) + '</a>')
         cursor = m.end()
     return ''.join(out) + esc(s[cursor:])
 
@@ -122,7 +123,9 @@ def select(source, spec, where):
     hits = [i for i, line in enumerate(lines) if start in line]
     assert len(hits) == 1, (where, start, f'occurs {len(hits)} times')
     first = hits[0]
-    last = next((i for i in range(first, len(lines)) if end in lines[i]), None)
+    last = next((i for i in range(first, len(lines))
+                 if (lines[i].strip() == 'end' if end == 'end'
+                     else end in lines[i])), None)
     assert last is not None, (where, end)
     excerpt = lines[first:last + 1]
     if after:
@@ -173,12 +176,23 @@ def parse(path):
 def render_body(body, source, prefix, where, used):
     out, para, items = [], [], []
 
+    def resolve_link(url):
+        if not url.startswith('src:'):
+            return url
+        path, separator, anchor = url[4:].partition('#')
+        source.read(path)
+        used.add(path)
+        return prefix + source.view(path) + separator + anchor
+
+    def render_inline(text):
+        return inline(text, resolve_link)
+
     def flush():
         if para:
-            out.append('<p>' + inline(' '.join(para)) + '</p>')
+            out.append('<p>' + render_inline(' '.join(para)) + '</p>')
             para.clear()
         if items:
-            out.append('<ul>' + ''.join('<li>' + inline(i) + '</li>' for i in items) + '</ul>')
+            out.append('<ul>' + ''.join('<li>' + render_inline(i) + '</li>' for i in items) + '</ul>')
             items.clear()
 
     lines = body.splitlines()
@@ -214,7 +228,7 @@ def render_body(body, source, prefix, where, used):
             out.append(f'<pre><code>{shown}</code></pre><p class="excerpt-source"><a href="{prefix}{esc(source.view(path))}{anchor}">{esc(path)}</a>{span}</p>')
         elif stripped.startswith('## '):
             flush()
-            out.append('<h2>' + inline(stripped[3:]) + '</h2>')
+            out.append('<h2>' + render_inline(stripped[3:]) + '</h2>')
         elif stripped.startswith('- '):
             if para:
                 flush()
@@ -250,8 +264,10 @@ def load(only=None):
             assert key in meta, (path.name, key)
         if not path.stem.startswith('_'):
             assert meta['status'] in STATUS, (path.name, meta['status'])
-            assert '\n## Trusted base\n' in body, f'{path.stem}: a page states its trusted base'
-            assert '\n## Interface\n' in body, f'{path.stem}: a page quotes its interface'
+            headings = re.findall(r'^## (.+)$', body, re.MULTILINE)
+            assert headings[:3] == ['Interface', 'Trusted base', 'Scope'], (
+                f'{path.stem}: put the interface, trusted base and scope '
+                'before clients and proofs')
         pages[path.stem] = (meta, body)
     return pages
 

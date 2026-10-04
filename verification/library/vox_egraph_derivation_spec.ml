@@ -74,10 +74,7 @@ let[@def] rec (valid @ total) (rules : R.t @ immutable)
   | Sym child -> valid rules child
   | Trans (first, second) ->
     valid rules first && valid rules second && right first === left second
-  | Add_cong (a, b) ->
-    valid rules a && valid rules b && L.sort (left a) === Some L.Integer &&
-    L.sort (left b) === Some L.Integer
-  | Eq_cong (a, b) ->
+  | Add_cong (a, b) | Eq_cong (a, b) ->
     valid rules a && valid rules b && L.sort (left a) === Some L.Integer &&
     L.sort (left b) === Some L.Integer
   | Int_if_cong (c, y, n) ->

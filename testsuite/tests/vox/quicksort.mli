@@ -2,11 +2,9 @@
 
 module Spec = Vox_int_sequence
 
-(* The sorts are not [total]. They lend the array or slice
-   ([Borrow.Owned_array.with_mut], [Borrow.Slice.split3]) and end those loans
-   ([Borrow.Slice.finish]); creating a loan chooses its final contents and
-   ending it assumes them, so neither step is a function of its arguments.
-   The recursion of [sort] still has a checked decreasing measure. *)
+(** On normal return, the elements are nondecreasing and every integer
+    occurs as often as before the call. The slice contract describes its
+    contents when the borrow ends. Termination and cost are unspecified. *)
 val sort : (s : int Borrow.Slice.t) @ local unique ->
   {u : unit | Spec.sorted (Borrow.Slice.final s)
     && Spec.permutation (Borrow.Slice.current s) (Borrow.Slice.final s)}

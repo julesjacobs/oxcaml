@@ -261,9 +261,9 @@
       {
         "title": "Evaluation",
         "from": "let[@def] rec (eval @ total)",
-        "to": "Bool_value (if choose_yes then yes_value else no_value)",
+        "to": "then as_bool (eval yes env) else as_bool (eval no env))",
         "kind": "what",
-        "text": "Both branches of a conditional are evaluated and then chosen between, which keeps `eval` a plain total function in the logic."
+        "text": "A conditional evaluates its condition and then the selected branch. `as_int` and `as_bool` define how values are observed; `eval` is total even on ill-sorted expressions."
       }
     ]
   },
@@ -298,7 +298,7 @@
       {
         "title": "Validity",
         "from": "let[@def] rec (valid @ total) (rules : R.t @ immutable)",
-        "span": 26,
+        "to": "R.rule_valid rule && R.subst_valid rule.vars subst)",
         "kind": "what",
         "text": "`Trans` requires the right end of the first part to be syntactically the left end of the second. A congruence step checks only the left ends' sorts; `Vox_egraph_derivation.sort_sound` gives the right ends'."
       }

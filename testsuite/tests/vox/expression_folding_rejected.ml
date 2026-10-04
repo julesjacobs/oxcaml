@@ -58,3 +58,21 @@ Line 6, characters 39-60:
                                            ^^^^^^^^^^^^^^^^^^^^^
 Error: This recursive function cannot be total: the recursive argument is not a known proper descendant.
 |}]
+
+let unreduced_constants () :
+    {result : Expression_folding.t | Expression_folding.folded result} =
+  let result = Expression_folding.Add
+      (Expression_folding.Lit 1, Expression_folding.Lit 2) in
+  Expression_folding.folded_def result;
+  result
+;;
+[%%expect{|
+Line 6, characters 2-8:
+6 |   result
+      ^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 2, characters 37-69:
+2 |     {result : Expression_folding.t | Expression_folding.folded result} =
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]

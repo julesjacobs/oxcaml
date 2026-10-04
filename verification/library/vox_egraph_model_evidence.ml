@@ -20,6 +20,7 @@ let (query @ total) : (state : {s : V.t | V.valid s}) @ immutable ->
     (a : {i : int | 0 <= i && i < state.semantic.union.count}) ->
     (b : {i : int | 0 <= i && i < state.semantic.union.count}) ->
     {r : result | r.#equal = Q.same (P.view state) a b &&
+      (a <> b || r.#equal) &&
       (match r.#proof with
        | None -> not r.#equal
        | Some proof -> r.#equal && E.valid state.semantic.rules proof &&

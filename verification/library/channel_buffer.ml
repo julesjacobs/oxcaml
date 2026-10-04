@@ -20,7 +20,9 @@ type filled : value mod portable contended = {r : receipt |
 
 let fill : (s : owned) @ unique -> (value : M.byte) ->
     {r : filled | r.slot.block === s.block && r.slot.index = s.index &&
-      r.expected = value} @ unique = fun s value ->
+      r.expected = value &&
+      P.own r.slot.permission === H.put (P.own s.permission)
+        (M.location s.block s.index) (Some value)} @ unique = fun s value ->
   let { block; index; permission } = s in
   let before = ghost_ (P.own (borrow_ permission)) in
   let permission = M.write block index value permission in
@@ -69,7 +71,8 @@ let dispatch : (block : M.t) ->
 
 let read_receipt : (r : filled) @ unique ->
     ({v : int | v = r.expected} *
-     {s : owned | s.block === r.slot.block && s.index = r.slot.index})
+     {s : owned | s.block === r.slot.block && s.index = r.slot.index &&
+       P.own s.permission === P.own r.slot.permission})
       @ unique = fun r ->
   let { slot; expected = _ } = r in
   let { block; index; permission } = slot in

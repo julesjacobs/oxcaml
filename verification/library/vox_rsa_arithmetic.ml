@@ -37,8 +37,8 @@ let (reduce_product @ total) (a : t) (b : t) (n : t) :
 let rec (modexp @ total) : (a : t) ->
     (exponent : {e : t | e >= 0Z}) ->
     (modulus : {n : t | n > 0Z}) ->
-    {r : t | let e = exponent in let n = modulus in
-      0Z <= r && r < n && r = power a e mod n} =
+    {r : t | 0Z <= r && r < modulus
+      && r = power a exponent mod modulus} =
   fun a exponent modulus ->
   let e = exponent in
   let n = modulus in

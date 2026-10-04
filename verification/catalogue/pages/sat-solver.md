@@ -1,7 +1,7 @@
 title: CDCL SAT solver
 blurb: A CDCL SAT solver proved to terminate on every CNF formula within its size limits, with `Sat` and a satisfying assignment or `Unsat`, proved to mean that no assignment satisfies the formula.
 status: owner-review
-date: 27 September 2026
+date: 4 October 2026
 sources:
   - verification/library/vox_cdcl_total.mli — Public interface of the demo solver, `solve_complete`, and the bounded `solve`
   - verification/library/vox_sat_spec.ml — Definitions: evaluation, satisfiability, unsatisfiability and the accepted inputs
@@ -25,6 +25,40 @@ The demo is `Vox_cdcl_total.solve_complete n formula`, a CDCL solver with clause
 
 The contract is that of any decision procedure: an enumeration of all `2^n` assignments would meet it too. Learning and backjumping are properties of the code, which the tests observe through the `statistics` in the report; the contract says nothing about the statistics. Totality is a logical property: there is no bound on running time, memory or stack, and the search can take exponential time. The solver scans every clause to propagate, decides on the unassigned variable that occurs most often in the input (setting it to `true`), and has no watched literals, restarts or clause deletion. The library has one other entry point, the bounded `solve`, described under Scope.
 
+## Interface
+
+The model is ordinary CNF evaluation: a formula is a list of clauses, and
+an assignment gives one Boolean per variable.
+
+@code verification/library/vox_sat_spec.ml "type literal" "    eval_clause assignment clause && eval_formula assignment rest"
+
+`check` requires an assignment of the right size that satisfies the formula.
+`unsatisfiable` enumerates both Boolean choices for every variable:
+
+@code verification/library/vox_sat_spec.ml "let[@def] check" "  0 <= n && valid_formula n formula && rejects_extensions [] n formula"
+
+The [complete model](src:verification/library/vox_sat_spec.ml)
+also defines assignment sizes, valid variable indices and the input classifier
+(the limits are 256 variables, 4,096 clauses and 65,536 literal occurrences).
+The public interface exports these definitions as checked equations.
+
+The complete solver returns a satisfying assignment or proves unsatisfiability:
+
+@code verification/library/vox_cdcl_total.mli "val solve_complete" "| Unknown -> false} @@ total"
+
+[The full solver interface](src:verification/library/vox_cdcl_total.mli)
+also provides a bounded solver that may return `Unknown`. Resolution
+derivations, learned clauses and search measures stay in the proof modules.
+
+## Trusted base
+
+Nothing beyond the shared base. The proofs use `Bigint` and `Vox_sequence.length`, which the shared page covers.
+
+## Scope
+
+- The demo is `solve_complete`. The only other entry point, `Vox_cdcl_total.solve fuel`, runs the same search with a budget; on an accepted input, `Unknown` is allowed for any fuel `>= 0` and implies `statistics.steps = fuel`. Nothing relates `steps` to the work done, so an implementation that returns `Unknown` at once with `steps = fuel` meets the contract.
+- Only CNF over integer-indexed variables; no incremental solving, assumptions or proof output.
+
 ## How it is proved
 
 `Sat`: the solver returns an assignment only when propagation has bound every variable without a conflict, and `Vox_sat_proof.scan_formula_complete` proves that such an assignment satisfies every clause.
@@ -46,35 +80,6 @@ The bounded solver `Vox_cdcl_total.solve fuel` may return `Unknown` for any nonn
 @code testsuite/tests/vox/sat_cdcl_progress_rejected.ml "let (unsupported_cdcl_depth @ total)" "Vox_cdcl_total.solve (n + 1) n formula"
 
 @text testsuite/tests/vox/sat_cdcl_progress_rejected.compilers.reference
-
-## Interface
-
-The types of `vox_cdcl_total.mli` and the demo solver:
-
-@code verification/library/vox_cdcl_total.mli "type statistics = {" "type input_error"
-
-@code verification/library/vox_cdcl_total.mli "(** Complete CDCL on every accepted input" "| Unknown -> false} @@ total"
-
-The specification is `vox_sat_spec.ml`. Evaluation:
-
-@code verification/library/vox_sat_spec.ml "let[@def] rec lookup" "eval_clause assignment clause && eval_formula assignment rest"
-
-and the results and the accepted inputs:
-
-@code verification/library/vox_sat_spec.ml "let[@def] check n formula assignment" "  else None"
-
-`well_sized n values` says that `values` has length `n` (for `n >= 0`), and `valid_formula n formula` that every variable index is in `[0, n)`; `clauses_fit` and `literals_fit` count clauses and literal occurrences. A missing variable evaluates to `false`. `let[@def]` also generates a lemma such as `check_def` stating the definition's equation, and `[@@decreases remaining]` gives a termination measure. `unsat_at`, in `Vox_sat`, extends `unsatisfiable` to assignments of any length:
-
-@code verification/library/vox_sat.mli "val unsat_at" "@@ total"
-
-## Trusted base
-
-Nothing beyond the shared base. The proofs use `Bigint` and `Vox_sequence.length`, which the shared page covers.
-
-## Scope
-
-- The demo is `solve_complete`. The only other entry point, `Vox_cdcl_total.solve fuel`, runs the same search with a budget; on an accepted input, `Unknown` is allowed for any fuel `>= 0` and implies `statistics.steps = fuel`. Nothing relates `steps` to the work done, so an implementation that returns `Unknown` at once with `steps = fuel` meets the contract.
-- Only CNF over integer-indexed variables; no incremental solving, assumptions or proof output.
 
 ## Reproduce
 

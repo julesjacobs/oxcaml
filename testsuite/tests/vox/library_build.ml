@@ -2,7 +2,7 @@
  has-z3;
  source_directories = "${test_source_directory}/../../../verification/library";
  readonly_files = "vox_sequence.mli vox_sequence.ml vox_http_spec.mli";
- readonly_files += " vox_http_spec.ml vox_http.mli vox_http.ml";
+ readonly_files += " vox_http_spec.ml vox_http_model.ml vox_http.mli vox_http.ml";
  readonly_files += " vox_int_sequence.mli vox_int_sequence.ml vox_iarray.mli";
  readonly_files += " vox_iarray.ml vox_string_view.mli vox_string_view.ml";
  readonly_files += " vox_sat_spec.mli vox_sat_spec.ml vox_sat_proof.mli";
@@ -11,7 +11,7 @@
  readonly_files += " vox_cdcl_total_proof.ml vox_cdcl_total.mli";
  readonly_files += " vox_cdcl_total.ml vox_credits.mli vox_credits.ml";
  readonly_files += " vox_ordered_sequence.ml vox_merge_proofs.ml";
- readonly_files += " vox_sort_cost.ml vox_merge_sort.mli vox_merge_sort.ml";
+ readonly_files += " vox_sort_cost.mli vox_sort_cost.ml vox_merge_sort.mli vox_merge_sort.ml";
  readonly_files += " vox_lz4_model.ml vox_parallel.mli vox_parallel.ml";
  readonly_files += " borrow.mli borrow.ml borrow_iarray.mli";
  readonly_files += " borrow_iarray.ml pref.mli pref.ml vox_pref_semantics.mli";
@@ -38,7 +38,7 @@
  readonly_files += " raw_memory.mli raw_memory.ml vox_lz4_spec_storage.ml";
  readonly_files += " vox_lz4_spec_parse.ml vox_lz4_spec_decode.ml";
  readonly_files += " vox_lz4_spec_decode_bytes.ml vox_lz4_spec_bytes.ml";
- readonly_files += " vox_lz4_heap_bytes.ml vox_lz4_spec_match.ml";
+ readonly_files += " vox_lz4_heap_bytes.ml vox_lz4_match_proof.ml vox_lz4_spec_match.ml";
  readonly_files += " vox_lz4_spec_plan.ml vox_lz4_spec_token.ml";
  readonly_files += " vox_lz4_spec_wire.ml vox_lz4_spec_hashes.ml";
  readonly_files += " vox_lz4_spec_scan.ml vox_lz4_spec.ml vox_lz4_buffer.ml";
@@ -91,7 +91,7 @@
    all_modules += " vox_http_spec.ml";
    ocamlc.opt;
    flags = "-extension refinement_types -vox-library";
-   all_modules = "vox_http.mli vox_http.ml";
+   all_modules = "vox_http_model.ml vox_http.mli vox_http.ml";
    ocamlc.opt;
    flags = "-extension refinement_types -principal -vox-library";
    all_modules = "vox_int_sequence.mli vox_int_sequence.ml vox_iarray.mli";
@@ -105,7 +105,7 @@
    ocamlc.opt;
    flags = "-extension refinement_types -principal -vox-library";
    all_modules = "vox_credits.mli vox_credits.ml vox_ordered_sequence.ml";
-   all_modules += " vox_merge_proofs.ml vox_sort_cost.ml vox_merge_sort.mli";
+   all_modules += " vox_merge_proofs.ml vox_sort_cost.mli vox_sort_cost.ml vox_merge_sort.mli";
    all_modules += " vox_merge_sort.ml vox_lz4_model.ml vox_parallel.mli";
    all_modules += " vox_parallel.ml borrow.mli borrow.ml";
    all_modules += " borrow_iarray.mli borrow_iarray.ml pref.mli pref.ml";
@@ -132,7 +132,7 @@
    all_modules += " raw_memory.mli raw_memory.ml vox_lz4_spec_storage.ml";
    all_modules += " vox_lz4_spec_parse.ml vox_lz4_spec_decode.ml";
    all_modules += " vox_lz4_spec_decode_bytes.ml vox_lz4_spec_bytes.ml";
-   all_modules += " vox_lz4_heap_bytes.ml vox_lz4_spec_match.ml";
+   all_modules += " vox_lz4_heap_bytes.ml vox_lz4_match_proof.ml vox_lz4_spec_match.ml";
    all_modules += " vox_lz4_spec_plan.ml vox_lz4_spec_token.ml";
    all_modules += " vox_lz4_spec_wire.ml vox_lz4_spec_hashes.ml";
    all_modules += " vox_lz4_spec_scan.ml vox_lz4_spec.ml vox_lz4_buffer.ml";
@@ -201,7 +201,7 @@
    all_modules += " vox_http_spec.ml";
    ocamlopt.opt;
    flags = "-extension refinement_types -smt-assume-verified -vox-library";
-   all_modules = "vox_http.mli vox_http.ml";
+   all_modules = "vox_http_model.ml vox_http.mli vox_http.ml";
    ocamlopt.opt;
    flags = "-extension refinement_types -principal -smt-assume-verified -vox-library";
    all_modules = "vox_int_sequence.mli vox_int_sequence.ml vox_iarray.mli";
@@ -220,7 +220,7 @@
    ocamlopt.opt;
    flags = "-extension refinement_types -principal -smt-assume-verified -vox-library";
    all_modules = "vox_credits.mli vox_credits.ml vox_ordered_sequence.ml";
-   all_modules += " vox_merge_proofs.ml vox_sort_cost.ml vox_merge_sort.mli";
+   all_modules += " vox_merge_proofs.ml vox_sort_cost.mli vox_sort_cost.ml vox_merge_sort.mli";
    all_modules += " vox_merge_sort.ml";
    ocamlopt.opt;
    flags = "-extension refinement_types -principal -smt-assume-verified -O3 -vox-library";
@@ -258,7 +258,7 @@
    all_modules = "raw_memory.mli raw_memory.ml vox_lz4_spec_storage.ml";
    all_modules += " vox_lz4_spec_parse.ml vox_lz4_spec_decode.ml";
    all_modules += " vox_lz4_spec_decode_bytes.ml vox_lz4_spec_bytes.ml";
-   all_modules += " vox_lz4_heap_bytes.ml vox_lz4_spec_match.ml";
+   all_modules += " vox_lz4_heap_bytes.ml vox_lz4_match_proof.ml vox_lz4_spec_match.ml";
    all_modules += " vox_lz4_spec_plan.ml vox_lz4_spec_token.ml";
    all_modules += " vox_lz4_spec_wire.ml vox_lz4_spec_hashes.ml";
    all_modules += " vox_lz4_spec_scan.ml vox_lz4_spec.ml vox_lz4_buffer.ml";

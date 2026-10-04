@@ -1,3 +1,4 @@
+(** Membership laws shared by the set interfaces. *)
 module type Operations = sig
   type t : logical_data
 
@@ -28,21 +29,9 @@ module type Operations = sig
       === (lookup element left || lookup element right)} @@ total
 end
 
-module type Canonical = sig
-  include Operations
-
-  val size_zero :
-    (set : t) ->
-    {u : unit | (size set === 0Z) === (set === empty)} @@ total
-
-  val extensional :
-    (left : t) ->
-    (right : t) ->
-    ((element : int) ->
-      {u : unit | lookup element left === lookup element right}) @ total ->
-    {u : unit | left === right} @@ total
-end
-
+(** Sets with the same members compare [equal], independently of representation.
+    [size] is nonnegative, increases exactly when [add] inserts a new member,
+    and agrees for equal sets. *)
 module type Extensional = sig
   include Operations
 
@@ -67,4 +56,33 @@ module type Extensional = sig
   val size_zero :
     (set : t) ->
     {u : unit | (size set === 0Z) === equal set empty} @@ total
+
+  val size_nonnegative : (set : t) ->
+    {u : unit | 0Z <= size set} @@ total
+
+  val size_add : (element : int) -> (set : t) ->
+    {u : unit | size (add element set) ===
+      (if lookup element set then size set else Bigint.add (size set) 1Z)}
+    @@ total
+
+  val equal_size : (left : t) -> (right : t) ->
+    {u : unit | if equal left right then size left === size right else true}
+    @@ total
+end
+
+(** Stronger interface for representations whose logical equality is determined
+    by membership. AVL sets implement [Extensional]. *)
+module type Canonical = sig
+  include Operations
+
+  val size_zero :
+    (set : t) ->
+    {u : unit | (size set === 0Z) === (set === empty)} @@ total
+
+  val extensional :
+    (left : t) ->
+    (right : t) ->
+    ((element : int) ->
+      {u : unit | lookup element left === lookup element right}) @ total ->
+    {u : unit | left === right} @@ total
 end

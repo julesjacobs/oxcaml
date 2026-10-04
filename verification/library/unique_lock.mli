@@ -4,6 +4,8 @@
     [Verified_atomic]. No fairness, termination, cancellation recovery or
     exception-safe restoration is claimed. All contracts describe normal returns. *)
 module Make (V : Unique_cell.Payload) : sig @@ portable
+  (** {1 Protected payload} *)
+
   type t : logical_data
   type contents : immutable_data = V.model option
   type 'a step = { value : 'a; state : contents Ghost_pref.token @@ ghost }
@@ -18,6 +20,8 @@ module Make (V : Unique_cell.Payload) : sig @@ portable
       | Some (Some x) -> h === Ghost_pref.Heap.put (Ghost_pref.Heap.empty ()) p (Some x)
       | _ -> false))} @@ total
 
+  (** {1 Operations} *)
+
   val make : V.t @ unique total -> t
   (** Success transfers the full singleton cell authority to the caller;
       failure transfers only empty authority. *)
@@ -25,7 +29,7 @@ module Make (V : Unique_cell.Payload) : sig @@ portable
     {r : (bool, contents) Ghost_pref.step |
       if r.value then owned a (Ghost_pref.own r.state)
       else Ghost_pref.own r.state === Ghost_pref.Heap.empty ()} @ unique
-  (** Release consumes full cell authority and restores it to the lock. *)
+  (** Consume full cell authority; return empty caller authority. *)
   val release : (a : t) ->
     {t : contents Ghost_pref.token | owned a (Ghost_pref.own t)} @ unique ghost ->
     {t : contents Ghost_pref.token | Ghost_pref.own t === Ghost_pref.Heap.empty ()}

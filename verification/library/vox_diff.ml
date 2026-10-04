@@ -842,19 +842,19 @@ let (optimal_at @ total) : (old : int list) -> (fresh : int list) ->
     (other : script) ->
     {u : unit |
       if apply old other === Some fresh then cost computed <= cost other
-      else true} =
-    fun old fresh computed other ->
+      else true} @ ghost =
+    fun old fresh computed other -> ghost_ (
   apply_characterization old other;
   M.lower_bound other;
-  ()
+  ())
 
 let (invert_correct @ total) (script : script) :
     {u : unit | source (invert script) === target script
       && target (invert script) === source script
-      && cost (invert script) = cost script} =
-  Proof.invert_correct script
+      && cost (invert script) = cost script} @ ghost =
+  ghost_ (Proof.invert_correct script)
 
 let (inverse_patch @ total) (script : script) :
     {u : unit |
-      apply (target script) (invert script) === Some (source script)} =
-  Proof.inverse_patch script
+      apply (target script) (invert script) === Some (source script)} @ ghost =
+  ghost_ (Proof.inverse_patch script)

@@ -91,6 +91,10 @@ let[@def] rec (decode_model @ total) (source : char iarray @ immutable)
                   (current + match_code + 4) reversed)
 [@@decreases fuel]
 
+let[@def] (decode_block @ total) (wire : char iarray @ immutable)
+    (capacity : int) : model_result @ ghost = ghost_ (
+  decode_model wire 0 (-1) (Iarray.length wire) capacity 0 [])
+
 let[@def] rec (matches_bytes @ total) (values : char iarray @ immutable)
     (count : int) (reversed : byte list @ immutable) = ghost_ (
   match reversed with

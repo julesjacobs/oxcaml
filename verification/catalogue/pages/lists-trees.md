@@ -1,7 +1,7 @@
 title: Mutable lists and trees
 blurb: In-place reversal of a linked list and mirroring of a binary tree built from mutable cells, proved against an erased model of the nodes and of the cells they own.
 status: owner-review
-date: 27 September 2026
+date: 4 October 2026
 sources:
   - testsuite/tests/vox/pref_list.mli — List: public interface
   - testsuite/tests/vox/pref_list.ml — List: implementation and proofs
@@ -15,16 +15,83 @@ sources:
   - testsuite/tests/vox/pref_tree_rejected.ml — Rejected tree programs
   - testsuite/tests/vox/pref_tree_observe_rejected.ml — Rejected claim about the token `Pref_tree.observe` returns
 ---
-`Pref_list` is a singly linked list and `Pref_tree` a binary tree whose links are mutable cells of type `node option Pref.t`. `Pref_list.reverse` reverses a list in place and `Pref_tree.mirror_with_frame` swaps the children of every tree node in place. Each structure is described by an erased model: a list or tree of the node records themselves. A node record holds its value and the identities of its link cells, so two nodes are logically equal exactly when they have the same value and the same cells. On normal return:
+`Pref_list` reverses a mutable linked list in place; `Pref_tree` mirrors a
+mutable binary tree by exchanging left and right at every node. The
+observable results are familiar pure values: the list's values in reverse
+order, and the tree's mirrored values and shape.
 
-- `reverse` returns the root of `rev_append xs Nil`, where `xs` is the input model, and a token that owns exactly the link cells of the reversed model, with their new contents, plus an unchanged frame of other cells. The reversed model's nodes are logically equal to the input's (same values, same link cells); that the node records are reused rather than copied is checked only at run time, by the list client.
-- `mirror_with_frame` returns a token that owns exactly the cells of `flipped model`, the tree with every node's children exchanged, plus the unchanged frame.
-- The constructors and observers are specified exactly: `empty`, `cons` and `branch` give the new model, `of_list` the values it holds, and `observe_read` returns the model's node list or the tree's shape. `observe` returns the same result together with the token, which still owns exactly the structure's cells.
-- Exported lemmas relate the observations to the models: `contents_nodes` states that a list's values are the values of its nodes, `nodes_rev_append` and `contents_rev_append` that reversal reverses both (`rev_onto xs ys` is `List.rev_append xs ys`), and `shape_flipped` that mirroring a tree mirrors its shape (`mirror_shape`).
+The `Owned` interfaces package the links and their ownership. Their
+contracts state those observable changes directly and retain the node
+records and link-cell identities. Raw operations additionally accept a
+frame of other cells and promise to preserve it. Operations that touch
+cells are partial; these guarantees describe normal return.
 
-Each module also has an `Owned` interface. An `Owned.t` is an unboxed value holding the root pointer, the erased model and the erased token, with the representation invariant hidden. `Owned.reverse` gives a list whose model is `rev_append (model state) Nil`, and `Owned.mirror` a tree whose model is `flipped (model state)`.
+## Interface
 
-Termination of the operations is not proved: every operation that reads or writes a cell is partial. (The model functions are `total`.) With the lemmas above, the clients prove what they observe after reversing or mirroring: the values of the reversed list are the original values in reverse order, and the mirrored tree has the mirrored shape. What stays a run-time check is that reversal reuses the node records rather than copying them, since the contracts compare nodes by their fields. For trees, `leaf` fixes only the shape of the new model.
+Start with the observations: list values in order, and a tree's values and
+shape. List reversal is ordinary reversal with an accumulator; tree
+mirroring exchanges left and right recursively.
+
+@code testsuite/tests/vox/pref_list.mli "type node =" "[@@inductive]"
+
+@code testsuite/tests/vox/pref_list.mli "val contents :" "  @@ total"
+
+@code testsuite/tests/vox/pref_list.mli "val rev_onto :" "    (match xs with [] -> ys | x :: rest -> rev_onto rest (x :: ys))} @@ total"
+
+@code testsuite/tests/vox/pref_tree.mli "type shape =" "[@@inductive]"
+
+@code testsuite/tests/vox/pref_tree.mli "val shape_of :" "| Branch (n, l, r) -> Fork (n.value, shape_of l, shape_of r))} @@ total"
+
+@code testsuite/tests/vox/pref_tree.mli "val mirror_shape :" "  @@ total"
+
+The `Owned` operations package the root, model and ownership token.
+`reverse` directly promises reversed values, and `mirror` directly promises
+the mirrored shape. Their model equations additionally preserve the node
+records: `rev_append` reverses the linked-list model and `flipped` mirrors
+the tree model. The complete interfaces define both recursive functions.
+The main operations need no heap premises from a caller:
+
+@code testsuite/tests/vox/pref_list.mli "module Owned : sig" "    {result : node list | result === nodes (model state)}"
+
+@code testsuite/tests/vox/pref_tree.mli "module Owned : sig" "    {result : shape | result === shape_of (model state)}"
+
+`observe` borrows the owned structure to read its nodes or shape.
+`@ unique` consumes the caller's handle, `@ ghost` marks erased values,
+and `@@ total` declares total functions. `model` retains node records and
+link-cell identities, so the same handle also supports clients that need
+to reason about nodes.
+
+For clients managing an unrelated heap frame, the raw operations expose
+explicit ownership. `heap model` describes the model's link cells, and
+`valid model` requires their separation; their recursive definitions are
+in the complete [list interface](src:testsuite/tests/vox/pref_list.mli) and
+[tree interface](src:testsuite/tests/vox/pref_tree.mli). These contracts
+preserve every cell in `frame` while updating the structure:
+
+@code testsuite/tests/vox/pref_list.mli "val reverse : (pointer :" "      && valid (rev_append xs Nil)} @ unique"
+
+@code testsuite/tests/vox/pref_tree.mli "val mirror_with_frame :" "      @ unique"
+
+`adopt` and `release` cross between explicit tokens and `Owned.t`, preserving
+the model and its owned heap. The final observation laws connect model
+reversal and mirroring to values and shapes. The complete interfaces link
+these observations to the heap through `root`, `heap` and `valid`; this
+ownership detail is needed when crossing that boundary.
+
+## Trusted base
+
+- Nothing beyond the shared base, which covers the `Pref` cell operations and the heap laws. The list proofs use the stated heap laws `partition_law`, `put_law`, `put_union_law` and `union_law`; the tree proofs also use `commute_law`, `domain_law` and `union_domain_law`.
+
+## Scope
+
+- List: `reverse` (with a frame), `empty`, `cons`, `of_list`, `observe_read` and `observe`; `Owned` has `empty`, `of_list`, `reverse`, `observe`, `adopt` and `release`. Tree: `mirror_with_frame`, `empty`, `leaf`, `branch`, `observe_read` and `observe`; `Owned` has `empty`, `leaf`, `branch`, `mirror`, `observe`, `adopt` and `release`. There is no insertion, deletion, search or length.
+- Values are `int`.
+- All operations that touch cells are partial; contracts describe normal return.
+- List reversal is tail-recursive. The list observers and `of_list` are not: their stack depth grows linearly with the list's length. The tree operations recurse to the depth of the tree.
+- A token owns cells of one payload type. The frame passed through `reverse` or `mirror_with_frame` must consist of `node option` cells; a cell of another type needs its own token, as in the clients.
+- `observe` in both modules takes the token and returns it with the same heap; `observe_read` and both `Owned.observe` functions borrow it.
+- Under `-principal`, neither interface type-checks, nor does client code that passes `node option` cells or tokens to `Pref` functions: the compiler cannot show that `node option` has kind `immutable_data`. The rejection tests record this error for their `-principal` variant.
+- The list client reverses lists of up to 1,000 nodes, proves the reversed values and node records, and checks with `==` at run time that the node records are the original ones.
 
 ## Client example
 
@@ -54,33 +121,6 @@ File "no_reversal.ml", line 7, characters 20-58:
 ```
 
 The rejection tests also reject a list function that loses a node, a tree function that claims to mirror without doing so, a tree whose two subtrees share a node, uses of private helpers, and reuse of a consumed `Owned.t` or of a released raw record. Against the lemmas, they reject the claims that reversal leaves a list's values unchanged, that a list's nodes hold its values in reverse order, that mirroring leaves a tree's shape unchanged, and that the token `Pref_tree.observe` returns owns nothing.
-
-## Interface
-
-`[@@inductive]` marks a model type that the checker may reason about by induction. Each model function `f` outside `Owned` comes with an equation `f_def` that gives its definition; `Owned.model` keeps its definition private. `Pref.own t` is the heap owned by token `t`, a finite map from cells to contents, and `H` is `Pref.Heap`. `valid` states that the link cells of different nodes are distinct. `@ unique` means the caller passes its only reference, `@ ghost` marks an erased value, and `@@ total` a function declared total.
-
-@code testsuite/tests/vox/pref_list.mli
-
-The tree interface defines `root`, `links`, `heap` and `valid` in the same way (`valid` also requires each node's two cells to differ), then:
-
-@code testsuite/tests/vox/pref_tree.mli "val flipped :" "  @ ghost @@ total"
-
-@code testsuite/tests/vox/pref_tree.mli "module Owned : sig" "end"
-
-## Trusted base
-
-- Nothing beyond the shared base, which covers the `Pref` cell operations and the heap laws. The list proofs use the stated heap laws `partition_law`, `put_law`, `put_union_law` and `union_law`; the tree proofs also use `commute_law`, `domain_law` and `union_domain_law`.
-
-## Scope
-
-- List: `reverse` (with a frame), `empty`, `cons`, `of_list`, `observe_read` and `observe`; `Owned` has `empty`, `of_list`, `reverse`, `observe`, `adopt` and `release`. Tree: `mirror_with_frame`, `empty`, `leaf`, `branch`, `observe_read` and `observe`; `Owned` has `empty`, `leaf`, `branch`, `mirror`, `observe`, `adopt` and `release`. There is no insertion, deletion, search or length.
-- Values are `int`.
-- All operations that touch cells are partial; contracts describe normal return.
-- List reversal is tail-recursive. The list observers and `of_list` are not: their stack depth grows linearly with the list's length. The tree operations recurse to the depth of the tree.
-- A token owns cells of one payload type. The frame passed through `reverse` or `mirror_with_frame` must consist of `node option` cells; a cell of another type needs its own token, as in the clients.
-- `observe` in both modules takes the token and returns it with the same heap; `observe_read` and both `Owned.observe` functions borrow it.
-- Under `-principal`, neither interface type-checks, nor does client code that passes `node option` cells or tokens to `Pref` functions: the compiler cannot show that `node option` has kind `immutable_data`. The rejection tests record this error for their `-principal` variant.
-- The list client reverses lists of up to 1,000 nodes, proves the reversed values and node records, and checks with `==` at run time that the node records are the original ones.
 
 ## Reproduce
 

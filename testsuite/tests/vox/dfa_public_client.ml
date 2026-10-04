@@ -54,9 +54,26 @@ let (reduction_finishes @ total) (source : Dfa_semantics.machine) (limit : int) 
   ()
 
 
+let (reduced_table_valid @ total) (source : Dfa_semantics.machine)
+    (limit : int) :
+    {u : unit | match Dfa_equivalence.reduce source limit with
+      | None -> true | Some reduced -> Dfa_semantics.valid reduced} =
+  ghost_ (Dfa_equivalence.reduce_valid source limit);
+  ()
+
+
 let () =
   let source : Dfa_semantics.machine = 0, [0, false, ([], 0)] in
   assert (Dfa_equivalence.compare source source 1 = Dfa_equivalence.Equivalent);
   (match Dfa_equivalence.reduce source 1 with
    | None -> assert false
    | Some reduced -> assert (not (Dfa_semantics.run reduced [7])))
+
+let () =
+  let first : Dfa_semantics.machine = 0, [0, false, ([], 0)] in
+  let renamed : Dfa_semantics.machine = 7, [7, false, ([], 7)] in
+  assert (first <> renamed);
+  assert (Dfa_equivalence.compare first renamed 1 = Dfa_equivalence.Equivalent);
+  List.iter (fun word ->
+    assert (Dfa_semantics.run first word = Dfa_semantics.run renamed word))
+    [[]; [0]; [7; -1; max_int]]

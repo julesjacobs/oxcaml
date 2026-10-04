@@ -24,5 +24,8 @@ val allocation_domain :
       valid program && 0 < physical && physical <= 32
       && allocation.physical = physical
       && allocation.source_registers = program.registers
-      && allocation.source_inputs === program.inputs}
+      && allocation.source_inputs === program.inputs
+      && length allocation.code = length program.code
+      && all_valid_instructions physical (length allocation.code)
+           allocation.code}
   @ ghost @@ total

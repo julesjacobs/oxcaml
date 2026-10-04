@@ -463,7 +463,7 @@ Line 1, characters 37-58:
 1 | let bad a = Reference_lock.release a (Ghost_pref.empty ());;
                                          ^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "reference_lock.mli", line 21, characters 30-56:
+File "reference_lock.mli", line 28, characters 30-56:
   The refinement is stated here.
 |}]
 
@@ -474,7 +474,7 @@ Line 1, characters 21-42:
 1 | let bad a = L.take a (Ghost_pref.empty ());;
                          ^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "unique_lock.mli", lines 35-36, characters 6-42:
+File "unique_lock.mli", lines 39-40, characters 6-42:
   The refinement is stated here.
 |}]
 
@@ -487,7 +487,7 @@ Line 3, characters 59-66:
 3 |   if not r.value then Reference_lock.read_owned a (borrow_ r.state) else 0;;
                                                                ^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "reference_lock.mli", line 24, characters 35-61:
+File "reference_lock.mli", line 31, characters 35-61:
   The refinement is stated here.
 |}]
 
@@ -574,7 +574,7 @@ Line 6, characters 24-35:
 6 |     let _ = L.release a taken.state in ()
                             ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "unique_lock.mli", line 30, characters 37-63:
+File "unique_lock.mli", line 34, characters 37-63:
   The refinement is stated here.
 |}]
 
@@ -606,6 +606,6 @@ Line 3, characters 51-58:
 3 |   if r.value then let _ = Reference_lock.release b r.state in ();;
                                                        ^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "reference_lock.mli", line 21, characters 30-56:
+File "reference_lock.mli", line 28, characters 30-56:
   The refinement is stated here.
 |}]

@@ -11,6 +11,13 @@
   ],
   "stops": [
     {
+      "title": "The semantic model: order and multiplicity",
+      "path": "verification/library/vox_int_sequence.mli",
+      "from": "val sorted :",
+      "to": "{u : unit | permutation left right} @@ total",
+      "text": "`sorted_adjacent` defines nondecreasing integer order recursively. `count_def` counts every occurrence of an integer. `permutation_count` and `count_extensional` characterize permutation in both directions by equality of every count. These definitions describe the complete sorting result independently of partitioning, borrowing or parallel scheduling; bag and update lemmas follow as proof support."
+    },
+    {
       "title": "The interface: three sorts, none of them total",
       "path": "testsuite/tests/vox/quicksort.mli",
       "from": "val sort : (s : int Borrow.Slice.t) @ local unique ->",
@@ -18,7 +25,7 @@
         "val parallel_sort_array",
         "} @ unique"
       ],
-      "lines": "10-22",
+      "lines": "8-20",
       "text": "`sort` takes a slice `@ local unique`: the caller lends its only reference, and the slice cannot escape the call. Its contract relates two erased views of the slice, `Borrow.Slice.current s`, the contents at the call, and `Borrow.Slice.final s`, the contents when the borrow ends. `sort_array` and `parallel_sort_array` consume an owned array and return one, and state the same property on `Borrow.Owned_array.contents`; `Spec` is `Vox_int_sequence`. None is `@@ total`: they create and end loans, and `parallel_sort_array` also starts domains. Their contracts hold on normal return only, and if `parallel_sort_array` raises the array is lost."
     },
     {
@@ -58,7 +65,7 @@
       "from": "(** [fork_join left right] runs [left] in a new domain",
       "to": "'a * 'b @ unique",
       "lines": "3-15",
-      "text": "`fork_join` mentions no refinement, array or ownership. The thunks are `portable once`, so they capture no unsynchronized state and run once, and their results are `unique`. Vox needs no rule for parallelism here: instantiating `'a` and `'b` at refined types carries each side's proof across the join, as a type argument. `portable` thunks are global, so they cannot capture a borrowed slice, which is `local` to its borrow; that is why the parallel sort works on owned arrays. The implementation, [`vox_parallel.ml`](src:verification/library/vox_parallel.ml), is trusted; see [stop 9](tour:quicksort/9)."
+      "text": "`fork_join` mentions no refinement, array or ownership. The thunks are `portable once`, so they capture no unsynchronized state and run once, and their results are `unique`. Vox needs no rule for parallelism here: instantiating `'a` and `'b` at refined types carries each side's proof across the join, as a type argument. `portable` thunks are global, so they cannot capture a borrowed slice, which is `local` to its borrow; that is why the parallel sort works on owned arrays. The implementation, [`vox_parallel.ml`](src:verification/library/vox_parallel.ml), is trusted; see [stop 10](tour:quicksort/10)."
     },
     {
       "title": "The parallel recursion on owned pieces",

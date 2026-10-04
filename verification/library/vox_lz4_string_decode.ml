@@ -282,6 +282,7 @@ let decode_string : (wire : string) ->
           (M.footprint block) block 0 []);
       let pure_model = ghost_ (Bytes_model.decode_model model 0 (-1)
         (Iarray.length model) capacity 0 []) in
+      ghost_ (Bytes_model.decode_block_def model capacity);
       match error with
       | Some error ->
         let decoded : decoded = Error error in

@@ -6,7 +6,8 @@ prefix=${1:?Usage: build.sh COMPILER_PREFIX}
 prefix=$(cd "$prefix" && pwd)
 output="$root/_build/vox-library"
 destination="$prefix/lib/ocaml/vox"
-modules=(vox_sequence vox_http_spec vox_http vox_int_sequence vox_iarray vox_string_view
+modules=(vox_sequence vox_http_spec vox_http_model vox_http
+         vox_int_sequence vox_iarray vox_string_view
          vox_sat_spec vox_sat_proof vox_sat
          vox_cdcl_total_proof vox_cdcl_total
          vox_credits vox_ordered_sequence vox_merge_proofs vox_sort_cost
@@ -26,7 +27,7 @@ modules=(vox_sequence vox_http_spec vox_http vox_int_sequence vox_iarray vox_str
          raw_memory
          vox_lz4_spec_storage vox_lz4_spec_parse vox_lz4_spec_decode
          vox_lz4_spec_decode_bytes vox_lz4_spec_bytes vox_lz4_heap_bytes
-         vox_lz4_spec_match
+         vox_lz4_match_proof vox_lz4_spec_match
          vox_lz4_spec_plan vox_lz4_spec_token vox_lz4_spec_wire
          vox_lz4_spec_hashes vox_lz4_spec_scan vox_lz4_spec
          vox_lz4_buffer vox_lz4_packed
@@ -100,7 +101,7 @@ compilers="$(cd "$prefix/bin" && pwd -P)/ocamlc.opt $(cd "$prefix/bin" && pwd -P
     # parameter. These modules still undergo all refinement and termination
     # checks.
     case "$module" in
-      vox_http | vox_cdcl_total | vox_cdcl_total_proof | vox_table_* | \
+      vox_http | vox_http_model | vox_cdcl_total | vox_cdcl_total_proof | vox_table_* | \
       vox_verified_flat_hashtbl)
         module_flags=$flags ;;
     esac

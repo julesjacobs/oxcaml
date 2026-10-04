@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_int_sequence.mli vox_int_sequence.ml vox_iarray.mli vox_iarray.ml sorted_array_proofs.ml sorted_array.mli sorted_array.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_int_sequence.mli vox_int_sequence.ml vox_iarray.mli vox_iarray.ml sorted_array_proofs.ml sorted_array_model.ml sorted_array.mli sorted_array.ml";
  { bytecode; }
  { native; }
 *)
@@ -12,24 +12,20 @@ open Sorted_array
 let (empty_observations @ total) (value : int) :
     {u : unit | not (occurs empty value)
       && range_spec empty value 0 0
-      && edited empty empty 0 value true
       && at empty (-1) = 0} =
   let array = empty in
   let zero = 0 in
   let negative = -1 in
-  let inserting = true in
   occurs_equation array value;
   occurs_between_equation array value zero zero;
   range_equation array value zero zero;
-  edited_equation array array zero value inserting;
-  edit_suffix_equation array array zero value inserting zero;
   at_outside array negative;
   ()
 
 let round_trip : (source : t) -> (value : int) -> (index : int) ->
     {u : unit | 0 <= index && index < length source} @ ghost ->
-    {result : t | length result = length source
-      && at result index = at source index} =
+    {result : t | contents result === contents source
+      && length result = length source && at result index = at source index} =
   fun source value index premise ->
   premise;
   let pair = insert source value in
@@ -37,14 +33,23 @@ let round_trip : (source : t) -> (value : int) -> (index : int) ->
   ghost_ (length_bounds source);
   let result = remove_at inserted position () in
   ghost_ (
-    let zero = 0 in
-    let insertion = true in
-    let removal = false in
+    inserted_def source inserted position value;
+    removed_def inserted result position;
+    contents_length source;
+    let sequence = contents source in
+    let p = Bigint.of_int position in
+    let prefix = Vox_sequence.take p sequence in
+    let suffix = Vox_sequence.drop p sequence in
+    Sorted_array_model.insert_def sequence p value;
+    Vox_sequence.cut sequence p;
+    Vox_sequence.append_split prefix (value :: suffix);
+    Sorted_array_model.remove_def (contents inserted) p;
+    Vox_sequence.drop_add (contents inserted) p 1Z;
+    Vox_sequence.drop_def 1Z (value :: suffix);
+    Vox_sequence.drop_def 0Z suffix;
     let original = if index < position then index else index + 1 in
-    edited_at inserted result position zero
-      removal index ();
-    edited_at source inserted position value
-      insertion original ();
+    removed_at inserted result position index ();
+    inserted_at source inserted position value original ();
     (() : {u : unit | at result index = at source index}));
   result
 
@@ -140,3 +145,11 @@ let observe_sequence : (array : t) -> (index : int) ->
   let bounded : {i : int | 0 <= i && i < length array} = index in
   contents_at array bounded;
   ())
+
+let () =
+  let _, one = insert empty 7 in
+  let _, duplicates = insert one 7 in
+  assert (length duplicates = 2);
+  let restored = remove_at duplicates 0 () in
+  assert (length restored = 1 && at restored 0 = 7);
+  assert (length duplicates = 2 && at duplicates 0 = 7 && at duplicates 1 = 7)

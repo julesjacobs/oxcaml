@@ -1,17 +1,25 @@
 @@ portable
 
+(** A worker writes one owned byte and returns a receipt stating its value.
+    On normal return, [fill] updates exactly that byte in the input heap
+    and preserves every other owned location. [read_receipt]
+    preserves the complete heap. *)
+
 module P = Ghost_pref
 module H = P.Heap
 module M = Raw_memory
 module C = One_shot
+
+(** {1 Owned byte and receipt} *)
 
 type slot : value mod portable contended = {
   block : M.t @@ aliased;
   index : int;
   permission : M.contents P.token @@ ghost;
 }
-type owned : value mod portable contended = {s : slot | 0 <= s.index && s.index < M.length s.block &&
-  H.mem (P.own s.permission) (M.location s.block s.index)}
+type owned : value mod portable contended =
+  {s : slot | 0 <= s.index && s.index < M.length s.block &&
+    H.mem (P.own s.permission) (M.location s.block s.index)}
 
 type receipt : value mod portable contended = { slot : owned; expected : M.byte }
 type filled : value mod portable contended = {r : receipt |
@@ -20,14 +28,18 @@ type filled : value mod portable contended = {r : receipt |
   | Some (Some v) -> v = r.expected
   | _ -> false}
 
-val fill : (s : owned) @ unique -> (value : M.byte) ->
-    {r : filled | r.slot.block === s.block && r.slot.index = s.index &&
-      r.expected = value} @ unique
-
 type ('a : value mod portable contended) pending = {
   answer : 'a C.recv;
   worker : unit Domain.t @@ aliased;
 }
+
+(** {1 Operations} *)
+
+val fill : (s : owned) @ unique -> (value : M.byte) ->
+    {r : filled | r.slot.block === s.block && r.slot.index = s.index &&
+      r.expected = value &&
+      P.own r.slot.permission === H.put (P.own s.permission)
+        (M.location s.block s.index) (Some value)} @ unique
 
 val dispatch : (block : M.t) ->
     (index : {i : int | 0 <= i && i < M.length block}) ->
@@ -39,5 +51,6 @@ val dispatch : (block : M.t) ->
 
 val read_receipt : (r : filled) @ unique ->
     ({v : int | v = r.expected} *
-     {s : owned | s.block === r.slot.block && s.index = r.slot.index})
+     {s : owned | s.block === r.slot.block && s.index = r.slot.index &&
+       P.own s.permission === P.own r.slot.permission})
       @ unique

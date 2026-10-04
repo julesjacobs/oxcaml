@@ -5,11 +5,6 @@
     return Input_too_large. Totality uses Vox's convention excluding runtime
     resource exhaustion; the size limit is not a RAM or stack guarantee.
 
-    The implementation greedily keeps equal heads. At each frontier slot it
-    compares old-input positions after the candidate edits and before the
-    next Keep run, choosing insertion on equal positions. This is the tie
-    policy, not a claim of global lexicographic minimality.
-
     The optimality theorem compares every finite script whose application
     succeeds, without imposing the input-size limit on that script. *)
 
@@ -32,14 +27,14 @@ val optimal_at : (old : int list) -> (fresh : int list) ->
   (other : script) ->
   {u : unit |
     if apply old other === Some fresh then cost computed <= cost other
-    else true}
+    else true} @ ghost
   @@ total
 
 val invert_correct : (script : script) ->
   {u : unit | source (invert script) === target script
     && target (invert script) === source script
-    && cost (invert script) = cost script} @@ total
+    && cost (invert script) = cost script} @ ghost @@ total
 
 val inverse_patch : (script : script) ->
   {u : unit | apply (target script) (invert script) === Some (source script)}
-  @@ total
+  @ ghost @@ total

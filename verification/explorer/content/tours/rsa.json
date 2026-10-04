@@ -12,20 +12,20 @@
   ],
   "stops": [
     {
-      "title": "Exact contracts with preconditions",
-      "path": "verification/library/vox_rsa.mli",
-      "from": "val modexp : (a : t) -> (exponent : {e : t | e >= 0Z}) ->",
-      "to": "0Z <= r && r < p * q && r = power ciphertext d mod (p * q)} @@ total",
-      "lines": "6-32",
-      "text": "`modexp`'s contract is exact: for every integer `a`, every exponent `e >= 0` and every modulus `n > 0`, the result is `power a e mod n`, where `power` is repeated multiplication. The conditions are preconditions in the argument types, so every call must prove `exponent >= 0Z` and `modulus > 0Z`, and there are no error results. `encrypt` and `decrypt` are `modexp` under other names. `roundtrip_correct` is the theorem, an erased total function over any five integers whose result states the implication; `roundtrip` runs encryption and decryption, and its type alone would also be met by returning the message. `decrypt_crt` requires two distinct primes and returns the same value as ordinary decryption."
-    },
-    {
-      "title": "The specification: five definitions",
+      "title": "The specification: seven definitions",
       "path": "verification/library/vox_rsa_spec.ml",
       "from": "let[@def] rec power a e =",
       "to": "&& (e * d - 1Z) mod lambda p q = 0Z",
       "lines": "3-25",
-      "text": "The specification is five definitions over unbounded integers. `power` is repeated multiplication, `prime` is trial division, and `lambda p q`, the lcm of `p - 1` and `q - 1`, is Carmichael's function of `p * q`; `valid_key` is the textbook condition that `e * d - 1` is a multiple of it. Each `[@@decreases ...]` gives the termination measure of a recursive definition, which must be total to appear in refinements. `let[@def]` also generates the lemmas `power_def`, `prime_def` and so on, which a proof calls to unfold a definition one step. `Bigint`'s `/` and `mod` are Euclidean, so `mod` by a positive number is never negative."
+      "text": "The specification is seven definitions over unbounded integers. `power` is repeated multiplication, `no_divisors` and `prime` define primality by trial division, `gcd` and `lcm` define the common-divisor and common-multiple arithmetic, and `lambda p q`, the lcm of `p - 1` and `q - 1`, is Carmichael's function of `p * q`; `valid_key` is the textbook condition that `e * d - 1` is a multiple of it. Each `[@@decreases ...]` gives the termination measure of a recursive definition, which must be total to appear in refinements. `let[@def]` also generates the lemmas `power_def`, `prime_def` and so on, which a proof calls to unfold a definition one step. `Bigint`'s `/` and `mod` are Euclidean, so `mod` by a positive number is never negative."
+    },
+    {
+      "title": "Exact contracts with preconditions",
+      "path": "verification/library/vox_rsa.mli",
+      "from": "val modexp : (a : t) -> (exponent : {e : t | e >= 0Z}) ->",
+      "to": "&& r = power ciphertext exponent mod (p * other_prime)} @@ total",
+      "lines": "6-32",
+      "text": "`modexp`'s contract is exact: for every integer `a`, every exponent `e >= 0` and every modulus `n > 0`, the result is `power a e mod n`, where `power` is repeated multiplication. The conditions are preconditions in the argument types, so every call must prove `exponent >= 0Z` and `modulus > 0Z`, and there are no error results. `encrypt` and `decrypt` are `modexp` under other names. `roundtrip_correct` is the theorem, an erased total function over any five integers whose result states the implication; `roundtrip` runs encryption and decryption, and its type alone would also be met by returning the message. `decrypt_crt` requires two distinct primes and returns the same value as ordinary decryption."
     },
     {
       "title": "A client proof of the round trip",
@@ -39,7 +39,10 @@
       "title": "Rejected: a key with p = q",
       "path": "testsuite/tests/vox/rsa_rejected.ml",
       "from": "(* p = q: every other conjunct of [valid_key] holds",
-      "to": ["let distinct_primes () =", "|}]"],
+      "to": [
+        "let distinct_primes () =",
+        "|}]"
+      ],
       "lines": "131-154",
       "text": "`repeated_prime` calls `roundtrip` with `p = q = 5`, a key for which every other conjunct of `valid_key` holds, and the checker rejects the message argument, pointing at `valid_key` in the interface. `distinct_primes` changes only `q`, to 7, and is accepted, so that input alone causes the rejection; the `Facts` module above supplies the unfoldings of `prime` and `lambda` that both cases need. The file repeats the pattern for a key whose `e * d - 1` is not a multiple of `lambda p q`, a message equal to `p * q` and a composite `p`. It also rejects a negative exponent, a zero modulus and a reference to a proof helper that the interface does not export."
     },

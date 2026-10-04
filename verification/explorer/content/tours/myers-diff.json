@@ -35,8 +35,7 @@
         "val optimal_at",
         "@@ total"
       ],
-      "lines": "20-36",
-      "text": "`diff` is `total`, and its result type is the theorem. When both inputs have at most 1,000,000 elements it returns `Ok s` with source `old`, target `fresh` and cost exactly `minimum_cost old fresh`, and it returns `Error Input_too_large` exactly when an input is longer. `optimal_at` turns the cost equation into optimality: any script `other` with `apply old other === Some fresh` costs at least as much. Its `computed` argument is refined by the cost equation, so a caller must supply a script already known to have minimum cost, and `diff` supplies one. The tie rule in the header comment, which of several optimal scripts is returned, is documentation and is outside the contract."
+      "text": "`diff` is `total`, and its result type is the theorem. When both inputs have at most 1,000,000 elements it returns `Ok s` with source `old`, target `fresh` and cost exactly `minimum_cost old fresh`, and it returns `Error Input_too_large` exactly when an input is longer. `optimal_at` turns the cost equation into optimality: any script `other` with `apply old other === Some fresh` costs at least as much. Its `computed` argument is refined by the cost equation, so a caller must supply a script already known to have minimum cost, and `diff` supplies one. Any minimum-cost script with that source and target is permitted. `optimal_at`, `invert_correct` and `inverse_patch` return ghost results, so their proofs are erased."
     },
     {
       "title": "A client: patch, invert, compare with any script",

@@ -4,10 +4,8 @@
     [Mode_solver_semantics]; inequality graphs in
     [Mode_solver_graph_semantics]; guarded quantifier prefixes in
     [Mode_solver_guarded_semantics]. Environments are lists of values
-    indexed by de Bruijn indices. Each operation comes with an [_exact]
-    theorem giving its result's truth value in every environment and, for
-    most, a [_scoped] theorem bounding the variables its result mentions
-    ([scoped depth f]: every free variable of [f] is below [depth]).
+    indexed by de Bruijn indices. The [_exact] theorems give each result's
+    truth value in every environment. Scoping and composition theorems follow the operations.
 
     Every function is [total], so the specifications can apply it. The
     theorems return a refined [unit] [@ ghost]: their proofs are erased. *)
@@ -29,8 +27,6 @@ val regionality_adjunction : (a : elt) -> (b : elt) ->
 val eliminate : formula -> qf @@ total
 val eliminate_exact : (env : elt list) -> (f : formula) ->
   {u : unit | eval_qf env (eliminate f) = eval env f} @ ghost @@ total
-val eliminate_scoped : (depth : int) -> (f : {f : formula | scoped depth f}) ->
-  {u : unit | scoped_qf depth (eliminate f)} @ ghost @@ total
 
 (** The truth value of a closed formula; [None] if [f] has a free
     variable. *)
@@ -51,10 +47,6 @@ val project_graph_exact :
   (count : unit list) -> (env : elt list) -> (graph : graph) ->
   {u : unit | eval_qf env (project_graph count graph)
               = models_exists count env graph} @ ghost @@ total
-val project_graph_scoped :
-  (count : unit list) -> (depth : int) ->
-  (graph : {graph : graph | scoped_exists count depth graph}) ->
-  {u : unit | scoped_qf depth (project_graph count graph)} @ ghost @@ total
 
 (** Whether [graph] holds for some values of its [count] variables; [None]
     if it has other free variables. *)
@@ -79,11 +71,6 @@ val subsumption_residual_exact :
   {u : unit | eval_qf env (subsumption_residual guard obligation)
               = eval env (subsumption_formula guard obligation)}
   @ ghost @@ total
-val subsumption_residual_scoped :
-  (depth : int) -> (guard : {g : qf | scoped_qf (depth + 1) g}) ->
-  (obligation : {w : qf | scoped_qf (depth + 2) w}) ->
-  {u : unit | scoped_qf depth (subsumption_residual guard obligation)}
-  @ ghost @@ total
 
 (** Adds the residual of a subsumption check to a context [gamma]. *)
 val assert_subsumption : qf -> qf -> qf -> qf @@ total
@@ -94,9 +81,10 @@ val assert_subsumption_exact :
                  && eval env (subsumption_formula guard obligation))}
   @ ghost @@ total
 
-(** The same for inequality graphs. The theorem spells out the subsumption
-    over the three values of [x]: [guard] mentions [x] as variable [0], and
-    [obligations] mentions [y] and [x] as variables [0] and [1]. *)
+(** The same for inequality graphs: [subsumes env guard obligations]
+    means [forall x. guard x implies exists y. obligations x y].
+    [guard] mentions [x] as variable [0], and [obligations] mentions [y]
+    and [x] as variables [0] and [1]. *)
 val assert_graph_subsumption :
   qf -> graph -> graph -> qf @@ total
 val assert_graph_subsumption_exact :
@@ -104,28 +92,7 @@ val assert_graph_subsumption_exact :
   (guard : graph) -> (obligations : graph) ->
   {u : unit |
     eval_qf env (assert_graph_subsumption gamma guard obligations) =
-      (eval_qf env gamma
-       && ((not (models (Global :: env) guard)
-            || models (Global :: Global :: env) obligations
-            || models (Regional :: Global :: env) obligations
-            || models (Local :: Global :: env) obligations)
-           && (not (models (Regional :: env) guard)
-               || models (Global :: Regional :: env) obligations
-               || models (Regional :: Regional :: env) obligations
-               || models (Local :: Regional :: env) obligations)
-           && (not (models (Local :: env) guard)
-               || models (Global :: Local :: env) obligations
-               || models (Regional :: Local :: env) obligations
-               || models (Local :: Local :: env) obligations)))}
-  @ ghost @@ total
-val assert_graph_subsumption_scoped :
-  (depth : int) ->
-  (gamma : {gamma : qf | scoped_qf depth gamma}) ->
-  (guard : {guard : graph | scoped_graph (depth + 1) guard}) ->
-  (obligations : {obligations : graph |
-    scoped_graph (depth + 2) obligations}) ->
-  {u : unit | scoped_qf depth
-                (assert_graph_subsumption gamma guard obligations)}
+      (eval_qf env gamma && subsumes env guard obligations)}
   @ ghost @@ total
 
 (** {2 Guarded quantifier prefixes}
@@ -150,6 +117,49 @@ val project_guarded_exact :
     && eval_qf env (project_guarded prefix guard witness).winning
       = game prefix env guard witness} @ ghost @@ total
 
+(** A formula equivalent to [admissible && game]. *)
+val project_admissible : quantifier list -> qf -> qf -> qf @@ total
+val project_admissible_exact :
+  (prefix : quantifier list) -> (env : elt list) ->
+  (guard : qf) -> (witness : qf) ->
+  {u : unit | eval_qf env (project_admissible prefix guard witness)
+              = normalized_game prefix env guard witness} @ ghost @@ total
+
+(** {2 Scoping and composition}
+
+    [scoped depth f] means every free variable of [f] is below [depth]. *)
+
+val eliminate_scoped : (depth : int) -> (f : {f : formula | scoped depth f}) ->
+  {u : unit | scoped_qf depth (eliminate f)} @ ghost @@ total
+
+val project_graph_scoped :
+  (count : unit list) -> (depth : int) ->
+  (graph : {graph : graph | scoped_exists count depth graph}) ->
+  {u : unit | scoped_qf depth (project_graph count graph)} @ ghost @@ total
+
+val subsumption_residual_scoped :
+  (depth : int) -> (guard : {g : qf | scoped_qf (depth + 1) g}) ->
+  (obligation : {w : qf | scoped_qf (depth + 2) w}) ->
+  {u : unit | scoped_qf depth (subsumption_residual guard obligation)}
+  @ ghost @@ total
+
+val assert_graph_subsumption_scoped :
+  (depth : int) ->
+  (gamma : {gamma : qf | scoped_qf depth gamma}) ->
+  (guard : {guard : graph | scoped_graph (depth + 1) guard}) ->
+  (obligations : {obligations : graph |
+    scoped_graph (depth + 2) obligations}) ->
+  {u : unit | scoped_qf depth
+                (assert_graph_subsumption gamma guard obligations)}
+  @ ghost @@ total
+
+val project_admissible_scoped :
+  (prefix : quantifier list) -> (depth : int) ->
+  (guard : {g : qf | scoped_prefix prefix depth g}) ->
+  (witness : {w : qf | scoped_prefix prefix depth w}) ->
+  {u : unit | scoped_qf depth (project_admissible prefix guard witness)}
+  @ ghost @@ total
+
 (** Projecting a prefix in two parts gives the same formulas, as syntax, as
     projecting it at once. *)
 val project_scopes_compose :
@@ -159,17 +169,3 @@ val project_scopes_compose :
     project_guarded (append_prefix outer inner) guard witness ===
       project_guarded outer (project_guarded inner guard witness).domain
         (project_guarded inner guard witness).winning} @ ghost @@ total
-
-(** A formula equivalent to [admissible && game]. *)
-val project_admissible : quantifier list -> qf -> qf -> qf @@ total
-val project_admissible_exact :
-  (prefix : quantifier list) -> (env : elt list) ->
-  (guard : qf) -> (witness : qf) ->
-  {u : unit | eval_qf env (project_admissible prefix guard witness)
-              = normalized_game prefix env guard witness} @ ghost @@ total
-val project_admissible_scoped :
-  (prefix : quantifier list) -> (depth : int) ->
-  (guard : {g : qf | scoped_prefix prefix depth g}) ->
-  (witness : {w : qf | scoped_prefix prefix depth w}) ->
-  {u : unit | scoped_qf depth (project_admissible prefix guard witness)}
-  @ ghost @@ total
