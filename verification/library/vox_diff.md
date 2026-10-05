@@ -1,5 +1,8 @@
 # Verified Myers diff
 
+A separate [compact alternative](vox_compact_diff.md) stores keeps as counts
+and retains single-element insertions and deletions.
+
 Read `vox_diff_spec.ml` for the pure model, then `vox_diff.mli` for the
 operations. The model is a concrete `'a diff`: a list of `Keep`, `Delete`,
 and `Insert`. Direct definitions give its source, target, and cost.
