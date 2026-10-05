@@ -100,7 +100,12 @@ include Container_types.Make (struct
 
   let compare = Stdlib.compare
 
-  let equal t1 t2 = compare t1 t2 = 0
+  let equal t1 t2 =
+    t1 == t2
+    ||
+    match t1, t2 with
+    | Naked_number k1, Naked_number k2 -> Naked_number_kind.equal k1 k2
+    | (Value | Region | Rec_info), _ | _, (Value | Region | Rec_info) -> false
 
   let hash = Hashtbl.hash
 

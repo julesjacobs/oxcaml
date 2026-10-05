@@ -31,3 +31,9 @@ let g a = Tmod_defs.mk a.(0);;
 [%%expect {|
 val g : Tmod_m.s Tmod_defs.t array -> Tmod_m.s Tmod_defs.t = <fun>
 |}]
+
+let with_primitive (n : int) x = n, Tmod_defs.mk x;;
+[%%expect{|
+val with_primitive :
+  int -> Tmod_m.s Tmod_defs.t -> int * Tmod_m.s Tmod_defs.t = <fun>
+|}]

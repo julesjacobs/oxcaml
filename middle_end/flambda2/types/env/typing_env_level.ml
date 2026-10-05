@@ -141,9 +141,12 @@ let add_definition t var kind binding_time =
 
 let add_or_replace_equation t name ty =
   More_type_creators.check_equation name ty;
-  if TG.is_obviously_unknown ty
-  then { t with equations = Name.Map.remove name t.equations }
-  else { t with equations = Name.Map.add name ty t.equations }
+  let equations =
+    if TG.is_obviously_unknown ty
+    then Name.Map.remove name t.equations
+    else Name.Map.add name ty t.equations
+  in
+  if equations == t.equations then t else { t with equations }
 
 let concat ~earlier:(t1 : t) ~later:(t2 : t) =
   let defined_vars =

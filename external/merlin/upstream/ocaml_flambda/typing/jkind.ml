@@ -3155,11 +3155,23 @@ let to_unsafe_mode_crossing jkind =
 
 let all_except_externality = Axis_lattice.of_axis_set Axis_set.all_modal_axes
 
-let get_externality_upper_bound ~context env jk =
-  let mod_bounds =
-    get_mod_bounds ~context ~ambient_bounds:all_except_externality env jk
-  in
-  Mod_bounds.get mod_bounds ~axis:(Nonmodal Externality)
+let get_externality_upper_bound (type l r) ~context env (jk : (l * r) jkind) =
+  match jk.jkind with
+  | { base = Layout layout; with_bounds = No_with_bounds; mod_bounds } ->
+    Externality.meet
+      (Mod_bounds.externality mod_bounds)
+      (Layout.implied_externality layout)
+  | { base = Layout layout; with_bounds = With_bounds _; mod_bounds }
+    when Externality.equal Externality.Internal
+           (Externality.meet
+              (Mod_bounds.externality mod_bounds)
+              (Layout.implied_externality layout)) ->
+    Externality.Internal
+  | { base = Kconstr _; _ } | { with_bounds = With_bounds _; _ } ->
+    let mod_bounds =
+      get_mod_bounds ~context ~ambient_bounds:all_except_externality env jk
+    in
+    Mod_bounds.get mod_bounds ~axis:(Nonmodal Externality)
 
 let set_externality_upper_bound jk externality_upper_bound =
   { jk with

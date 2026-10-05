@@ -94,11 +94,14 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
     tlambda
     |> Profile.(record generate) (fun (program : Lambda.program) ->
         Builtin_attributes.warn_unused ();
+        let program_ref = ref (Some program) in
         program.code
         |> print_if i.ppf_dump Clflags.dump_tlambda Printlambda.lambda
         |> Slambda.eval ~cu_static_data:Compilenv.get_static_data
              (print_if i.ppf_dump Clflags.dump_slambda Printlambda.slambda)
         |> fun (static_data, lambda) ->
+        let program = Option.get !program_ref in
+        program_ref := None;
         { program with Lambda.code = lambda }
         |> print_if i.ppf_dump Clflags.dump_debug_uid_tables (fun ppf _ ->
             Type_shape.print_debug_uid_tables ppf)
@@ -116,20 +119,17 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
         |> fun (program : Lambda.program) ->
         if Clflags.(should_stop_after Compiler_pass.Lambda)
         then ()
-        else (
+        else
+          let { Lambda.arg_block_idx; main_module_block_format; _ } = program in
           Backend.compile_implementation ~keep_symbol_tables
             ~sourcefile:(Some (Unit_info.original_source_file i.target))
             ~prefixname:(Unit_info.prefix i.target)
             ~ppf_dump:i.ppf_dump program;
-          let arg_descr =
-            make_arg_descr ~param:as_arg_for
-              ~arg_block_idx:program.arg_block_idx
-          in
+          let arg_descr = make_arg_descr ~param:as_arg_for ~arg_block_idx in
           Compilenv.save_unit_info
             (Unit_info.Artifact.filename
                (Unit_info.artifact i.target ~extension:Backend.ext_flambda_obj))
-            ~main_module_block_format:program.main_module_block_format
-            ~arg_descr ~static_data))
+            ~main_module_block_format ~arg_descr ~static_data)
 
   let compile_from_typed i typed ~keep_symbol_tables ~as_arg_for =
     let loc = Location.in_file (Unit_info.original_source_file i.target) in

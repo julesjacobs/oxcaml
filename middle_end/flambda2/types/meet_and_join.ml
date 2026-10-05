@@ -243,8 +243,19 @@ let combine_results env ~(meet_ops : 'a Combine_results_meet_ops.t)
 
 let combine_results2 env ~meet_a ~meet_b ~left_a ~right_a ~left_b ~right_b
     ~rebuild =
-  combine_results env ~meet_ops:[meet_a; meet_b] ~left_inputs:[left_a; left_b]
-    ~right_inputs:[right_a; right_b] ~rebuild:(fun (a, (b, ())) -> rebuild a b)
+  match meet_a env left_a right_a with
+  | Bottom r -> Bottom r
+  | Ok (result_a, env) -> (
+    match meet_b env left_b right_b with
+    | Bottom r -> Bottom r
+    | Ok (result_b, env) ->
+      let return_value =
+        combine_meet_return_values result_a result_b (fun () ->
+            rebuild
+              (extract_value result_a left_a right_a)
+              (extract_value result_b left_b right_b))
+      in
+      Ok (return_value, env))
 
 type ext =
   | No_extensions

@@ -143,6 +143,7 @@ type 'a pers_struct_info = {
 }
 
 module Param_set = Global_module.Parameter_name.Set
+module Name_table = Global_module.Name.Tbl
 
 (* If you add something here, _do not forget_ to add it to [clear]! *)
 type 'a t = {
@@ -150,7 +151,9 @@ type 'a t = {
   imports : (CU.Name.t, import_info) Hashtbl.t;
   persistent_names : (Global_module.Name.t, pers_name) Hashtbl.t;
   persistent_structures :
-    (Global_module.Name.t, 'a pers_struct_info) Hashtbl.t;
+    'a pers_struct_info Name_table.t;
+  structure_cache :
+    (Global_module.Name.t * 'a pers_struct_info) option array;
   locals_bound_to_runtime_parameters : unit Ident.Tbl.t;
   imported_units: CU.Name.Set.t ref;
   imported_opaque_units: CU.Name.Set.t ref;
@@ -165,7 +168,8 @@ let empty () = {
   globals = Hashtbl.create 17;
   imports = Hashtbl.create 17;
   persistent_names = Hashtbl.create 17;
-  persistent_structures = Hashtbl.create 17;
+  persistent_structures = Name_table.create 17;
+  structure_cache = Array.make 256 None;
   locals_bound_to_runtime_parameters = Ident.Tbl.create 17;
   imported_units = ref CU.Name.Set.empty;
   imported_opaque_units = ref CU.Name.Set.empty;
@@ -182,6 +186,7 @@ let clear penv =
     imports;
     persistent_names;
     persistent_structures;
+    structure_cache;
     locals_bound_to_runtime_parameters;
     imported_units;
     imported_opaque_units;
@@ -194,7 +199,8 @@ let clear penv =
   Hashtbl.clear globals;
   Hashtbl.clear imports;
   Hashtbl.clear persistent_names;
-  Hashtbl.clear persistent_structures;
+  Name_table.clear persistent_structures;
+  Array.fill structure_cache 0 (Array.length structure_cache) None;
   Ident.Tbl.clear locals_bound_to_runtime_parameters;
   imported_units := CU.Name.Set.empty;
   imported_opaque_units := CU.Name.Set.empty;
@@ -238,8 +244,27 @@ let find_name_info_in_cache {persistent_names; _} name =
   | exception Not_found -> None
   | pn -> Some pn
 
-let find_info_in_cache {persistent_structures; _} name =
-  match Hashtbl.find persistent_structures name with
+let find_persistent_structure {persistent_structures; structure_cache; _} name =
+  let head = name.Global_module.Name.head in
+  let length = String.length head in
+  let hash =
+    if length = 0 then 0
+    else Char.code head.[0] lxor (Char.code head.[length - 1] lsl 3) lxor length
+  in
+  let slot = hash land (Array.length structure_cache - 1) in
+  match structure_cache.(slot) with
+  | Some (cached_name, ps) when name == cached_name -> ps
+  | None | Some _ ->
+      let ps = Name_table.find persistent_structures name in
+      structure_cache.(slot) <- Some (name, ps);
+      ps
+
+let add_persistent_structure {persistent_structures; structure_cache; _} name ps =
+  Name_table.add persistent_structures name ps;
+  Array.fill structure_cache 0 (Array.length structure_cache) None
+
+let find_info_in_cache penv name =
+  match find_persistent_structure penv name with
   | exception Not_found -> None
   | ps -> Some ps
 
@@ -313,7 +338,7 @@ let without_cmis penv f x =
   res
 
 let fold {persistent_structures; _} f x =
-  Hashtbl.fold
+  Name_table.fold
     (fun name ps x -> if ps.ps_canonical then f name ps.ps_val x else x)
     persistent_structures x
 
@@ -837,7 +862,7 @@ type 'a sig_reader =
    Checks that OCaml source is allowed to refer to this module. *)
 
 let acknowledge_new_pers_struct penv modname pers_name val_of_pers_sig =
-  let {persistent_structures; locals_bound_to_runtime_parameters; _} = penv in
+  let {locals_bound_to_runtime_parameters; _} = penv in
   let import = pers_name.pn_import in
   let global = pers_name.pn_global in
   let (_, mode) as sign = pers_name.pn_sign in
@@ -875,7 +900,7 @@ let acknowledge_new_pers_struct penv modname pers_name val_of_pers_sig =
       ps_canonical = true;
     }
   in
-  Hashtbl.add persistent_structures modname ps;
+  add_persistent_structure penv modname ps;
   begin match binding with
   | Runtime_parameter id -> Ident.Tbl.add locals_bound_to_runtime_parameters id ()
   | Constant _ -> ()
@@ -888,14 +913,15 @@ let acknowledge_pers_struct penv modname pers_name val_of_pers_sig =
   let {persistent_structures; _} = penv in
   let canonical_modname = Global_module.to_name pers_name.pn_global in
   let ps =
-    match Hashtbl.find_opt persistent_structures canonical_modname with
+    match Name_table.find_opt persistent_structures canonical_modname with
     | Some ps -> ps
     | None ->
         acknowledge_new_pers_struct penv canonical_modname pers_name
           val_of_pers_sig
   in
   if not (Global_module.Name.equal modname canonical_modname) then
-    Hashtbl.add persistent_structures modname { ps with ps_canonical = false };
+    add_persistent_structure penv modname
+      { ps with ps_canonical = false };
   ps
 
 let read_pers_struct penv check modname cmi =
@@ -906,8 +932,7 @@ let read_pers_struct penv check modname cmi =
 
 let find_pers_struct
     ~allow_hidden penv val_of_pers_sig ~check name ~allow_excess_args =
-  let {persistent_structures; _} = penv in
-  match Hashtbl.find persistent_structures name with
+  match find_persistent_structure penv name with
   | ps -> check_visibility ~allow_hidden ps.ps_name_info.pn_import; ps
   | exception Not_found ->
       let pers_name =
@@ -1016,9 +1041,8 @@ let find ~allow_hidden penv f name ~allow_excess_args =
      name).ps_val
 
 let check ~allow_hidden penv f ~loc name =
-  let {persistent_structures; _} = penv in
   let persistent_structure_visible =
-    match Hashtbl.find persistent_structures name with
+    match find_persistent_structure penv name with
     | ps ->
         begin
           match
@@ -1114,7 +1138,7 @@ let runtime_parameter_bindings {persistent_structures; _} =
      during lambda generation?" rather than "what all did anyone ask about
      ever?". *)
   persistent_structures
-  |> Hashtbl.to_seq_values
+  |> Name_table.to_seq_values
   |> Seq.filter_map
         (fun ps ->
            match ps.ps_binding with
@@ -1135,7 +1159,7 @@ let parameters {param_imports; _} =
   Param_set.elements !param_imports
 
 let looked_up {persistent_structures; _} modname =
-  Hashtbl.mem persistent_structures modname
+  Name_table.mem persistent_structures modname
 
 let is_imported_opaque {imported_opaque_units; _} s =
   CU.Name.Set.mem s !imported_opaque_units

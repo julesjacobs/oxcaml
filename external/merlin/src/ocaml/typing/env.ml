@@ -1205,12 +1205,34 @@ let get_current_unit_name = Current_unit.Name.get
 let in_current_unit_and_stage ~name ~stage =
   Current_unit.Name.is name && stage = 0
 
-let find_same_module id tbl =
-  match IdTbl.find_same_without_locks id tbl with
-  | x -> x
-  | exception Not_found
-    when Ident.is_global id && not (Current_unit.Name.is_ident id) ->
-      Mod_persistent
+(* Module tables have no [IdTbl.Map] layers. Cache their immutable lookup,
+   while leaving persistent-module loading and current-unit checks below. *)
+let module_ident_cache :
+    ((lock_or_stage, module_entry, module_data) IdTbl.t * Ident.t *
+     (module_entry option * Global_module.Name.t option)) option array ref =
+  s_table (fun size -> Array.make size None) 256
+
+let find_module_ident id table =
+  let cache = !module_ident_cache in
+  let name = Ident.name id in
+  let length = String.length name in
+  let hash =
+    if length = 0 then 0
+    else Ident.hash id lxor (Char.code name.[length - 1] lsl 3) lxor length
+  in
+  let slot = hash land (Array.length cache - 1) in
+  match cache.(slot) with
+  | Some (cached_table, cached_id, data)
+    when table == cached_table && id == cached_id -> data
+  | None | Some _ ->
+      let entry =
+        match IdTbl.find_same_without_locks id table with
+        | entry -> Some entry
+        | exception Not_found -> None
+      in
+      let data = entry, Ident.to_global id in
+      cache.(slot) <- Some (table, id, data);
+      data
 
 let find_name_module ~mark ~stage name tbl =
   match IdTbl.find_name_and_locks wrap_module ~mark name tbl with
@@ -1313,6 +1335,26 @@ let read_sign_of_cmi (sign, mda_mode) name uid ~shape ~address:addr ~flags =
 let persistent_env : module_data Persistent_env.t ref =
   s_table Persistent_env.empty ()
 
+(* Type tables are immutable and have no [IdTbl.Map] layers. Physical keys
+   keep entries distinct across environment extensions and identifier resets. *)
+let type_ident_cache :
+    ((stage_lock, type_data, type_data) IdTbl.t * Ident.t * type_data)
+      option array ref =
+  s_table (fun size -> Array.make size None) 256
+
+let find_type_ident id table =
+  let cache = !type_ident_cache in
+  let hash = if String.length (Ident.name id) = 0 then 0 else Ident.hash id in
+  let slot = hash land (Array.length cache - 1) in
+  match cache.(slot) with
+  | Some (cached_table, cached_id, data)
+    when table == cached_table && id == cached_id ->
+      data
+  | None | Some _ ->
+      let data = IdTbl.find_same_without_locks id table in
+      cache.(slot) <- Some (table, id, data);
+      data
+
 let without_cmis f x =
   Persistent_env.without_cmis !persistent_env f x
 
@@ -1359,6 +1401,8 @@ let implemented_parameter modname =
   Persistent_env.implemented_parameter !persistent_env modname
 
 let reset_declaration_caches () =
+  Array.fill !type_ident_cache 0 (Array.length !type_ident_cache) None;
+  Array.fill !module_ident_cache 0 (Array.length !module_ident_cache) None;
   Stamped_hashtable.clear value_declarations;
   Stamped_hashtable.clear type_declarations;
   Stamped_hashtable.clear module_declarations;
@@ -1431,30 +1475,30 @@ let check_functor_appl
 (* Lookup by identifier *)
 
 let find_ident_module id env =
-  match find_same_module id env.modules with
-  | Mod_local (data, _) -> data
-  | Mod_unbound _ -> raise Not_found
-  | Mod_persistent ->
-      match Ident.to_global id with
-      | Some global_name ->
-          let allow_excess_args =
-            (* This may be a global that arose by substituting instance
-               arguments into an overapproximated instance name, so we have to
-               allow it to have more arguments than expected. For example, if
-               [foo.ml] is compiled with [-parameter P] and says
-               [module Alias = M], we assume that [m.ml] was (or will be)
-               compiled with [-parameter P] as well, sa [foo.cmi] will record
-               [M{P}] as an approximate elaboration of [M]. Then if [bar.ml]
-               refers to [Foo[P:Int]], we substitute in [Foo]'s signature and
-               get [module Alias = M[P:Int]] whether or not [M] takes [P].) *)
-            (* CR-someday lmaurer: This does mean that the original alias may
-               have had too many arguments and we'll never have checked them.
-               One solution would be to remember somewhere what the user
-               actually typed in addition to the approximation. *)
-            true
-          in
-          find_pers_mod ~allow_hidden:true ~allow_excess_args global_name
-      | None -> Misc.fatal_errorf "Not global: %a" Ident.print id
+  match find_module_ident id env.modules with
+  | Some (Mod_local (data, _)), _ -> data
+  | Some (Mod_unbound _), _ | None, None -> raise Not_found
+  | None, Some _ when Current_unit.Name.is_ident id -> raise Not_found
+  | (Some Mod_persistent | None), Some global_name ->
+      let allow_excess_args =
+        (* This may be a global that arose by substituting instance
+           arguments into an overapproximated instance name, so we have to
+           allow it to have more arguments than expected. For example, if
+           [foo.ml] is compiled with [-parameter P] and says
+           [module Alias = M], we assume that [m.ml] was (or will be)
+           compiled with [-parameter P] as well, sa [foo.cmi] will record
+           [M{P}] as an approximate elaboration of [M]. Then if [bar.ml]
+           refers to [Foo[P:Int]], we substitute in [Foo]'s signature and
+           get [module Alias = M[P:Int]] whether or not [M] takes [P].) *)
+        (* CR-someday lmaurer: This does mean that the original alias may
+           have had too many arguments and we'll never have checked them.
+           One solution would be to remember somewhere what the user
+           actually typed in addition to the approximation. *)
+        true
+      in
+      find_pers_mod ~allow_hidden:true ~allow_excess_args global_name
+  | Some Mod_persistent, None ->
+      Misc.fatal_errorf "Not global: %a" Ident.print id
 
 let rec find_module_components path env =
   match path with
@@ -1583,9 +1627,11 @@ let step_find_unboxed_version decl =
 
 let rec find_type_data path env seen =
   match
-    StagedPath.Map.find (path_at_current_stage env path) env.local_constraints
+    if StagedPath.Map.is_empty env.local_constraints then None
+    else StagedPath.Map.find_opt
+        (path_at_current_stage env path) env.local_constraints
   with
-  | decl ->
+  | Some decl ->
     {
       tda_declaration = decl;
       tda_descriptions = Type_abstract (Btype.type_origin decl);
@@ -1593,10 +1639,10 @@ let rec find_type_data path env seen =
       tda_unboxed_version_descriptions = None;
       tda_hidden = false;
     }
-  | exception Not_found -> begin
+  | None -> begin
       match path with
       | Pident id ->
-          IdTbl.find_same_without_locks id env.types
+          find_type_ident id env.types
       | Pdot(p, s) ->
           let sc = find_structure_components p env in
           NameMap.find s sc.comp_types

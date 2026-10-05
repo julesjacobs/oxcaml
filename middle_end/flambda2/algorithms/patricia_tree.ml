@@ -65,13 +65,11 @@ let mask i bit = i land -(bit lsl 1)
    match [prefix] at every position strictly higher than [bit]? *)
 let match_prefix i prefix bit = mask i bit = prefix
 
-let match_prefix_and_bit i prefix_and_bit =
-  (* CR bclement: There might be better ways to compute this, such as [mask (i
-     lxor prefix_and_bit) (prefix_and_bit land -prefix_and_bit) = 0] which would
-     avoid a [xor], but it's not clear that the assembly is better due to this
-     operating on tagged integers. *)
-  let prefix, bit = unpack prefix_and_bit in
-  match_prefix i prefix bit
+let[@inline always] match_prefix_and_bit i prefix_and_bit =
+  (* Matching prefixes have no xor bits above [bit]. [lsr 1] clears the sign;
+     for the sign bit, [bit - 1] wraps to [max_int]. *)
+  let bit = prefix_and_bit land -prefix_and_bit in
+  (i lxor prefix_and_bit) lsr 1 <= bit - 1
 
 let higher bit0 bit1 =
   (* We need to do _unsigned_ int comparison on bits.
@@ -189,6 +187,8 @@ module type Tree = sig
     val of_func : 'a is_value -> (key -> 'a -> 'b) -> ('a, 'b) t
 
     val call : ('a, 'b) t -> key -> 'a -> 'b
+
+    val call_fold : ('a, 'b -> 'b) t -> key -> 'a -> 'b -> 'b
   end
 
   (* CR bclement: This module (and the modules below) are used as workarounds to
@@ -315,6 +315,8 @@ module Set0 = struct
       (f [@inlined hint]) key ()
 
     let[@inline always] call f key _ = f key
+
+    let[@inline always] call_fold f key _ acc = f key acc
   end
 
   module Merge_callback = struct
@@ -427,6 +429,8 @@ module Map0 = struct
     type ('a, 'b) t = key -> 'a -> 'b
 
     let[@inline always] call f i d = f i d
+
+    let[@inline always] call_fold f i d acc = f i d acc
 
     let[@inline always] of_func Any f = f
   end
@@ -649,8 +653,9 @@ end = struct
     match tree_descr t with
     | Leaf l -> leaf_key l = i
     | Branch b ->
-      let prefix, bit = unpack (branch_prefix_and_bit b) in
-      if not (match_prefix i prefix bit)
+      let prefix_and_bit = branch_prefix_and_bit b in
+      let bit = prefix_and_bit land -prefix_and_bit in
+      if not (match_prefix_and_bit i prefix_and_bit)
       then false
       else if zero_bit i bit
       then mem_tree i (branch0 b)
@@ -687,18 +692,22 @@ end = struct
     match tree_descr t with
     | Leaf l ->
       let j = leaf_key l in
-      if i = j then leaf iv i d else join j
+      if i = j then if d == leaf_datum l then t else leaf iv i d else join j
     | Branch b ->
       let prefix_and_bit = branch_prefix_and_bit b in
-      let prefix, bit = unpack prefix_and_bit in
-      if match_prefix i prefix bit
+      let bit = prefix_and_bit land -prefix_and_bit in
+      if match_prefix_and_bit i prefix_and_bit
       then
         let t0 = branch0 b in
         let t1 = branch1 b in
         if zero_bit i bit
-        then branch_non_empty prefix_and_bit (add_tree i d t0) t1
-        else branch_non_empty prefix_and_bit t0 (add_tree i d t1)
-      else join prefix
+        then
+          let t0' = add_tree i d t0 in
+          if t0' == t0 then t else branch_non_empty prefix_and_bit t0' t1
+        else
+          let t1' = add_tree i d t1 in
+          if t1' == t1 then t else branch_non_empty prefix_and_bit t0 t1'
+      else join (prefix_and_bit lxor bit)
 
   let add i d t : _ t =
     let iv = is_value_of t in
@@ -713,19 +722,24 @@ end = struct
       let key' = leaf_key l in
       if key = key'
       then
-        let datum = f (leaf_datum l) in
-        leaf iv key datum
+        let original = leaf_datum l in
+        let datum = f original in
+        if datum == original then t else leaf iv key datum
       else t
     | Branch b ->
       let prefix_and_bit = branch_prefix_and_bit b in
-      let prefix, bit = unpack prefix_and_bit in
-      if match_prefix key prefix bit
+      let bit = prefix_and_bit land -prefix_and_bit in
+      if match_prefix_and_bit key prefix_and_bit
       then
         let t0 = branch0 b in
         let t1 = branch1 b in
         if zero_bit key bit
-        then branch_non_empty prefix_and_bit (replace_tree key f t0) t1
-        else branch_non_empty prefix_and_bit t0 (replace_tree key f t1)
+        then
+          let t0' = replace_tree key f t0 in
+          if t0' == t0 then t else branch_non_empty prefix_and_bit t0' t1
+        else
+          let t1' = replace_tree key f t1 in
+          if t1' == t1 then t else branch_non_empty prefix_and_bit t0 t1'
       else t
 
   let replace key f t =
@@ -746,9 +760,11 @@ end = struct
       let key' = leaf_key l in
       if key = key'
       then
-        match f (Some (leaf_datum l)) with
+        let original = leaf_datum l in
+        match f (Some original) with
         | None -> empty iv
-        | Some datum -> of_tree (leaf iv key datum)
+        | Some datum ->
+          if datum == original then of_tree t else of_tree (leaf iv key datum)
       else join key'
     | Branch b ->
       let prefix_and_bit = branch_prefix_and_bit b in
@@ -759,11 +775,15 @@ end = struct
         let t1 = branch1 b in
         if zero_bit key bit
         then
-          of_tree
-            (branch_right_nonempty prefix_and_bit (update_tree key f t0) t1)
+          let t0' = update_tree key f t0 in
+          if t0' == of_tree t0
+          then of_tree t
+          else of_tree (branch_right_nonempty prefix_and_bit t0' t1)
         else
-          of_tree
-            (branch_left_nonempty prefix_and_bit t0 (update_tree key f t1))
+          let t1' = update_tree key f t1 in
+          if t1' == of_tree t1
+          then of_tree t
+          else of_tree (branch_left_nonempty prefix_and_bit t0 t1')
       else join prefix
 
   let update key f t =
@@ -781,14 +801,21 @@ end = struct
     | Leaf l -> if i = leaf_key l then empty iv else of_tree t
     | Branch b ->
       let prefix_and_bit = branch_prefix_and_bit b in
-      let prefix, bit = unpack prefix_and_bit in
-      if match_prefix i prefix bit
+      let bit = prefix_and_bit land -prefix_and_bit in
+      if match_prefix_and_bit i prefix_and_bit
       then
         let t0, t1 = branch0 b, branch1 b in
         if zero_bit i bit
         then
-          of_tree (branch_right_nonempty prefix_and_bit (remove_tree i t0) t1)
-        else of_tree (branch_left_nonempty prefix_and_bit t0 (remove_tree i t1))
+          let t0' = remove_tree i t0 in
+          if t0' == of_tree t0
+          then of_tree t
+          else of_tree (branch_right_nonempty prefix_and_bit t0' t1)
+        else
+          let t1' = remove_tree i t1 in
+          if t1' == of_tree t1
+          then of_tree t
+          else of_tree (branch_left_nonempty prefix_and_bit t0 t1')
       else of_tree t
 
   let remove i t =
@@ -1262,10 +1289,10 @@ end = struct
     | Leaf l ->
       if leaf_key l = i then Or_null.this (leaf_datum l) else Or_null.null
     | Branch b ->
-      let prefix, bit = unpack (branch_prefix_and_bit b) in
-      if not (match_prefix i prefix bit)
-      then Or_null.null
-      else if zero_bit i bit
+      let prefix_and_bit = branch_prefix_and_bit b in
+      (* Prefix agreement removes the extra mask bits; misses fail at the
+         leaf. *)
+      if i land -prefix_and_bit = 0
       then find_tree i (branch0 b)
       else find_tree i (branch1 b)
 
@@ -1432,7 +1459,7 @@ end = struct
 
   let rec unsigned_fold f t acc =
     match tree_descr t with
-    | Leaf l -> Callback.call f (leaf_key l) (leaf_datum l) acc
+    | Leaf l -> Callback.call_fold f (leaf_key l) (leaf_datum l) acc
     | Branch b -> unsigned_fold f (branch1 b) (unsigned_fold f (branch0 b) acc)
 
   let fold f t acc =
@@ -1440,7 +1467,7 @@ end = struct
     | Empty -> acc
     | Non_empty tree -> (
       match tree_descr tree with
-      | Leaf l -> Callback.call f (leaf_key l) (leaf_datum l) acc
+      | Leaf l -> Callback.call_fold f (leaf_key l) (leaf_datum l) acc
       | Branch b ->
         let t0, t1 = order_branches' b in
         unsigned_fold f t1 (unsigned_fold f t0 acc))
@@ -1476,19 +1503,23 @@ end = struct
         let t0, t1 = order_branches' b in
         unsigned_exists p t0 || unsigned_exists p t1)
 
+  let rec filter_tree p tree =
+    let iv = is_value_of_tree tree in
+    match tree_descr tree with
+    | Leaf leaf ->
+      if Callback.call p (leaf_key leaf) (leaf_datum leaf)
+      then of_tree tree
+      else empty iv
+    | Branch b ->
+      let prefix_and_bit, t0, t1 = branch_descr b in
+      let t1' = filter_tree p t1 in
+      let t0' = filter_tree p t0 in
+      if t0' == of_tree t0 && t1' == of_tree t1
+      then of_tree tree
+      else branch prefix_and_bit t0' t1'
+
   let filter p t =
-    let rec loop tree =
-      let iv = is_value_of_tree tree in
-      match tree_descr tree with
-      | Leaf leaf ->
-        if Callback.call p (leaf_key leaf) (leaf_datum leaf)
-        then of_tree tree
-        else empty iv
-      | Branch b ->
-        let prefix_and_bit, t0, t1 = branch_descr b in
-        branch prefix_and_bit (loop t0) (loop t1)
-    in
-    match descr t with Empty -> t | Non_empty tree -> loop tree
+    match descr t with Empty -> t | Non_empty tree -> filter_tree p tree
 
   let rec partition_tree p tree =
     let iv = is_value_of_tree tree in
@@ -2180,6 +2211,22 @@ module Map = struct
      {!module-Merge_callback}. *)
   let split i t = Ops.split ~found:Option ~not_found:None i t
 
+  (* [mapped == t] means all processed keys are unchanged. At the first changed
+     key, retain exactly the original bindings already processed. *)
+  let map_keys f t =
+    fold
+      (fun key datum mapped ->
+        let key' = f key in
+        if mapped == t
+        then
+          if key' = key
+          then t
+          else
+            let prefix, _, _ = split key t in
+            add key' datum prefix
+        else add key' datum mapped)
+      t t
+
   let bindings s = Ops.to_list s
 
   let map f t = Ops.map Any f t
@@ -2192,14 +2239,21 @@ module Map = struct
 
   let merge f t0 t1 = Ops.merge Any f t0 t1
 
-  (* CR-someday lmaurer: This should be doable as a fast map operation if we
-     generalize [Ops.map] by letting the returned tree be built by a different
-     [Tree] module *)
-  let keys map = fold (fun k _ set -> Set.add k set) map Set.empty
+  let keys map =
+    let rec loop (tree : (_, non_empty) Map0.tree) : (unit, non_empty) Set0.tree
+        =
+      match tree with
+      | Map0.Leaf (key, _) -> Set0.Leaf key
+      | Map0.Branch (prefix_and_bit, t0, t1) ->
+        Set0.Branch (prefix_and_bit, loop t0, loop t1)
+    in
+    match Map0.descr map with
+    | Empty -> Set.empty
+    | Non_empty tree -> Set0.of_tree (loop tree)
 
   let data t = List.map snd (bindings t)
 
-  (* CR-someday lmaurer: See comment on [keys] *)
+  (* CR-someday lmaurer: Convert the set tree directly. *)
   let of_set f set = Set.fold (fun e map -> add e (f e) map) set empty
 end
 

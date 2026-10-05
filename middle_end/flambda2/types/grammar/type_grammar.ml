@@ -391,7 +391,22 @@ let get_alias_exn t =
   | Region ty -> TD.get_alias_exn ty
 
 let get_alias_opt t =
-  match get_alias_exn t with s -> Some s | exception Not_found -> None
+  match t with
+  | Value ty -> TD.get_alias_opt ty
+  | Naked_immediate ty -> TD.get_alias_opt ty
+  | Naked_float32 ty -> TD.get_alias_opt ty
+  | Naked_float ty -> TD.get_alias_opt ty
+  | Naked_int8 ty -> TD.get_alias_opt ty
+  | Naked_int16 ty -> TD.get_alias_opt ty
+  | Naked_int32 ty -> TD.get_alias_opt ty
+  | Naked_int64 ty -> TD.get_alias_opt ty
+  | Naked_nativeint ty -> TD.get_alias_opt ty
+  | Naked_vec128 ty -> TD.get_alias_opt ty
+  | Naked_vec256 ty -> TD.get_alias_opt ty
+  | Naked_vec512 ty -> TD.get_alias_opt ty
+  | Naked_mask ty -> TD.get_alias_opt ty
+  | Rec_info ty -> TD.get_alias_opt ty
+  | Region ty -> TD.get_alias_opt ty
 
 let empty_env_extension = { equations = Name.Map.empty }
 
@@ -4581,7 +4596,7 @@ module Descr = struct
     | Region of head_of_kind_region TD.Descr.t Or_unknown_or_bottom.t
 end
 
-let descr t : Descr.t =
+let[@inline always] descr t : Descr.t =
   match t with
   | Value ty -> Value (TD.descr ty)
   | Naked_immediate ty -> Naked_immediate (TD.descr ty)

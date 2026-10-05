@@ -1277,7 +1277,7 @@ let repr_link1 t = function
      repr_link t d' t'
  | t' -> t'
 
-let repr t =
+let[@inline always] repr t =
   match t.desc with
    Tlink t' ->
      repr_link1 t t'

@@ -769,10 +769,14 @@ let asm_filename output_prefix =
 
 let compile_implementation unix ?toplevel ~pipeline ~sourcefile ~prefixname
     ~ppf_dump (program : Lambda.program) =
+  (* Clear the captured input before later compilation phases allocate. *)
+  let program_ref = ref (Some program) in
   compile_unit unix ~ppf_dump ~output_prefix:prefixname
     ~asm_filename:(asm_filename prefixname) ~keep_asm:!keep_asm_file
     ~obj_filename:(prefixname ^ ext_obj)
     ~may_reduce_heap:(Option.is_none toplevel) (fun () ->
+      let program = Option.get !program_ref in
+      program_ref := None;
       Compilation_unit.Set.iter Compilenv.require_global
         program.required_globals;
       Compilenv.record_external_symbols ();

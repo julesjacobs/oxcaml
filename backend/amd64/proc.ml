@@ -727,9 +727,12 @@ let clear_pending_jit_run () = ()
 
 (* Precolored_regs is not always the same as [all_phys_regs], as some physical registers
    may not be allocatable (e.g. rbp when frame pointers are enabled). *)
-let precolored_regs () =
-  let phys_regs = Reg.set_of_array (Lazy.force all_phys_regs) in
-  if fp then Reg.Set.remove rbp phys_regs else phys_regs
+let precolored_regs =
+  let phys_regs = lazy (
+    let phys_regs = Reg.set_of_array (Lazy.force all_phys_regs) in
+    if fp then Reg.Set.remove rbp phys_regs else phys_regs)
+  in
+  fun () -> Lazy.force phys_regs
 
 let has_three_operand_float_ops () = Arch.Extension.enabled AVX
 

@@ -507,11 +507,11 @@ let expand_head_of_alias_type env kind
     ~known_canonical_simple_at_in_types_mode:simple =
   let[@inline always] name name ~coercion =
     let ty = TE.find env name (Some kind) in
-    match TG.get_alias_exn ty with
-    | exception Not_found ->
+    match TG.get_alias_opt ty with
+    | None ->
       let coercion = if Coercion.is_id coercion then None else Some coercion in
       ET.of_non_alias_type ?coercion ty
-    | _alias ->
+    | Some _alias ->
       Misc.fatal_errorf
         "Canonical alias %a should never have [Equals] type %a:@\n\n%a"
         Simple.print simple TG.print ty TE.print env
@@ -519,9 +519,9 @@ let expand_head_of_alias_type env kind
   Simple.pattern_match simple ~const:ET.create_const ~name
 
 let expand_head0 env ty ~known_canonical_simple_at_in_types_mode =
-  match TG.get_alias_exn ty with
-  | exception Not_found -> ET.of_non_alias_type ty
-  | _ -> (
+  match TG.get_alias_opt ty with
+  | None -> ET.of_non_alias_type ty
+  | Some _ -> (
     match known_canonical_simple_at_in_types_mode with
     | Some simple ->
       expand_head_of_alias_type env (TG.kind ty)

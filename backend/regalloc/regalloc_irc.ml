@@ -46,7 +46,10 @@ let build : State.t -> Cfg_with_infos.t -> unit =
       Reg.Set.iter
         (fun reg1 ->
           if move_src == Reg.dummy || not (Reg.same reg1 move_src)
-          then Array.iter def ~f:(fun reg2 -> State.add_edge state reg1 reg2))
+          then
+            for i = 0 to Array.length def - 1 do
+              State.add_edge state reg1 def.(i)
+            done)
         live.across;
       (* Add interference edges between all pairs of results, since they are all
          defined simultaneously and must be in different registers. *)
@@ -60,7 +63,9 @@ let build : State.t -> Cfg_with_infos.t -> unit =
     then
       Reg.Set.iter
         (fun reg1 ->
-          Array.iter destroyed ~f:(fun reg2 -> State.add_edge state reg1 reg2))
+          for i = 0 to Array.length destroyed - 1 do
+            State.add_edge state reg1 destroyed.(i)
+          done)
         live.across
   in
   let cfg_with_layout = Cfg_with_infos.cfg_with_layout cfg_with_infos in
@@ -94,11 +99,12 @@ let build : State.t -> Cfg_with_infos.t -> unit =
       then
         let first_id = Cfg.first_instruction_id block in
         let live = InstructionId.Tbl.find liveness first_id in
+        let destroyed = filter_unavailable (Proc.destroyed_at_raise ()) in
         Reg.Set.iter
           (fun reg1 ->
-            Array.iter
-              (filter_unavailable (Proc.destroyed_at_raise ()))
-              ~f:(fun reg2 -> State.add_edge state reg1 reg2))
+            for i = 0 to Array.length destroyed - 1 do
+              State.add_edge state reg1 destroyed.(i)
+            done)
           (Reg.Set.remove Proc.loc_exn_bucket live.before))
 
 let make_work_list : State.t -> unit =
@@ -148,16 +154,14 @@ let conservative : State.t -> Reg.t -> Reg.t -> bool =
  fun state reg1 reg2 ->
   let exception False in
   let i = ref 0 in
-  let seen = Reg.Tbl.create 32 in
+  let seen = ref [] in
   let f (reg : Reg.t) : unit =
-    if not (Reg.Tbl.mem seen reg)
+    let k = k reg in
+    if State.degree state reg >= k && not (List.exists !seen ~f:(Reg.same reg))
     then (
-      Reg.Tbl.replace seen reg ();
-      let k = k reg in
-      if State.degree state reg >= k
-      then (
-        incr i;
-        if !i >= k then raise_notrace False))
+      incr i;
+      if !i >= k then raise_notrace False;
+      seen := reg :: !seen)
   in
   try
     State.iter_adjacent state reg1 ~f;

@@ -4,15 +4,15 @@ Initial situation:
 ((defined_symbols { [0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m })
  (code_age_relation {})
  (levels
-  ((scope 1) (defined_vars {([0m[38;5;111;1mvar2/1N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar1/0N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
-  ((defined_vars { var2/1N var1/0N })
+  ((scope 1) (defined_vars {([0m[38;5;111;1mvar1/0N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar2/1N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
+  ((defined_vars { var1/0N var2/1N })
    (equations
-    ([0m[38;5;111;1mvar2/1N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/0N[0m))
-     [0m[38;5;111;1mvar1/0N[0m :
+    ([0m[38;5;111;1mvar1/0N[0m :
       (Val!
        (Variant
         (blocks (alloc_mode Heap)
-         (known {(tag_0 => (Known 1), ((Val! (Variant (tagged_imms [0m[38;5;37;1m⊤[0m)))))})))))))))
+         (known {(tag_0 => (Known 1), ((Val! (Variant (tagged_imms [0m[38;5;37;1m⊤[0m)))))}))))
+     [0m[38;5;111;1mvar2/1N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/0N[0m)))))))
  (aliases
   ((canonical_elements {([0m[38;5;111;1mvar2/1N[0m ([0m[38;5;111;1mvar1/0N[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))})
    (aliases_of_canonical_names {([0m[38;5;111;1mvar1/0N[0m {(Normal {([0m[38;5;111;1mvar2/1N[0m [0m[38;5;243;1mid[0m)})})})
@@ -23,11 +23,11 @@ Extended env:
 ((defined_symbols { [0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m })
  (code_age_relation {})
  (levels
-  ((scope 1) (defined_vars {([0m[38;5;111;1mvar2/1N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar1/0N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
-  ((defined_vars { var2/1N var1/0N })
+  ((scope 1) (defined_vars {([0m[38;5;111;1mvar1/0N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar2/1N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
+  ((defined_vars { var1/0N var2/1N })
    (equations
-    ([0m[38;5;111;1mvar2/1N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/0N[0m))
-     [0m[38;5;111;1mvar1/0N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m))
+    ([0m[38;5;111;1mvar1/0N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m))
+     [0m[38;5;111;1mvar2/1N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/0N[0m))
      [0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m :
       (Val!
        (Variant
@@ -35,20 +35,20 @@ Extended env:
          (known {(tag_0 => (Known 1), ((Val! (Variant (tagged_imms [0m[38;5;37;1m⊤[0m)))))})))))))))
  (aliases
   ((canonical_elements
-    {([0m[38;5;111;1mvar2/1N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))
-     ([0m[38;5;111;1mvar1/0N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))})
+    {([0m[38;5;111;1mvar1/0N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))
+     ([0m[38;5;111;1mvar2/1N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))})
    (aliases_of_canonical_names
     {([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m
-      {(Normal {([0m[38;5;111;1mvar2/1N[0m [0m[38;5;243;1mid[0m) ([0m[38;5;111;1mvar1/0N[0m [0m[38;5;243;1mid[0m)})})}) (aliases_of_consts {}))))
+      {(Normal {([0m[38;5;111;1mvar1/0N[0m [0m[38;5;243;1mid[0m) ([0m[38;5;111;1mvar2/1N[0m [0m[38;5;243;1mid[0m)})})}) (aliases_of_consts {}))))
 Final situation:
 ((defined_symbols { [0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m })
  (code_age_relation {})
  (levels
-  ((scope 1) (defined_vars {([0m[38;5;111;1mvar2/1N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar1/0N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
-  ((defined_vars { var2/1N var1/0N })
+  ((scope 1) (defined_vars {([0m[38;5;111;1mvar1/0N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar2/1N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
+  ((defined_vars { var1/0N var2/1N })
    (equations
-    ([0m[38;5;111;1mvar2/1N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/0N[0m))
-     [0m[38;5;111;1mvar1/0N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m))
+    ([0m[38;5;111;1mvar1/0N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m))
+     [0m[38;5;111;1mvar2/1N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/0N[0m))
      [0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m :
       (Val!
        (Variant
@@ -56,11 +56,11 @@ Final situation:
          (known {(tag_0 => (Known 1), ((Val! (Variant (tagged_imms [0m[38;5;37;1m⊤[0m)))))})))))))))
  (aliases
   ((canonical_elements
-    {([0m[38;5;111;1mvar2/1N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))
-     ([0m[38;5;111;1mvar1/0N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))})
+    {([0m[38;5;111;1mvar1/0N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))
+     ([0m[38;5;111;1mvar2/1N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))})
    (aliases_of_canonical_names
     {([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m
-      {(Normal {([0m[38;5;111;1mvar2/1N[0m [0m[38;5;243;1mid[0m) ([0m[38;5;111;1mvar1/0N[0m [0m[38;5;243;1mid[0m)})})}) (aliases_of_consts {}))))
+      {(Normal {([0m[38;5;111;1mvar1/0N[0m [0m[38;5;243;1mid[0m) ([0m[38;5;111;1mvar2/1N[0m [0m[38;5;243;1mid[0m)})})}) (aliases_of_consts {}))))
 
 MEET CHAINS WITH THREE VARS
 
@@ -69,21 +69,21 @@ Initial situation:
  (code_age_relation {})
  (levels
   ((scope 1) (defined_vars
-   {([0m[38;5;111;1mvar3/4N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar1/2N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar2/3N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
-  ((defined_vars { var3/4N var1/2N var2/3N })
+   {([0m[38;5;111;1mvar1/2N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar2/3N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar3/4N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
+  ((defined_vars { var1/2N var2/3N var3/4N })
    (equations
-    ([0m[38;5;111;1mvar3/4N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/2N[0m))
-     [0m[38;5;111;1mvar1/2N[0m :
+    ([0m[38;5;111;1mvar1/2N[0m :
       (Val!
        (Variant
         (blocks (alloc_mode Heap)
          (known {(tag_0 => (Known 1), ((Val! (Variant (tagged_imms [0m[38;5;37;1m⊤[0m)))))}))))
-     [0m[38;5;111;1mvar2/3N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/2N[0m)))))))
+     [0m[38;5;111;1mvar2/3N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/2N[0m))
+     [0m[38;5;111;1mvar3/4N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/2N[0m)))))))
  (aliases
   ((canonical_elements
-    {([0m[38;5;111;1mvar3/4N[0m ([0m[38;5;111;1mvar1/2N[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m)) ([0m[38;5;111;1mvar2/3N[0m ([0m[38;5;111;1mvar1/2N[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))})
+    {([0m[38;5;111;1mvar2/3N[0m ([0m[38;5;111;1mvar1/2N[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m)) ([0m[38;5;111;1mvar3/4N[0m ([0m[38;5;111;1mvar1/2N[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))})
    (aliases_of_canonical_names
-    {([0m[38;5;111;1mvar1/2N[0m {(Normal {([0m[38;5;111;1mvar3/4N[0m [0m[38;5;243;1mid[0m) ([0m[38;5;111;1mvar2/3N[0m [0m[38;5;243;1mid[0m)})})})
+    {([0m[38;5;111;1mvar1/2N[0m {(Normal {([0m[38;5;111;1mvar2/3N[0m [0m[38;5;243;1mid[0m) ([0m[38;5;111;1mvar3/4N[0m [0m[38;5;243;1mid[0m)})})})
    (aliases_of_consts {}))))
 New knowledge:
 var3/4N : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m))
@@ -92,12 +92,12 @@ Extended env:
  (code_age_relation {})
  (levels
   ((scope 1) (defined_vars
-   {([0m[38;5;111;1mvar3/4N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar1/2N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar2/3N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
-  ((defined_vars { var3/4N var1/2N var2/3N })
+   {([0m[38;5;111;1mvar1/2N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar2/3N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar3/4N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
+  ((defined_vars { var1/2N var2/3N var3/4N })
    (equations
-    ([0m[38;5;111;1mvar3/4N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/2N[0m))
-     [0m[38;5;111;1mvar1/2N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m))
+    ([0m[38;5;111;1mvar1/2N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m))
      [0m[38;5;111;1mvar2/3N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/2N[0m))
+     [0m[38;5;111;1mvar3/4N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/2N[0m))
      [0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m :
       (Val!
        (Variant
@@ -105,24 +105,24 @@ Extended env:
          (known {(tag_0 => (Known 1), ((Val! (Variant (tagged_imms [0m[38;5;37;1m⊤[0m)))))})))))))))
  (aliases
   ((canonical_elements
-    {([0m[38;5;111;1mvar3/4N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))
-     ([0m[38;5;111;1mvar1/2N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))
-     ([0m[38;5;111;1mvar2/3N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))})
+    {([0m[38;5;111;1mvar1/2N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))
+     ([0m[38;5;111;1mvar2/3N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))
+     ([0m[38;5;111;1mvar3/4N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))})
    (aliases_of_canonical_names
     {([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m
-      {(Normal {([0m[38;5;111;1mvar3/4N[0m [0m[38;5;243;1mid[0m) ([0m[38;5;111;1mvar1/2N[0m [0m[38;5;243;1mid[0m) ([0m[38;5;111;1mvar2/3N[0m [0m[38;5;243;1mid[0m)})})})
+      {(Normal {([0m[38;5;111;1mvar1/2N[0m [0m[38;5;243;1mid[0m) ([0m[38;5;111;1mvar2/3N[0m [0m[38;5;243;1mid[0m) ([0m[38;5;111;1mvar3/4N[0m [0m[38;5;243;1mid[0m)})})})
    (aliases_of_consts {}))))
 Final situation:
 ((defined_symbols { [0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m })
  (code_age_relation {})
  (levels
   ((scope 1) (defined_vars
-   {([0m[38;5;111;1mvar3/4N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar1/2N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar2/3N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
-  ((defined_vars { var3/4N var1/2N var2/3N })
+   {([0m[38;5;111;1mvar1/2N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar2/3N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvar3/4N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
+  ((defined_vars { var1/2N var2/3N var3/4N })
    (equations
-    ([0m[38;5;111;1mvar3/4N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/2N[0m))
-     [0m[38;5;111;1mvar1/2N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m))
+    ([0m[38;5;111;1mvar1/2N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m))
      [0m[38;5;111;1mvar2/3N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/2N[0m))
+     [0m[38;5;111;1mvar3/4N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mvar1/2N[0m))
      [0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m :
       (Val!
        (Variant
@@ -130,12 +130,12 @@ Final situation:
          (known {(tag_0 => (Known 1), ((Val! (Variant (tagged_imms [0m[38;5;37;1m⊤[0m)))))})))))))))
  (aliases
   ((canonical_elements
-    {([0m[38;5;111;1mvar3/4N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))
-     ([0m[38;5;111;1mvar1/2N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))
-     ([0m[38;5;111;1mvar2/3N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))})
+    {([0m[38;5;111;1mvar1/2N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))
+     ([0m[38;5;111;1mvar2/3N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))
+     ([0m[38;5;111;1mvar3/4N[0m ([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))})
    (aliases_of_canonical_names
     {([0m[38;5;111;1m[0m[38;5;98;1mMeet_test.camlMeet_test__my_symbol[0m[38;5;111;1m[0m
-      {(Normal {([0m[38;5;111;1mvar3/4N[0m [0m[38;5;243;1mid[0m) ([0m[38;5;111;1mvar1/2N[0m [0m[38;5;243;1mid[0m) ([0m[38;5;111;1mvar2/3N[0m [0m[38;5;243;1mid[0m)})})})
+      {(Normal {([0m[38;5;111;1mvar1/2N[0m [0m[38;5;243;1mid[0m) ([0m[38;5;111;1mvar2/3N[0m [0m[38;5;243;1mid[0m) ([0m[38;5;111;1mvar3/4N[0m [0m[38;5;243;1mid[0m)})})})
    (aliases_of_consts {}))))
 
 MEET VARIANT
@@ -164,9 +164,9 @@ Meet:
   ((defined_symbols { }) (code_age_relation {})
    (levels
     ((scope 1) (defined_vars
-     {([0m[38;5;111;1ma/7N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mx/5N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvariant/9N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
-      ([0m[38;5;111;1mb/8N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1my/6N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
-    ((defined_vars { a/7N x/5N variant/9N b/8N y/6N }) (equations ()))))
+     {([0m[38;5;111;1mx/5N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1my/6N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1ma/7N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
+      ([0m[38;5;111;1mb/8N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvariant/9N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
+    ((defined_vars { x/5N y/6N a/7N b/8N variant/9N }) (equations ()))))
    (aliases
     ((canonical_elements {}) (aliases_of_canonical_names {})
      (aliases_of_consts {}))))
@@ -175,11 +175,12 @@ env:
   ((defined_symbols { }) (code_age_relation {})
    (levels
     ((scope 1) (defined_vars
-     {([0m[38;5;111;1ma/7N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mx/5N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvariant/9N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
-      ([0m[38;5;111;1mnaked/10N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1mb/8N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1my/6N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
-    ((defined_vars { a/7N x/5N variant/9N naked/10N b/8N y/6N })
+     {([0m[38;5;111;1mx/5N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1my/6N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1ma/7N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
+      ([0m[38;5;111;1mb/8N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvariant/9N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mnaked/10N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)}))
+    ((defined_vars { x/5N y/6N a/7N b/8N variant/9N naked/10N })
      (equations
-      ([0m[38;5;111;1mvariant/9N[0m :
+      ([0m[38;5;111;1mb/8N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1my/6N[0m))
+       [0m[38;5;111;1mvariant/9N[0m :
         (Val!
          (Variant
           (get_tag naked/10N)
@@ -187,11 +188,10 @@ env:
            (known
             {(tag_1 => (Known 1), ((Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1my/6N[0m)))
               (equations ([0m[38;5;111;1mb/8N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1my/6N[0m)))))}))))
-       [0m[38;5;111;1mnaked/10N[0m : (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;70;1m#1[0m))
-       [0m[38;5;111;1mb/8N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1my/6N[0m)))))))
+       [0m[38;5;111;1mnaked/10N[0m : (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;70;1m#1[0m)))))))
    (aliases
     ((canonical_elements
-      {([0m[38;5;111;1mnaked/10N[0m ([0m[38;5;70;1m#1[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m)) ([0m[38;5;111;1mb/8N[0m ([0m[38;5;111;1my/6N[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))})
+      {([0m[38;5;111;1mb/8N[0m ([0m[38;5;111;1my/6N[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m)) ([0m[38;5;111;1mnaked/10N[0m ([0m[38;5;70;1m#1[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))})
      (aliases_of_canonical_names {([0m[38;5;111;1my/6N[0m {(Normal {([0m[38;5;111;1mb/8N[0m [0m[38;5;243;1mid[0m)})})})
      (aliases_of_consts {([0m[38;5;70;1m#1[0m {(Normal {([0m[38;5;111;1mnaked/10N[0m [0m[38;5;243;1mid[0m)})})}))))
 
@@ -203,24 +203,24 @@ Env:
 ((defined_symbols { }) (code_age_relation {})
  (levels
   ((scope 1) (defined_vars
-   {([0m[38;5;111;1mfield1/12N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mblock2/13N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
-    ([0m[38;5;111;1mblock1/11N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mfield2/14N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
-  ((defined_vars { field1/12N block2/13N block1/11N field2/14N })
+   {([0m[38;5;111;1mblock1/11N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mfield1/12N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
+    ([0m[38;5;111;1mblock2/13N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mfield2/14N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
+  ((defined_vars { block1/11N field1/12N block2/13N field2/14N })
    (equations
-    ([0m[38;5;111;1mblock2/13N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mblock1/11N[0m))
-     [0m[38;5;111;1mblock1/11N[0m :
+    ([0m[38;5;111;1mblock1/11N[0m :
       (Val!
        (Variant
         (blocks (alloc_mode Heap)
          (known {(tag_0 => (Known 1), ((Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mfield1/12N[0m))))}))))
+     [0m[38;5;111;1mblock2/13N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mblock1/11N[0m))
      [0m[38;5;111;1mfield2/14N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mfield1/12N[0m)))))))
  (aliases
   ((canonical_elements
     {([0m[38;5;111;1mblock2/13N[0m ([0m[38;5;111;1mblock1/11N[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))
      ([0m[38;5;111;1mfield2/14N[0m ([0m[38;5;111;1mfield1/12N[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))})
    (aliases_of_canonical_names
-    {([0m[38;5;111;1mfield1/12N[0m {(Normal {([0m[38;5;111;1mfield2/14N[0m [0m[38;5;243;1mid[0m)})})
-     ([0m[38;5;111;1mblock1/11N[0m {(Normal {([0m[38;5;111;1mblock2/13N[0m [0m[38;5;243;1mid[0m)})})}) (aliases_of_consts {}))))
+    {([0m[38;5;111;1mblock1/11N[0m {(Normal {([0m[38;5;111;1mblock2/13N[0m [0m[38;5;243;1mid[0m)})})
+     ([0m[38;5;111;1mfield1/12N[0m {(Normal {([0m[38;5;111;1mfield2/14N[0m [0m[38;5;243;1mid[0m)})})}) (aliases_of_consts {}))))
 
 Res:
 (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mblock2/13N[0m))
@@ -228,24 +228,24 @@ Env:
 ((defined_symbols { }) (code_age_relation {})
  (levels
   ((scope 1) (defined_vars
-   {([0m[38;5;111;1mfield1/12N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mblock2/13N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
-    ([0m[38;5;111;1mblock1/11N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mfield2/14N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
-  ((defined_vars { field1/12N block2/13N block1/11N field2/14N })
+   {([0m[38;5;111;1mblock1/11N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mfield1/12N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
+    ([0m[38;5;111;1mblock2/13N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mfield2/14N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
+  ((defined_vars { block1/11N field1/12N block2/13N field2/14N })
    (equations
-    ([0m[38;5;111;1mblock2/13N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mblock1/11N[0m))
-     [0m[38;5;111;1mblock1/11N[0m :
+    ([0m[38;5;111;1mblock1/11N[0m :
       (Val!
        (Variant
         (blocks (alloc_mode Heap)
          (known {(tag_0 => (Known 1), ((Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mfield1/12N[0m))))}))))
+     [0m[38;5;111;1mblock2/13N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mblock1/11N[0m))
      [0m[38;5;111;1mfield2/14N[0m : (Val ([0m[38;5;160;1m=[0m [0m[38;5;111;1mfield1/12N[0m)))))))
  (aliases
   ((canonical_elements
     {([0m[38;5;111;1mblock2/13N[0m ([0m[38;5;111;1mblock1/11N[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))
      ([0m[38;5;111;1mfield2/14N[0m ([0m[38;5;111;1mfield1/12N[0m [0m[38;5;243;1m(coercion [0m[38;5;243;1mid[0m[38;5;243;1m)[0m))})
    (aliases_of_canonical_names
-    {([0m[38;5;111;1mfield1/12N[0m {(Normal {([0m[38;5;111;1mfield2/14N[0m [0m[38;5;243;1mid[0m)})})
-     ([0m[38;5;111;1mblock1/11N[0m {(Normal {([0m[38;5;111;1mblock2/13N[0m [0m[38;5;243;1mid[0m)})})}) (aliases_of_consts {}))))
+    {([0m[38;5;111;1mblock1/11N[0m {(Normal {([0m[38;5;111;1mblock2/13N[0m [0m[38;5;243;1mid[0m)})})
+     ([0m[38;5;111;1mfield1/12N[0m {(Normal {([0m[38;5;111;1mfield2/14N[0m [0m[38;5;243;1mid[0m)})})}) (aliases_of_consts {}))))
 
 
 MEET ALIAS TO RECOVER 
@@ -281,9 +281,9 @@ Left:
            (tag_1 => (Known 0), ())}))))
      [0m[38;5;111;1mx/18N[0m : (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1ma/19N[0m))))))))))
   ((scope 1) (defined_vars
-   {([0m[38;5;111;1mb/20N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1ma/19N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1my/17N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
-    ([0m[38;5;111;1mx/18N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
-  ((defined_vars { b/20N a/19N y/17N x/18N })
+   {([0m[38;5;111;1my/17N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mx/18N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1ma/19N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)
+    ([0m[38;5;111;1mb/20N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)}))
+  ((defined_vars { y/17N x/18N a/19N b/20N })
    (equations
     ([0m[38;5;111;1my/17N[0m :
       (Val!
@@ -309,9 +309,9 @@ Right:
            (tag_1 => (Known 0), ())}))))
      [0m[38;5;111;1mx/18N[0m : (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1mb/20N[0m))))))))))
   ((scope 1) (defined_vars
-   {([0m[38;5;111;1mb/20N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1ma/19N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1my/17N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
-    ([0m[38;5;111;1mx/18N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
-  ((defined_vars { b/20N a/19N y/17N x/18N })
+   {([0m[38;5;111;1my/17N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mx/18N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1ma/19N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)
+    ([0m[38;5;111;1mb/20N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)}))
+  ((defined_vars { y/17N x/18N a/19N b/20N })
    (equations
     ([0m[38;5;111;1my/17N[0m :
       (Val!
@@ -336,9 +336,9 @@ Res:
            (tag_1 => (Known 0), ())}))))
      [0m[38;5;111;1mx/18N[0m : (Val! (Variant (tagged_imms (Naked_immediate [0m[38;5;37;1m⊤[0m)))))))))
   ((scope 1) (defined_vars
-   {([0m[38;5;111;1mb/20N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1ma/19N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1my/17N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
-    ([0m[38;5;111;1mx/18N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
-  ((defined_vars { b/20N a/19N y/17N x/18N })
+   {([0m[38;5;111;1my/17N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mx/18N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1ma/19N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)
+    ([0m[38;5;111;1mb/20N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)}))
+  ((defined_vars { y/17N x/18N a/19N b/20N })
    (equations
     ([0m[38;5;111;1my/17N[0m :
       (Val!
@@ -356,7 +356,9 @@ Left:
  (levels
   ((scope 2)
   ((equations
-    ([0m[38;5;111;1mw/23N[0m : (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1ma/25N[0m)))))
+    ([0m[38;5;111;1my/21N[0m : (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1ma/25N[0m)))))
+     [0m[38;5;111;1mx/22N[0m : (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1ma/25N[0m)))))
+     [0m[38;5;111;1mw/23N[0m : (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1ma/25N[0m)))))
      [0m[38;5;111;1mz/24N[0m :
       (Val!
        (Variant
@@ -365,14 +367,12 @@ Left:
           {(tag_0 => (Known 2),
             ((Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1mb/26N[0m)))))
              (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1mb/26N[0m)))))))
-           (tag_1 => (Known 0), ())}))))
-     [0m[38;5;111;1my/21N[0m : (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1ma/25N[0m)))))
-     [0m[38;5;111;1mx/22N[0m : (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1ma/25N[0m))))))))))
+           (tag_1 => (Known 0), ())})))))))))
   ((scope 1) (defined_vars
-   {([0m[38;5;111;1mw/23N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1md/28N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1ma/25N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)
-    ([0m[38;5;111;1mz/24N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1my/21N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mx/22N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
-    ([0m[38;5;111;1mb/26N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1mc/27N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)}))
-  ((defined_vars { w/23N d/28N a/25N z/24N y/21N x/22N b/26N c/27N })
+   {([0m[38;5;111;1my/21N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mx/22N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mw/23N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
+    ([0m[38;5;111;1mz/24N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1ma/25N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1mb/26N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)
+    ([0m[38;5;111;1mc/27N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1md/28N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)}))
+  ((defined_vars { y/21N x/22N w/23N z/24N a/25N b/26N c/27N d/28N })
    (equations
     ([0m[38;5;111;1mz/24N[0m :
       (Val!
@@ -388,7 +388,9 @@ Right:
  (levels
   ((scope 2)
   ((equations
-    ([0m[38;5;111;1mw/23N[0m : (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1md/28N[0m)))))
+    ([0m[38;5;111;1my/21N[0m : (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1mc/27N[0m)))))
+     [0m[38;5;111;1mx/22N[0m : (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1mb/26N[0m)))))
+     [0m[38;5;111;1mw/23N[0m : (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1md/28N[0m)))))
      [0m[38;5;111;1mz/24N[0m :
       (Val!
        (Variant
@@ -398,16 +400,14 @@ Right:
             ((Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1mb/26N[0m)))))
              (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1mb/26N[0m))))))
             (equations
-             ([0m[38;5;111;1md/28N[0m : (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1mb/26N[0m))
-              [0m[38;5;111;1mc/27N[0m : (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1mb/26N[0m)))))
-           (tag_1 => (Known 0), ())}))))
-     [0m[38;5;111;1my/21N[0m : (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1mc/27N[0m)))))
-     [0m[38;5;111;1mx/22N[0m : (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1mb/26N[0m))))))))))
+             ([0m[38;5;111;1mc/27N[0m : (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1mb/26N[0m))
+              [0m[38;5;111;1md/28N[0m : (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1mb/26N[0m)))))
+           (tag_1 => (Known 0), ())})))))))))
   ((scope 1) (defined_vars
-   {([0m[38;5;111;1mw/23N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1md/28N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1ma/25N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)
-    ([0m[38;5;111;1mz/24N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1my/21N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mx/22N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
-    ([0m[38;5;111;1mb/26N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1mc/27N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)}))
-  ((defined_vars { w/23N d/28N a/25N z/24N y/21N x/22N b/26N c/27N })
+   {([0m[38;5;111;1my/21N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mx/22N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mw/23N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
+    ([0m[38;5;111;1mz/24N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1ma/25N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1mb/26N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)
+    ([0m[38;5;111;1mc/27N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1md/28N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)}))
+  ((defined_vars { y/21N x/22N w/23N z/24N a/25N b/26N c/27N d/28N })
    (equations
     ([0m[38;5;111;1mz/24N[0m :
       (Val!
@@ -423,7 +423,9 @@ Res:
  (levels
   ((scope 2)
   ((equations
-    ([0m[38;5;111;1mw/23N[0m : (Val! (Variant (tagged_imms (Naked_immediate [0m[38;5;37;1m⊤[0m))))
+    ([0m[38;5;111;1my/21N[0m : (Val! (Variant (tagged_imms (Naked_immediate [0m[38;5;37;1m⊤[0m))))
+     [0m[38;5;111;1mx/22N[0m : (Val! (Variant (tagged_imms (Naked_immediate [0m[38;5;37;1m⊤[0m))))
+     [0m[38;5;111;1mw/23N[0m : (Val! (Variant (tagged_imms (Naked_immediate [0m[38;5;37;1m⊤[0m))))
      [0m[38;5;111;1mz/24N[0m :
       (Val!
        (Variant
@@ -432,14 +434,12 @@ Res:
           {(tag_0 => (Known 2),
             ((Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1mb/26N[0m)))))
              (Val! (Variant (tagged_imms (Naked_immediate ([0m[38;5;160;1m=[0m [0m[38;5;111;1mb/26N[0m)))))))
-           (tag_1 => (Known 0), ())}))))
-     [0m[38;5;111;1my/21N[0m : (Val! (Variant (tagged_imms (Naked_immediate [0m[38;5;37;1m⊤[0m))))
-     [0m[38;5;111;1mx/22N[0m : (Val! (Variant (tagged_imms (Naked_immediate [0m[38;5;37;1m⊤[0m)))))))))
+           (tag_1 => (Known 0), ())})))))))))
   ((scope 1) (defined_vars
-   {([0m[38;5;111;1mw/23N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1md/28N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1ma/25N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)
-    ([0m[38;5;111;1mz/24N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1my/21N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mx/22N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
-    ([0m[38;5;111;1mb/26N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1mc/27N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)}))
-  ((defined_vars { w/23N d/28N a/25N z/24N y/21N x/22N b/26N c/27N })
+   {([0m[38;5;111;1my/21N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mx/22N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mw/23N[0m :: [0m[38;5;37;1m𝕍[0m Normal)
+    ([0m[38;5;111;1mz/24N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1ma/25N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1mb/26N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)
+    ([0m[38;5;111;1mc/27N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal) ([0m[38;5;111;1md/28N[0m :: [0m[38;5;37;1mℕ𝕚[0m Normal)}))
+  ((defined_vars { y/21N x/22N w/23N z/24N a/25N b/26N c/27N d/28N })
    (equations
     ([0m[38;5;111;1mz/24N[0m :
       (Val!
@@ -526,8 +526,8 @@ The projection of:
   ((defined_symbols { }) (code_age_relation {})
    (levels
     ((scope 1) (defined_vars
-     {([0m[38;5;111;1mf/30N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvs/32N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mx/31N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
-    ((defined_vars { f/30N vs/32N x/31N })
+     {([0m[38;5;111;1mf/30N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mx/31N[0m :: [0m[38;5;37;1m𝕍[0m Normal) ([0m[38;5;111;1mvs/32N[0m :: [0m[38;5;37;1m𝕍[0m Normal)}))
+    ((defined_vars { f/30N x/31N vs/32N })
      (equations
       ([0m[38;5;111;1mf/30N[0m :
         (Val!  (alloc_mode Heap)

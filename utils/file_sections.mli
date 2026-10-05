@@ -40,6 +40,10 @@ module Builder : sig
 
   val create : int -> t
   val add : t -> Obj.t -> Idx.t
+
+  (** Drop loaded graphs. Previously obtained values must no longer be used;
+      on failure a prefix may be serialized. Append and reads remain valid. *)
+  val serialize : t -> unit
   val build : t -> file_sections
   val clear : t -> unit
 end

@@ -245,10 +245,7 @@ end = struct
 
   let keys t = N.Map.keys t
 
-  let subset_domain t1 t2 =
-    (* CR lmaurer: Add this operation to [Patricia_tree]. ([N.Map.keys] being
-       O(n lg n) makes this especially painful.) *)
-    N.Set.subset (N.Map.keys t1) (N.Map.keys t2)
+  let subset_domain = N.Map.subset_domain
 
   let inter_domain_is_non_empty t1 t2 = N.Map.inter_domain_is_non_empty t1 t2
 
@@ -1069,18 +1066,6 @@ let apply_renaming
     in
     let continuations_in_trap_actions =
       For_continuations.apply_renaming continuations_in_trap_actions renaming
-    in
-    let function_slots_in_projections =
-      For_function_slots.apply_renaming function_slots_in_projections renaming
-    in
-    let value_slots_in_projections =
-      For_value_slots.apply_renaming value_slots_in_projections renaming
-    in
-    let function_slots_in_declarations =
-      For_function_slots.apply_renaming function_slots_in_declarations renaming
-    in
-    let value_slots_in_declarations =
-      For_value_slots.apply_renaming value_slots_in_declarations renaming
     in
     let code_ids = For_code_ids.apply_renaming code_ids renaming in
     let newer_version_of_code_ids =

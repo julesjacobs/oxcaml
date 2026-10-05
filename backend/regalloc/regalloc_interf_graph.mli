@@ -92,12 +92,10 @@ end
 
     Internal representation:
     - adj_set: edge set for O(1) membership testing
-    - adj_list: adjacency lists for iteration (DUPLICATES adj_set information)
-    - degree: degree counts per register
+    - nodes: adjacency lists and mutable degree counts per register
 
-    The duplication between adj_set and adj_list is intentional: adj_set
-    provides fast membership testing while adj_list enables efficient iteration.
-*)
+    The duplication between edges and adjacency lists is intentional: adj_set
+    provides fast membership testing while adjacency lists enable iteration. *)
 type t
 
 (** {2 Construction} *)
@@ -195,8 +193,9 @@ val incr_degree : t -> Reg.t -> unit
 
 (** [decr_degree graph reg] decrements the degree of [reg] by 1. This operation
     does NOT affect edges - it only updates the degree counter. Typically used
-    during IRC simplification phase. Does nothing if the degree is infinite. *)
-val decr_degree : t -> Reg.t -> unit
+    during IRC simplification phase. Returns the previous degree, leaving it
+    unchanged if it is infinite. *)
+val decr_degree : t -> Reg.t -> int
 
 val get_max_degree : t -> int
 
