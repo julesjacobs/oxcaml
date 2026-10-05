@@ -60,6 +60,8 @@ module T : sig
 
   val get_alias_exn : 'head t -> Simple.t
 
+  val get_alias_opt : 'head t -> Simple.t option
+
   val apply_renaming :
     apply_renaming_head:('head -> Renaming.t -> 'head) ->
     free_names_head:('head -> Name_occurrences.t) ->
@@ -210,6 +212,11 @@ end = struct
     match t with
     | Unknown | Bottom | Ok (No_alias _) -> raise Not_found
     | Ok (Equals alias) -> alias
+
+  let[@inline always] get_alias_opt (t : _ t) =
+    match t with
+    | Unknown | Bottom | Ok (No_alias _) -> None
+    | Ok (Equals alias) -> Some alias
 
   let apply_renaming ~apply_renaming_head ~free_names_head (t : _ t) renaming :
       _ t =

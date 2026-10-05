@@ -325,20 +325,28 @@ let lambda_to_flambda ~ppf_dump:ppf ~prefixname ~machine_width
     ~close_prog_metadata ~code_slot_offsets ~sections raw_flambda
 
 let reset_symbol_tables () =
+  Flambda2_types.Typing_env.reset_lookup_cache ();
   Compilenv.reset_info_tables ();
   Flambda2_identifiers.Continuation.reset ();
   Flambda2_identifiers.Int_ids.reset ()
 
 let lambda_to_cmm ~ppf_dump ~prefixname ~machine_width ~keep_symbol_tables
     (program : Lambda.program) =
+  let program_ref = ref (Some program) in
   let run () =
+    let program = Option.get !program_ref in
+    program_ref := None;
     let { flambda; all_code; offsets; reachable_names } =
       lambda_to_flambda ~ppf_dump ~prefixname ~machine_width program
     in
+    Flambda2_types.Typing_env.reset_lookup_cache ();
     let cmm =
       Flambda2_to_cmm.To_cmm.unit flambda ~all_code ~offsets ~reachable_names
     in
-    if not keep_symbol_tables then reset_symbol_tables ();
+    if not keep_symbol_tables
+    then (
+      File_sections.Builder.serialize (Compilenv.current_sections ());
+      reset_symbol_tables ());
     cmm
   in
   Profile.record_call "flambda2" run

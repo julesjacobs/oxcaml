@@ -18,9 +18,6 @@ open! Simplify_import
 module U = Unboxing_types
 module Extra_param_and_args = U.Extra_param_and_args
 
-let pp_tag print_tag ppf tag =
-  if print_tag then Format.fprintf ppf "_%d" (Tag.to_int tag)
-
 (* Internal control knobs *)
 let unbox_numbers = true
 
@@ -160,9 +157,12 @@ and make_optimistic_fields ~add_tag_to_name ~depth ~recursive tenv param_type
     | Scannable (Mixed_record _) -> "unboxed_mixed_field"
     | Float_record -> "unboxed_float_field"
   in
-  let field_name n =
-    Format.asprintf "%s%a_%d" field_base_name (pp_tag add_tag_to_name) tag n
+  let field_prefix =
+    if add_tag_to_name
+    then field_base_name ^ "_" ^ string_of_int (Tag.to_int tag) ^ "_"
+    else field_base_name ^ "_"
   in
+  let field_name n = field_prefix ^ string_of_int n in
   let field_vars =
     List.init (Target_ocaml_int.to_int size) (fun i ->
         Extra_param_and_args.create ~name:(field_name i)

@@ -703,6 +703,7 @@
   regalloc_gi_utils
   regalloc_invariants
   regalloc_interf_graph
+  regalloc_reg_table
   regalloc_irc
   regalloc_irc_state
   regalloc_irc_utils

@@ -218,6 +218,9 @@ module Typing_env : sig
 
   val find : t -> Name.t -> Flambda_kind.t option -> flambda_type
 
+  (** Clear retained bindings before resetting the global name identifiers. *)
+  val reset_lookup_cache : unit -> unit
+
   val find_params : t -> Bound_parameters.t -> flambda_type list
 
   val add_env_extension : t -> Typing_env_extension.t -> t

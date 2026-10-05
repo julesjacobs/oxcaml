@@ -31,8 +31,6 @@ module Id = struct
     t land mask_selecting_bottom_bits lor (flags lsl flags_shift)
 
   let flags t = t lsr flags_shift
-
-  let next t = t + 1
 end
 
 module Make (E : sig
@@ -50,10 +48,8 @@ struct
   module HT = Hashtbl.Make (struct
     type t = int
 
-    (* As of writing, every [E.hash] reaching this table is already well
-       distributed in the low bits and the identity function would do; we mix
-       defensively against future ones that aren't. The mixer is a bijection, so
-       it never merges distinct ids. Multiplier from xxHash. *)
+    (* Keep this hash unchanged: serialized tables contain buckets populated by
+       it, including tables produced before ids were allocated densely. *)
     let hash (t : t) =
       let mixed = t lxor (t lsr 31) in
       let h = mixed * 0x27d4eb2f in
@@ -64,54 +60,88 @@ struct
 
   let () = assert (E.flags lsr Id.flags_size_in_bits = 0)
 
-  type t = E.t HT.t
+  type t =
+    { mutable slots : int array;
+          (* Slots contain a value index plus one; zero marks an empty slot. *)
+      mutable values : Obj.t array;
+      mutable length : int
+    }
 
-  let create () = HT.create 20_000
+  let create () = { slots = [| 0 |]; values = [||]; length = 0 }
 
-  exception Can_add of int
+  (* [values] is never a flat-float array, and [index] is in its initialized
+     prefix. The option-array view selects an address-array load; its result
+     remains an arbitrary OCaml value. *)
+  external address_array_get : Obj.t option array -> int -> Obj.t
+    = "%array_unsafe_get"
 
-  exception Already_added of int
+  let[@inline always] get_value (values : Obj.t array) index : E.t =
+    Obj.obj (address_array_get (Obj.magic values) index)
+
+  let find_slot t elt hash =
+    let mask = Array.length t.slots - 1 in
+    let rec loop slot =
+      let index = Array.unsafe_get t.slots slot in
+      if index = 0 || E.equal (get_value t.values (index - 1)) elt
+      then slot
+      else loop ((slot + 1) land mask)
+    in
+    loop (hash land mask)
+
+  let empty_slot slots hash =
+    let mask = Array.length slots - 1 in
+    let rec loop slot =
+      if Array.unsafe_get slots slot = 0
+      then slot
+      else loop ((slot + 1) land mask)
+    in
+    loop (hash land mask)
+
+  let grow t elt =
+    if t.length > Sys.max_array_length / 4
+    then Misc.fatal_errorf "No ids left for@ %a" E.print elt;
+    let capacity = if t.length = 0 then 16 else 2 * t.length in
+    (* Initializing with an integer keeps floats boxed and preserves physical
+       identity. Only the first [length] entries contain values of type
+       [E.t]. *)
+    let values = Array.make capacity (Obj.repr 0) in
+    Array.blit t.values 0 values 0 t.length;
+    let slots = Array.make (2 * capacity) 0 in
+    for index = 0 to t.length - 1 do
+      let slot = empty_slot slots (E.hash (get_value values index)) in
+      slots.(slot) <- index + 1
+    done;
+    t.values <- values;
+    t.slots <- slots
 
   let add t elt =
-    let id = Id.create (E.hash elt) E.flags in
-    match HT.find t id with
-    | exception Not_found ->
-      HT.add t id elt;
-      id
-    | existing_elt -> (
-      if E.equal elt existing_elt
-      then id
-      else
-        try
-          let starting_id = id in
-          let id = ref (Id.next starting_id) in
-          (* If there is a collision, we search for another slot, but take care
-             not to alter the flags bits. *)
-          while !id <> starting_id do
-            assert (Id.flags !id = E.flags);
-            match HT.find t !id with
-            | exception Not_found -> raise (Can_add !id)
-            | existing_elt ->
-              if E.equal elt existing_elt
-              then raise (Already_added !id)
-              else id := Id.next !id
-          done;
-          Misc.fatal_errorf "No hash values left for@ %a" E.print elt
-        with
-        | Can_add id ->
-          HT.add t id elt;
-          assert (Id.flags id = E.flags);
-          id
-        | Already_added id ->
-          assert (Id.flags id = E.flags);
-          id)
+    let hash = E.hash elt in
+    let slot = find_slot t elt hash in
+    let index = Array.unsafe_get t.slots slot in
+    if index <> 0
+    then Id.create (index - 1) E.flags
+    else
+      let index = t.length in
+      let slot =
+        if index = Array.length t.values
+        then (
+          grow t elt;
+          empty_slot t.slots hash)
+        else slot
+      in
+      t.values.(index) <- Obj.repr elt;
+      t.slots.(slot) <- index + 1;
+      t.length <- index + 1;
+      Id.create index E.flags
 
   let find t id =
     assert (Id.flags id = E.flags);
-    HT.find t id
+    let index = id land Id.mask_selecting_bottom_bits in
+    if index >= t.length then raise Not_found;
+    get_value t.values index
 
-  (* We serialize a table using the exact same format we use in memory, except
-     that we only store the data for the exported elements. *)
+  (* Keep the serialized representation independent of the dense in-memory
+     table, since imported ids belong to the exporting compilation unit. *)
   type serializable = E.t HT.t
 
   let export t ~iter =

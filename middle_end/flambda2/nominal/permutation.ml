@@ -74,7 +74,7 @@ module Make (N : Container_types.S) = struct
     invariant t;
     t
 
-  let compose ~second ~first =
+  let compose_nonempty ~second ~first =
     (* Find the triples [n1, n2, n3] where [first n1 = n2] and [second n2 =
        n3]. *)
     let chained =
@@ -105,6 +105,13 @@ module Make (N : Container_types.S) = struct
       N.Map.fold (fun _ (n1, n3) -> add_to_map n3 n1) chained backwards
     in
     { forwards; backwards }
+
+  let compose ~second ~first =
+    if is_empty second
+    then first
+    else if is_empty first
+    then second
+    else compose_nonempty ~second ~first
 
   let compose_one ~first n1 n2 = post_swap first n1 n2
 

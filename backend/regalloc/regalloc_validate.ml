@@ -478,19 +478,20 @@ end = struct
     if Array.length reg_arr <> Array.length loc_arr
     then
       Regalloc_utils.fatal
-        "%s: register array length has changed. Before: %d. Now: %d." context
-        (Array.length reg_arr) (Array.length loc_arr);
+        "%s: register array length has changed. Before: %d. Now: %d."
+        (context ()) (Array.length reg_arr) (Array.length loc_arr);
     Array.iter2
       (fun (reg_desc : Register.t) loc_reg ->
         match reg_desc.reg_id, Location.of_reg loc_reg with
         | _, None ->
           Regalloc_utils.fatal "%s: location is still unknown after allocation"
-            context
+            (context ())
         | Named { stamp = _ }, _ -> ()
         | Preassigned { location = l1 }, Some l2 when Location.equal l1 l2 -> ()
         | Preassigned { location = prev_loc }, Some new_loc ->
           Regalloc_utils.fatal
-            "%s: changed preassigned register's location from %a to %a" context
+            "%s: changed preassigned register's location from %a to %a"
+            (context ())
             (Location.print (Register.typ reg_desc))
             prev_loc
             (Location.print loc_reg.Reg.typ)
@@ -501,14 +502,14 @@ end = struct
   let verify_reg_arrays (type a) ~id (instr : a Cfg.instruction)
       (old_instr : a Instruction.t) =
     verify_reg_array
-      ~context:
-        (Printf.sprintf "In instruction's no %s arguments"
-           (InstructionId.to_string id))
+      ~context:(fun () ->
+        Printf.sprintf "In instruction's no %s arguments"
+          (InstructionId.to_string id))
       ~reg_arr:old_instr.arg ~loc_arr:instr.arg;
     verify_reg_array
-      ~context:
-        (Printf.sprintf "In instruction's no %s results"
-           (InstructionId.to_string id))
+      ~context:(fun () ->
+        Printf.sprintf "In instruction's no %s results"
+          (InstructionId.to_string id))
       ~reg_arr:old_instr.res ~loc_arr:instr.res
 
   let verify_basic ~seen_ids ~successor_id t instr =
@@ -717,7 +718,8 @@ end = struct
 
   let verify t cfg =
     Regalloc_invariants.postcondition_layout cfg;
-    verify_reg_array ~reg_arr:t.reg_fun_args ~context:"In function arguments"
+    verify_reg_array ~reg_arr:t.reg_fun_args
+      ~context:(fun () -> "In function arguments")
       ~loc_arr:(Cfg_with_layout.cfg cfg).fun_args;
     let seen_ids =
       Hashtbl.create

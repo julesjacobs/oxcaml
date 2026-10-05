@@ -142,6 +142,9 @@ val find_symbol_projection : t -> Variable.t -> Symbol_projection.t option
     [variable_is_from_missing_cmx_file]. *)
 val find : t -> Name.t -> Flambda_kind.t option -> Type_grammar.t
 
+(** Clear retained bindings before resetting the global name identifiers. *)
+val reset_lookup_cache : unit -> unit
+
 val find_params : t -> Bound_parameters.t -> Type_grammar.t list
 
 val variable_is_from_missing_cmx_file : t -> Name.t -> bool

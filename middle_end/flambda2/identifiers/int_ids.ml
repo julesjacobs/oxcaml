@@ -18,13 +18,11 @@ let hash_seed =
   let seed = Random.bits () in
   if seed mod 2 = 0 then seed + 1 else seed
 
-(* Fast integer hashing algorithm for sdolan. With the stdlib Hashtbl
-   implementation it's ok that this returns > 30 bits. *)
 let hash2 a b =
-  let a = Hashtbl.hash a in
-  let b = Hashtbl.hash b in
   let r = (a * hash_seed) + b in
-  r lxor (r lsr 17)
+  let mixed = r lxor (r lsr 31) in
+  let h = mixed * 0x27d4eb2f in
+  h lxor (h lsr 29)
 
 module Id = Table_by_int_id.Id
 
@@ -280,7 +278,7 @@ module Variable_data = struct
 
   let hash
       { compilation_unit; name = _; name_stamp; kind = _; user_visible = _ } =
-    hash2 (Compilation_unit.hash compilation_unit) (Hashtbl.hash name_stamp)
+    hash2 (Compilation_unit.hash compilation_unit) name_stamp
 
   let equal t1 t2 =
     if t1 == t2
@@ -373,7 +371,11 @@ module Const = struct
 
   let grand_table_of_constants = ref (Table.create ())
 
-  let initialise () = grand_table_of_constants := Table.create ()
+  let initialise () =
+    let table = Table.create () in
+    (* [const_null] survives resets and occupies the first dense id. *)
+    ignore (Table.add table Const_data.Null);
+    grand_table_of_constants := table
 
   let find_data t = Table.find !grand_table_of_constants t
 
@@ -706,7 +708,7 @@ module Simple_data = struct
       Coercion.print coercion
 
   let hash { simple; coercion } =
-    Hashtbl.hash (Id.hash simple, Coercion.hash coercion)
+    hash2 (Id.hash simple) (Coercion.hash coercion)
 
   let equal t1 t2 =
     if t1 == t2

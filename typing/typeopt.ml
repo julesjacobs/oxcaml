@@ -51,7 +51,11 @@ exception Error of Location.t * error
 (* CR external-mode: Don't disregard modalities when using [scrape_ty] to reason
    about the runtime properties of a type - in particular, in
    [maybe_pointer_ty], when checking whether a type crosses externality. *)
-let scrape_ty env ty =
+type scraped_type =
+  | Missing_type_declaration
+  | Scraped_type of type_expr * Types.type_declaration option
+
+let scrape_ty_with_declaration env ty =
   let ty =
     match get_desc ty with
     | Tpoly(ty, _) -> ty
@@ -63,19 +67,27 @@ let scrape_ty env ty =
       let ty = Ctype.expand_head_opt env ty in
       begin match get_desc ty with
       | Tconstr (p, _, _) ->
-          begin match find_unboxed_type (Env.find_type p env) with
-          | Some _ -> begin
-            match (Ctype.get_unboxed_type_approximation env ty) with
-            | { ty; or_null = None; modality = _ } ->
-              Some ty
-            | _ -> Some ty end
-          | None -> Some ty
-          | exception Not_found -> None
+          begin match Env.find_type p env with
+          | declaration ->
+            begin match find_unboxed_type declaration with
+            | Some _ ->
+              begin match Ctype.get_unboxed_type_approximation env ty with
+              | { ty; or_null = None; modality = _ } ->
+                Scraped_type (ty, None)
+              | _ -> Scraped_type (ty, None)
+              end
+            | None -> Scraped_type (ty, Some declaration)
+            end
+          | exception Not_found -> Missing_type_declaration
           end
-      | _ ->
-          Some ty
+      | _ -> Scraped_type (ty, None)
       end
-  | _ -> Some ty
+  | _ -> Scraped_type (ty, None)
+
+let scrape_ty env ty =
+  match scrape_ty_with_declaration env ty with
+  | Missing_type_declaration -> None
+  | Scraped_type (ty, _) -> Some ty
 
 (* See [scrape_ty]; this returns the [type_desc] of a scraped [type_expr]. *)
 let scrape env ty =
@@ -617,17 +629,112 @@ let fallback_if_missing_cmi ~default f =
    check the sorts of the relevant types.  Ideally this wouldn't involve
    expensive layout computation, because the sorts are stored somewhere (e.g.,
    [record_representation]).  But that's not currently the case for tuples. *)
-let rec value_kind env ~loc ~visited ~depth ~num_nodes_visited (ty : type_expr)
+(* These closed predefined types have no aliases or sort variables, so their
+   value kinds do not require expansion or the layout checks below. *)
+let predefined_value_kind =
+  let table =
+    List.map (fun (path, raw_kind) -> path, non_nullable raw_kind)
+      [ Predef.path_int, Pintval;
+        Predef.path_char, Pintval;
+        Predef.path_int8, Pintval;
+        Predef.path_int16, Pintval;
+        Predef.path_bool, Pintval;
+        Predef.path_unit, Pintval;
+        Predef.path_string, Pgenval;
+        Predef.path_bytes, Pgenval;
+        Predef.path_floatarray, Parrayval Pfloatarray;
+        Predef.path_float, Pboxedfloatval Boxed_float64;
+        Predef.path_float32, Pboxedfloatval Boxed_float32;
+        Predef.path_int32, Pboxedintval Boxed_int32;
+        Predef.path_int64, Pboxedintval Boxed_int64;
+        Predef.path_nativeint, Pboxedintval Boxed_nativeint;
+        Predef.path_int8x16, Pboxedvectorval Boxed_vec128;
+        Predef.path_int16x8, Pboxedvectorval Boxed_vec128;
+        Predef.path_int32x4, Pboxedvectorval Boxed_vec128;
+        Predef.path_int64x2, Pboxedvectorval Boxed_vec128;
+        Predef.path_float16x8, Pboxedvectorval Boxed_vec128;
+        Predef.path_float32x4, Pboxedvectorval Boxed_vec128;
+        Predef.path_float64x2, Pboxedvectorval Boxed_vec128;
+        Predef.path_int8x32, Pboxedvectorval Boxed_vec256;
+        Predef.path_int16x16, Pboxedvectorval Boxed_vec256;
+        Predef.path_int32x8, Pboxedvectorval Boxed_vec256;
+        Predef.path_int64x4, Pboxedvectorval Boxed_vec256;
+        Predef.path_float16x16, Pboxedvectorval Boxed_vec256;
+        Predef.path_float32x8, Pboxedvectorval Boxed_vec256;
+        Predef.path_float64x4, Pboxedvectorval Boxed_vec256;
+        Predef.path_int8x64, Pboxedvectorval Boxed_vec512;
+        Predef.path_int16x32, Pboxedvectorval Boxed_vec512;
+        Predef.path_int32x16, Pboxedvectorval Boxed_vec512;
+        Predef.path_int64x8, Pboxedvectorval Boxed_vec512;
+        Predef.path_float16x32, Pboxedvectorval Boxed_vec512;
+        Predef.path_float32x16, Pboxedvectorval Boxed_vec512;
+        Predef.path_float64x8, Pboxedvectorval Boxed_vec512;
+        Predef.path_mask, Pboxedmaskval ]
+    |> Path.Map.of_list
+  in
+  fun ty ->
+    match get_desc ty with
+    | Tconstr ((Pident id as path), [], _) when Ident.is_predef id ->
+      Path.Map.find_opt path table
+    | _ -> None
+
+let declaration_is_boxed decl =
+  match decl.type_kind with
+  | Type_variant (_, (Variant_boxed _ | Variant_extensible), _)
+  | Type_record
+      (_, (Record_boxed | Record_float | Record_ufloat | Record_mixed _
+          | Record_inlined (_, _, (Variant_boxed _ | Variant_extensible))), _)
+  | Type_open -> true
+  | Type_variant (_, (Variant_unboxed | Variant_with_null), _)
+  | Type_record
+      (_, (Record_unboxed | Record_dummy _ | Record_undetermined
+          | Record_variable _
+          | Record_inlined (_, _, (Variant_unboxed | Variant_with_null))), _)
+  | Type_record_unboxed_product _
+  | Type_abstract _ -> false
+
+let rec value_kind env ~loc ~visited ~depth ~num_nodes_visited ty =
+  match predefined_value_kind ty with
+  | Some kind -> num_nodes_visited, kind
+  | None ->
+    value_kind_general env ~loc ~visited ~depth ~num_nodes_visited ty
+
+and value_kind_general env ~loc ~visited ~depth ~num_nodes_visited
+    (ty : type_expr)
   : int * value_kind =
   let[@inline] cannot_proceed () =
     Numbers.Int.Set.mem (get_id ty) visited
     || depth >= 2
     || num_nodes_visited >= 30
   in
-  match scrape_ty env ty with
-  | None -> num_nodes_visited, non_nullable Pgenval
-  | Some scty ->
-  begin
+  match scrape_ty_with_declaration env ty with
+  | Missing_type_declaration -> num_nodes_visited, non_nullable Pgenval
+  | Scraped_type (scty, declaration) ->
+  let declaration =
+    match declaration with
+    | Some _ -> declaration
+    | None ->
+      match get_desc scty with
+      | Tconstr (p, _, _) ->
+        begin match Env.find_type p env with
+        | decl -> Some decl
+        | exception Not_found -> None
+        end
+      | _ -> None
+  in
+  let known_value_layout =
+    match get_desc scty with
+    | Tarrow _ | Ttuple _ | Tobject _ | Tvariant _ | Tpackage _ | Tbox _ ->
+      true
+    | _ ->
+      match declaration with
+      | Some decl -> declaration_is_boxed decl
+      | None -> false
+  in
+  (* A known boxed representation fixes the outer layout independently of its
+     parameters. Abstract and unboxed types still need the safety check, as do
+     type variables whose sorts may need defaulting. *)
+  if not known_value_layout then begin
     (* CR layouts: We want to avoid correcting levels twice, and scrape_ty will
        correct levels for us.  But it may be the case that we could do the
        layout check on the original type but not the scraped type, because of
@@ -659,77 +766,16 @@ let rec value_kind env ~loc ~visited ~depth ~num_nodes_visited (ty : type_expr)
         then raise Missing_cmi_fallback
         else raise (Error (loc, Non_value_layout (env, ty, Some violation)))
   end;
+  match predefined_value_kind scty with
+  | Some kind -> num_nodes_visited, kind
+  | None ->
   match get_desc scty with
-  | Tconstr(p, _, _) when Path.same p Predef.path_int ->
-    num_nodes_visited, non_nullable Pintval
-  | Tconstr(p, _, _) when Path.same p Predef.path_char ->
-    num_nodes_visited, non_nullable Pintval
-  | Tconstr(p, _, _) when Path.same p Predef.path_int8 ->
-    num_nodes_visited, non_nullable Pintval
-  | Tconstr(p, _, _) when Path.same p Predef.path_int16 ->
-    num_nodes_visited, non_nullable Pintval
-  | Tconstr(p, _, _) when Path.same p Predef.path_floatarray ->
-    num_nodes_visited, non_nullable (Parrayval Pfloatarray)
-  | Tconstr(p, _, _) when Path.same p Predef.path_float ->
-    num_nodes_visited, non_nullable (Pboxedfloatval Boxed_float64)
-  | Tconstr(p, _, _) when Path.same p Predef.path_float32 ->
-    num_nodes_visited, non_nullable (Pboxedfloatval Boxed_float32)
-  | Tconstr(p, _, _) when Path.same p Predef.path_int32 ->
-    num_nodes_visited, non_nullable (Pboxedintval Boxed_int32)
-  | Tconstr(p, _, _) when Path.same p Predef.path_int64 ->
-    num_nodes_visited, non_nullable (Pboxedintval Boxed_int64)
-  | Tconstr(p, _, _) when Path.same p Predef.path_nativeint ->
-    num_nodes_visited, non_nullable (Pboxedintval Boxed_nativeint)
-  | Tconstr(p, _, _) when Path.same p Predef.path_int8x16 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec128)
-  | Tconstr(p, _, _) when Path.same p Predef.path_int16x8 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec128)
-  | Tconstr(p, _, _) when Path.same p Predef.path_int32x4 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec128)
-  | Tconstr(p, _, _) when Path.same p Predef.path_int64x2 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec128)
-  | Tconstr(p, _, _) when Path.same p Predef.path_float16x8 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec128)
-  | Tconstr(p, _, _) when Path.same p Predef.path_float32x4 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec128)
-  | Tconstr(p, _, _) when Path.same p Predef.path_float64x2 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec128)
-  | Tconstr(p, _, _) when Path.same p Predef.path_int8x32 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec256)
-  | Tconstr(p, _, _) when Path.same p Predef.path_int16x16 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec256)
-  | Tconstr(p, _, _) when Path.same p Predef.path_int32x8 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec256)
-  | Tconstr(p, _, _) when Path.same p Predef.path_int64x4 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec256)
-  | Tconstr(p, _, _) when Path.same p Predef.path_float16x16 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec256)
-  | Tconstr(p, _, _) when Path.same p Predef.path_float32x8->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec256)
-  | Tconstr(p, _, _) when Path.same p Predef.path_float64x4 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec256)
-  | Tconstr(p, _, _) when Path.same p Predef.path_int8x64 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec512)
-  | Tconstr(p, _, _) when Path.same p Predef.path_int16x32 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec512)
-  | Tconstr(p, _, _) when Path.same p Predef.path_int32x16 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec512)
-  | Tconstr(p, _, _) when Path.same p Predef.path_int64x8 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec512)
-  | Tconstr(p, _, _) when Path.same p Predef.path_float16x32->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec512)
-  | Tconstr(p, _, _) when Path.same p Predef.path_float32x16->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec512)
-  | Tconstr(p, _, _) when Path.same p Predef.path_float64x8 ->
-    num_nodes_visited, non_nullable (Pboxedvectorval Boxed_vec512)
-  | Tconstr(p, _, _) when Path.same p Predef.path_mask ->
-    num_nodes_visited, non_nullable Pboxedmaskval
   | Tconstr(p, [arg], _)
     when (Path.same p Predef.path_array
           || Path.same p Predef.path_iarray) ->
     let ak = array_type_kind ~elt_ty:(Some arg) env loc ty in
     num_nodes_visited, non_nullable (Parrayval ak)
-  | Tconstr(p, args, _) -> begin
+  | Tconstr(_, args, _) -> begin
       (* CR layouts v2.8: The uses of [decl.type_jkind] here are suspect:
          with with-kinds, [decl.type_jkind] will mention variables bound
          by the parameters of the declaration. The code below loses this
@@ -737,12 +783,17 @@ let rec value_kind env ~loc ~visited ~depth ~num_nodes_visited (ty : type_expr)
          instead of [string] when looking at a [string list]. This should
          probably just call a [type_jkind] function. Internal ticket 5101. *)
       let decl =
-        try Env.find_type p env with Not_found -> raise Missing_cmi_fallback
+        match declaration with
+        | Some decl -> decl
+        | None -> raise Missing_cmi_fallback
       in
       if cannot_proceed () then
+        let raw_kind =
+          value_kind_of_scannable_jkind env decl.type_jkind
+        in
         num_nodes_visited,
-        add_nullability_from_ty env scty
-          (value_kind_of_scannable_jkind env decl.type_jkind)
+        if known_value_layout then non_nullable raw_kind
+        else add_nullability_from_ty env scty raw_kind
       else
         let visited = Numbers.Int.Set.add (get_id ty) visited in
         (* Default of [Pgenval] is currently safe for the missing cmi fallback
@@ -822,7 +873,8 @@ let rec value_kind env ~loc ~visited ~depth ~num_nodes_visited (ty : type_expr)
       (value_kind_of_scannable_jkind env (Jkind.disallow_right jkind))
   | _ ->
     num_nodes_visited,
-    add_nullability_from_ty env scty Pgenval
+    if known_value_layout then non_nullable Pgenval
+    else add_nullability_from_ty env scty Pgenval
 
 and value_kind_mixed_block_field env ~loc ~visited ~depth ~num_nodes_visited
       (field : unit Lambda.mixed_block_element) ty

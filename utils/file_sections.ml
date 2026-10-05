@@ -16,6 +16,7 @@
 
 type section =
   | Loaded of Obj.t
+  | Serialized of string
   | Pending of { byte_offset_in_file : int }
 
 module File_lru_cache = Lru.Make (struct
@@ -37,7 +38,7 @@ type t =
       { channel : File_lru_cache.slot;
         sections : section array
       }
-  | In_memory of Obj.t array
+  | In_memory of section ref array
 
 module Idx = struct
   type t = int
@@ -64,9 +65,14 @@ let length = function
   | From_file { sections; _ } -> Array.length sections
   | In_memory sections -> Array.length sections
 
+let load_serialized section data =
+  let contents : Obj.t = Marshal.from_string data 0 in
+  section := Loaded contents; contents
+
 let read_section sections channel index =
   match sections.(index) with
   | Loaded section_contents -> section_contents
+  | Serialized _ -> assert false
   | Pending { byte_offset_in_file } ->
     let channel = File_lru_cache.load_slot channel file_lru in
     seek_in channel byte_offset_in_file;
@@ -77,7 +83,11 @@ let read_section sections channel index =
 let unsafe_get t index =
   match t with
   | From_file { sections; channel } -> read_section sections channel index
-  | In_memory sections -> sections.(index)
+  | In_memory sections -> (
+    match !(sections.(index)) with
+    | Loaded contents -> contents
+    | Serialized data -> load_serialized sections.(index) data
+    | Pending _ -> assert false)
 
 let get t index =
   let len = length t in
@@ -95,14 +105,16 @@ let unsafe_blit_to_array t dest start_index =
       dest.(start_index + i) <- read_section sections channel i
     done
   | In_memory sections ->
-    Array.blit sections 0 dest start_index (Array.length sections)
+    for i = 0 to Array.length sections - 1 do
+      dest.(start_index + i) <- unsafe_get t i
+    done
 
 let to_array t =
   let dest = Array.make (length t) (Obj.repr 0) in
   unsafe_blit_to_array t dest 0;
   dest
 
-let from_array t = In_memory (Array.copy t)
+let from_array t = In_memory (Array.map (fun data -> ref (Loaded data)) t)
 
 let compute_toc serialized_sections =
   let toc = Array.make (Array.length serialized_sections) 0 in
@@ -113,16 +125,24 @@ let compute_toc serialized_sections =
   done;
   toc, !length
 
+let serialize_section section =
+  match !section with
+  | Loaded data -> Marshal.to_string data []
+  | Serialized data -> data
+  | Pending _ -> assert false
+
 let serialize t =
-  let sections = to_array t in
   let serialized_sections =
-    Array.map (fun section -> Marshal.to_string section []) sections
+    match t with
+    | In_memory sections -> Array.map serialize_section sections
+    | From_file _ ->
+      Array.map (fun section -> Marshal.to_string section []) (to_array t)
   in
   let toc, total_length = compute_toc serialized_sections in
   serialized_sections, toc, total_length
 
 module Builder = struct
-  type t = Obj.t Dynarray.t
+  type t = section ref Dynarray.t
 
   let create capacity =
     let sections = Dynarray.create () in
@@ -131,8 +151,13 @@ module Builder = struct
 
   let add t section =
     let idx = Dynarray.length t in
-    Dynarray.add_last t section;
+    Dynarray.add_last t (ref (Loaded section));
     idx
+
+  let serialize t =
+    Dynarray.iter
+      (fun section -> section := Serialized (serialize_section section))
+      t
 
   let build t = In_memory (Dynarray.to_array t)
 

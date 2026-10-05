@@ -606,15 +606,16 @@ let is_cfi_enabled () = Config.asm_cfi_supported
 
 (* Emit debug information *)
 
-(* This assoc list is expected to be very short *)
-let file_pos_nums = (ref [] : (string * int) list ref)
+module File_number_map = Misc.Stdlib.String.Map
+
+let file_pos_nums = ref File_number_map.empty
 
 (* Number of files *)
 let file_pos_num_cnt = ref 1
 
 (* Reset debug state at beginning of asm file *)
 let reset_debug_info () =
-  file_pos_nums := [];
+  file_pos_nums := File_number_map.empty;
   file_pos_num_cnt := 1
 
 let with_snapshot ~f =
@@ -632,12 +633,12 @@ let with_snapshot ~f =
   result
 
 let get_file_num ~file_emitter file_name =
-  try List.assoc file_name !file_pos_nums
+  try File_number_map.find file_name !file_pos_nums
   with Not_found ->
     let file_num = !file_pos_num_cnt in
     incr file_pos_num_cnt;
     file_emitter ~file_num ~file_name;
-    file_pos_nums := (file_name, file_num) :: !file_pos_nums;
+    file_pos_nums := File_number_map.add file_name file_num !file_pos_nums;
     file_num
 
 (* Some assemblers always build DWARF-5 line tables. The line table header
@@ -657,7 +658,7 @@ let register_primary_file ~file_emitter ~sourcefile =
   if Config.asm_file0_supported
   then (
     file_emitter ~file_num:0 ~file_name:sourcefile;
-    file_pos_nums := (sourcefile, 0) :: !file_pos_nums)
+    file_pos_nums := File_number_map.add sourcefile 0 !file_pos_nums)
 
 (* We only display .file if the file has not been seen before. We display .loc
    for every instruction. *)

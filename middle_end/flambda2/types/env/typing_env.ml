@@ -404,11 +404,42 @@ let check_optional_kind_matches name ty kind_opt =
         "Kind %a of type@ %a@ for %a@ doesn't match expected kind %a" K.print
         ty_kind TG.print ty Name.print name K.print kind
 
+module Raw_name_binding_cache = struct
+  type binding = Type_grammar.t * Binding_time.With_name_mode.t
+
+  type t =
+    { mutable map : binding Name.Map.t;
+      mutable name : Name.t Or_null.t;
+      mutable result : binding Or_null.t
+    }
+
+  let cache =
+    { map = Name.Map.empty; name = Or_null.null; result = Or_null.null }
+
+  let reset () =
+    cache.map <- Name.Map.empty;
+    cache.name <- Or_null.null;
+    cache.result <- Or_null.null
+
+  let find name map =
+    match cache.name with
+    | This cached_name when map == cache.map && Name.equal cached_name name ->
+      cache.result
+    | Null | This _ ->
+      let result = Name.Map.find_or_null name map in
+      cache.map <- map;
+      cache.name <- Or_null.this name;
+      cache.result <- result;
+      result
+end
+
+let reset_lookup_cache = Raw_name_binding_cache.reset
+
 (* CR-someday mshinwell: [kind] could also take a [subkind] *)
 let find_with_binding_time_and_mode' t name kind =
   (* Note that [Pre_serializable] (below) assumes this function only looks up
      types of names in the cache for the current level. *)
-  match Name.Map.find_or_null name (names_to_types t) with
+  match Raw_name_binding_cache.find name (names_to_types t) with
   | Null -> (
     let comp_unit = Name.compilation_unit name in
     if Compilation_unit.equal comp_unit (Current_unit.get_cu_exn ())
@@ -526,7 +557,7 @@ let mem ?min_name_mode t name =
   Name.pattern_match name
     ~var:(fun _var ->
       let name_mode =
-        match Name.Map.find_or_null name (names_to_types t) with
+        match Raw_name_binding_cache.find name (names_to_types t) with
         | Null ->
           if Current_unit.is_current (Name.compilation_unit name)
           then None
@@ -815,10 +846,15 @@ let replace_equation (t : t) name ty =
         in
         just_after_level)
   in
-  let current_level =
-    One_level.create (current_scope t) level ~just_after_level
-  in
-  with_current_level t ~current_level
+  if
+    level == One_level.level t.current_level
+    && just_after_level == One_level.just_after_level t.current_level
+  then t
+  else
+    let current_level =
+      One_level.create (current_scope t) level ~just_after_level
+    in
+    with_current_level t ~current_level
 
 let rec type_from_closure_conversion_approx ~machine_width
     (approx : _ Value_approximation.t) =

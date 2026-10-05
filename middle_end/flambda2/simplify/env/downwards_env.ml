@@ -48,6 +48,11 @@ module Disable_inlining = struct
     | Do_not_disable_inlining -> Format.fprintf ppf "Do_not_disable_inlining"
 end
 
+type local_code =
+  { by_id : Code.t Code_id.Map.t;
+    mutable last : Code.t Flambda2_algorithms.Or_null.t
+  }
+
 type t =
   { round : int;
     machine_width : Target_system.Machine_width.t;
@@ -69,7 +74,7 @@ type t =
     are_rebuilding_terms : Are_rebuilding_terms.t;
     closure_info : Closure_info.t;
     get_imported_code : unit -> Exported_code.t;
-    all_code : Code.t Code_id.Map.t;
+    all_code : local_code;
     inlining_history_tracker : Inlining_history.Tracker.t;
     loopify_state : Loopify_state.t;
     replay_history : Replay_history.t;
@@ -169,7 +174,7 @@ let [@ocamlformat "disable"] print ppf { round; machine_width; typing_env;
     (Variable.Map.print Comparison_result.print) comparison_results
     Are_rebuilding_terms.print are_rebuilding_terms
     Closure_info.print closure_info
-    (Code_id.Map.print Code.print) all_code
+    (Code_id.Map.print Code.print) all_code.by_id
     Loopify_state.print loopify_state
     Replay_history.print replay_history
     Specialization_cost.print specialization_cost
@@ -252,7 +257,7 @@ let create ~round ~machine_width ~(resolver : resolver)
     comparison_results = Variable.Map.empty;
     are_rebuilding_terms = Are_rebuilding_terms.are_rebuilding;
     closure_info = Closure_info.not_in_a_closure;
-    all_code = Code_id.Map.empty;
+    all_code = { by_id = Code_id.Map.empty; last = Null };
     get_imported_code;
     inlining_history_tracker =
       Inlining_history.Tracker.empty (Current_unit.get_cu_exn ());
@@ -266,7 +271,7 @@ let create ~round ~machine_width ~(resolver : resolver)
     join_analysis = None
   }
 
-let all_code t = t.all_code
+let all_code t = t.all_code.by_id
 
 let machine_width t = t.machine_width
 
@@ -544,12 +549,21 @@ let check_simple_is_bound t (simple : Simple.t) =
     ~const:(fun _ -> ())
 
 let mem_code t id =
-  Code_id.Map.mem id t.all_code || Exported_code.mem id (t.get_imported_code ())
+  Code_id.Map.mem id t.all_code.by_id
+  || Exported_code.mem id (t.get_imported_code ())
+
+let find_local_code all_code id : Code.t Flambda2_algorithms.Or_null.t =
+  match all_code.last with
+  | This code when Code_id.equal id (Code.code_id code) -> This code
+  | Null | This _ ->
+    let result = Code_id.Map.find_or_null id all_code.by_id in
+    (match result with Null -> () | This _ -> all_code.last <- result);
+    result
 
 let find_code_metadata_exn t id =
-  match Code_id.Map.find id t.all_code with
-  | code -> Code.code_metadata code
-  | exception Not_found -> (
+  match find_local_code t.all_code id with
+  | This code -> Code.code_metadata code
+  | Null -> (
     (* We don't care which unit the metadata is coming from, so if we have
        already loaded the metadata in imported code, return it. *)
     match Exported_code.find_exn (t.get_imported_code ()) id with
@@ -564,7 +578,7 @@ let find_code_metadata_exn t id =
         (Exported_code.find_exn (t.get_imported_code ()) id))
 
 let find_code_exn t id =
-  match Code_id.Map.find_or_null id t.all_code with
+  match find_local_code t.all_code id with
   | This code -> Code_or_metadata.create code
   | Null ->
     (* We might have already loaded the metadata, from another unit that
@@ -589,7 +603,9 @@ let define_code t ~code_id ~code =
     TE.add_to_code_age_relation t.typing_env ~new_code_id:code_id
       ~old_code_id:(Code.newer_version_of code)
   in
-  let all_code = Code_id.Map.add code_id code t.all_code in
+  let all_code =
+    { by_id = Code_id.Map.add code_id code t.all_code.by_id; last = This code }
+  in
   { t with typing_env; all_code }
 
 let cse t = t.cse

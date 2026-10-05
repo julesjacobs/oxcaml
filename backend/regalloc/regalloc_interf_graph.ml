@@ -20,7 +20,11 @@ module Edge = struct
     Reg.Stamp.equal (fst left) (fst right)
     && Reg.Stamp.equal (snd left) (snd right)
 
-  let hash ((x, y) : t) = (Reg.Stamp.hash x lsl 17) lxor Reg.Stamp.hash y
+  let hash ((x, y) : t) =
+    let r = (Reg.Stamp.to_int x * 0x1e35a7bd) + Reg.Stamp.to_int y in
+    let mixed = r lxor (r lsr 31) in
+    let h = mixed * 0x27d4eb2f in
+    h lxor (h lsr 29)
 end
 
 module EdgeTbl = Hashtbl.Make (Edge)
@@ -166,10 +170,14 @@ type edge_set =
   | EdgeSet of EdgeSet.t
   | BitMatrix of BitMatrix.t
 
+type node =
+  { mutable adjacent : Reg.t list;
+    mutable degree : int
+  }
+
 type t =
   { mutable adj_set : edge_set;
-    adj_list : Reg.t list Reg.Tbl.t;
-    degree : int Reg.Tbl.t
+    nodes : node Regalloc_reg_table.t
   }
 
 let[@inline] make () =
@@ -179,10 +187,7 @@ let[@inline] make () =
     then BitMatrix (BitMatrix.make ~num_registers)
     else EdgeSet (EdgeSet.make ~num_registers)
   in
-  { adj_set;
-    adj_list = Reg.Tbl.create num_registers;
-    degree = Reg.Tbl.create num_registers
-  }
+  { adj_set; nodes = Regalloc_reg_table.create num_registers }
 
 let[@inline] clear graph =
   let num_registers = Reg.For_testing.get_stamp () in
@@ -192,8 +197,7 @@ let[@inline] clear graph =
     if BitMatrix.capacity matrix < num_registers
     then graph.adj_set <- BitMatrix (BitMatrix.make ~num_registers)
     else BitMatrix.clear matrix);
-  Reg.Tbl.clear graph.adj_list;
-  Reg.Tbl.clear graph.degree
+  Regalloc_reg_table.clear graph.nodes
 
 let[@inline] add_edge graph u v =
   let is_interesting_reg reg =
@@ -202,39 +206,30 @@ let[@inline] add_edge graph u v =
     | Unknown -> true
     | Stack (Local _ | Incoming _ | Outgoing _ | Domainstate _) -> false
   in
-  let edge = Edge.make u.Reg.stamp v.Reg.stamp in
-  let[@inline] mem_edge () =
-    match graph.adj_set with
-    | EdgeSet set -> EdgeSet.mem set edge
-    | BitMatrix matrix -> BitMatrix.mem matrix edge
-  in
   if
     (not (Reg.same u v))
     && is_interesting_reg u && is_interesting_reg v && same_reg_class u v
-    && not (mem_edge ())
-  then (
-    (match graph.adj_set with
-    | EdgeSet set -> EdgeSet.add set edge
-    | BitMatrix matrix -> BitMatrix.add matrix edge);
-    let add_adj_list x y =
-      Reg.Tbl.replace graph.adj_list x (y :: Reg.Tbl.find graph.adj_list x)
+  then
+    let edge = Edge.make u.Reg.stamp v.Reg.stamp in
+    let[@inline] mem_edge () =
+      match graph.adj_set with
+      | EdgeSet set -> EdgeSet.mem set edge
+      | BitMatrix matrix -> BitMatrix.mem matrix edge
     in
-    let incr_degree x =
-      let deg = Reg.Tbl.find graph.degree x in
-      if debug && deg = Degree.infinite
-      then fatal "trying to increment the degree of a precolored node";
-      Reg.Tbl.replace graph.degree x (succ deg)
-    in
-    let deg_u = Reg.Tbl.find graph.degree u in
-    let deg_v = Reg.Tbl.find graph.degree v in
-    if deg_u <> Degree.infinite
+    if not (mem_edge ())
     then (
-      add_adj_list u v;
-      incr_degree u);
-    if deg_v <> Degree.infinite
-    then (
-      add_adj_list v u;
-      incr_degree v))
+      (match graph.adj_set with
+      | EdgeSet set -> EdgeSet.add set edge
+      | BitMatrix matrix -> BitMatrix.add matrix edge);
+      let add_adjacent x y =
+        let node = Regalloc_reg_table.find graph.nodes x in
+        if node.degree <> Degree.infinite
+        then (
+          node.adjacent <- y :: node.adjacent;
+          node.degree <- succ node.degree)
+      in
+      add_adjacent u v;
+      add_adjacent v u)
 
 let[@inline] mem_edge graph reg1 reg2 =
   let edge = Edge.make reg1.Reg.stamp reg2.Reg.stamp in
@@ -242,7 +237,8 @@ let[@inline] mem_edge graph reg1 reg2 =
   | EdgeSet set -> EdgeSet.mem set edge
   | BitMatrix matrix -> BitMatrix.mem matrix edge
 
-let[@inline] adj_list graph reg = Reg.Tbl.find graph.adj_list reg
+let[@inline] adj_list graph reg =
+  (Regalloc_reg_table.find graph.nodes reg).adjacent
 
 let[@inline] iter_adjacent graph reg ~f = List.iter (adj_list graph reg) ~f
 
@@ -256,34 +252,37 @@ let[@inline] for_all_adjacent_if graph reg ~should_visit ~f =
   List.for_all (adj_list graph reg) ~f:(fun r ->
       if should_visit r then f r else true)
 
-let[@inline] degree graph reg =
-  match Reg.Tbl.find_opt graph.degree reg with
-  | None -> fatal "%a is not in the degree map" Printreg.reg reg
-  | Some x -> x
+let[@inline] find_node graph reg =
+  match Regalloc_reg_table.find graph.nodes reg with
+  | exception Not_found -> fatal "%a is not in the degree map" Printreg.reg reg
+  | node -> node
 
-let[@inline] set_degree graph reg d = Reg.Tbl.replace graph.degree reg d
+let[@inline] degree graph reg = (find_node graph reg).degree
+
+let[@inline] set_degree graph reg d = (find_node graph reg).degree <- d
 
 let[@inline] incr_degree graph reg =
-  let deg = degree graph reg in
-  Reg.Tbl.replace graph.degree reg (succ deg)
+  let node = find_node graph reg in
+  node.degree <- succ node.degree
 
 let[@inline] decr_degree graph reg =
-  let deg = degree graph reg in
-  if deg <> Degree.infinite then Reg.Tbl.replace graph.degree reg (pred deg)
+  let node = find_node graph reg in
+  let degree = node.degree in
+  if degree <> Degree.infinite then node.degree <- pred degree;
+  degree
 
 let[@inline] get_max_degree graph =
-  Reg.Tbl.fold
-    (fun _reg degree acc ->
-      if degree = Degree.infinite then acc else Int.max acc degree)
-    graph.degree 0
+  Regalloc_reg_table.fold
+    (fun _reg node acc ->
+      if node.degree = Degree.infinite then acc else Int.max acc node.degree)
+    graph.nodes 0
 
 let[@inline] init_register graph reg =
-  Reg.Tbl.replace graph.adj_list reg [];
-  Reg.Tbl.replace graph.degree reg 0
+  Regalloc_reg_table.replace graph.nodes reg { adjacent = []; degree = 0 }
 
 let[@inline] init_register_with_infinite_degree graph reg =
-  Reg.Tbl.replace graph.adj_list reg [];
-  Reg.Tbl.replace graph.degree reg Degree.infinite
+  Regalloc_reg_table.replace graph.nodes reg
+    { adjacent = []; degree = Degree.infinite }
 
 module For_debug = struct
   let cardinal_edges graph =

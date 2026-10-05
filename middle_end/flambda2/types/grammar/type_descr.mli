@@ -46,6 +46,8 @@ val is_obviously_unknown : _ t -> bool
 
 val get_alias_exn : 'head t -> Simple.t
 
+val get_alias_opt : 'head t -> Simple.t option
+
 val apply_coercion :
   apply_coercion_head:('head -> Coercion.t -> 'head Or_bottom.t) ->
   Coercion.t ->

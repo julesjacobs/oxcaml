@@ -76,7 +76,7 @@ module Data = struct
       Sort.print sort
 
   let hash { compilation_unit; name = _; name_stamp; sort = _ } =
-    Hashtbl.hash (Compilation_unit.hash compilation_unit, name_stamp)
+    Hashtbl.seeded_hash (Compilation_unit.hash compilation_unit) name_stamp
 
   let equal t1 t2 =
     if t1 == t2
