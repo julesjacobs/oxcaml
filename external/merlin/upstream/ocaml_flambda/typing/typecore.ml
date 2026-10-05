@@ -2005,18 +2005,55 @@ let sort_pattern_variables vs =
       Stdlib.compare (Ident.name x) (Ident.name y))
     vs
 
+let is_dependent_record_alias id =
+  String.starts_with ~prefix:"_*record" (Ident.name id)
+
 let enter_orpat_variables loc env  p1_vs p2_vs =
   (* unify_vars operate on sorted lists *)
 
+  let aliases vs = List.filter (fun pv ->
+    is_dependent_record_alias pv.pv_id) vs in
+  let dependencies aliases ty = List.filter (fun pv ->
+    Ctype.refinement_ident_occurs pv.pv_id ty) aliases in
+  let left_aliases = aliases p1_vs and right_aliases = aliases p2_vs in
+  let alias_pairs = List.fold_left (fun pairs right ->
+    if is_dependent_record_alias right.pv_id then pairs else
+    match List.find_opt (fun left ->
+        Ident.equal left.pv_id right.pv_id) p1_vs with
+    | None -> pairs
+    | Some left ->
+        match dependencies left_aliases left.pv_type,
+              dependencies right_aliases right.pv_type with
+        | [left], [right] ->
+            if List.exists (fun (source, target) ->
+                (Ident.same source right.pv_id <>
+                 Ident.same target left.pv_id)) pairs then
+              Location.raise_errorf ~loc
+                "These alternatives bind dependent fields from \
+                 incompatible records";
+            (right.pv_id, left.pv_id) :: pairs
+        | _ -> pairs) [] p2_vs in
+  let aligned_id id = match List.assoc_opt id alias_pairs with
+    | Some id -> id | None -> id in
   let p1_vs = sort_pattern_variables p1_vs
-  and p2_vs = sort_pattern_variables p2_vs in
+  and p2_vs = List.sort (fun left right ->
+    String.compare (Ident.name (aligned_id left.pv_id))
+      (Ident.name (aligned_id right.pv_id))) p2_vs in
+  let subst = List.fold_left (fun subst right ->
+    match List.find_opt (fun left ->
+      Ident.equal left.pv_id (aligned_id right.pv_id)) p1_vs with
+    | None -> subst
+    | Some left -> Subst.add_value right.pv_id (Path.Pident left.pv_id) subst)
+    Subst.identity p2_vs in
+  let p2_vs = List.map (fun pv ->
+    { pv with pv_type = Subst.type_expr subst pv.pv_type }) p2_vs in
 
   let rec unify_vars p1_vs p2_vs =
     let vars vs = List.map (fun {pv_id; _} -> pv_id) vs in
     match p1_vs, p2_vs with
       | ({pv_id = x1; pv_type = t1; pv_mode = m1; _} as pv1)::rem1,
         {pv_id = x2; pv_type = t2; pv_mode = m2; _}::rem2
-        when Ident.equal x1 x2 ->
+        when Ident.equal x1 (aligned_id x2) ->
           if x1==x2 then
             let vars, alist = unify_vars rem1 rem2 in
             pv1 :: vars, alist
@@ -2103,7 +2140,9 @@ and build_as_type_aux (env : Env.t) p ~mode =
     ty, mode
   in
   match p.pat_desc with
-    Tpat_alias { pattern = p1; _ } ->
+  | Tpat_alias { id; _ } when is_dependent_record_alias id ->
+      p.pat_type, mode
+  | Tpat_alias { pattern = p1; _ } ->
      build_as_type_and_mode env p1 ~mode
   | Tpat_tuple pl ->
       let labeled_tyl =
@@ -2558,6 +2597,54 @@ let solve_Ppat_construct tps (penv : Pattern_env.t) loc constr no_existentials
     with Warn_only_once -> ()
   end;
   (ty_args, existential_ctyp)
+
+let is_unboxed_record : type rep. rep record_form -> bool = function
+  | Legacy -> false
+  | Unboxed_product -> true
+
+let label_has_dependencies label ty =
+  Array.exists (fun previous ->
+    Ctype.refinement_ident_occurs previous.lbl_id ty) label.lbl_all
+
+let record_field_projections env ~unboxed record label =
+  let types, result = instance_labels ~fixed:false label.lbl_all in
+  unify_exp_types record.rexp_loc env result record.rexp_type;
+  let owner = match get_desc (expand_head env result) with
+    | Tconstr (path, _, _) -> path
+    | _ -> Misc.fatal_error "Typecore: record field without a record type"
+  in
+  Array.to_list (Array.map (fun field ->
+    let _, field_type = types.(field.lbl_pos) in
+    field.lbl_id,
+    { rexp_desc =
+        (if unboxed then Rexp_unboxed_field (record, owner, field.lbl_name)
+         else Rexp_field (record, owner, field.lbl_name));
+      rexp_type = field_type; rexp_type_constraint = false;
+      rexp_loc = record.rexp_loc }) label.lbl_all)
+
+let specialize_record_field env ~unboxed record label ty =
+  List.fold_left (fun ty (id, projection) ->
+    if Ctype.refinement_ident_occurs id ty then
+      Ctype.substitute_refinement_expression id projection ty
+    else ty) ty (record_field_projections env ~unboxed record label)
+
+let refinement_argument_scope = ref None
+
+let name_record_expression record =
+  let desc, record = match record.exp_desc with
+    | Texp_ident {path; _} -> Rexp_ident path, record
+    | _ ->
+        let id = Ident.create_local "*record*" in
+        Ctype.register_refinement_value_scope
+          ~level:(Option.value !refinement_argument_scope
+            ~default:(get_current_level ())) [id];
+        Rexp_ident (Path.Pident id),
+        {record with exp_extra =
+          (Texp_value_name id, record.exp_loc, []) :: record.exp_extra}
+  in
+  record,
+  { rexp_desc = desc; rexp_type = record.exp_type;
+    rexp_type_constraint = false; rexp_loc = record.exp_loc }
 
 let solve_Ppat_record_field loc penv label label_lid record_ty
       record_form =
@@ -4098,11 +4185,45 @@ and type_pat_aux
           let error = Wrong_expected_kind(wks, Pattern, expected_ty) in
           raise (Error (loc, !!penv, error))
       in
+      let record_name = Location.mkloc
+          (Printf.sprintf "_*record%d*" (List.length tps.tps_pattern_variables))
+          (Location.ghostify loc) in
+      let record_alias = lazy (
+        enter_variable ~is_as_variable:true tps loc record_name alloc_mode.mode
+          record_ty ~kind:(Val_reg record_sort) [] record_sort) in
+      let has_dependencies = ref false in
+      let binds_variable syntax =
+        let found = ref false in
+        let iterator = { Ast_iterator.default_iterator with
+          pat = (fun self p ->
+            (match p.ppat_desc with
+             | Ppat_var _ | Ppat_alias _ -> found := true
+             | _ -> ());
+            Ast_iterator.default_iterator.pat self p) }
+        in
+        iterator.pat iterator syntax;
+        !found
+      in
       let type_label_pat rep (label_lid, (label : rep gen_label_description),
                               sarg) =
         let ty_arg =
           solve_Ppat_record_field loc penv label label_lid
             record_ty record_form in
+        let ty_arg =
+          if not (label_has_dependencies label ty_arg && binds_variable sarg)
+          then ty_arg else begin
+            has_dependencies := true;
+            let record_id, _ = Lazy.force record_alias in
+            Ctype.register_refinement_value_scope
+              ~level:Ident.lowest_scope [record_id];
+            let record =
+              { rexp_desc = Rexp_ident (Path.Pident record_id);
+                rexp_type = record_ty; rexp_type_constraint = false;
+                rexp_loc = loc } in
+            specialize_record_field !!penv
+              ~unboxed:(is_unboxed_record record_form) record label ty_arg
+          end
+        in
         check_project_mutability ~loc ~env:!!penv
           (Record_field label.lbl_name)
           label.lbl_mut alloc_mode.mode;
@@ -4170,8 +4291,21 @@ and type_pat_aux
           ~why:Field_projection
           ~containing_type:(instance record_ty)
       in
+      if List.exists (fun (_, label, syntax) ->
+          label_has_dependencies label label.lbl_arg && binds_variable syntax)
+          lbl_a_list then
+        ignore (Lazy.force record_alias);
       let lbl_a_list = List.map (type_label_pat rep) lbl_a_list in
       let pattern = solve_expected (make_record_pat rep lbl_a_list ambiguity) in
+      let pattern = if not !has_dependencies then pattern else
+        let record_id, uid = Lazy.force record_alias in
+        { pattern with pat_desc = Tpat_alias
+            { pattern; id = record_id; name = record_name; uid;
+              sort = record_sort; mode = alloc_mode.mode;
+              type_expr = pattern.pat_type };
+          pat_extra = [];
+          pat_unique_barrier = Unique_barrier.not_computed () }
+      in
       defer_partial_if_not_total_pattern_type
         tps ~loc ~env:!!penv pattern.pat_type;
       rvp pattern
@@ -4659,6 +4793,29 @@ and type_pat_aux
           }
         ~dst:tps;
       let p2 = alpha_pat alpha_env p2 in
+      let subst = List.fold_left (fun subst (source, target) ->
+        Subst.add_value source (Path.Pident target) subst)
+        Subst.identity alpha_env in
+      let rename_type = Subst.type_expr subst in
+      let default = Tast_mapper.default in
+      let mapper = { default with
+        pat = (fun (type k) self (p : k general_pattern) ->
+          let p = default.pat self p in
+          let pat_desc : k pattern_desc = match p.pat_desc with
+            | Tpat_alias alias -> Tpat_alias
+                { alias with type_expr = rename_type alias.type_expr }
+            | desc -> desc in
+          let pat_extra = List.map (fun (extra, loc, attrs) ->
+            let extra = match extra with
+              | Tpat_refinement ty -> Tpat_refinement (rename_type ty)
+              | extra -> extra in
+            extra, loc, attrs) p.pat_extra in
+          { p with pat_desc; pat_extra; pat_type = rename_type p.pat_type });
+        typ = (fun self ty ->
+          let ty = default.typ self ty in
+          { ty with ctyp_type = rename_type ty.ctyp_type }) }
+      in
+      let p2 = mapper.pat mapper p2 in
       Tpat_or (p1, p2, None), [p1.pat_type; p2.pat_type]
       end
       in
@@ -5392,8 +5549,6 @@ let stable_dependent_argument :
       refinement_expression option) ref =
   ref (fun _ _ _ ->
     Misc.fatal_error "Typecore: dependent argument typer not installed")
-
-let refinement_argument_scope = ref None
 
 let with_refinement_argument_scope level f =
   Misc.protect_refs [Misc.R (refinement_argument_scope, Some level)] f
@@ -8210,7 +8365,42 @@ and type_expect_
         else
           None, expected_mode
       in
-      let type_label_exp overwrite ((_, label, _) as x) =
+      let substitutions = ref [] in
+      let _, representative, _ = List.hd lbl_a_list in
+      let has_dependencies = Array.exists
+          (fun label -> label_has_dependencies label label.lbl_arg)
+          representative.lbl_all in
+      let unboxed = is_unboxed_record record_form in
+      let overridden id = List.exists
+          (fun (_, label, _) -> Ident.same id label.lbl_id) lbl_a_list in
+      let opt_exp = match opt_exp with
+        | Some (exp, mode) when has_dependencies ->
+            let exp, model = name_record_expression exp in
+            Array.iter (fun kept ->
+              if not (overridden kept.lbl_id) &&
+                 List.exists (fun (_, changed, _) ->
+                   Ctype.refinement_ident_occurs changed.lbl_id kept.lbl_arg)
+                   lbl_a_list then
+                Location.raise_errorf ~loc
+                  "Updating this record also requires replacing the \
+                   dependent field %s" kept.lbl_name) representative.lbl_all;
+            substitutions := List.filter
+                (fun (id, _) -> not (overridden id))
+                (record_field_projections env ~unboxed model representative);
+            Some (exp, mode)
+        | _ -> opt_exp
+      in
+      (match overwrite with
+       | Overwriting _ when has_dependencies ->
+           Location.raise_errorf ~loc
+             "Overwriting a dependent record is not supported"
+       | _ -> ());
+      let type_label_exp overwrite (lid, label, syntax) =
+        let original = label in
+        let label = { label with lbl_arg =
+          List.fold_left (fun ty (id, value) ->
+            Ctype.substitute_refinement_expression id value ty)
+            label.lbl_arg !substitutions } in
         check_construct_mutability ~loc ~env label.lbl_mut ~ty:label.lbl_arg
           ~modalities:label.lbl_modalities record_mode;
         let is_contained_by : Mode.Hint.is_contained_by =
@@ -8225,7 +8415,24 @@ and type_expect_
           if label.lbl_ghost then mode_ghost_field_write argument_mode
           else argument_mode
         in
-        type_label_exp ~overwrite true env argument_mode loc ty_record x record_form
+        let lid, _, value = type_label_exp ~overwrite true env argument_mode
+            loc ty_record (lid, label, syntax) record_form in
+        let depended_on = Array.exists (fun later ->
+          Ctype.refinement_ident_occurs original.lbl_id later.lbl_arg)
+          original.lbl_all in
+        let value = if not depended_on then value else
+          let id = Ident.create_local ("*" ^ original.lbl_name ^ "*") in
+          Ctype.register_refinement_value_scope
+            ~level:(get_current_level ()) [id];
+          let model =
+            { rexp_desc = Rexp_ident (Path.Pident id);
+              rexp_type = value.exp_type; rexp_type_constraint = false;
+              rexp_loc = value.exp_loc } in
+          substitutions := (original.lbl_id, model) :: !substitutions;
+          {value with exp_extra =
+            (Texp_value_name id, value.exp_loc, []) :: value.exp_extra}
+        in
+        lid, original, value
       in
       let overwrites =
         assign_label_children (List.length lbl_a_list)
@@ -12061,6 +12268,12 @@ and solve_Pexp_field
       in
       ty_arg, record_repres
     end
+  in
+  let record, ty_arg =
+    if not (label_has_dependencies label ty_arg) then record, ty_arg else
+    let record, model = name_record_expression record in
+    let unboxed = is_unboxed_record record_form in
+    record, specialize_record_field env ~unboxed model label ty_arg
   in
   (record, record_sort, rmode, label, ambiguity, ty_arg, record_repres)
 
@@ -16777,9 +16990,11 @@ let default_refinement_predicate_types payload predicate =
        (fun () ty -> default ty) () predicate
      : unit)
 
-let add_total_immutable_value env binder payload loc =
+let add_total_immutable_value ?uid ?sort env binder payload loc =
   let sort =
-    match
+    match sort with
+    | Some sort -> sort
+    | None -> match
       Ctype.type_sort ~why:Jkind.History.Let_binding ~fixed:false env payload
     with
     | Ok sort -> sort
@@ -16794,7 +17009,8 @@ let add_total_immutable_value env binder payload loc =
       val_zero_alloc = Zero_alloc.default;
       val_modalities = Modality.undefined;
       val_loc = loc;
-      val_uid = Uid.mk ~current_unit:(Env.get_current_unit ())
+      val_uid = (match uid with Some uid -> uid
+        | None -> Uid.mk ~current_unit:(Env.get_current_unit ()))
     }
   in
   Env.add_value ~mode:(total_immutable_mode ()) binder value_description env
@@ -17282,8 +17498,8 @@ let () =
        { return with exp_desc = Texp_assume (binding, predicate, return);
                    exp_env = env; exp_loc = loc });
   Typetexp.add_dependent_binder :=
-    (fun env binder payload loc ->
-       add_total_immutable_value env binder payload loc);
+    (fun ?uid ?sort env binder payload loc ->
+       add_total_immutable_value ?uid ?sort env binder payload loc);
   Typetexp.type_refinement_predicate :=
     (fun env bound_values binder payload predicate ->
        let loc = predicate.pexp_loc in

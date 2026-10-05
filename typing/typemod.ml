@@ -1841,6 +1841,7 @@ end = struct
 
   type hide_reason =
     | From_open
+    | Anonymous_record
     | Shadowed_by of Ident.t * Location.t
 
   type to_be_removed = {
@@ -1931,6 +1932,11 @@ end = struct
             raise(Error(loc, Env.empty, Repeated_name(cl, name)))
 
   let check_value ?info t loc id =
+    if Typecore.is_dependent_record_alias id then
+      t.to_be_removed.hide <-
+        Ident.Map.add id (Sig_component_kind.Value, loc, Anonymous_record)
+          t.to_be_removed.hide
+    else
     let info =
       match info with
       | Some i -> i
@@ -2037,6 +2043,10 @@ end = struct
               in
               let err_loc, hiding_error =
                 match reason with
+                | Anonymous_record ->
+                    Location.raise_errorf ~loc:user_loc
+                      "This inferred type depends on an unnamed record. \
+                       Bind the record to a name and project its fields."
                 | From_open ->
                   removed_item_loc,
                   Appears_in_signature {

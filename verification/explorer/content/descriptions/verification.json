@@ -570,7 +570,10 @@
   },
   "verification/library/vox_diff.mli": {
     "what": {
-      "short": "A diff on integer sequences whose edit script is proved to transform the old input into the new one with minimal cost."
+      "short": "Generic diff, application, and inversion contracts stated through the pure model.",
+      "long": [
+        "`diff` takes equality and two input lists and returns a diff with the right source and target. Its erased `optimality` field proves that no diff with those endpoints costs less. `apply` succeeds exactly on the source; `invert` swaps source and target and preserves cost. The supplied comparison decides exact element equality. Inputs exceeding 1,000,000 elements raise `Invalid_argument`."
+      ]
     }
   },
   "verification/library/vox_egraph_rule_handle.mli": {

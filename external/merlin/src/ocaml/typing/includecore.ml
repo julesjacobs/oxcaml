@@ -1121,7 +1121,24 @@ module Record_diffing = struct
     in
     Compute.diff (params1,params2) cstrs_1 cstrs_2
 
+  let align_dependencies l r =
+    if not (List.exists (fun (field : Types.label_declaration) ->
+      List.exists (fun (binder : Types.label_declaration) ->
+        Ctype.refinement_ident_occurs binder.ld_id field.ld_type) r) r)
+    then r else
+    let subst = List.fold_left (fun subst (right : Types.label_declaration) ->
+      match List.find_opt
+          (fun (left : Types.label_declaration) ->
+            Ident.name left.ld_id = Ident.name right.ld_id) l with
+      | None -> subst
+      | Some (left : Types.label_declaration) ->
+          Subst.add_bound_value right.ld_id left.ld_id subst)
+      Subst.identity r in
+    List.map (fun (ld : Types.label_declaration) ->
+      { ld with ld_type = Subst.type_expr subst ld.ld_type }) r
+
   let compare ~loc env params1 params2 l r =
+    let r = align_dependencies l r in
     if equal ~loc env params1 params2 l r then
       None
     else
@@ -1155,6 +1172,7 @@ module Record_diffing = struct
   let compare_with_representation (type rep) ~loc
         (record_form : rep record_form) env params1 params2 l r
         (rep1 : rep) (rep2 : rep) =
+    let r = align_dependencies l r in
     if not (equal ~loc env params1 params2 l r) then
       let patch = diffing loc env params1 params2 l r in
       Some (Record_mismatch (Label_mismatch patch))

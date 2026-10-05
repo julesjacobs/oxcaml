@@ -328,10 +328,16 @@ let applied env declaration arguments ty =
   with Ctype.Cannot_apply -> None
 
 let immutable_record_fields env ty =
-  match source_type env ty with
+  let rec payload ty =
+    match get_desc (Ctype.expand_head env ty) with
+    | Trefine r -> payload r.ref_payload
+    | Tpoly (ty, []) -> payload ty
+    | _ -> ty
+  in
+  match source_type env (payload ty) with
   | Some (arguments, declaration) ->
     begin match declaration.type_kind with
-    | Type_record (labels, (Record_boxed | Record_mixed _), _)
+    | Type_record (labels, (Record_boxed | Record_mixed _ | Record_inlined _), _)
     | Type_record_unboxed_product (labels, _, _)
       when List.for_all (fun label -> label.ld_mutable = Immutable) labels ->
       Misc.Stdlib.List.map_option
@@ -495,7 +501,8 @@ and build_data ctx env stack key ty =
     | None -> None
     | Some (arguments, declaration) ->
       begin match declaration.type_kind with
-      | Type_record (labels, (Record_boxed | Record_mixed _), _)
+      | Type_record
+          (labels, (Record_boxed | Record_mixed _ | Record_inlined _), _)
       | Type_record_unboxed_product (labels, _, _)
         when Ctype.can_pattern_match_total env ty
              && List.for_all (fun label -> label.ld_mutable = Immutable) labels

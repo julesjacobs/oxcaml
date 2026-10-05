@@ -61,7 +61,8 @@ let cstr_res_type_path cstr =
   | _ -> assert false
 
 type 'a gen_label_description =
-  { lbl_name: string;                   (* Short name *)
+  { lbl_id: Ident.t;                    (* Binder for dependent fields *)
+    lbl_name: string;                   (* Short name *)
     lbl_res: type_expr;                 (* Type of the result *)
     lbl_arg: type_expr;                 (* Type of the argument *)
     lbl_mut: mutability;                (* Is this a mutable field? *)
@@ -84,13 +85,8 @@ type unboxed_label_description =
   record_unboxed_product_representation gen_label_description
 
 let label_declaration_of_label_description lbl =
-  let ld_id =
-    (* This has the wrong stamp but as far as I can tell the stamp is used for
-       absolutely nothing *)
-    Ident.create_local lbl.lbl_name
-  in
   {
-    ld_id;
+    ld_id = lbl.lbl_id;
     ld_mutable = lbl.lbl_mut;
     ld_modalities = lbl.lbl_modalities;
     ld_ghost = lbl.lbl_ghost;

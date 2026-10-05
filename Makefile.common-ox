@@ -299,6 +299,7 @@ install_for_test: install
 	mkdir _runtest/verification
 	cp $(ocamldir)/verification/vox_smt.{ml,mli} _runtest/verification/
 	cp -R $(ocamldir)/verification/library _runtest/verification/
+	cp -R $(ocamldir)/verification/demos _runtest/verification/
 	# Use rsync to ensure hardlinks are created on both Linux and macOS
 	rsync --link-dest=../../$(ocamldir)/testsuite/ -a $(ocamldir)/testsuite/ _runtest/testsuite/
 	 # replace backend-specific testsuite/tools with their new versions

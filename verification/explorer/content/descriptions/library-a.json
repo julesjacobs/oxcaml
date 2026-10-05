@@ -2949,90 +2949,43 @@
   },
   "verification/library/vox_diff.md": {
     "what": {
-      "short": "Reader's guide to the Myers diff demo: how to run it, the two-interface review surface, the public guarantees, the algorithm and proof outline, and resource limits.",
-      "long": [
-        "Documentation for [Myers diff](demo:myers-diff). It names `vox_diff_spec.mli` and `vox_diff.mli` as the complete review surface, explains the meaning of `Keep`, `Delete` and `Insert`, the 1,000,000-element limit and the tie policy, and outlines the private proof in [vox_diff.ml](src:verification/library/vox_diff.ml): the script lower bound, suffix cropping, frontier dominance, snake preserving remaining distance, and a ghost budget that decreases at each search step.",
-        "It also derives, informally, bounds on levels, snake calls and output length, and states that these are not a mechanized cost theorem, and it describes what the boundary, rejected and runtime tests check."
-      ]
+      "short": "Reader guide to the generic Myers diff model, contracts, implementation, and checks."
     }
   },
   "verification/library/vox_diff_spec.ml": {
     "what": {
-      "short": "Implementation of the edit-script equations; minimum_cost is a fuel-bounded distance, and minimum_cost_equation proves the fuel-free recurrence the interface states.",
+      "short": "Pure model: generic diffs and their source, target, and insertion/deletion cost.",
       "long": [
-        "Implements `source`, `target`, `cost`, `apply`, `invert`, `size` and `script_size` as `let[@def]` recursions, proves `apply_characterization` by induction, and defines `minimum_cost old fresh` as `distance` with fuel `size old + size fresh`. `minimum_cost_equation` proves that this satisfies the recurrence stated in [vox_diff_spec.mli](src:verification/library/vox_diff_spec.mli), which hides `distance` and the fuel.",
-        "Part of [Myers diff](demo:myers-diff); verified, with no externals or assumptions. The lemmas here are ordinary total functions that return `unit`, declared without `@ ghost`, so a caller that does not want them to run wraps the call in `ghost_`. `diff_rejected.ml` checks that clients cannot reach the private fuel."
+        "A diff is a list of `Keep`, `Delete`, and `Insert`. Direct recursive definitions describe its source, target, and cost. The dependent record `optimal_diff` pairs `edits` with an erased `optimality` proof comparing them against any diff with the same endpoints. The distance recurrence is private."
       ]
-    },
-    "notes": [
-      {
-        "title": "The distance with fuel",
-        "from": "let[@def] rec distance",
-        "to": "distance (Bigint.add (size old) (size fresh)) old fresh",
-        "lines": "71-86",
-        "kind": "what",
-        "text": "Fuel makes the recursion decrease a single `Bigint` measure; a match costs two units and an edit one, so `size old + size fresh` suffices. The interface never mentions fuel: it states only the recurrence proved below."
-      },
-      {
-        "title": "The recurrence, proved",
-        "from": "let (minimum_cost_equation @ total)",
-        "to": "minimum_cost_def old bts",
-        "lines": "88-110",
-        "kind": "what",
-        "text": "Unfolds `distance` once at full fuel and shows the recursive calls receive exactly the fuel `minimum_cost` would give the smaller inputs, so the fuel-free equation holds for all lists."
-      }
-    ]
-  },
-  "verification/library/vox_diff_spec.mli": {
-    "what": {
-      "short": "Edit scripts (Keep, Delete, Insert) and their meaning by equations: source, target, cost, apply, invert, size and the edit distance minimum_cost.",
-      "long": [
-        "Declares the `operation` and `script` types and, for each function, a checked equation: `source_def`, `target_def`, `cost_def`, `invert_def`, `size_def`, `script_size_def`, `apply_characterization` (application succeeds exactly when the old list is the script's source, and yields its target) and `minimum_cost_equation` (the insertion/deletion distance by its recurrence, where a substitution costs two). Each equation recurses on shorter lists, so it determines its function.",
-        "First of the two files a reviewer reads for [Myers diff](demo:myers-diff); the claims in `vox_diff.mli` are stated only in these terms. The equations are verified against [vox_diff_spec.ml](src:verification/library/vox_diff_spec.ml)."
-      ]
-    },
-    "notes": [
-      {
-        "title": "The edit distance",
-        "from": "(** Insertion/deletion distance",
-        "to": "then minimum_cost ats fresh else minimum_cost old bts))} @@ total",
-        "lines": "56-67",
-        "kind": "what",
-        "text": "Equal heads are kept at no cost; otherwise one plus the cheaper of deleting the old head or inserting the new one. This is the quantity `diff`'s result cost is proved equal to."
-      }
-    ]
+    }
   },
   "verification/library/vox_diff.ml": {
     "what": {
-      "short": "Myers' frontier search with erased proofs (snake, choose, advance, search, diff) and the lower bound that makes the computed script optimal against every script.",
+      "short": "Generic Myers frontier search and private proofs of application, inversion, and optimality.",
       "long": [
-        "The private `Proof` and `M` modules hold the script reasoning: `restore_old`, `restore_new` and `reverse_into` for rebuilding a script from its reversed prefix, the `suffix` lemmas, `invert_correct`, `inverse_patch`, and in `M` the distance facts `neighbors`, `strip`, `crop`, `properties` and `lower_bound` (`minimum_cost (source s) (target s) <= cost s` for every script). A search `entry` is `{x; old_tail; new_tail; rev}`; the ghost predicate `valid old fresh k depth e` ties it to diagonal `k` and edit depth `depth`, and `dominance` shows that, on one diagonal, the entry further along the old input has no larger remaining distance. `Entry_proof`, `Choice_proof` and `Frontier_proof` collect the preservation lemmas.",
-        "The running code is `snake` (consume equal heads as `Keep`), `step_delete`, `step_insert`, `choose` (keep the candidate further along the old input, insertion on ties, then snake), `advance` (the next frontier, one slot wider), `finished` (find an entry with both tails empty and rebuild its script with `reverse_into`), `search` and `diff`. `search` terminates by `[@@decreases budget]` on a ghost budget that starts at `minimum_cost old fresh`; its invariant says some slot's remaining distance is within the budget, so it returns a script of cost at most `depth + budget`, and `lower_bound` in `diff` turns this into equality. `optimal_at` is `apply_characterization` plus `lower_bound`.",
-        "Verified, with no externals, no `assume_` and no statement without proof; [vox_diff.mli](src:verification/library/vox_diff.mli) hides every helper module. Part of [Myers diff](demo:myers-diff). The module is absent from `build.sh` and is verified when the tests compile it from source. That `diff` runs no proof code is checked by the Lambda audit in `diff_boundary.ml`; the tie rule is checked only by tests in `diff.ml`."
+        "The frontier tracks remaining input lists and a reverse diff. Erased invariants connect this state to source, target, and cost. `snake` consumes equal heads using the supplied comparison; `search` decreases a ghost distance budget. `M.lower_bound` proves that no diff between the same lists costs less. The public interface hides all helper modules."
       ]
     },
     "notes": [
       {
-        "title": "The script lower bound",
+        "title": "The diff lower bound",
         "from": "let rec (lower_bound @ total)",
         "to": "| Insert b -> neighbors (source rest) (target rest) b b);",
-        "lines": "180-196",
         "kind": "what",
-        "text": "Every script costs at least the distance between its source and target, by induction on the script: `Keep` uses the recurrence directly, and `neighbors` shows a one-element change moves the distance by at most one. This is the whole optimality argument for `optimal_at`, independent of the search."
+        "text": "Every diff costs at least the private distance between its source and target, by induction on the diff. `Keep` uses the recurrence directly; `neighbors` shows a one-element change moves the distance by at most one. Combined with the search upper bound, this proves the public comparison against any competing diff."
       },
       {
         "title": "The entry invariant",
-        "from": "let[@def] valid (old : int list)",
+        "from": "let[@def] valid (old : 'a list)",
         "to": "&& cost e.rev = depth)",
-        "lines": "258-268",
         "kind": "what",
-        "text": "An entry's reversed script `rev` rebuilds `old` and `fresh` from its tails, the tails are suffixes, `x` counts consumed old elements and stays within the 1,000,000 cap, the length difference fixes the diagonal `k`, and `rev` costs exactly `depth`. The predicate is ghost; the runtime entry holds only `x`, the tails and `rev`."
+        "text": "An entry's reversed diff `rev` rebuilds `old` and `fresh` from its tails, the tails are suffixes, `x` counts consumed old elements and stays within the 1,000,000 cap, the length difference fixes the diagonal `k`, and `rev` costs exactly `depth`. The predicate is ghost; the runtime entry holds only `x`, the tails and `rev`."
       },
       {
         "title": "snake",
         "from": "let rec (snake @ total)",
         "to": "[@@decreases remaining]",
-        "lines": "397-420",
         "kind": "what",
         "text": "Follows a diagonal while heads are equal, adding `Keep`. The termination measure `remaining` is a ghost argument equal to the old tail's size, so no counter runs. The result is `settled` and has the same remaining distance, by the `a = b` case of the recurrence."
       },
@@ -3040,7 +2993,6 @@
         "title": "Choosing between deletion and insertion",
         "from": "let (choose @ total)",
         "span": 27,
-        "lines": "567-593",
         "kind": "what",
         "text": "Of the two candidates for a slot, the one with larger `x` is kept and insertion wins ties; `Choice_proof.selected` uses `dominance` to show a candidate within budget survives. The choice is then snaked, so every frontier slot is settled."
       },
@@ -3048,17 +3000,15 @@
         "title": "search and its ghost budget",
         "from": "let rec (search @ total)",
         "to": "[@@decreases budget]",
-        "lines": "749-785",
         "kind": "what",
-        "text": "Invariant: the frontier at depth `depth` is valid, has `depth + 1` slots, and some slot's remaining distance is at most `budget`. If no slot is finished, `frontier_budget` shows `budget > 0`, and `advance` keeps the invariant with `budget - 1` at `depth + 1`. The returned script costs at most `depth + budget`, which is `minimum_cost old fresh` from the initial call."
+        "text": "Invariant: the frontier at depth `depth` is valid, has `depth + 1` slots, and some slot's remaining distance is at most `budget`. If no slot is finished, `frontier_budget` shows `budget > 0`, and `advance` keeps the invariant with `budget - 1` at `depth + 1`. The returned diff costs at most `depth + budget`, which is `minimum_cost old fresh` from the initial call."
       },
       {
         "title": "diff",
-        "from": "let (diff @ total)",
-        "to": "let result : (script, error) result = Error Input_too_large",
-        "lines": "805-838",
+        "from": "let diff :",
+        "to": "  | _ -> raise (Invalid_argument",
         "kind": "what",
-        "text": "`bounded_length` checks both inputs against 1,000,000, stopping after at most 1,000,001 cells; the initial entry is snaked and `search` starts with the ghost budget `minimum_cost old fresh`. `M.lower_bound`, `apply_source` and `script_bounds` run in `ghost_` and give the exact cost, `apply old s === Some fresh`, and the length bound."
+        "text": "`bounded_length` checks both inputs against the cap. The initial frontier is snaked; `search` starts with the private ghost distance. `M.lower_bound edits` establishes the exact cost internally. The returned `optimality` field uses this fact and the competitor lower bound to prove the public cost comparison."
       }
     ]
   },

@@ -580,7 +580,7 @@ let transl_labels (type rep) ~(record_form : rep record_form) ~new_var_jkind
          raise(Error(loc, Duplicate_label name));
        all_labels := String.Set.add name !all_labels)
     lbls;
-  let mk {pld_name=name;pld_mutable=mut;pld_modalities=modalities;
+  let mk env {pld_name=name;pld_mutable=mut;pld_modalities=modalities;
           pld_type=arg;pld_loc=loc;pld_attributes=attrs} =
     Builtin_attributes.warning_scope attrs
       (fun () ->
@@ -591,7 +591,8 @@ let transl_labels (type rep) ~(record_form : rep record_form) ~new_var_jkind
             [Typemode.transl_modalities] to reject. *)
          let ghost, modalities =
            match kloc with
-           | Record { unboxed = false } | Record_unboxed_product ->
+           | Record { unboxed = false } | Inlined_record { unboxed = false }
+           | Record_unboxed_product ->
              let ghost, rest =
                List.partition
                  (fun {Location.txt = Parsetree.Modality m; _} ->
@@ -625,7 +626,7 @@ let transl_labels (type rep) ~(record_form : rep record_form) ~new_var_jkind
          check_no_repr arg;
          let arg = Ast_helper.Typ.force_poly arg in
          let cty = transl_simple_type ~new_var_jkind env ?univars ~closed Mode.Alloc.Const.legacy arg in
-         {ld_id = Ident.create_local name.txt;
+         {ld_id = Ident.create_scoped ~scope:Ident.lowest_scope name.txt;
           ld_name = name;
           ld_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
           ld_mutable = mut;
@@ -634,7 +635,55 @@ let transl_labels (type rep) ~(record_form : rep record_form) ~new_var_jkind
           ld_type = cty; ld_loc = loc; ld_attributes = attrs}
       )
   in
-  let lbls = List.map mk lbls in
+  let rec translate env = function
+    | [] -> []
+    | label :: rest ->
+        let label = Ctype.with_local_level_generalize_structure_if_principal
+            (fun () -> mk env label) in
+        let ty = label.ld_type.ctyp_type in
+        let ty = match get_desc ty with Tpoly (ty, []) -> ty | _ -> ty in
+        let rest =
+          Typetexp.with_dependent_binder env label.ld_id ~uid:label.ld_uid
+            ty label.ld_loc (fun env -> translate env rest)
+        in
+        label :: rest
+  in
+  let lbls =
+    if Language_extension.is_enabled Refinement_types then translate env lbls
+    else List.map (mk env) lbls
+  in
+  let dependencies =
+    List.filter
+      (fun label -> List.exists
+        (fun next -> Ctype.refinement_ident_occurs label.ld_id
+          next.ld_type.ctyp_type) lbls)
+      lbls
+  in
+  (match dependencies with
+   | [] -> ()
+   | first :: _ ->
+       (match kloc with
+        | Record _ | Inlined_record _ | Record_unboxed_product -> ()
+        | _ -> Location.raise_errorf ~loc:first.ld_loc
+            "Dependent fields are supported in record types");
+       if List.exists (fun l -> Types.is_mutable l.ld_mutable) lbls then
+         Location.raise_errorf ~loc:first.ld_loc
+           "Dependent record fields must be immutable");
+  let lbls = List.map (fun label ->
+    if List.exists (fun l -> Ident.same l.ld_id label.ld_id) dependencies then
+      let required = Typemode.transl_modalities ~maturity:Stable Immutable
+          [Location.mkloc (Parsetree.Modality "total") label.ld_loc] in
+      let modalities = Mode.Modality.Const.concat
+          ~then_:required.moda_modalities
+          label.ld_modalities.moda_modalities in
+      List.iter (fun {Location.txt = Mode.Modality.Atom (axis, value); loc} ->
+        if Mode.Modality.Const.proj axis modalities <> value then
+          Location.raise_errorf ~loc
+            "Fields used by later refinements must be total, stateless, \
+             and portable") label.ld_modalities.moda_desc;
+      { label with ld_modalities =
+          { label.ld_modalities with moda_modalities = modalities } }
+    else label) lbls in
   let lbls' =
     List.map
       (fun ld ->
@@ -1463,6 +1512,20 @@ let derive_unboxed_version env path_in_group_has_unboxed_version decl =
           })
         lbls
     in
+    let lbls_unboxed =
+      if not (List.exists (fun (field : Types.label_declaration) ->
+        List.exists (fun (binder : Types.label_declaration) ->
+          Ctype.refinement_ident_occurs binder.ld_id field.ld_type) lbls) lbls)
+      then lbls_unboxed else
+        let subst = List.fold_left2 (fun subst
+            (source : Types.label_declaration)
+            (target : Types.label_declaration) ->
+          Subst.add_bound_value source.ld_id target.ld_id subst)
+          Subst.identity lbls lbls_unboxed in
+        List.map (fun (label : Types.label_declaration) ->
+          { label with ld_type = Subst.type_expr subst label.ld_type })
+          lbls_unboxed
+    in
     let rep = Types.Record_unboxed_product in
     (* CR layouts v11: update type_jkind once we have [layout_of] layouts *)
     let jkind =
@@ -1987,7 +2050,11 @@ let update_constructor_arguments_sorts env loc cd_args =
     let lbls, jkinds =
       update_label_sorts_in_place env loc lbls ~form:Legacy
     in
-    Types.Cstr_record lbls, false, jkinds, Some [| Jkind.Sort.Const.scannable |]
+    let all_ghost = List.for_all (fun lbl -> lbl.Types.ld_ghost) lbls in
+    let sort =
+      if all_ghost then Jkind.Sort.Const.void else Jkind.Sort.Const.scannable
+    in
+    Types.Cstr_record lbls, all_ghost, jkinds, Some [| sort |]
 
 let assert_mixed_product_support =
   let required_reserved_header_bits = 8 in
@@ -2193,8 +2260,9 @@ let update_constructor_representation
     | Cstr_record fields ->
         let arg_reprs =
           List.map2 (fun ld arg_jkind ->
-            Element_repr.classify env ld.Types.ld_type arg_jkind
-              ~default_to_scannable:true,
+            (if ld.Types.ld_ghost then Some Element_repr.Void
+             else Element_repr.classify env ld.Types.ld_type arg_jkind
+               ~default_to_scannable:true),
             ld.Types.ld_type)
             fields arg_jkinds
         in

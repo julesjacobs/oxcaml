@@ -1,4 +1,4 @@
-ok: snake calls exactly [snake]
+ok: snake calls exactly [equal snake]
 ok: snake calls 0 proof functions
 ok: snake makes no other calls
 ok: snake computes no metric or big integer

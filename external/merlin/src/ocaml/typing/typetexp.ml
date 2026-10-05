@@ -997,11 +997,26 @@ let type_refinement_predicate =
 
 let add_dependent_binder =
   ref
-    (fun _env _binder _payload _loc ->
+    (fun ?uid:_ ?sort:_ _env _binder _payload _loc ->
       assert false
-      : Env.t -> Ident.t -> type_expr -> Location.t -> Env.t)
+      : ?uid:Uid.t -> ?sort:Jkind.Sort.t ->
+        Env.t -> Ident.t -> type_expr -> Location.t -> Env.t)
 
 let dependent_binders = ref Ident.Set.empty
+
+let with_dependent_binder env id ~uid ty loc f =
+  (* These binders only name fields inside refinements. Their registration
+     must not constrain the storage layout inferred by the record declaration. *)
+  let sort =
+    match Jkind.sort_option_of_jkind env (Ctype.estimate_type_jkind env ty) with
+    | Some sort -> sort
+    | None -> snd (Jkind.of_new_sort_var ~why:Jkind.History.Let_binding
+        ~level:(Ctype.get_current_level ()))
+  in
+  let env = !add_dependent_binder ~uid ~sort env id ty loc in
+  Misc.protect_refs
+    [Misc.R (dependent_binders, Ident.Set.add id !dependent_binders)]
+    (fun () -> f env)
 
 let rec transl_type env ~policy ?(aliased=false) ~row_context mode styp =
   Msupport.with_saved_types

@@ -1,104 +1,69 @@
 {
-  "_about": "Demo tour of Myers diff. Sources: verification/catalogue/pages/myers-diff.md (its sources: list is the backbone), verification/library/vox_diff.md, research/mastery-20260927/demos-algorithms.md §3.6, definitions-lemmas.md §1-2; every claim re-checked against the code at 8479634adc.",
-  "_notes": "vox_diff.md says ghost arguments may leave dummy ABI arguments; the tour therefore says ghost arguments carry no computation and does not claim they vanish from the calling convention. The tie rule (insertion wins on equal old-input positions, choose's 'if a.x > b.x then deletion else insertion') is documented and tested, not specified.",
+  "_about": "Myers diff: the pure model, public contracts, clients, and private implementation.",
   "id": "myers-diff",
   "title": "Myers diff",
   "kind": "demo",
   "demo": "myers-diff",
   "order": 24,
   "summary": [
-    "`Vox_diff.diff` computes an edit script between two `int` lists with Myers' frontier search, and proves that the script turns the first list into the second at the minimum number of insertions and deletions, and that no script that applies costs less. The tour reads the specification and the contract, a client and a rejected client, then the frontier invariant, the ghost budget that makes the search total, the optimality proof, and the check that the compiled search runs no proof or big-integer code.",
-    "The [catalogue page](demo:myers-diff) states the claim, the trusted base and the scope."
+    "`Vox_diff.diff equal old fresh` computes a generic diff with the right source and target and minimum insertion/deletion cost. Read the pure definitions and operation contracts first; the frontier and its proofs are private."
   ],
   "stops": [
     {
-      "title": "Edit scripts and what they mean",
-      "path": "verification/library/vox_diff_spec.mli",
-      "from": "(** Edit scripts and their meaning.",
-      "to": "(if old === source script then Some (target script) else None)} @@ total",
-      "lines": "1-36",
-      "text": "`Vox_diff_spec` is the language of the claim. A script is a list of `Keep x`, `Delete x` and `Insert x`, an `[@@inductive]` type of kind `immutable_data mod total`, so total code and the logic can use it. `source` collects the kept and deleted elements, `target` the kept and inserted ones, and `cost` counts the edits as a `Bigint.t`. Each function is exported abstract, with its defining equation as a `_def` lemma that a proof calls to unfold it once; the implementations in [`vox_diff_spec.ml`](src:verification/library/vox_diff_spec.ml) generate those lemmas and must match these types. `apply` is characterised in one equation: applying a script to `old` succeeds exactly when `old` is its source, and yields its target."
+      "title": "A diff and its meaning",
+      "path": "verification/library/vox_diff_spec.ml",
+      "from": "type ('a : logical_data) operation",
+      "to": "Bigint.add 1Z (cost rest)",
+      "text": "A diff is a list of `Keep`, `Delete`, and `Insert`. `source` collects kept and deleted elements; `target` collects kept and inserted elements. `cost` counts insertions and deletions. These direct definitions are the pure model."
     },
     {
-      "title": "The edit distance, by its recurrence",
-      "path": "verification/library/vox_diff_spec.mli",
-      "from": "(** Insertion/deletion distance; substitution costs two.",
-      "to": "then minimum_cost ats fresh else minimum_cost old bts))} @@ total",
-      "lines": "56-67",
-      "text": "`minimum_cost` is the edit distance with insertions and deletions only, specified by its recurrence: equal heads are kept, and otherwise the cost is one more than the cheaper of dropping the old head or the new one. Keeping equal heads greedily is correct for this distance, and every step shortens an input, so the recurrence determines the function. The implementation behind it is different: `distance` in `vox_diff_spec.ml` takes an explicit `Bigint` fuel with `[@@decreases fuel]`, and `minimum_cost_equation` is proved from it with fuel `size old + size fresh`. That definition is hidden, and a rejected test checks that `Vox_diff_spec.distance` is unbound."
+      "title": "The returned optimality proof",
+      "path": "verification/library/vox_diff_spec.ml",
+      "from": "type 'a optimal_diff",
+      "to": "}",
+      "text": "The result pairs `edits` with an erased proof that every diff with the same endpoints costs at least as much. The proof field refers to the earlier `edits` field. No distance recurrence appears in this specification."
     },
     {
-      "title": "The contract: exact cost, and optimality against any script",
+      "title": "Operation contracts",
       "path": "verification/library/vox_diff.mli",
-      "from": "val diff : (old : int list) -> (fresh : int list) ->",
-      "to": [
-        "val optimal_at",
-        "@@ total"
-      ],
-      "text": "`diff` is `total`, and its result type is the theorem. When both inputs have at most 1,000,000 elements it returns `Ok s` with source `old`, target `fresh` and cost exactly `minimum_cost old fresh`, and it returns `Error Input_too_large` exactly when an input is longer. `optimal_at` turns the cost equation into optimality: any script `other` with `apply old other === Some fresh` costs at least as much. Its `computed` argument is refined by the cost equation, so a caller must supply a script already known to have minimum cost, and `diff` supplies one. Any minimum-cost script with that source and target is permitted. `optimal_at`, `invert_correct` and `inverse_patch` return ghost results, so their proofs are erased."
+      "from": "(** The comparison",
+      "to": "&& target inverse === source edits && cost inverse = cost edits}",
+      "text": "`diff` takes equality and two input lists. Its result has the right source and target; the result carries an erased `optimality` proof that no competing diff with those endpoints costs less. `apply` succeeds exactly on the source; `invert` swaps source and target and preserves cost."
     },
     {
-      "title": "A client: patch, invert, compare with any script",
+      "title": "A generic verified client",
       "path": "testsuite/tests/vox/diff_public_client.ml",
-      "from": "let (verified_client @ total)",
-      "to": [
-        "let (accepted @ total)",
-        "ghost_ (invert_correct script);",
-        "script"
-      ],
-      "lines": "4-38",
-      "text": "`verified_client` proves that a successful result patches `old` into `fresh`, that its inverse patches back, and that it costs no more than an arbitrary `other` script that also applies. The ascription `computed : {s : script | cost s = minimum_cost old fresh} = s` makes the checker prove, from `diff`'s refinement, the premise `optimal_at` needs; both lemma calls are in `ghost_`. `accepted` takes inputs refined to be within the cap, and the `unreachable_ ()` on its error branch is proved dead. [`diff_boundary.ml`](src:testsuite/tests/vox/diff_boundary.ml) compiles this file in a directory holding only the two public `.cmi` files and checks that each function compiles to one call, to `Vox_diff.diff`."
+      "from": "let verified_client",
+      "to": "  edits",
+      "text": "The client calls `diff` normally and calls the result’s erased `optimality` field to compare against an arbitrary competing diff. It also checks forward and backward application. These proof calls are erased: the boundary test verifies one runtime call to `diff`."
     },
     {
-      "title": "A rejected client: a script that is not minimal",
+      "title": "A rejected claim",
       "path": "testsuite/tests/vox/diff_rejected.ml",
       "from": "let nonminimal () =",
       "to": "|}]",
-      "lines": "14-34",
-      "text": "Deleting and reinserting `97` costs 2, and `minimum_cost [97] [97]` is 0, so this script cannot be ascribed the minimal-cost type that `optimal_at` requires. The `cost_def`, `minimum_cost_equation` and `size_def` calls give the solver the equations at these concrete lists, and the error points at the ascription. That premise is what stops a client from using `optimal_at` to call any script optimal. The same file rejects a false claim about the patched result, a conclusion drawn from `optimal_at` without proving that the other script applies, and references to the hidden `Vox_diff.Proof` and `Vox_diff_spec.distance`."
+      "text": "Deleting and reinserting the same element costs two; keeping it costs zero. The claimed cost comparison is therefore rejected. The same file rejects a cost comparison without matching endpoints, a wrong patch result, a dishonest element comparison, and private helper access."
     },
     {
-      "title": "Inside: frontier entries and their invariant",
+      "title": "Inside the implementation",
       "path": "verification/library/vox_diff.ml",
-      "from": "type entry = { x : int; old_tail : int list;",
-      "to": [
-        "let[@def] good candidate budget",
-        "Some e -> minimum_cost e.old_tail e.new_tail <= budget"
-      ],
-      "lines": "255-284",
-      "text": "The search keeps a frontier of `entry option`s, one slot per diagonal `k`. An entry is runtime state: `x`, the position in `old`, the two residual lists, and `rev`, the script so far in reverse. `valid` is the ghost invariant that ties them together: `rev` and the tails rebuild both inputs, `x` counts the consumed old elements and stays within the cap, the tails lie on diagonal `k`, and `cost e.rev = depth`. `settled` says the snake has consumed all equal heads, and `good candidate budget` says that the entry can still finish within `budget` more edits. `dominance`, below, shows that of two valid entries on one diagonal the one farther along `old` is at least as good, which is why `choose` may keep only that one."
+      "from": "type 'a entry =",
+      "to": "&& cost e.rev = depth)",
+      "text": "Private frontier entries hold a position, remaining input lists, and a reverse diff. The invariant connects this implementation state to the pure source, target, and cost. It is hidden by `vox_diff.mli`."
     },
     {
-      "title": "Where the budget comes from",
+      "title": "Termination without a runtime counter",
       "path": "verification/library/vox_diff.ml",
-      "from": "let (diff @ total) : (old : int list) -> (fresh : int list) ->",
-      "to": "Error Input_too_large in result",
-      "lines": "805-838",
-      "text": "`diff` checks both lengths with `bounded_length`, which gives up after the cap, runs `snake` from the empty script, and hands a one-slot frontier to `search`. The search's budget is `ghost_ (minimum_cost old fresh)`: the exact remaining distance, computed only in the logic. The arguments `snake` and `search` take `@ ghost`, `old`, `fresh`, `k`, `depth` and the budget, carry no computation, and every proof call is in `ghost_`. After the search, `M.lower_bound` shows that the script, which costs at most `minimum_cost old fresh`, costs at least that much, so the cost is exact."
-    },
-    {
-      "title": "The core proof: the search is total because the distance shrinks",
-      "path": "verification/library/vox_diff.ml",
-      "from": "let rec (search @ total) :",
+      "from": "let rec (search @ total)",
       "to": "[@@decreases budget]",
-      "lines": "749-785",
-      "text": "`search` is `[@@decreases budget]` on a ghost `Bigint.t`, so the compiled search has no fuel, and its termination argument is that each new frontier brings some entry one edit closer to the end. The precondition says that the frontier is valid at `depth`, has width `depth + 1`, and contains an entry that is `good` within `budget`. If `finished` finds an entry with both tails empty, its script has cost `depth`. Otherwise `frontier_budget` shows that `budget` is positive, `advance` builds the next frontier with a good entry within `budget - 1`, and the recursive call is on the smaller budget. The result costs at most `depth + budget`, which is `minimum_cost old fresh` at the top."
+      "text": "The frontier always has a candidate within the remaining ghost budget. An unfinished frontier has positive budget; advancing decreases it. The lower-bound proof later establishes that the returned cost is exactly minimum cost."
     },
     {
-      "title": "Optimality: a lower bound for every script",
-      "path": "verification/library/vox_diff.ml",
-      "from": "let rec (lower_bound @ total) (script : script) :",
-      "to": "| Insert b -> neighbors (source rest) (target rest) b b);",
-      "lines": "180-196",
-      "text": "`M.lower_bound` proves, by induction on an arbitrary script, that its cost is at least `minimum_cost` of its own source and target. A `Keep` step uses the recurrence at equal heads; a `Delete` or `Insert` step uses `neighbors`, which says that adding one element to either input changes the distance by at most one. `optimal_at`, near the end of the file, is two lemma calls: `apply_characterization` turns `apply old other === Some fresh` into facts about `source other` and `target other`, and `lower_bound other` concludes. The lower bound itself is private; clients see it only through `optimal_at`."
-    },
-    {
-      "title": "Erasure and the trusted base",
+      "title": "Proof erasure",
       "path": "testsuite/tests/vox/diff_boundary_check.ml",
-      "from": "(* The functions each executable diff function may call directly. *)",
+      "from": "let expected =",
       "to": "\"diff\", [ \"bounded_length\"; \"search\"; \"snake\" ] ]",
-      "lines": "7-17",
-      "text": "`diff_boundary.ml` compiles `vox_diff.ml` with `-drawlambda` under both compilers, and this program checks the dump. For each function that `diff` runs, listed by hand here, the direct calls must be exactly the listed ones, and the body may mention neither `minimum_cost` nor a big integer; since the listed functions call only each other, the list covers everything `diff` runs. Further down, `search` must contain no arithmetic, comparison, `raise` or `exit` and no fuel, and the one `Proof` function allowed to run is `reverse_into`, which builds the final script. The demo adds nothing to the trusted base. Running time and memory are not proved; [`diff.ml`](src:testsuite/tests/vox/diff.ml) compares `diff` with a dynamic-programming oracle on all 3,969 pairs of binary words of length at most 5 and on 200 random pairs."
+      "text": "The bytecode and native Lambda audits check the algorithm call graph, including the supplied `equal` callback. Metric and proof computations must be absent. `reverse_into` is the reconstruction routine allowed from the private helper module."
     }
   ]
 }

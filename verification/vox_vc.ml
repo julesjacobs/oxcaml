@@ -2602,7 +2602,7 @@ let rec known_type env e =
   | Rexp_ident path -> declared_type env path e.rexp_type
   | Rexp_field (record, _, name) | Rexp_unboxed_field (record, _, name) -> (
     match known_type env record with
-    | Some ty -> field_type env ty name
+    | Some ty -> field_type env ty record name
     | None ->
       let rec payload ty =
         match get_desc (Ctype.expand_head env ty) with
@@ -2610,7 +2610,7 @@ let rec known_type env e =
         | _ -> ty
       in
       let ty = payload record.rexp_type in
-      if refinement_free env ty then field_type env ty name else None)
+      if refinement_free env ty then field_type env ty record name else None)
   | _ -> None
 
 (* The declared type of [path], instantiated at the skeleton [ty]. *)
@@ -2622,9 +2622,9 @@ and declared_type env path ty =
   | exception Not_found -> None
 
 (* The declared type of field [name] of a record of type [ty]. *)
-and field_type env ty name =
+and field_type env ty record name =
   match get_desc (Ctype.expand_head env ty) with
-  | Trefine r -> field_type env r.ref_payload name
+  | Trefine r -> field_type env r.ref_payload record name
   | Tconstr (path, args, _) -> (
     match Env.find_type path env with
     | { type_kind =
@@ -2639,7 +2639,26 @@ and field_type env ty name =
           labels
       with
       | Some label -> (
-        try Some (Ctype.apply env type_params label.ld_type args)
+        try
+          Some
+            (List.fold_left
+               (fun ty (previous : Types.label_declaration) ->
+                 if not (Ctype.refinement_ident_occurs previous.ld_id ty)
+                 then ty
+                 else
+                   let field =
+                     { record with
+                       rexp_desc =
+                         Rexp_field (record, path, Ident.name previous.ld_id);
+                       rexp_type =
+                         Ctype.apply env type_params previous.ld_type args;
+                       rexp_type_constraint = false
+                     }
+                   in
+                   Ctype.substitute_refinement_expression previous.ld_id field
+                     ty)
+               (Ctype.apply env type_params label.ld_type args)
+               labels)
         with Ctype.Cannot_apply -> None)
       | None -> None)
     | _ -> None
@@ -3231,31 +3250,29 @@ let rec pattern : type k.
           args )
       with
       | Some x, Some c, [] -> [s, both Eq x c]
-      | _ -> pattern_fallback ctx s p
+      | _ ->
+        (* Even without a datatype encoding, argument patterns recover their
+           declared refinements. Share a value across an inline record's fields
+           so dependencies refer to the fields actually bound. *)
+        let condition =
+          required p.pat_loc (fresh ctx p.pat_env Predef.type_bool "pattern")
+        in
+        List.fold_left
+          (fun outcomes (_, pat) ->
+            let value = fresh ctx pat.pat_env pat.pat_type "argument" in
+            List.concat_map
+              (fun (s, condition) ->
+                List.map
+                  (fun (s, matched) -> s, both And condition matched)
+                  (pattern ctx s value pat))
+              outcomes)
+          [s, condition]
+          args
       end
     end
-  | Tpat_record (fields, _, _) ->
-    begin match data_of_type ctx p.pat_env p.pat_type, scalar value with
-    | Some { kind = Record_data constructor; _ }, Some value ->
-      let patterns =
-        List.map
-          (fun (_, label, pattern) -> label.Data_types.lbl_pos, pattern)
-          fields
-      in
-      pattern_selected_fields ctx s value constructor patterns
-    | _ -> pattern_fallback ctx s p
-    end
+  | Tpat_record (fields, _, _) -> record_pattern ctx s value p fields
   | Tpat_record_unboxed_product (fields, _, _) ->
-    begin match data_of_type ctx p.pat_env p.pat_type, scalar value with
-    | Some { kind = Record_data constructor; _ }, Some value ->
-      let patterns =
-        List.map
-          (fun (_, label, pattern) -> label.Data_types.lbl_pos, pattern)
-          fields
-      in
-      pattern_selected_fields ctx s value constructor patterns
-    | _ -> pattern_fallback ctx s p
-    end
+    record_pattern ctx s value p fields
   | Tpat_or (left, right, _) ->
     let left = pattern ctx s value left in
     let left_condition = disjunction (List.map snd left) in
@@ -3266,6 +3283,69 @@ let rec pattern : type k.
     in
     left @ right
   | _ -> pattern_fallback ctx s p
+
+and record_pattern :
+    'rep.
+    context ->
+    state ->
+    value option ->
+    pattern ->
+    (Longident.t Location.loc * 'rep Data_types.gen_label_description * pattern)
+    list ->
+    (state * term) list =
+ fun ctx s value p fields ->
+  let labels =
+    match fields with
+    | [] -> [||]
+    | (_, label, _) :: _ -> label.Data_types.lbl_all
+  in
+  (* Nonbinding patterns keep declaration-level refinements. Interpret their
+     field names against this record, restoring the scope after nested
+     matches. *)
+  let initial = s in
+  let s =
+    Array.fold_left
+      (fun s label ->
+        bind s label.Data_types.lbl_id
+          (select_field ctx p.pat_env p.pat_type label.Data_types.lbl_name value))
+      s labels
+  in
+  let outcomes =
+    List.fold_left
+      (fun outcomes (_, label, pat) ->
+        List.concat_map
+          (fun (s, condition) ->
+            let field =
+              select_field ctx p.pat_env p.pat_type label.Data_types.lbl_name
+                value
+            in
+            let field =
+              match field with
+              | Some _ -> field
+              | None ->
+                fresh ctx pat.pat_env pat.pat_type label.Data_types.lbl_name
+            in
+            List.map
+              (fun (s, field_condition) ->
+                s, both And condition field_condition)
+              (pattern ctx s field pat))
+          outcomes)
+      [s, Boolean true]
+      fields
+  in
+  List.map
+    (fun (s, condition) ->
+      let values =
+        Array.fold_left
+          (fun values label ->
+            let path = Path.Pident label.Data_types.lbl_id in
+            match Path.Map.find_opt path initial.values with
+            | None -> Path.Map.remove path values
+            | Some value -> Path.Map.add path value values)
+          s.values labels
+      in
+      { s with values }, condition)
+    outcomes
 
 and pattern_fields ctx s value constructor patterns =
   pattern_selected_fields ctx s value constructor
@@ -3863,10 +3943,14 @@ and expression_extras ?deferred ctx s e ty = function
         s, value
       | None | Some _ -> introduce ctx e.exp_env s target value loc
       end
-    | Texp_subsumption { source; target } ->
+    | Texp_subsumption { source; target } -> (
       let site = { sub_loc = loc; sub_headline = None; sub_context = [] } in
-      let s = subsume ctx e.exp_env site s value ~source ~target in
-      s, value
+      let check s = subsume ctx e.exp_env site s value ~source ~target in
+      match deferred with
+      | None -> check s, value
+      | Some checks ->
+        defer checks s check;
+        s, value)
     | Texp_value_name id ->
       let path = Path.Pident id in
       ctx.argument_values <- Path.Map.add path value ctx.argument_values;
@@ -3935,12 +4019,7 @@ and expression_desc ?deferred ctx s e =
         s, Some (e.exp_type, value)
     in
     let fields = Array.to_list fields in
-    let s, values =
-      arguments_right_to_left
-        (fun s (_, _, field) ->
-          match field with Kept _ -> s, None | Overridden (_, e) -> result s e)
-        s fields
-    in
+    let s, values = record_fields ?deferred ctx s fields in
     let fields =
       List.filter_map Fun.id
         (List.map2
@@ -3962,12 +4041,7 @@ and expression_desc ?deferred ctx s e =
         s, Some (e.exp_type, value)
     in
     let fields = Array.to_list fields in
-    let s, values =
-      arguments_right_to_left
-        (fun s (_, _, field) ->
-          match field with Kept _ -> s, None | Overridden (_, e) -> eval s e)
-        s fields
-    in
+    let s, values = record_fields ?deferred ctx s fields in
     let fields =
       List.filter_map Fun.id
         (List.map2
@@ -4267,6 +4341,52 @@ and expression_desc ?deferred ctx s e =
     let iterator = iterator ctx state in
     Tast_iterator.default_iterator.expr iterator e;
     !state, opaque ()
+
+and record_fields :
+    'rep.
+    ?deferred:deferred_check list ref ->
+    context ->
+    state ->
+    ('rep Data_types.gen_label_description * _ * record_label_definition) list ->
+    state * value option list =
+ fun ?deferred ctx initial fields ->
+  let fields = Array.of_list fields in
+  let values = Array.make (Array.length fields) None in
+  let entries = Array.make (Array.length fields) initial in
+  let checks = Array.init (Array.length fields) (fun _ -> ref []) in
+  let s = ref initial in
+  for index = Array.length fields - 1 downto 0 do
+    match fields.(index) with
+    | _, _, Kept _ -> ()
+    | _, _, Overridden (_, e) ->
+      entries.(index) <- !s;
+      let next, value = expression ~deferred:checks.(index) ctx !s e in
+      s := next;
+      values.(index) <- value
+  done;
+  let check s =
+    let s = ref s in
+    Array.iteri
+      (fun index (_, _, field) ->
+        match field with
+        | Kept _ -> ()
+        | Overridden (_, e) ->
+          let checked = complete_checks entries.(index) !s !(checks.(index)) in
+          s
+            := fst
+                 (expose_outer ctx e.exp_env checked e.exp_type values.(index)
+                    e.exp_loc))
+      fields;
+    !s
+  in
+  let s =
+    match deferred with
+    | None -> check !s
+    | Some checks ->
+      defer checks !s check;
+      !s
+  in
+  s, Array.to_list values
 
 and check_function ctx s e params body value =
   let captured = s in
