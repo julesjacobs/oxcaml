@@ -25,14 +25,14 @@ type predicate = (x:int) -> {r:int | let x = x + 1 in r=x}
 external g : (x:int) -> {r:int | r=x} = "g"
 module M = struct
   let x = 1
-  let y = g x
+  let y : {r : int | r = x} = g x
 end
 let exported : {r:int | r=M.x} = M.y
 module Copy = M
 let copied : {r:int | r=Copy.x} = Copy.y
 module F (X : sig val x : int end) = struct
   let x = X.x
-  let y = g x
+  let y : {r : int | r = x} = g x
 end
 module Applied = F (M)
 let applied : {r:int | r=Applied.x} = Applied.y

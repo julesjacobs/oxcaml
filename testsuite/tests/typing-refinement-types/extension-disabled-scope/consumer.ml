@@ -10,4 +10,4 @@ let escaped =
     let flag = true
   end in
   let module M = Producer.Make (Local) in
-  M.value
+  M.values

@@ -189,6 +189,8 @@ and 'a pattern_data =
    }
 
 and pat_extra =
+  | Tpat_refinement of Types.type_expr
+        (** Expose the input's outer refinements before matching its payload. *)
   | Tpat_constraint of core_type option * Mode.Alloc.Const.t modes
         (** P : T          { pat_desc = P
                            ; pat_extra = (Tpat_constraint T, _, _) :: ... }
@@ -432,6 +434,12 @@ and exp_extra =
         [Texp_ghost_region]. Currently it's impossible. *)
   | Texp_refine
         (** The source expression was introduced by [refine_]. *)
+  | Texp_refinement of { source : Types.type_expr; target : Types.type_expr }
+        (** An outer refinement conversion, processed after the expression
+            returns. Nested refinements are unchanged. *)
+  | Texp_value_name of Ident.t
+        (** A logical name for this evaluated argument, scoped to its
+            lexical continuation. This adds no runtime binding. *)
   | Texp_let_refine of Ident.t * string loc
         (** The source expression was [let refine_ x = ... in ...]. *)
 

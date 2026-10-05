@@ -20,7 +20,9 @@ jobs:
     # Keep this name equal to the job id: it is the GitHub status-check name,
     # and branch protection on `main` requires the check named `nix-matrix`.
     name: nix-matrix
-    runs-on: warp-ubuntu-latest-arm64-8x
+    runs-on: >-
+      ${{ github.repository == 'julesjacobs/oxcaml' && 'ubuntu-24.04-arm'
+        || 'warp-ubuntu-latest-arm64-8x' }}
     permissions:
       contents: read
     outputs:
@@ -44,7 +46,13 @@ jobs:
   nix-build:
     name: ${{ matrix.name }} (${{ matrix.system }})
     needs: nix-matrix
-    runs-on: ${{ matrix.os }}
+    runs-on: >-
+      ${{ github.repository == 'julesjacobs/oxcaml'
+      && (matrix.system == 'x86_64-linux' && 'ubuntu-24.04'
+        || matrix.system == 'aarch64-linux' && 'ubuntu-24.04-arm'
+        || matrix.system == 'x86_64-darwin' && 'macos-15-intel'
+        || 'macos-15')
+      || matrix.os }}
     strategy:
       fail-fast: true
       matrix: ${{fromJSON(needs.nix-matrix.outputs.matrix)}}

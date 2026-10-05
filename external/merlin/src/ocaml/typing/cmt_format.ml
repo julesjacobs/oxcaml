@@ -333,7 +333,8 @@ let iter_on_occurrences
             f ~namespace:Module pat_env path lid
         | Tpat_type (path, lid) ->
             f ~namespace:Type pat_env path lid
-        | Tpat_constraint _ | Tpat_unpack | Tpat_inspected_type _ -> ())
+        | Tpat_constraint _ | Tpat_unpack | Tpat_refinement _
+        | Tpat_inspected_type _ -> ())
         pat_extra;
       default_iterator.pat sub pat);
 

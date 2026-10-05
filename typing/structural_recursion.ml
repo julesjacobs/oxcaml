@@ -80,6 +80,28 @@ and bind_field facts owner ty pat =
       end
   | _ -> facts
 
+let rec bind_expression facts exp pat =
+  match pat.pat_desc, exp.exp_desc with
+  | Tpat_alias { pattern; _ }, _ ->
+      bind_expression (bind_pattern facts (status facts exp) pat) exp pattern
+  | Tpat_or (left, right, _), _ ->
+      intersection (bind_expression facts exp left)
+        (bind_expression facts exp right)
+  | Tpat_tuple pats, Texp_tuple (fields, _) ->
+      List.fold_left2
+        (fun facts (_, exp) (_, pat) -> bind_expression facts exp pat)
+        facts fields pats
+  | Tpat_record (patterns, _, _), Texp_record { fields; _ } ->
+      List.fold_left
+        (fun facts (_, label, pat) ->
+          if Types.is_mutable label.Data_types.lbl_mut then facts else
+          let _, _, field = fields.(label.Data_types.lbl_pos) in
+          match field with
+          | Kept _ -> facts
+          | Overridden (_, exp) -> bind_expression facts exp pat)
+        facts patterns
+  | _ -> bind_pattern facts (status facts exp) pat
+
 let check_parameter self body index root =
   let rec iterator facts : Tast_iterator.iterator =
     let default = Tast_iterator.default_iterator in
@@ -99,7 +121,7 @@ let check_parameter self body index root =
         | Texp_let (Nonrecursive, bindings, body) ->
             List.iter (it.value_binding it) bindings;
             let facts = List.fold_left (fun facts binding ->
-              bind_pattern facts (status facts binding.vb_expr) binding.vb_pat)
+              bind_expression facts binding.vb_expr binding.vb_pat)
                 facts bindings
             in
             let it = iterator facts in
@@ -110,7 +132,7 @@ let check_parameter self body index root =
               let pat, exception_pat = split_pattern case.c_lhs in
               let facts = match pat, exception_pat with
                 | Some pat, None ->
-                    bind_pattern facts (status facts scrutinee) pat
+                    bind_expression facts scrutinee pat
                 | _ -> facts
               in
               let it = iterator facts in

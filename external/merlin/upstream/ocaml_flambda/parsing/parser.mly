@@ -1007,6 +1007,7 @@ let maybe_pmod_constraint mode expr =
 %token BORROW                 "borrow_"
 %token REFINE                 "refine_"
 %token ASSUME                 "assume_"
+%token UNREACHABLE            "unreachable_"
 %token <char> CHAR            "'a'" (* just an example *)
 %token <char> HASH_CHAR       "#'a'" (* just an example *)
 %token CLASS                  "class"
@@ -2961,6 +2962,9 @@ fun_expr:
       { Exp.refine ~loc:(make_loc $sloc) $2 }
   | ASSUME simple_expr %prec below_HASH
       { Exp.assume ~loc:(make_loc $sloc) $2 }
+  | UNREACHABLE LPAREN RPAREN
+      { Exp.extension ~loc:(make_loc $sloc)
+          (mkloc "vox.unreachable" (make_loc $sloc), PStr []) }
   | labeled_tuple %prec below_COMMA
       { mkexp ~loc:$sloc (Pexp_tuple $1) }
   | maybe_stack (
@@ -5516,6 +5520,7 @@ single_attr_id:
   | BORROW { "borrow_" }
   | REFINE { "refine_" }
   | ASSUME { "assume_" }
+  | UNREACHABLE { "unreachable_" }
   | CLASS { "class" }
   | CONSTRAINT { "constraint" }
   | DO { "do" }

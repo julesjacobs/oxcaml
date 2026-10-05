@@ -1091,6 +1091,11 @@ let rec generalize stage_offset ty =
     | Tconstr (_, _, abbrev) ->
         iter_abbrev (generalize stage_offset) !abbrev;
         iter_type_expr (generalize stage_offset) ty
+    | Trefine { ref_payload; ref_pred; _ } ->
+        generalize stage_offset ref_payload;
+        ignore
+          (Refinement_predicate.fold_types
+             (fun () ty -> generalize stage_offset ty) () ref_pred)
     | _ ->
         iter_type_expr (generalize stage_offset) ty
     end;

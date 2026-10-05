@@ -61,6 +61,8 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
           Rexp_apply
             ( map_rexp rename fn,
               List.map (fun (lbl, arg) -> lbl, map_rexp rename arg) args )
+      | Rexp_refinement (source, e) ->
+          Rexp_refinement (type_expr source, map_rexp rename e)
       | Rexp_ghost e -> Rexp_ghost (map_rexp rename e)
       | Rexp_logical_equal (left, right) ->
           Rexp_logical_equal (map_rexp rename left, map_rexp rename right)
@@ -197,6 +199,7 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
     rename,
     { rpat_desc;
       rpat_type = type_expr pat.rpat_type;
+      rpat_refinements = List.map type_expr pat.rpat_refinements;
       rpat_type_constraint = pat.rpat_type_constraint;
       rpat_loc = location pat.rpat_loc }
   in
@@ -214,6 +217,7 @@ let fold_types_gen ~constraints_only f init rexp =
         List.fold_left
           (fun init (_, arg) -> expression init arg)
           (expression init fn) args
+    | Rexp_refinement (source, e) -> expression (f false init source) e
     | Rexp_ghost e -> expression init e
     | Rexp_logical_equal (left, right) ->
         expression (expression init left) right
@@ -250,6 +254,7 @@ let fold_types_gen ~constraints_only f init rexp =
     expression init rc_rhs
   and pattern init pat =
     let init = f pat.rpat_type_constraint init pat.rpat_type in
+    let init = List.fold_left (f false) init pat.rpat_refinements in
     match pat.rpat_desc with
     | Rpat_any | Rpat_var _ | Rpat_constant _ -> init
     | Rpat_tuple components ->
@@ -276,6 +281,7 @@ let iter_scoped_dependencies ~bound ~ident ~type_expr rexp =
   in
   let rec pattern bound pat =
     type_expr ~bound pat.rpat_type;
+    List.iter (type_expr ~bound) pat.rpat_refinements;
     match pat.rpat_desc with
     | Rpat_any | Rpat_constant _ -> bound
     | Rpat_var id -> Ident.Set.add id bound
@@ -332,6 +338,9 @@ let iter_scoped_dependencies ~bound ~ident ~type_expr rexp =
     | Rexp_sequence (first, second) ->
         expression bound first;
         expression bound second
+    | Rexp_refinement (source, e) ->
+        type_expr ~bound source;
+        expression bound e
     | Rexp_ghost e -> expression bound e
     | Rexp_logical_equal (left, right) ->
         expression bound left;
@@ -379,6 +388,8 @@ let equal ~pairs rexp1 rexp2 =
   in
   let rec eq pairs rexp1 rexp2 =
     match rexp1.rexp_desc, rexp2.rexp_desc with
+    | Rexp_refinement (_, e1), _ -> eq pairs e1 rexp2
+    | _, Rexp_refinement (_, e2) -> eq pairs rexp1 e2
     | Rexp_var id1, Rexp_var id2 -> var_eq pairs id1 id2
     | Rexp_ident p1, Rexp_ident p2 -> Path.same p1 p2
     | Rexp_var id1, Rexp_ident (Pident id2)
@@ -516,6 +527,7 @@ let untype ?(type_constraint = fun _ -> None)
     | Rexp_apply (fn, args) ->
         Exp.apply ~loc (untype_rexp fn)
           (List.map (fun (lbl, arg) -> lbl, untype_rexp arg) args)
+    | Rexp_refinement (_, e) -> untype_rexp e
     | Rexp_ghost e -> Exp.ghost ~loc (untype_rexp e)
     | Rexp_logical_equal (left, right) ->
         Exp.apply ~loc
@@ -647,7 +659,7 @@ let exists_rexp pred rexp =
     | Rexp_apply (fn, args) ->
         walk fn;
         List.iter (fun (_, arg) -> walk arg) args
-    | Rexp_ghost e -> walk e
+    | Rexp_refinement (_, e) | Rexp_ghost e -> walk e
     | Rexp_logical_equal (left, right) -> walk left; walk right
     | Rexp_tuple components -> List.iter (fun (_, c) -> walk c) components
     | Rexp_construct (_, args) -> List.iter walk args
@@ -793,7 +805,7 @@ let bound_idents rexp =
         List.fold_left
           (fun ids (_, arg) -> expression ids arg)
           (expression ids fn) args
-    | Rexp_ghost e -> expression ids e
+    | Rexp_refinement (_, e) | Rexp_ghost e -> expression ids e
     | Rexp_logical_equal (left, right) ->
         expression (expression ids left) right
     | Rexp_tuple components ->
