@@ -372,6 +372,8 @@ install_for_test: install
 	 ln -s ../_build/main/$(ocamldir)/toplevel/byte/.ocamltoplevel.objs/byte toplevel; \
 	)
 
+	cp $(ocamldir)/runtime/borrow.c _runtest/runtime/
+
 	# Various directories are put on the -I paths by tools/Makefile;
 	# utils/ is one such, so we just dump the .cm* files in there for
 	# various things.
