@@ -258,4 +258,17 @@ VOX_VERIFY_CACHE=${VOX_VERIFY_CACHE-$(dirname "$output")/vox-verify-cache}
 export VOX_VERIFY_CACHE
 jobs=${VOX_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}
 rm -rf "$work"
-exec make -s -k -j "$jobs" -f build.mk all
+report_slow_proofs=0
+if [ -z "${VOX_SLOW_PROOFS-}" ]; then
+  VOX_SLOW_PROOFS=$output/slow-proofs
+  export VOX_SLOW_PROOFS
+  : > "$VOX_SLOW_PROOFS"
+  report_slow_proofs=1
+fi
+status=0
+make -s -k -j "$jobs" -f build.mk all || status=$?
+if [ "$report_slow_proofs" -eq 1 ] && [ -s "$VOX_SLOW_PROOFS" ]; then
+  echo "Proofs over the solver resource warning threshold:"
+  LC_ALL=C sort -u "$VOX_SLOW_PROOFS" | sed 's/^/  /'
+fi
+exit "$status"
