@@ -48,7 +48,7 @@ let code loopify(never) size(45) newer_version_of(run_0)
         -> k * k1
         : imm tagged =
   let body = closure body_1_1 @body &my_alloc_region
-  with { unboxed_field_b = b; unboxed_field_x = x }
+  with { unboxed_field_x = x; unboxed_field_b = b }
   in
   apply direct(body_1_1 &my_alloc_region)
     (body : _ -> imm tagged)

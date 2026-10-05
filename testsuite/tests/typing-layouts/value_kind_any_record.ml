@@ -1,5 +1,5 @@
 (* TEST
- flags = "-extension layouts_alpha -dlambda -dno-unique-ids";
+ flags = "-extension layouts_alpha -extension small_numbers -dlambda -dno-unique-ids";
  expect;
 *)
 
@@ -143,4 +143,73 @@ let either (v : float# inline) (w : float# inline) =
          (mixedfield 1  (float64,value<int>) r))))
   (apply (field_imm 1 (global Toploop!)) "either" either))
 val either : float# inline -> float# inline -> int = <fun>
+|}]
+
+let primitive_fields
+    (r : (int * char * int8 * int16 * bool * unit * string * bytes *
+          floatarray * float * float32 * int32 * int64 * nativeint) t) = r
+[%%expect{|
+(let
+  (primitive_fields =
+     (function {nlocal = 0}
+       r[value<
+          (consts ())
+           (non_consts ([0:
+                         value<
+                          (consts ())
+                           (non_consts ([0: value<int>, value<int>,
+                                         value<int>, value<int>, value<int>,
+                                         value<int>, *, *, value<floatarray>,
+                                         value<float>, value<float32>,
+                                         value<int32>, value<int64>,
+                                         value<nativeint>]))>, value<int>]))>]
+       : (consts ())
+          (non_consts ([0:
+                        value<
+                         (consts ())
+                          (non_consts ([0: value<int>, value<int>,
+                                        value<int>, value<int>, value<int>,
+                                        value<int>, *, *, value<floatarray>,
+                                        value<float>, value<float32>,
+                                        value<int32>, value<int64>,
+                                        value<nativeint>]))>, value<int>]))
+       r))
+  (apply (field_imm 1 (global Toploop!)) "primitive_fields" primitive_fields))
+val primitive_fields :
+  (int * char * int8 * int16 * bool * unit * string * bytes * floatarray *
+   float * float32 * int32 * int64 * nativeint)
+  t ->
+  (int * char * int8 * int16 * bool * unit * string * bytes * floatarray *
+   float * float32 * int32 * int64 * nativeint)
+  t = <fun>
+|}]
+
+module Shadowed = struct
+  type int = float
+  let float_field (r : int t) = r
+end
+[%%expect{|
+(apply (field_imm 1 (global Toploop!)) "Shadowed/399"
+  (let
+    (float_field =
+       (function {nlocal = 0}
+         r[value<(consts ()) (non_consts ([0: value<float>, value<int>]))>]
+         : (consts ()) (non_consts ([0: value<float>, value<int>])) r))
+    (makeblock 0 float_field)))
+module Shadowed : sig type int = float val float_field : int t -> int t end
+|}]
+
+let default_sort () =
+  match assert false with
+  | _ -> assert false
+[%%expect{|
+(let
+  (default_sort =
+     (function {nlocal = 0} param[value<int>]
+       (let
+         (*match* =?
+            (raise (makeblock 0 (getpredef Assert_failure!!) [0: "" 2 8])))
+         (raise (makeblock 0 (getpredef Assert_failure!!) [0: "" 3 9])))))
+  (apply (field_imm 1 (global Toploop!)) "default_sort" default_sort))
+val default_sort : unit -> 'a = <fun>
 |}]

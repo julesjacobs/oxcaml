@@ -41,6 +41,329 @@ module Tree = Flambda2_algorithms.Patricia_tree.Make (Key)
 module Set = Tree.Set
 module Map = Tree.Map
 
+let () =
+  let keys = [0; 1; 17; max_int; min_int; -17; -1] in
+  let set = Set.of_list keys in
+  let map = Map.of_list (List.map (fun key -> key, ref key) keys) in
+  for mask = 0 to 127 do
+    let accepts key =
+      List.exists
+        (fun (index, candidate) ->
+          Int.equal candidate key && mask land (1 lsl index) <> 0)
+        (List.mapi (fun index key -> index, key) keys)
+    in
+    let set_calls = ref [] in
+    let filtered_set =
+      Set.filter
+        (fun key ->
+          set_calls := key :: !set_calls;
+          accepts key)
+        set
+    in
+    let map_calls = ref [] in
+    let filtered_map =
+      Map.filter
+        (fun key _ ->
+          map_calls := key :: !map_calls;
+          accepts key)
+        map
+    in
+    assert (List.equal Int.equal !set_calls keys);
+    assert (List.equal Int.equal !map_calls keys);
+    assert (Set.equal filtered_set (Set.of_list (List.filter accepts keys)));
+    assert (
+      List.equal Int.equal
+        (Map.keys filtered_map |> Set.elements)
+        (Set.elements filtered_set));
+    if mask = 127
+    then (
+      assert (filtered_set == set);
+      assert (filtered_map == map))
+  done
+
+let () =
+  let keys = [min_int; min_int + 1; -1; 0; 1; max_int - 1; max_int] in
+  let bindings = List.map (fun key -> key, ref key) keys in
+  let map = Map.of_list bindings in
+  let set = Set.of_list keys in
+  let seen = ref [] in
+  let result =
+    Map.fold
+      (fun key value acc ->
+        seen := (key, value) :: !seen;
+        key :: acc)
+      map []
+  in
+  assert (result = List.rev keys);
+  List.iter2
+    (fun (key, value) (expected_key, expected_value) ->
+      assert (key = expected_key && value == expected_value))
+    (List.rev !seen) bindings;
+  assert (Set.fold (fun key acc -> key :: acc) set [] = List.rev keys);
+  let seen = ref [] in
+  let exception Stop in
+  let stopped =
+    try
+      ignore
+        (Map.fold
+           (fun key _ acc ->
+             seen := key :: !seen;
+             if key = 0 then raise Stop;
+             acc + 1)
+           map 0);
+      false
+    with Stop -> true
+  in
+  assert stopped;
+  assert (List.rev !seen = [min_int; min_int + 1; -1; 0])
+
+let check_lookup key bindings map =
+  let expected = List.assoc_opt key bindings in
+  let actual = Map.find_opt key map in
+  let actual_or_null =
+    Flambda2_algorithms.Or_null.to_option (Map.find_or_null key map)
+  in
+  match expected, actual, actual_or_null with
+  | Some expected, Some actual, Some actual_or_null ->
+    assert (expected == actual && expected == actual_or_null);
+    assert (Map.find key map == expected)
+  | None, None, None ->
+    assert (
+      match Map.find key map with exception Not_found -> true | _ -> false)
+  | _ -> assert false
+
+let check_lookups keys queries =
+  let bindings = List.map (fun key -> key, ref key) keys in
+  let map = Map.of_list (List.rev bindings) in
+  assert (Map.valid map);
+  List.iter (fun key -> check_lookup key bindings map) queries
+
+let check_inter left_keys right_keys =
+  let left_bindings = List.map (fun key -> key, ref key) left_keys in
+  let right_bindings = List.map (fun key -> key, ref key) right_keys in
+  let left = Map.of_list left_bindings in
+  let right = Map.of_list (List.rev right_bindings) in
+  let common =
+    List.filter (fun key -> List.mem key right_keys) left_keys
+    |> List.sort_uniq Int.compare
+  in
+  let seen = ref [] in
+  let result =
+    Map.inter
+      (fun key left right ->
+        assert (left == List.assoc key left_bindings);
+        assert (right == List.assoc key right_bindings);
+        seen := key :: !seen;
+        left)
+      left right
+  in
+  assert (Map.valid result);
+  assert (List.sort_uniq Int.compare !seen = common);
+  assert (List.length !seen = List.length common);
+  List.iter (fun key -> check_lookup key left_bindings result) common;
+  List.iter
+    (fun stop ->
+      let seen = ref [] in
+      let exception Stop in
+      let stopped =
+        try
+          ignore
+            (Map.inter
+               (fun key left _ ->
+                 seen := key :: !seen;
+                 if key = stop then raise Stop;
+                 left)
+               left right);
+          false
+        with Stop -> true
+      in
+      assert stopped;
+      assert (List.hd !seen = stop))
+    common
+
+let () =
+  let keys =
+    [ min_int;
+      min_int + 1;
+      -33;
+      -32;
+      -1;
+      0;
+      1;
+      16;
+      17;
+      max_int - 2;
+      max_int - 1;
+      max_int ]
+  in
+  let queries = ref keys in
+  for bit = 0 to Sys.int_size - 1 do
+    let boundary = 1 lsl bit in
+    queries
+      := (boundary - 1) :: boundary :: (boundary + 1) :: (-boundary - 1)
+         :: -boundary :: (-boundary + 1) :: !queries
+  done;
+  let queries = List.sort_uniq Int.compare !queries in
+  let indexed = List.mapi (fun index key -> index, key) keys in
+  for mask = 0 to (1 lsl List.length keys) - 1 do
+    let subset =
+      List.filter_map
+        (fun (index, key) ->
+          if mask land (1 lsl index) <> 0 then Some key else None)
+        indexed
+    in
+    check_lookups subset queries;
+    if mask land 31 = 0
+    then check_inter subset (List.filter (fun key -> key land 1 = 0) keys)
+  done;
+  let state = ref 0x1234_5678_9abc_def0L in
+  let next () =
+    let x = Int64.logxor !state (Int64.shift_left !state 13) in
+    let x = Int64.logxor x (Int64.shift_right_logical x 7) in
+    let x = Int64.logxor x (Int64.shift_left x 17) in
+    state := x;
+    Int64.to_int x
+  in
+  for round = 0 to 63 do
+    let keys = List.init 128 (fun _ -> next ()) |> List.sort_uniq Int.compare in
+    let misses = List.init 256 (fun _ -> next ()) in
+    let neighbors = List.concat_map (fun key -> [key - 1; key + 1]) keys in
+    check_lookups keys (keys @ misses @ neighbors);
+    let right =
+      List.filter (fun key -> key land 3 = round land 3) keys
+      @ List.init 32 (fun _ -> next ())
+      |> List.sort_uniq Int.compare
+    in
+    check_inter keys right
+  done
+
+let () =
+  List.iter
+    (fun keys -> check_lookups keys (keys @ List.init 64 (fun i -> i - 32)))
+    [[2; 3]; [12; 13]; [-15; -14]; [min_int; min_int + 1; max_int - 1; max_int]]
+
+let () =
+  let keys = [min_int; min_int + 1; -33; -1; 0; 1; 16; 17; max_int] in
+  let queries =
+    List.sort_uniq Int.compare (keys @ [-34; -32; -2; 2; 15; 18; max_int - 1])
+  in
+  let indexed = List.mapi (fun i key -> i, key) keys in
+  for mask = 0 to (1 lsl List.length keys) - 1 do
+    let keys =
+      List.filter_map
+        (fun (i, key) -> if mask land (1 lsl i) <> 0 then Some key else None)
+        indexed
+    in
+    let bindings = List.map (fun key -> key, ref key) keys in
+    let map = Map.of_list bindings in
+    let set = Set.of_list keys in
+    List.iter
+      (fun key ->
+        let present = List.assoc_opt key bindings in
+        let calls = ref 0 in
+        let unchanged =
+          Map.update key
+            (fun value ->
+              incr calls;
+              value)
+            map
+        in
+        assert (!calls = 1);
+        assert (List.map fst (Map.bindings unchanged) = keys);
+        List.iter
+          (fun (key, value) -> assert (Map.find key unchanged == value))
+          bindings;
+        assert (unchanged == map);
+        let removed = Map.remove key map in
+        let removed_set = Set.remove key set in
+        let expected = List.filter (fun candidate -> candidate <> key) keys in
+        assert (List.map fst (Map.bindings removed) = expected);
+        assert (Set.elements removed_set = expected);
+        if Option.is_none present
+        then (
+          assert (removed == map);
+          assert (removed_set == set));
+        calls := 0;
+        let replacement = ref key in
+        let replaced =
+          Map.update key
+            (fun _ ->
+              incr calls;
+              Some replacement)
+            map
+        in
+        assert (!calls = 1);
+        assert (Map.find key replaced == replacement);
+        assert (replaced != map);
+        calls := 0;
+        let dropped =
+          Map.update key
+            (fun _ ->
+              incr calls;
+              None)
+            map
+        in
+        assert (!calls = 1);
+        assert (List.map fst (Map.bindings dropped) = expected);
+        let raised =
+          match Map.update key (fun _ -> raise Exit) map with
+          | exception Exit -> true
+          | _ -> false
+        in
+        assert raised)
+      queries
+  done
+
+let () =
+  let keys = [min_int; min_int + 1; -1; 0; 1; max_int - 1; max_int] in
+  let bindings = List.map (fun key -> key, ref key) keys in
+  let map = Map.of_list bindings in
+  assert (Map.map_keys (fun key -> key) map == map);
+  List.iter
+    (fun transform ->
+      let expected =
+        List.fold_left
+          (fun map (key, datum) -> Map.add (transform key) datum map)
+          Map.empty bindings
+      in
+      let seen = ref [] in
+      let actual =
+        Map.map_keys
+          (fun key ->
+            seen := key :: !seen;
+            transform key)
+          map
+      in
+      assert (List.rev !seen = keys);
+      assert (Map.valid actual);
+      assert (Map.equal ( == ) actual expected);
+      List.iter
+        (fun stop_key ->
+          let seen = ref [] in
+          let exception Stop in
+          (match
+             Map.map_keys
+               (fun key ->
+                 seen := key :: !seen;
+                 if key = stop_key then raise Stop;
+                 transform key)
+               map
+           with
+          | _ -> assert false
+          | exception Stop -> ());
+          let rec prefix = function
+            | [] -> assert false
+            | key :: rest ->
+              if key = stop_key then [key] else key :: prefix rest
+          in
+          assert (List.rev !seen = prefix keys))
+        keys)
+    ((fun _ -> 0)
+    :: (fun key -> key + 1)
+    :: List.map
+         (fun changed_key key -> if key = changed_key then 42 else key)
+         keys)
+
 let ( <=> ) = Bool.equal
 
 let ( ==> ) a f = (not a) || f ()
@@ -108,6 +431,8 @@ module Set_specs = struct
     Set.cardinal (Set.add e s) = Set.cardinal s + 1
 
   let add_elt { set = s; element = e } = Set.equal (Set.add e s) s
+
+  let add_sharing { set = s; element = e } = Set.add e s == s
 
   let singleton_valid e = Set.valid (Set.singleton e)
 
@@ -355,6 +680,10 @@ module Map_specs (V : Value) = struct
   let is_empty_vs_equal m = Map.is_empty m <=> Map.equal V.equal m Map.empty
 
   let add_valid k v m = Map.valid (Map.add k v m)
+
+  let add_sharing { map = m; key = k; value = v } = Map.add k v m == m
+
+  let replace_sharing k m = Map.replace k Fun.id m == m
 
   let add_same k v m = Map.find_opt k (Map.add k v m) =? Some v
 
@@ -641,7 +970,13 @@ module Map_specs (V : Value) = struct
       (sort_by_key (List.map (fun (k, v) -> f k, v) (m |> Map.bindings)))
 
   let keys_vs_of_list m =
-    Set.equal (Map.keys m) (m |> Map.bindings |> List.map fst |> Set.of_list)
+    let actual = Map.keys m in
+    let expected = m |> Map.bindings |> List.map fst |> Set.of_list in
+    Set.equal actual expected
+    && Set.compare actual expected = 0
+    && String.equal
+         (Marshal.to_string actual [])
+         (Marshal.to_string expected [])
 
   let data_vs_bindings m =
     equal_list_up_to_order V.compare (Map.data m)
@@ -1048,6 +1383,7 @@ let () =
     c "add then subset" add_subset [elt; set];
     c "add then cardinal" add_cardinal [elt; set];
     c "add existing element" add_elt [set_and_element];
+    c "add shares existing element" add_sharing [set_and_element];
     c "singleton is valid" singleton_valid [elt];
     c "singleton vs. elements" singleton_vs_elements [elt];
     c "remove is valid" remove_valid [elt; set];
@@ -1151,6 +1487,8 @@ let () =
     c "mem" mem [key; map];
     c "is_empty vs. equal" is_empty_vs_equal [map];
     c "add is valid" add_valid [key; value; map];
+    c "add shares existing binding" add_sharing [map_and_binding];
+    c "replace shares unchanged map" replace_sharing [key; map];
     c "add then find_opt" add_same [key; value; map];
     c "add then find_opt other" add_other [key; key; value; map];
     c "update is valid" update_valid [key; value_option_to_value_option; map];

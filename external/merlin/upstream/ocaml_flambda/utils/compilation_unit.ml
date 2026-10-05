@@ -506,6 +506,20 @@ include Identifiable.Make (struct
         ListLabels.map ~f:hash_arg arguments )
 
   and hash_arg { param; value } = Hashtbl.hash (Name.hash param, hash value)
+
+  let hash =
+    let dummy_hash = hash dummy in
+    let cache = Atomic.make (dummy, dummy_hash, dummy, dummy_hash) in
+    fun t ->
+      let first, first_hash, second, second_hash = Atomic.get cache in
+      if t == first
+      then first_hash
+      else if t == second
+      then second_hash
+      else
+        let result = hash t in
+        Atomic.set cache (t, result, first, first_hash);
+        result
 end)
 
 let print = doc_print

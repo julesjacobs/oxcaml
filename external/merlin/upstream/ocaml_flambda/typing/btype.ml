@@ -386,7 +386,20 @@ let fold_type_expr f fm init ty =
   | Tbox ty -> f init ty
 
 let iter_type_expr f fm ty =
-  fold_type_expr (fun () v -> f v) (fun () v -> fm v) () ty
+  match get_desc ty with
+  | Tvar _ | Tnil | Tunivar _ | Tof_kind _ -> ()
+  | Tarrow ((_, m1, m2), ty1, ty2, _) ->
+      fm m1; fm m2; f ty1; f ty2
+  | Ttuple l | Tunboxed_tuple l -> List.iter (fun (_, ty) -> f ty) l
+  | Tconstr (_, l, _) -> List.iter f l
+  | Tobject (ty, {contents = Some (_, p)}) -> f ty; List.iter f p
+  | Tmod (ty, _) | Tobject (ty, _) | Tquote ty | Tsplice ty
+  | Tquote_eval ty | Tsubst (ty, _) | Trepr (ty, _) | Tbox ty -> f ty
+  | Tvariant row -> iter_row f row; f (row_more row)
+  | Tfield (_, _, ty1, ty2) -> f ty1; f ty2
+  | Tlink _ -> assert false
+  | Tpoly (ty, tyl) -> f ty; List.iter f tyl
+  | Tpackage pack -> List.iter (fun (_, ty) -> f ty) pack.pack_cstrs
 
 let rec iter_abbrev f = function
     Mnil                   -> ()
