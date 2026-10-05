@@ -7089,6 +7089,20 @@ end = struct
       result
   [@@decreases limit]
 
+  let (separation_pair_limit_bounds @ total) (limit : int) (pair_limit : int) :
+      {u : unit | if 0 < limit && limit <= 64 &&
+        Bigint.of_int pair_limit ===
+          Bigint.mul (Bigint.of_int limit) (Bigint.of_int limit) then
+        0 < pair_limit && pair_limit <= 4096 else true} = ()
+
+  let (separation_bounded_square @ total) (size : Bigint.t) (limit : int) :
+      {u : unit | if Bigint.compare 0Z size <= 0 &&
+        0 < limit && limit <= 64 &&
+        Bigint.compare size (Bigint.of_int limit) <= 0 then
+        Bigint.compare (Bigint.mul size size)
+          (Bigint.mul (Bigint.of_int limit) (Bigint.of_int limit)) <= 0
+        else true} = ()
+
   let (separation_budget_from_limit @ total) (source : machine) (limit : int)
       (pair_limit : int) :
       {u : unit | if valid source && labels_bounded source &&
@@ -7101,6 +7115,8 @@ end = struct
     let states = ghost_ (state_ids table) in
     ghost_ (big_length_nonnegative states);
     ghost_ (state_size_via_ids source);
+    ghost_ (separation_pair_limit_bounds limit pair_limit);
+    ghost_ (separation_bounded_square (state_size source) limit);
     ghost_ (separation_budget_def source pair_limit);
     ()
 
