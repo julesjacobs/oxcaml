@@ -708,11 +708,6 @@ Line 3, characters 4-21:
 3 |     let* x = n in f x
         ^^^^^^^^^^^^^^^^^
 Error: This recursive function cannot be total: the recursive function cannot be used as a binding operator.
-|}, Principal{|
-Line 3, characters 4-21:
-3 |     let* x = n in f x
-        ^^^^^^^^^^^^^^^^^
-Error: This recursive function cannot be total: the recursive function cannot be used as a binding operator.
 |}]
 
 module Test_recursive_andop = struct
@@ -721,11 +716,6 @@ module Test_recursive_andop = struct
     let* x = n and* y = m in (x, y)
 end
 [%%expect{|
-Line 4, characters 9-25:
-4 |     let* x = n and* y = m in (x, y)
-             ^^^^^^^^^^^^^^^^
-Error: This recursive function cannot be total: the recursive function cannot be used as a binding operator.
-|}, Principal{|
 Line 4, characters 9-25:
 4 |     let* x = n and* y = m in (x, y)
              ^^^^^^^^^^^^^^^^
