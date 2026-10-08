@@ -339,6 +339,7 @@
                   []
                 Ptyp_arrow
                 Nolabel
+                None
                 core_type (attributes.ml[59,812+19]..[59,812+23])
                   Ptyp_constr "unit" (attributes.ml[59,812+19]..[59,812+23])
                   []
