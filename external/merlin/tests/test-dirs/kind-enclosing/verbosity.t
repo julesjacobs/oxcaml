@@ -56,8 +56,10 @@
   > type 'a t1
   > type t2 = Foo of int t1
   > EOF
-  Verbosity 0: immutable_data with int t1
-  Verbosity 1: value non_float mod forkable unyielding many total immutable with int t1
+  Verbosity 0: logical_data with int t1
+  Verbosity 1: value non_float
+    mod forkable unyielding many total immutable logical
+    with int t1
   Verbosity 2: value non_float non_null
     mod forkable
         unyielding
@@ -67,12 +69,12 @@
         stateless
         portable
         contended
+        logical
         local
         unique
         static
         ghost
         internal
-        maybe_logical
     with int t1
 
   $ run 1:5 <<EOF

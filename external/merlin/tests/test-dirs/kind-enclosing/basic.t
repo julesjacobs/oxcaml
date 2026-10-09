@@ -61,7 +61,7 @@
   > type 'a t1
   > type t2 = Foo of int t1
   > EOF
-  2:0-2:23: immutable_data with int t1
+  2:0-2:23: logical_data with int t1
 
   $ run 1:14 <<EOF
   > let f (foo : int) =
