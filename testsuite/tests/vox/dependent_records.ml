@@ -182,3 +182,40 @@ let (unboxed_pattern @ total) (r : unboxed_record) : {x : int | x = 0} =
 let () =
   assert (mutable_pattern {n = 3} = 0);
   assert (unboxed_pattern {n = 0} = 0)
+
+type chain = {
+  first : int;
+  second : {v : int | first <= v};
+  third : {v : int | second <= v};
+}
+
+let (chain @ total) (first : int) (second : {v : int | first <= v})
+    (third : {v : int | second <= v}) : chain = {first; second; third}
+
+let (chain_third @ total) (r : chain) : {v : int | r.second <= v} =
+  let {third; _} = r in third
+
+let (chain_replace @ total) (r : chain)
+    (third : {v : int | r.second <= v}) = {r with third}
+
+let (unboxed_chain @ total) (first : int)
+    (second : {v : int | first <= v})
+    (third : {v : int | second <= v}) : chain# = #{first; second; third}
+
+let (unboxed_chain_third @ total) (r : chain#) :
+    {v : int | r.#second <= v} =
+  let #{third; _} = r in third
+
+let (swap_dependent_patterns @ total) (which : bool)
+    (r : interval) (s : interval) : int * int =
+  match which, r, s with
+  | true, {upper = u; _}, {upper = v; _}
+  | false, {upper = v; _}, {upper = u; _} -> u, v
+
+let () =
+  let r = chain 1 2 3 in
+  assert (chain_third r = 3);
+  assert (chain_third (chain_replace r 4) = 4);
+  assert (unboxed_chain_third (unboxed_chain 1 2 3) = 3);
+  assert (swap_dependent_patterns true interval (make 3 7) = (5, 7));
+  assert (swap_dependent_patterns false interval (make 3 7) = (7, 5))

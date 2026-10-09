@@ -21,6 +21,52 @@ Line 1, characters 50-60:
   The refinement is stated here.
 |}]
 
+type chain = {
+  first : int;
+  second : {v : int | first <= v};
+  third : {v : int | second <= v};
+};;
+[%%expect{|
+type chain = {
+  first : int @@ total;
+  second : {v : int | first <= v} @@ total;
+  third : {v : int | second <= v};
+}
+|}]
+
+let bad_chain = { first = 1; second = 2; third = 0 };;
+[%%expect{|
+Line 1, characters 49-50:
+1 | let bad_chain = { first = 1; second = 2; third = 0 };;
+                                                     ^
+Error: Refinement could not be proved (counterexample)
+Line 4, characters 21-32:
+4 |   third : {v : int | second <= v};
+                         ^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
+let bad_update (r : chain) = {r with first = 10; second = 11};;
+[%%expect{|
+Line 1, characters 29-61:
+1 | let bad_update (r : chain) = {r with first = 10; second = 11};;
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Updating this record also requires replacing the dependent field third
+|}]
+
+let bad_projection (r : chain) (s : chain) :
+    {v : int | s.second <= v} = r.third;;
+[%%expect{|
+Line 2, characters 32-39:
+2 |     {v : int | s.second <= v} = r.third;;
+                                    ^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 2, characters 15-28:
+2 |     {v : int | s.second <= v} = r.third;;
+                   ^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
 let bad (r : interval) = { r with lower = 100 };;
 [%%expect{|
 Line 1, characters 25-47:

@@ -136,7 +136,7 @@ class Parser:
     def __init__(self, prefix, cache):
         self.cache = cache
         cache.mkdir(parents=True, exist_ok=True)
-        self.prefix = Path(prefix)
+        self.prefix = Path(prefix).resolve()
         compiler = self.prefix / 'bin' / 'ocamlopt.opt'
         tool = (HERE / 'source_inventory.ml').read_bytes()
         key = hashlib.sha256(tool + compiler.read_bytes()).hexdigest()[:16]
@@ -315,7 +315,8 @@ class Graph:
     def __init__(self, units, typed, runtime_units):
         self.nodes = {}                  # (namespace, key) -> declaration
         self.aliases, self.instances, self.includes, self.params = {}, {}, {}, {}
-        self.arguments = {}              # functor -> the modules it is applied to
+        self.application_args = {}       # instance -> positional arguments
+        self.arguments = {}              # (functor, position) -> actual modules
         self.edges = {}                  # id(declaration) -> [(declaration, logical)]
         self.refs = {}                   # path -> [(offset, declaration)]
         self.memo = {}
@@ -332,16 +333,22 @@ class Graph:
                 self.aliases[m] = target
             for m, functor, arguments in data['instances']:
                 self.instances[m] = functor
-                self.arguments.setdefault(functor, []).extend(arguments)
+                self.application_args[m] = arguments
             for m, target in data['includes']:
                 self.includes.setdefault(m, []).append(target)
-            for p, functor in data['params']:
-                self.params[p] = functor
+            for p, functor, position in data['params']:
+                self.params[p] = (functor, position)
             if path.endswith('.ml'):
                 for kind, key, (start, _) in data['bindings']:
                     d = found[path].at(start)
                     if kind != 'm' and d is not None:
                         self.nodes[(kind, key)] = d
+        for instance in self.instances:
+            functor, arguments = self.application(instance)
+            for position, argument in enumerate(arguments):
+                if argument is not None:
+                    actuals = self.arguments.setdefault((functor, position), set())
+                    actuals.add(argument)
         for unit, path, raw, syntax in units:
             data = typed[path]
             proof = Spans(syntax['proof_spans'])
@@ -384,10 +391,24 @@ class Graph:
                 current = self.module(self.aliases.get(current) or self.instances[current], depth + 1)
         return current
 
+    def application(self, key, depth=0):
+        """A functor's canonical path and any already-applied arguments."""
+        assert depth < 50, key
+        if key in self.aliases:
+            return self.application(self.aliases[key], depth + 1)
+        if key in self.instances:
+            functor, arguments = self.application(self.instances[key], depth + 1)
+            return functor, arguments + self.application_args[key]
+        prefix, _, name = key.rpartition('.')
+        if prefix:
+            canonical = self.module(prefix) + '.' + name
+            if canonical != key:
+                return self.application(canonical, depth + 1)
+        return key, []
+
     def resolve(self, kind, key, seen=()):
-        """The declarations a path names. A path through a functor's
-        parameter names that member of every module the functor is applied
-        to."""
+        """The declarations a path names. A functor parameter refers to
+        that member of the actual modules at its argument position."""
         if (kind, key) in self.memo:
             return self.memo[(kind, key)]
         if '.' not in key or (kind, key) in seen:
@@ -397,7 +418,9 @@ class Graph:
         m = self.module(prefix)
         found = []
         if m in self.params:
-            for argument in self.arguments.get(self.params[m], []):
+            functor, position = self.params[m]
+            actuals = self.arguments.get((self.module(functor), position), [])
+            for argument in sorted(actuals):
                 found += self.resolve(kind, argument + '.' + name, seen)
         elif (kind, m + '.' + name) in self.nodes:
             found = [self.nodes[(kind, m + '.' + name)]]

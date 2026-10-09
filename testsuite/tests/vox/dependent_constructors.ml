@@ -135,6 +135,9 @@ let () =
   assert (evidence_tag (first ()) = 1);
   assert (evidence_tag (second ()) = 2);
   assert (evidence_tag (Payload 9) = 3);
+  assert (evidence_tag (copy (first ())) = 1);
+  assert (evidence_tag (copy (second ())) = 2);
+  assert (evidence_tag (copy (Payload 9)) = 3);
   assert (Obj.is_int (Obj.repr (first ())));
   assert (Obj.is_int (Obj.repr (second ())))
 

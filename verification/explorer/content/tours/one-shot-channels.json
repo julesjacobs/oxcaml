@@ -95,7 +95,7 @@
       "path": "runtime/pref.c",
       "from": "CAMLprim value caml_vox_atomic_cas(value cell",
       "span": 5,
-      "lines": "182-186",
+      "lines": "194-198",
       "text": "The atomic's operations are C primitives, and this is the whole native compare-and-set: the runtime's `caml_atomic_cas_field` on field 0. It ignores `post` and `transition`, whose erased code never runs, and the void token is not passed at all. The payload moves through `caml_unique_cell_put` and `caml_unique_cell_take` further down this file, which are ordinary stores and loads, and an empty slot holds `()` at type `'a`; the Boolean model in [`unique_cell.mli`](src:verification/library/unique_cell.mli) is what keeps `take` away from an empty slot. That the flag's compare-and-set orders these accesses for the other domain is an assumption about the runtime's atomics: [`concurrency-boundary.md`](src:verification/library/concurrency-boundary.md) states it, and no memory-model proof backs it."
     },
     {

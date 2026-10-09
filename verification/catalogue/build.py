@@ -26,8 +26,8 @@ esc = html.escape
 ROUTE = [
     ('flat-hash-table', 6,
      'Open with the client example: the refinement on the result is the whole specification of the call, and the ghost block is erased. '
-     'Then the interface: the abstract map and its laws, views and tokens, and what a mutation promises about the rest of the heap. '
-     'End with the native code, where views and tokens have disappeared, and the trusted SIMD and storage code.'),
+     'Then the interface: the logical map of bindings and the permission that reads borrow and mutations replace. '
+     'End with the native code, where permissions and snapshots have disappeared, and the trusted SIMD and storage code.'),
     ('myers-diff', 4,
      'A pure algorithm with an optimality theorem: the patch reconstructs the target and no patch has lower insertion and deletion cost.'),
     ('one-shot-channels', 4,

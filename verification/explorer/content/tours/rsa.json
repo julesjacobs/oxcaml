@@ -83,7 +83,7 @@
       "path": "verification/vox_encoding.ml",
       "from": "| \"caml_bigint_neg\" -> unary Int Int_neg",
       "to": "| \"caml_bigint_modulo\" -> bigint_division Int_mod",
-      "lines": "883-888",
+      "lines": "909-914",
       "text": "The demo trusts nothing beyond the base every demo trusts, and the part it leans on is here: the verifier gives `Bigint`'s C primitives the meaning of SMT integer arithmetic. Addition, subtraction and multiplication are exact, and `div` and `modulo` are SMT's Euclidean `div` and `mod`, with division by zero defined as in [`bigint.mli`](src:stdlib/bigint.mli): quotient 0, remainder the dividend. `runtime/bigint.c` implements them over base-10^9 digits and is assumed to agree. The meaning belongs to `Bigint`'s own declarations: `Vox_type.carries_builtin_meaning` gives it only to an `external` of `Stdlib__Bigint` with the library's native name, so a user `external` that names `caml_bigint_add` gets none ([builtin_declaration_identity.ml](src:testsuite/tests/vox/builtin_declaration_identity.ml))."
     },
     {

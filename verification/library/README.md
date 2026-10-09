@@ -324,32 +324,37 @@ not claim that effectful operations inhabit Vox's pure `total` mode.
 ### Connectivity clients
 
 `Vox_connectivity.Make (Credits)` seals the online implementation behind
-abstract elements and persistent ghost snapshots. `snapshot` observes the
-partition; `contains`, `root`, and `connected` describe it. After an operation,
-`added_law`, `found_law`, and `joined_law` instantiate its membership and
-representative guarantees for any chosen element. New elements form fresh
-singleton components; a union chooses one of the two previous representatives
-and preserves every other component. Saved snapshots remain
-usable after the live unique state has been consumed; they grant no mutation
-permission.
+abstract elements and a pure class-list partition. `model` observes the
+partition; `Vox_partition_classes.contains`, `representative`, and `connected`
+describe it. The operation contracts use `added`, `same`, and `joined` from
+that module. New elements form fresh singleton components; a union may choose
+any member of the merged classes as representative and preserves every other
+component. An already-connected union preserves representatives. Saved models
+remain usable after the live unique state has been consumed; they grant no
+mutation permission.
 
 The operations retain exact payments and return no refunds. The
 `connectivity.ml` client keeps unspent caller credits in its own wallet and
-proves conservation using `account` and `account_bounds`. The implementation's
-surplus and growth reserve remain private. The signature exposes no path,
-heap, rank, or reserve model.
+proves conservation using `Cost.account` and `Cost.account_bounds`. The
+implementation's surplus and growth reserve remain private. The signature
+exposes no path, heap, rank, or reserve model.
 
 Connectivity states are valid by construction, so its contracts state
-membership through `contains (snapshot s) x` and results through `root`.
-`root_law` states that a member's root is a member and its own root, and that
-a member has depth zero exactly when it is its own root.
+membership through `Partition.contains (model s) x` and results through
+`Partition.representative`. `Vox_partition_classes_proof.representative_law`
+states that a member's representative is a member and its own representative.
+`Cost.root_depth` states that a member has depth zero exactly when it is its
+own representative.
 `Vox_union_find_events` records completed operations newest first: `Initialize`
 (1), `Allocate` (3), `Find depth` (`4 * depth + 2`), `Link` (7) and `Union` (1).
-`event_cost` proves that the ticks equal the total weight of `events state`,
+`Cost.event_cost` proves that the ticks equal the total weight of
+`Cost.events state`,
 and each operation states the events it appends: `create` starts from
 `[Initialize]`, `make_set` appends `Allocate`, `find x` appends
-`Find (depth p x)` and leaves the snapshot `compressed p x`, and `union x y`
+`Find (Cost.depth p x)` and leaves the cost snapshot `Cost.compressed p x`,
+and `union x y`
 appends its two finds, a `Link` and `Union`. A client can therefore compute the
-ticks of any sequence of operations from the interface, and `account_bounds`
-bounds them by the credits paid. `depth` and `compressed` are abstract: the
-interface does not say how the forest determines them.
+ticks of any sequence of operations from the interface, and
+`Cost.account_bounds` bounds them by the credits paid. `Cost.depth` and
+`Cost.compressed` are abstract: the interface does not say how the forest
+determines them. Cost snapshots are independent of the pure partition model.
