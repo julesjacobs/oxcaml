@@ -20,9 +20,9 @@ let (mixed_instance @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t
     let[@def] choices : node Pref.t @ immutable total -> ty @ immutable total = fun _x -> Boolean in
     let refine_ args = P.direct_instance rho choices schema in
     interpret_def rho choices schema; interpret_def rho choices left; interpret_def rho choices right;
-    rho_def q; choices_def p; let wanted = Function (Variable p, Boolean) in T.embed_def wanted;
+    rho_def q; choices_def p; let wanted = Function (Variable p, Boolean) in D.embed_def wanted;
     let sigma = P.scheme rho schema in
-    let _checked : {u : unit | D.open_scheme sigma args === T.embed wanted} = refine_ () in
+    let _checked : {u : unit | D.open_scheme sigma args === D.embed wanted} = refine_ () in
     P.scheme_wf rho schema; let u = () in refine_ u)
 
 let (shared_parameter @ total) : (p : node Pref.t) @ immutable ->
@@ -33,5 +33,5 @@ let (shared_parameter @ total) : (p : node Pref.t) @ immutable ->
     let refine_ args = P.direct_instance rho choices schema in
     interpret_def rho choices schema; interpret_def rho choices parameter; choices_def p;
     let wanted = Function (t, t) in let sigma = P.scheme rho schema in
-    let _checked : {u : unit | D.open_scheme sigma args === T.embed wanted} = refine_ () in
+    let _checked : {u : unit | D.open_scheme sigma args === D.embed wanted} = refine_ () in
     P.scheme_wf rho schema; let u = () in refine_ u)

@@ -47,15 +47,15 @@ let rec work : (goal : goal) @ immutable -> (h : node Pref.heap Ghost.t) @ immut
     let p : {p : node Pref.t | lookup env i === Some p && H.mem h.Ghost.ghost p} = match found with
       | Some p -> refine_ p | None -> ghost_ (let impossible : {u : unit | false} = refine_ () in let refine_ impossible = impossible in ()); assert false in
     let refine_ p = p in
-    let c = {Effective_copy_runtime.saved = ghost_ h.Ghost.ghost; epoch = ghost_ p;
+    let c = {Effective_copy_spec.saved = ghost_ h.Ghost.ghost; epoch = ghost_ p;
       depth = ghost_ depth; base = ghost_ pool} in
-    let scope : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem c.Effective_copy_runtime.saved x) || source_ok c.Effective_copy_runtime.saved x})) Ghost.t =
+    let scope : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem c.Effective_copy_spec.saved x) || source_ok c.Effective_copy_spec.saved x})) Ghost.t =
       {Ghost.ghost = ghost_ (fun x -> facts.Ghost.ghost x; runtime_at_def h.Ghost.ghost heads.Ghost.ghost depth pool x;
         safe_def h.Ghost.ghost heads.Ghost.ghost x; let u = () in refine_ u)} in
-    let clean : (((x : node Pref.t) @ immutable -> {u : unit | match H.at c.Effective_copy_runtime.saved x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t =
+    let clean : (((x : node Pref.t) @ immutable -> {u : unit | match H.at c.Effective_copy_spec.saved x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t =
       {Ghost.ghost = ghost_ (fun x -> facts.Ghost.ghost x; runtime_at_def h.Ghost.ghost heads.Ghost.ghost depth pool x;
         safe_def h.Ghost.ghost heads.Ghost.ghost x; let u = () in refine_ u)} in
-    let valid_copy : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head c.Effective_copy_runtime.saved heads.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ valid.Ghost.ghost)} in
+    let valid_copy : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head c.Effective_copy_spec.saved heads.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ valid.Ghost.ghost)} in
     let refine_ copied = Certified_copy.instantiate c heads scope clean valid_copy (refine_ depth) pool p (refine_ state) in
   let execution = ghost_ (RVar (i, copied.#value, copied.#epoch, copied.#history, copied.#certificate)) in
   let after = ghost_ (Pref.own (borrow_ copied.#state)) in

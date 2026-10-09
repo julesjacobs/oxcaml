@@ -58,7 +58,7 @@ val literal : unit -> {n : int | n = 30} = <fun>
 val aliased_get_literal : unit -> {n : int | n = 20} = <fun>
 val normal_return_bounds :
   (values : int iarray) ->
-  int @ total -> {i : int | (0 <= i) && (i < (Iarray.length values))} = <fun>
+  int -> {i : int | (0 <= i) && (i < (Iarray.length values))} = <fun>
 val nested : unit -> {n : int | n = 7} = <fun>
 external raw_length : int iarray -> int = "%array_length"
 external raw_get : int iarray -> int -> int = "%array_safe_get"
@@ -541,5 +541,44 @@ let unequal_arrays () =
 Line 4, characters 46-59:
 4 |   let (_ : {a : int iarray | a === second}) = refine_ first in ();;
                                                   ^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+let initialized : (n : int) -> {a : int iarray | Iarray.length a = n} =
+  fun n -> Iarray.init n (fun i -> i)
+let initialized_alias : (n : int) -> {a : int iarray | Iarray.length a = n} =
+  fun n -> let init = Iarray.init in init n (fun i -> i)
+let initialization_effects () =
+  let seen = ref [] in
+  let values = Iarray.init 3 (fun i -> seen := i :: !seen; i) in
+  Iarray.to_list values, List.rev !seen
+let initialization_order = initialization_effects ();;
+[%%expect{|
+val initialized : (n : int) -> {a : int iarray | (Iarray.length a) = n} =
+  <fun>
+val initialized_alias : (n : int) -> {a : int iarray | (Iarray.length a) = n} =
+  <fun>
+val initialization_effects : unit -> int list * int list = <fun>
+val initialization_order : int list * int list = ([0; 1; 2], [0; 1; 2])
+|}]
+
+let wrong_initialization : (n : int) ->
+    {a : int iarray | Iarray.length a = n + 1} =
+  fun n -> Iarray.init n (fun i -> i);;
+[%%expect{|
+Line 3, characters 11-37:
+3 |   fun n -> Iarray.init n (fun i -> i);;
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+let shadowed_initialization : (n : int) ->
+    {a : int iarray | Iarray.length a = n} = fun n ->
+  let module Iarray = struct let init _ _ = [:0:] end in
+  Iarray.init n (fun i -> i);;
+[%%expect{|
+Line 4, characters 2-28:
+4 |   Iarray.init n (fun i -> i);;
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]

@@ -114,3 +114,44 @@ Line 4, characters 2-11:
       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
+
+type tree = Leaf | Node of tree * tree [@@inductive]
+type pair = { first : tree; second : tree }
+let rec (tuple_walk @ total) a b =
+  match a, b with
+  | Node (left, right), Node (other_left, other_right) ->
+    tuple_walk left other_left; tuple_walk right other_right
+  | _ -> ()
+let rec (record_walk @ total) a b =
+  match {first = a; second = b} with
+  | {first = Node (left, right); second = Node (other_left, other_right)} ->
+    record_walk left other_left; record_walk right other_right
+  | _ -> ();;
+[%%expect{|
+type tree = Leaf | Node of tree * tree [@@inductive]
+type pair = { first : tree; second : tree; }
+val tuple_walk : tree -> tree -> unit = <fun>
+val record_walk : tree -> tree -> unit = <fun>
+|}]
+
+let rec (tuple_same @ total) a b =
+  match a, b with
+  | Node _, _ -> tuple_same a b
+  | _ -> ();;
+[%%expect{|
+Line 3, characters 17-31:
+3 |   | Node _, _ -> tuple_same a b
+                     ^^^^^^^^^^^^^^
+Error: This recursive function cannot be total: the recursive argument is not a known proper descendant.
+|}]
+
+let rec (tuple_increasing @ total) a b =
+  match a, b with
+  | Node _, _ -> tuple_increasing (Node (a, a)) (Node (b, b))
+  | _ -> ();;
+[%%expect{|
+Line 3, characters 17-61:
+3 |   | Node _, _ -> tuple_increasing (Node (a, a)) (Node (b, b))
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This recursive function cannot be total: the recursive argument is not a known proper descendant.
+|}]

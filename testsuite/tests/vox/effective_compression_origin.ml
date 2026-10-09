@@ -12,18 +12,16 @@ let rec (leaf_origin @ total) : (saved : node Pref.heap) @ immutable -> (h : nod
     (x : node Pref.t) @ immutable -> {u : unit | Effective_compression_spec.effective_rewritten h after edits} ->
     {o : origin | not (low_var after x cut) || originates saved after cut x o} @ immutable ghost =
   fun saved h after edits cut prior x premise -> ghost_ (
-    let refine_ premise = premise in Effective_compression_spec.effective_rewritten_def h after edits; let u = () in
-    match edits with Done -> let refine_ o = prior x in refine_ o
+    Effective_compression_spec.effective_rewritten_def h after edits; match edits with Done -> let o = prior x in o
     | Write (p, q, r, d, rest) -> let v = redirect h p r in let middle = H.put h p v in
       let next : ((y : node Pref.t) @ immutable ->
         {o : origin | not (low_var middle y cut) || originates saved middle cut y o} @ immutable) @ total = fun y ->
-        let u = () in low_var_def h y cut; low_var_def middle y cut;
+        low_var_def h y cut; low_var_def middle y cut;
         below_def h y cut; below_def middle y cut; at_level_def h y; at_level_def middle y;
         Level_unifier_proofs.observe_write h p v y; Level_unifier_proofs.redirect_desc h p r;
-        redirect_def h p r; Copy_heap_proofs.put_frame h p v y;
-        if not (low_var middle y cut) then (let o = Origin (y, Stop) in refine_ o) else (
-          let refine_ o = prior y in originates_def saved h cut y o;
+        redirect_def h p r; if not (low_var middle y cut) then (let o = Origin (y, Stop) in o) else (
+          let o = prior y in originates_def saved h cut y o;
           match o with Origin (root, path) ->
-            let refine_ path = shortcut_path h p q r d root y path (refine_ u) in
-            let o = Origin (root, path) in originates_def saved middle cut y o; refine_ o) in
-      let refine_ o = leaf_origin saved middle after rest cut next x (refine_ u) in refine_ o)
+            let path = shortcut_path h p q r d root y path () in
+            let o = Origin (root, path) in originates_def saved middle cut y o; o) in
+      let o = leaf_origin saved middle after rest cut next x () in o)

@@ -28,6 +28,8 @@ let[@def] (ordered @ total) (h : node Pref.heap @ immutable) (p : node Pref.t @ 
   | Generic -> true | Finite n -> n >= 0 && children_below h v.desc n)
 
 type lowering = Keep | Lower of node Pref.t * node * lowering | Sequence of lowering * lowering [@@inductive]
+type written = #{state : node Pref.token; edits : lowering @@ ghost}
+
 let[@def] rec (lower_heap @ total) (h : node Pref.heap @ immutable) (bound : int) (d : lowering @ immutable) =
   ghost_ (match d with Keep -> h | Lower (p, old, rest) ->
     H.put (lower_heap h bound rest) p (lower_cell old bound)

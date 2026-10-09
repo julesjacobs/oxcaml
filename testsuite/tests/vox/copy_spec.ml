@@ -133,3 +133,7 @@ let[@def] (head_desc @ total) (t : template @ immutable) = match t with
   | Boundary _ | Parameter _ -> Var | Constant _ -> Bool
   | Product (_, a, b) -> Arrow (root a, root b) | Indirect (_, c) -> Link (root c)
 let[@def] (head_generic @ total) (t : template @ immutable) = match t with Boundary _ -> false | _ -> true
+
+let[@def] rec (extends @ total) (before : history @ immutable) (after : history @ immutable) = ghost_ (
+  before === after || match after with Start | Clean -> false
+  | Fresh (rest, _, _, _, _) | Alias (rest, _, _, _) -> extends before rest)

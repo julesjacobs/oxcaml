@@ -639,7 +639,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (depth : 
 let (with_closed_model @ total) : (e : execution) @ immutable -> (after : node Pref.heap) @ immutable ->
     (pool : pool) @ immutable -> (target : ty) @ immutable -> (d : D.typing) @ immutable ->
     {u : unit | ran (H.empty ()) 0 Generalize_spec.Empty Hm_environment_spec.Empty e after pool
-      && D.typed D.Z D.Empty_context (source e) (T.embed target) d} -> (claim : bool) ->
+      && D.typed D.Z D.Empty_context (source e) (D.embed target) d} -> (claim : bool) ->
     (use : ((rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (model : ((x : node Pref.t) @ immutable -> {u : unit | equation after rho x})) @ total ->
       {u : unit | Hm_complete_proofs.matches rho e target} -> {u : unit | claim})) @ total -> {u : unit | claim} @ ghost =
@@ -668,7 +668,7 @@ let (with_closed_model @ total) : (e : execution) @ immutable -> (after : node P
         let refine_ fit = fit in let u = () in
         let refine_ u = Hm_environment_proofs.realize_empty rho xi i sigma schema args (refine_ u) claim use in refine_ u in
     env_at_def h 0 env ts; aligned_def g ts;
-    T.eval_embed xi target; let mono = T.embed target in
+    T.eval_embed xi target; let mono = D.embed target in
     let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (next : ((x : node Pref.t) @ immutable -> {u : unit | equation after tau x})) @ total ->
       (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
@@ -679,7 +679,7 @@ let (with_closed_model @ total) : (e : execution) @ immutable -> (after : node P
 let (closed_completes @ total) : (e : execution) @ immutable -> (after : node Pref.heap) @ immutable ->
     (pool : pool) @ immutable -> (target : ty) @ immutable -> (d : D.typing) @ immutable ->
     {u : unit | ran (H.empty ()) 0 Generalize_spec.Empty Hm_environment_spec.Empty e after pool
-      && D.typed D.Z D.Empty_context (source e) (T.embed target) d} ->
+      && D.typed D.Z D.Empty_context (source e) (D.embed target) d} ->
     {u : unit | not (result e === None)} @ ghost = fun e after pool target d premise -> ghost_ (
     let refine_ premise = premise in let claim = not (result e === None) in
     let use : ((rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
@@ -691,7 +691,7 @@ let (closed_completes @ total) : (e : execution) @ immutable -> (after : node Pr
 let (closed_reject @ total) : (e : execution) @ immutable -> (after : node Pref.heap) @ immutable ->
     (pool : pool) @ immutable -> (target : ty) @ immutable -> (d : D.typing) @ immutable ->
     {u : unit | ran (H.empty ()) 0 Generalize_spec.Empty Hm_environment_spec.Empty e after pool
-      && result e === None && D.typed D.Z D.Empty_context (source e) (T.embed target) d} ->
+      && result e === None && D.typed D.Z D.Empty_context (source e) (D.embed target) d} ->
     {u : unit | false} @ ghost = fun e after pool target d premise -> ghost_ (
     let refine_ premise = premise in let u = () in closed_completes e after pool target d (refine_ u); refine_ u)
 
@@ -700,7 +700,7 @@ let (closed_factor @ total) : (e : execution) @ immutable -> (after : node Pref.
     (target : ty) @ immutable -> (d : D.typing) @ immutable ->
     {u : unit | ran (H.empty ()) 0 Generalize_spec.Empty Hm_environment_spec.Empty e after pool
       && result e === Some p && Level_finite_spec.finite after tree && Level_finite_spec.tree_root tree === p
-      && D.typed D.Z D.Empty_context (source e) (T.embed target) d} -> (claim : bool) ->
+      && D.typed D.Z D.Empty_context (source e) (D.embed target) d} -> (claim : bool) ->
     (use : ((delta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       {u : unit | target === Level_mgu_spec.substitute delta (Level_finite_spec.readback tree)} ->
       {u : unit | claim})) @ total -> {u : unit | claim} @ ghost =

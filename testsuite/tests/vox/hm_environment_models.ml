@@ -17,18 +17,18 @@ let rec (interpret_boundary_agreement @ total) : (s : template) @ immutable ->
     | Product (_, a, b) ->
       let left : ((x : node Pref.t) @ immutable ->
         {u : unit | not (boundary_member a x) || rho x === tau x}) @ total = fun x ->
-        boundary_member_def s x; equal x; let u = () in refine_ u in
+        boundary_member_def s x; equal x; () in
       let right : ((x : node Pref.t) @ immutable ->
         {u : unit | not (boundary_member b x) || rho x === tau x}) @ total = fun x ->
-        boundary_member_def s x; equal x; let u = () in refine_ u in
+        boundary_member_def s x; equal x; () in
       interpret_boundary_agreement a rho tau left choices;
       interpret_boundary_agreement b rho tau right choices; ()
     | Indirect (_, child) ->
       let next : ((x : node Pref.t) @ immutable ->
         {u : unit | not (boundary_member child x) || rho x === tau x}) @ total = fun x ->
-        boundary_member_def s x; equal x; let u = () in refine_ u in
+        boundary_member_def s x; equal x; () in
       interpret_boundary_agreement child rho tau next choices; ());
-    let u = () in refine_ u)
+    ())
 
 let rec (aligned_lookup @ total) : (g : D.context) @ immutable ->
     (ts : templates) @ immutable -> (i : D.index) @ immutable ->
@@ -36,13 +36,13 @@ let rec (aligned_lookup @ total) : (g : D.context) @ immutable ->
     {u : unit | match D.lookup g i, template_lookup ts i with
       None, None | Some _, Some _ -> true | _ -> false} @ ghost =
   fun g ts i premise -> ghost_ (
-    let refine_ premise = premise in aligned_def g ts;
+    aligned_def g ts;
     D.lookup_def g i; template_lookup_def ts i;
-    let u = () in match g with
-    | D.Empty_context -> refine_ u
-    | D.Binding (_, rest) -> match ts with No_templates -> refine_ u
-      | Template_binding (_, tail) -> match i with D.Z -> refine_ u
-        | D.S i -> aligned_lookup rest tail i (refine_ u); refine_ u)
+    match g with
+    | D.Empty_context -> ()
+    | D.Binding (_, rest) -> match ts with No_templates -> ()
+      | Template_binding (_, tail) -> match i with D.Z -> ()
+        | D.S i -> aligned_lookup rest tail i (); ())
 
 let (realize_empty @ total) :
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total -> (xi : (D.index @ immutable total -> ty @ immutable total)) @ total ->
@@ -54,20 +54,20 @@ let (realize_empty @ total) :
       {u : unit | interpret rho choices schema === T.meaning xi sigma args} ->
       {u : unit | claim})) @ total -> {u : unit | claim} @ ghost =
   fun rho xi i sigma schema args premise claim use -> ghost_ (
-    let refine_ premise = premise in let g = D.Empty_context in
-    D.lookup_def g i; let u = () in refine_ u)
+    let g = D.Empty_context in
+    D.lookup_def g i; ())
 
 let rec (eval_empty @ total) : (args : T.values) @ immutable ->
     (xi : (D.index @ immutable total -> ty @ immutable total)) @ total -> (a : D.mono) @ immutable ->
     {u : unit | args === T.No_values} ->
     {u : unit | T.eval_prefixed args xi a === T.eval xi a} @ ghost =
   fun args xi a premise -> ghost_ (
-    let refine_ premise = premise in T.eval_prefixed_def args xi a; T.eval_def xi a;
-    let u = () in match a with
-    | D.Parameter i -> T.prefix_def args xi i; refine_ u
-    | D.Free _ | D.Boolean -> refine_ u
-    | D.Function (a, b) -> eval_empty args xi a (refine_ u);
-      eval_empty args xi b (refine_ u); refine_ u)
+    T.eval_prefixed_def args xi a; T.eval_def xi a;
+    match a with
+    | D.Parameter i -> T.prefix_def args xi i; ()
+    | D.Free _ | D.Boolean -> ()
+    | D.Function (a, b) -> eval_empty args xi a ();
+      eval_empty args xi b (); ())
 
 let (realize_monomorphic @ total) :
     (g : D.context) @ immutable -> (ts : templates) @ immutable ->
@@ -89,20 +89,19 @@ let (realize_monomorphic @ total) :
       {u : unit | interpret rho choices schema === T.meaning xi sigma args} ->
       {u : unit | claim})) @ total -> {u : unit | claim} @ ghost =
   fun g ts rho xi realize p a fit i sigma schema args premise claim use -> ghost_ (
-    let refine_ fit = fit in let refine_ premise = premise in
     let z = D.Z in let mono = D.Forall (z, a) in
     let next = D.Binding (mono, g) in let bound = Boundary p in
     let next_ts = Template_binding (bound, ts) in
     D.lookup_def next i; template_lookup_def next_ts i;
-    let u = () in match i with
+    match i with
     | D.Z -> D.arity_def mono; T.values_length_def args;
       (match args with
       | T.No_values ->
-        T.meaning_def xi mono args; eval_empty args xi a (refine_ u);
+        T.meaning_def xi mono args; eval_empty args xi a ();
         interpret_def rho rho bound;
-        let refine_ u = use rho (refine_ u) in refine_ u
-      | T.Value _ -> refine_ u)
-    | D.S i -> let refine_ u = realize i sigma schema args (refine_ u) claim use in refine_ u)
+        let () = use rho () in ()
+      | T.Value _ -> ())
+    | D.S i -> let () = realize i sigma schema args () claim use in ())
 
 let (realize_weaken @ total) :
     (g : D.context) @ immutable -> (ts : templates) @ immutable ->
@@ -125,28 +124,27 @@ let (realize_weaken @ total) :
       {u : unit | interpret rho choices schema === T.meaning zeta sigma args} ->
       {u : unit | claim})) @ total -> {u : unit | claim} @ ghost =
   fun g ts rho xi realize ambient zeta equal i sigma schema args premise claim use -> ghost_ (
-    let refine_ premise = premise in let k = T.values_length ambient in
-    T.lookup_weaken k g i; let u = () in match D.lookup g i with
-    | None -> refine_ u
+    let k = T.values_length ambient in
+    T.lookup_weaken k g i; match D.lookup g i with
+    | None -> ()
     | Some original ->
       D.weaken_scheme_def k original;
       D.arity_def sigma; D.arity_def original;
       let forward : ((choices : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
         {u : unit | interpret rho choices schema === T.meaning xi original args} ->
         {u : unit | claim}) @ total = fun choices fit ->
-        let refine_ fit = fit in let u = () in
-        T.meaning_weaken args ambient xi zeta equal original (refine_ u);
-        let refine_ u = use choices (refine_ u) in refine_ u in
-      let refine_ u = realize i original schema args (refine_ u) claim forward in refine_ u)
+        T.meaning_weaken args ambient xi zeta equal original ();
+        let () = use choices () in () in
+      let () = realize i original schema args () claim forward in ())
 
 let rec (lookup_boundary @ total) : (ts : templates) @ immutable ->
     (i : D.index) @ immutable -> (s : template) @ immutable -> (p : node Pref.t) @ immutable ->
     {u : unit | template_lookup ts i === Some s && boundary_member s p} ->
     {u : unit | environment_boundary ts p} @ ghost = fun ts i s p premise -> ghost_ (
-    let refine_ premise = premise in template_lookup_def ts i; environment_boundary_def ts p;
-    let u = () in match ts with No_templates -> refine_ u
-    | Template_binding (_, rest) -> match i with D.Z -> refine_ u
-      | D.S i -> lookup_boundary rest i s p (refine_ u); refine_ u)
+    template_lookup_def ts i; environment_boundary_def ts p;
+    match ts with No_templates -> ()
+    | Template_binding (_, rest) -> match i with D.Z -> ()
+      | D.S i -> lookup_boundary rest i s p (); ())
 
 let (realize_transport @ total) :
     (g : D.context) @ immutable -> (ts : templates) @ immutable ->
@@ -169,15 +167,14 @@ let (realize_transport @ total) :
       {u : unit | interpret tau choices schema === T.meaning xi sigma args} ->
       {u : unit | claim})) @ total -> {u : unit | claim} @ ghost =
   fun g ts rho tau xi realize equal i sigma schema args premise claim use -> ghost_ (
-    let refine_ premise = premise in
     let boundaries : ((p : node Pref.t) @ immutable ->
         {u : unit | not (boundary_member schema p) || rho p === tau p}) @ total = fun p ->
       if boundary_member schema p then (
-        let u = () in lookup_boundary ts i schema p (refine_ u);
-        equal p; refine_ u) else let u = () in refine_ u in
+        lookup_boundary ts i schema p ();
+        equal p; ()) else () in
     let forward : ((choices : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
         {u : unit | interpret rho choices schema === T.meaning xi sigma args} ->
         {u : unit | claim}) @ total = fun choices fit ->
-      let refine_ fit = fit in interpret_boundary_agreement schema rho tau boundaries choices;
-      let u = () in let refine_ u = use choices (refine_ u) in refine_ u in
-    let u = () in let refine_ u = realize i sigma schema args (refine_ u) claim forward in refine_ u)
+      interpret_boundary_agreement schema rho tau boundaries choices;
+      let () = use choices () in () in
+    let () = realize i sigma schema args () claim forward in ())

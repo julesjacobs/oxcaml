@@ -23,7 +23,7 @@ module Capture_boundary = struct
       {u : unit | true} @ ghost = fun p q -> ghost_ (
     let empty = A.No_names in let names = A.Name (p, empty) in let schema = Boundary q in
     let[@def] rho : node Pref.t @ immutable total -> ty @ immutable total = fun _x -> Variable p in
-    rho_def q; let var = Variable p in T.embed_def var;
+    rho_def q; let var = Variable p in Hm_declarative.embed_def var;
     P.boundaries_avoid_def names rho schema;
     let free = Hm_declarative.Free p in A.avoids_def names free; A.position_def names p;
     let _wrong : {u : unit | P.boundaries_avoid names rho schema} = refine_ () in

@@ -9,12 +9,12 @@ module C = Hm_complete_proofs
 
 let (identity_typing @ total) : (a : ty) @ immutable ->
     {d : D.typing | D.typed D.Z D.Empty_context (D.Lambda (D.Bound D.Z))
-      (T.embed (Function (a, a))) d} @ immutable ghost = fun a -> ghost_ (
-    let z = D.Z in let empty = D.Empty_context in let at = T.embed a in
+      (D.embed (Function (a, a))) d} @ immutable ghost = fun a -> ghost_ (
+    let z = D.Z in let empty = D.Empty_context in let at = D.embed a in
     let scheme = D.Forall (z, at) in let env = D.Binding (scheme, empty) in
     let args = D.No_arguments in let variable = D.Variable args in let body = D.Bound z in
-    let e = D.Lambda body in let target = Function (a, a) in T.embed_def target;
-    let t = T.embed target in let d = D.Abstraction (at, variable) in
+    let e = D.Lambda body in let target = Function (a, a) in D.embed_def target;
+    let t = D.embed target in let d = D.Abstraction (at, variable) in
     T.embed_wf z a; T.embed_wf z target; D.context_wf_def z empty; D.context_wf_def z env;
     D.scheme_wf_def z scheme; D.add_def z z; D.lookup_def env z;
     D.length_def args; D.arity_def scheme; D.arguments_wf_def z args;

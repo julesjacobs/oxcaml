@@ -12,6 +12,9 @@ module D = Hm_declarative
 module F = Fast_environment
 module T = Fast_term
 
+external[@layout_poly] raise_any : ('a : any).
+  exn -> 'a @ portable unique = "%raise"
+
 type infer_goal = { heap : node Pref.heap @@ ghost; depth : int @@ ghost;
   pool : pool @@ ghost; env : env @@ ghost; term : D.term @@ ghost }
 
@@ -396,7 +399,8 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
     | T.Let (runtime_rhs, runtime_body) ->
       let rhs = ghost_ (T.source runtime_rhs) in let body = ghost_ (T.source runtime_body) in
       let child_depth = depth + 1 in
-      if child_depth < 0 then assert false else (
+      if child_depth < 0 then
+        raise_any (Failure "type inference level capacity") else (
       let child_pool : pool = Generalize_spec.Empty in
       let child_facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h.Ghost.ghost child_depth child_pool x}) @ total ghost = ghost_ (fun x ->
         facts x; let u = () in enter_runtime h.Ghost.ghost depth pool x (refine_ u); refine_ u) in

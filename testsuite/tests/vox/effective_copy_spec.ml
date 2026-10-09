@@ -50,3 +50,15 @@ let[@def] (effective_children_available @ total) (saved : node Pref.heap @ immut
     (desc : desc @ immutable) = ghost_ (match desc with Var | Bool -> true
   | Link q -> effective_available saved heads d q
   | Arrow (a, b) -> effective_available saved heads d a && effective_available saved heads d b)
+
+type context = { saved : node Pref.heap @@ ghost;
+  epoch : node Pref.t @@ ghost; depth : int @@ ghost; base : Generalize_spec.pool @@ ghost }
+
+let[@def] (result @ total) (c : context @ immutable) (heads : Effective_level.heads @ total) (before : history @ immutable)
+    (p : node Pref.t @ immutable) (value : node Pref.t @ immutable)
+    (after : node Pref.heap @ immutable) (d : history @ immutable)
+    (pool : Generalize_spec.pool @ immutable) (trail : Generalize_spec.pool @ immutable) = ghost_ (
+  effective_valid c.saved heads c.epoch c.depth d && clean_session d
+  && after === heap c.saved c.epoch c.depth d
+  && pool === Pooled_spec.registered c.base c.epoch d && trail === Pooled_spec.touched d
+  && extends before d && effective_target_for c.saved heads d p value)

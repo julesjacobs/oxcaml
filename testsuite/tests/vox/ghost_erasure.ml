@@ -72,7 +72,7 @@ end;;
                   (consts (0))
                    (non_consts ([0: ?,
                                  value<(consts (0)) (non_consts ([0: ?, *]))>]))>]
-            : int (seq (opaque 24029) 7)))
+            : int 7))
        (makeblock 0 run/1)))
   (makeblock 0 Statement_client/0))
 module Statement_client : sig val run : int list -> int end
