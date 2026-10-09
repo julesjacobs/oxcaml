@@ -37,10 +37,12 @@ async function main() {
       if (lambda && result.lambda) process.stdout.write(result.lambda);
     }
   }
+  await new Promise((resolve) => process.stdout.write('', resolve));
   process.exit(0);
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
   console.error(error);
+  await new Promise((resolve) => process.stderr.write('', resolve));
   process.exit(1);
 });

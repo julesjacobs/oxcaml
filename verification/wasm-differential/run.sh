@@ -82,30 +82,53 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 parts=$(mktemp -d)
+trap 'rm -rf "$parts"' EXIT
 share=$(( (count + jobs - 1) / jobs ))
+pids=()
 for (( j = 0; j < jobs; j++ )); do
   start=$(( from + j * share ))
   n=$(( share < from + count - start ? share : from + count - start ))
   (( n > 0 )) || continue
   "$build/wasm_differential.exe" -harness "$harness" -from "$start" -count "$n" ${rest[@]+"${rest[@]}"} > "$parts/$j.txt" &
+  pids+=("$!")
 done
-wait
+failed=0
+for pid in ${pids[@]+"${pids[@]}"}; do
+  if ! wait "$pid"; then failed=1; fi
+done
+if [[ $failed -ne 0 ]]; then
+  echo "wasm differential check: a worker failed" >&2
+  exit 1
+fi
 python3 - "$count" "$from" "$parts"/*.txt <<'EOF'
 import re, sys
 count, start, files = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3:]
-tally, steps, cases, model, total = {}, {}, [], '', 0
+tally, steps, cases, model, total, modules = {}, {}, [], '', 0, 0
 for name in files:
     section = None
+    complete = False
+    size = None
     for line in open(name):
         line = line.rstrip('\n')
         if line.startswith('Model fuel'): model = line
-        elif line.startswith('Differential'): section = tally
+        elif line.startswith('Differential'):
+            size = int(re.search(r': (\d+) modules,', line).group(1))
+            modules += size
+            section = tally
         elif line.startswith('Executed by the model'): section = steps
-        elif line.startswith('Disagreements:'): total += int(line.split()[1]); section = 'cases'
+        elif line.startswith('Disagreements:'):
+            total += int(line.split()[1])
+            section = 'cases'
+            complete = True
         elif section == 'cases': cases.append(line)
         elif line.startswith('  ') and section is not None:
             m = re.match(r'  (.*?)\s+(\d+)$', line)
             section[m.group(1)] = section.get(m.group(1), 0) + int(m.group(2))
+    if size is None or not complete:
+        sys.exit(f'wasm differential check: incomplete worker output: {name}')
+if modules != count:
+    sys.exit(f'wasm differential check: expected {count} modules, '
+             f'got {modules}')
 print(f'Differential test of the WebAssembly model against Node: {count} modules, ids {start}-{start + count - 1}')
 print(model)
 for k in sorted(tally): print(f'  {k:<78} {tally[k]:8}')
@@ -115,4 +138,3 @@ if steps:
 print(f'Disagreements: {total}')
 for c in cases: print(c)
 EOF
-rm -rf "$parts"

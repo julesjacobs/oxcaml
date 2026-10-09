@@ -43,10 +43,14 @@ git -C "$root" rev-parse --verify --quiet "$base^{commit}" > /dev/null || {
   git -C "$root" ls-files -o --exclude-standard -- testsuite/tests "$library"
 } | LC_ALL=C sort -u > "$work/changed"
 
-for suite in $suites; do
-  (cd "$root/testsuite/tests/$suite" && "$ocamltest" -list-tests .) |
-    sed "s|^|testsuite/tests/$suite/|"
-done > "$work/tests"
+(cd "$root" &&
+  for suite in $suites; do
+    "$ocamltest" -find-test-dirs "testsuite/tests/$suite" |
+      while IFS= read -r directory; do
+        "$ocamltest" -list-tests "$directory" |
+          sed "s|^|$directory/|"
+      done
+  done) > "$work/tests"
 
 if awk '
     /^(testsuite\/tests|research)\// { next }
@@ -97,10 +101,35 @@ done > "$work/headers"
 # Module dependencies of every source in the suites and the library.
 (cd "$root" &&
   for directory in $library $(printf 'testsuite/tests/%s ' $suites); do
-    ls "$directory"/*.ml "$directory"/*.mli 2>/dev/null || true
+    find "$directory" \( -type f -o -type l \) \
+      \( -name '*.ml' -o -name '*.mli' \)
   done) > "$work/candidates"
+# A changed library source also changes every symlink to that source.
+perl -MCwd=abs_path -e '
+  my ($root, $changes_name, $candidates_name) = @ARGV;
+  chdir $root or die "$root: $!\n";
+  open my $changes, "<", $changes_name or die "$changes_name: $!\n";
+  my %changed;
+  while (<$changes>) {
+    chomp;
+    my $path = abs_path($_);
+    $changed{$path} = 1 if defined $path;
+  }
+  open my $files, "<", $candidates_name or die "$candidates_name: $!\n";
+  while (<$files>) {
+    chomp;
+    my $path = abs_path($_);
+    print "$_\n" if defined $path && $changed{$path};
+  }
+' "$root" "$work/changed" "$work/candidates" > "$work/aliases"
+cat "$work/aliases" >> "$work/changed"
+# Syntax-negative tests still contribute their lexical dependencies.
 (cd "$root" && tr '\n' '\0' < "$work/candidates" |
-  xargs -0 "$ocamldep" -modules) > "$work/depend"
+  xargs -0 "$ocamldep" -allow-approx -modules) > "$work/depend" \
+  2> "$work/depend-errors" || {
+    cat "$work/depend-errors" >&2
+    exit 1
+  }
 
 awk -F '\t' -v library="$library" '
   FILENAME == ARGV[1] { changed[$0] = 1; next }
