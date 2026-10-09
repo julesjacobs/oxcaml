@@ -84,6 +84,24 @@ module Ackermann :
   end
 |}]
 
+module Annotated = struct
+  let rec (grid @ total) row column =
+    if row > 0 then grid (row - 1) column
+    else if column > 0 then grid row (column - 1)
+    else 0
+  [@@decreases (((row, column) : int * int) : int * int)]
+
+  let rec (mixed @ total) (row : Bigint.t) column =
+    if row > 0Z then mixed (Bigint.sub row 1Z) column
+    else if column > 0 then mixed row (column - 1)
+    else 0
+  [@@decreases ((row, column) : Bigint.t * int)]
+end;;
+[%%expect{|
+module Annotated :
+  sig val grid : int -> int -> int val mixed : Bigint.t -> int -> int end
+|}]
+
 (* The first component must not grow when a later one decreases. *)
 let rec swapped (m : Bigint.t) (n : Bigint.t) : Bigint.t =
   if m <= 0Z then Bigint.add n 1Z
@@ -104,16 +122,16 @@ Line 5, characters 13-19:
 (* A decreasing Bigint component must stay nonnegative. *)
 let rec below_zero (m : Bigint.t) (n : int) : int =
   if n > 0 then below_zero (Bigint.sub m 1Z) n else 0
-[@@decreases (m, n)];;
+[@@decreases ((m, n) : Bigint.t * int)];;
 [%%expect{|
 Line 2, characters 16-46:
 2 |   if n > 0 then below_zero (Bigint.sub m 1Z) n else 0
                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample: n = 1, m = 0Z)
-Line 3, characters 13-19:
-3 | [@@decreases (m, n)];;
-                 ^^^^^^
-  Required by this decreases attribute
+Line 3, characters 13-38:
+3 | [@@decreases ((m, n) : Bigint.t * int)];;
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^
+Required by this decreases attribute
 |}]
 
 (* A total function without a definition says nothing about its result. *)
@@ -151,11 +169,11 @@ Line 4, characters 15-29:
 |}]
 
 let rec boolean n = if n > 0 then boolean (n - 1) else 0
-[@@decreases (n, true)];;
+[@@decreases ((n, true) : int * bool)];;
 [%%expect{|
-Line 2, characters 17-21:
-2 | [@@decreases (n, true)];;
-                     ^^^^
+Line 2, characters 18-22:
+2 | [@@decreases ((n, true) : int * bool)];;
+                      ^^^^
 Error: The constructor "true" has type "bool"
        but an expression was expected of type "int"
 |}]

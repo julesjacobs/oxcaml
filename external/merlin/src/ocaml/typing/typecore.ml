@@ -17526,7 +17526,12 @@ let () = type_decreases := (fun self fn measure ->
         unify_exp ~sexp env measure (instance Predef.type_int)
   in
   (* A tuple is a lexicographic measure. *)
-  begin match sexp.pexp_desc, measure.exp_desc with
+  let rec without_constraints sexp =
+    match sexp.pexp_desc with
+    | Pexp_constraint (inner, _, _) -> without_constraints inner
+    | _ -> sexp
+  in
+  begin match (without_constraints sexp).pexp_desc, measure.exp_desc with
   | Pexp_tuple scomponents, Texp_tuple (components, _)
     when List.length scomponents = List.length components ->
       List.iter2 (fun (_, sexp) (_, measure) -> component sexp measure)
