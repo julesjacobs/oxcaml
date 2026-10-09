@@ -1,0 +1,16 @@
+diff --git a/smt/core/node.ml b/smt/core/node.ml
+index 3260952..644facc 100644
+--- a/smt/core/node.ml
++++ b/smt/core/node.ml
+@@ -52,10 +52,7 @@ let equal_node (a : node) (b : node) =
+   | App (f, xs), App (g, ys) -> Symbol.equal f g && same_children xs ys
+   | Arith l1, Arith l2 ->
+     Int.equal l1.const l2.const
+-    && Iarr.equal
+-         (fun (t1, c1) (t2, c2) -> t1.tag = t2.tag && Int.equal c1 c2)
+-         l1.coeffs
+-         l2.coeffs
++    && Iarr.equal (fun (t1, _) (t2, _) -> t1.tag = t2.tag) l1.coeffs l2.coeffs
+   | Le x, Le y -> x.tag = y.tag
+   | Eq (a1, a2), Eq (b1, b2) -> a1.tag = b1.tag && a2.tag = b2.tag
+   | Not x, Not y -> x.tag = y.tag

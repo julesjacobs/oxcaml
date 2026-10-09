@@ -1,0 +1,10 @@
+; New stage-2 library (ADR-0012 lemma tier, §1.2): the lemma store, placeholder
+; qvars, ground instances, and the instantiation manager. It sits ABOVE the theories
+; and BESIDE interface/ — the Session owns one manager. stdlib-only over oxsmt_core +
+; oxsmt_solver (AGENTS.md dependency firewall, I3): core for the term layer, solver for
+; [Sat.var] (a lemma records its owning frame's selector var, §1.1). It is NOT a THEORY,
+; is NOT composed into Combine, and does NOT touch the frozen seam (R-EM4).
+
+(library
+ (name oxsmt_ematch)
+ (libraries oxsmt_core oxsmt_solver))

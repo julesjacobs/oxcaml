@@ -1,0 +1,6 @@
+module=presolve
+suite=wiring-test
+target=smt/interface/presolve.ml
+description=Equality-over-ITE projection swaps the two projected sub-equalities: (= (ite c x y) d) is rewritten as (ite c (= y d) (= x d)) instead of (ite c (= x d) (= y d)). This inverts the condition's truth on the projected atom — a wrong-verdict bug (the projected condition reads as its complement). On (= (ite (= x 0) 923 926) 923) the correct projection is (ite (= x 0) true false) = (= x 0), but the swap gives (ite (= x 0) false true) = (not (= x 0)); and the end-to-end (= (ite (= x 0) 10 20) 20) with (not (= x 0)) is sat (x<>0) but the swap reads x=0 and flips it to a wrong-Unsat. Killed by test_proj_eq_over_ite_fires / test_proj_eq_over_ite_neg / test_proj_e2e_no_wrong_unsat.
+review=task #34 equality-over-ITE projection; logs/ite-projection-log.md soundness net (branch order)
+expected=KILLED-TEST

@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# Parallel, label-checked full-corpus sweep (board #124).
+#
+# The solver is single-threaded and deterministic, so the corpus is embarrassingly
+# parallel: fan out over `xargs -P` with one corpus_classify PROCESS per file under a hard
+# `timeout` (SIGKILL). Per-process isolation means no shared state across files — this is
+# what makes a tight timeout safe and deterministic (no shared intern table / SIGALRM
+# mid-intern). The run's payload is ZERO soundness mismatches — a definite verdict
+# contradicting a file's :status is CRITICAL and makes this exit nonzero; unknown-vs-label
+# is the expected v1 completeness gap.
+#
+# Output is JSON in the committed baseline schema (oxsmt-corpus-baseline/v1) written to
+# ../logs — NEVER to tests/corpus/baseline_summary.json (that committed snapshot is a
+# deliberate manual copy+commit; see tests/README.md). Digest to stdout; per-file detail
+# to $CORPUS_RAW.
+#
+# Env knobs (Makefile sets them): CLASSIFY (the corpus_classify exe), CORPUS_TIMEOUT (s),
+# CORPUS_JOBS, CORPUS_MAX_BYTES, CORPUS_MAX_EFFORT, CORPUS_JSON, CORPUS_RAW. Positional
+# args: the logic dirs.
+set -uo pipefail
+
+CLASSIFY="${CLASSIFY:?CLASSIFY must point at the corpus_classify exe}"
+TIMEOUT="${CORPUS_TIMEOUT:-2}"
+JOBS="${CORPUS_JOBS:-48}"
+MAXBYTES="${CORPUS_MAX_BYTES:-20971520}"
+# board #60 counted cutoff: when set, each corpus_classify runs with --max-effort N (a
+# deterministic, load-independent cap). Empty = unbounded (the wall timeout still bounds
+# each file, and the emitted per-file effort feeds calibration to pick N).
+MAXEFFORT="${CORPUS_MAX_EFFORT:-}"
+JSON="${CORPUS_JSON:-../logs/corpus-run.json}"
+RAW="${CORPUS_RAW:-../logs/corpus-run.raw}"
+TRUNK="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+# Board #69 — binary-provenance stamp. A measurement is only PROMOTABLE from a release-
+# config binary on a clean tree; record the facts so `make promote-baseline` can enforce
+# it fail-closed (no override) and STATUS.md can display them.
+#  - build_commit: full HEAD. The Makefile rebuilds CLASSIFY immediately before this run,
+#    so on a CLEAN tree the binary is built from exactly this commit; a DIRTY tree breaks
+#    that guarantee, hence [dirty] is itself part of the promotable predicate.
+#  - assertions / euf_self_check: read straight from the binary via `--stamp`, so they
+#    describe the ACTUAL build/run config, not an assumption.
+BUILD_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then DIRTY=true; else DIRTY=false; fi
+STAMP="$("$CLASSIFY" --stamp 2>/dev/null || echo '')"
+ASSERTIONS="$(printf '%s' "$STAMP" | sed -n 's/.*assertions=\([a-z]*\).*/\1/p')"
+EUF_SELF_CHECK="$(printf '%s' "$STAMP" | sed -n 's/.*euf_self_check=\([a-z]*\).*/\1/p')"
+[ -n "$ASSERTIONS" ] || ASSERTIONS=unknown
+[ -n "$EUF_SELF_CHECK" ] || EUF_SELF_CHECK=unknown
+# codex AP5(ii): bind the stamp to the ACTUAL classifier binary by its sha256 (forensic /
+# audit — detects a stamp that describes one binary but was produced by another, e.g. a
+# stale CLASSIFY passed to a direct corpus_run.sh invocation). Not a promote gate itself;
+# the gate keys on release_config, and the make target fixes CLASSIFY to the fresh build.
+CLASSIFIER_SHA256="$(sha256sum "$CLASSIFY" 2>/dev/null | cut -d' ' -f1)"
+[ -n "$CLASSIFIER_SHA256" ] || CLASSIFIER_SHA256=unknown
+# release_config: the fail-closed predicate the promote gate re-checks.
+if [ "$ASSERTIONS" = off ] && [ "$EUF_SELF_CHECK" = off ] && [ "$DIRTY" = false ]; then
+  RELEASE_CONFIG=true
+else
+  RELEASE_CONFIG=false
+fi
+
+mkdir -p "$(dirname "$JSON")" "$(dirname "$RAW")"
+
+# Per-file: emit "<logic> <outcome> <effort> <file>". Outcome is a corpus_classify token
+# (solved-sat|solved-unsat|unknown|unknown-incremental|parse-fail|mismatch) or, added here,
+# skip-too-big / timeout / error. Effort is corpus_classify's deterministic counted work
+# (board #60), or "-" for the rows classify never produced (skip/timeout/error).
+classify_one() {
+  local file="$1" logic="$2" out rc sz tok eff
+  sz=$(stat -c%s "$file" 2>/dev/null || echo 0)
+  if [ "$sz" -gt "$MAXBYTES" ]; then
+    echo "$logic skip-too-big - $file"
+    return
+  fi
+  out=$(timeout -k 1 "${TIMEOUT}s" "$CLASSIFY" ${MAXEFFORT:+--max-effort "$MAXEFFORT"} "$file" 2>/dev/null)
+  rc=$?
+  if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+    tok=timeout
+    eff=-
+  elif [ "$rc" -ne 0 ] || [ -z "$out" ]; then
+    tok=error
+    eff=-
+  else
+    tok=$(printf '%s' "$out" | awk '{print $1}')
+    eff=$(printf '%s' "$out" | awk '{print $2}')
+    [ -n "$eff" ] || eff=-
+  fi
+  echo "$logic $tok $eff $file"
+}
+export -f classify_one
+export CLASSIFY TIMEOUT MAXBYTES MAXEFFORT
+
+: >"$RAW"
+start=$(date +%s.%N)
+declare -A avail
+for d in "$@"; do
+  [ -d "$d" ] || {
+    echo "corpus-run: no such dir $d (skipping)" >&2
+    continue
+  }
+  logic=$(basename "$d")
+  avail[$logic]=$(find "$d" -name '*.smt2' | wc -l)
+  find "$d" -name '*.smt2' -print0 \
+    | xargs -0 -P "$JOBS" -I{} bash -c 'classify_one "$1" "$2"' _ {} "$logic" >>"$RAW"
+done
+end=$(date +%s.%N)
+wall=$(awk "BEGIN{printf \"%.1f\", $end-$start}")
+nfiles=$(wc -l <"$RAW")
+fps=$(awk "BEGIN{ if ($wall>0) printf \"%.1f\", $nfiles/$wall; else print 0 }")
+
+OUTCOMES="solved-sat solved-unsat unknown unknown-incremental parse-fail timeout skip-too-big error"
+logics=$(awk '{print $1}' "$RAW" | sort -u)
+c() { awk -v l="$1" -v o="$2" '$1==l && $2==o' "$RAW" | wc -l; }
+total_mismatch=$(awk '$2=="mismatch"' "$RAW" | wc -l)
+
+# JSON in the committed baseline schema (oxsmt-corpus-baseline/v1) + run metadata.
+{
+  echo "{"
+  echo "  \"schema\": \"oxsmt-corpus-baseline/v1\","
+  echo "  \"trunk\": \"$TRUNK\","
+  echo "  \"stamp\": { \"build_commit\": \"$BUILD_COMMIT\", \"dirty\": $DIRTY, \"assertions\": \"$ASSERTIONS\", \"euf_self_check\": \"$EUF_SELF_CHECK\", \"classifier_sha256\": \"$CLASSIFIER_SHA256\", \"max_effort\": \"${MAXEFFORT:-unbounded}\", \"release_config\": $RELEASE_CONFIG },"
+  echo "  \"timeout_s\": $TIMEOUT, \"workers\": $JOBS, \"wall_s\": $wall, \"files_per_s\": $fps,"
+  echo "  \"logics\": {"
+  first=1
+  for l in $logics; do
+    [ $first -eq 1 ] || echo ","
+    first=0
+    tot=0
+    fields=""
+    for o in $OUTCOMES; do
+      n=$(c "$l" "$o")
+      tot=$((tot + n))
+      fields="$fields \"$o\": $n,"
+    done
+    mm=$(c "$l" mismatch)
+    tot=$((tot + mm))
+    printf "    %s: { \"total_available\": %s, \"scanned\": %d, \"outcomes\": {%s }, \"mismatches\": %d }" \
+      "\"$l\"" "${avail[$l]:-$tot}" "$tot" "${fields%,}" "$mm"
+  done
+  echo ""
+  echo "  },"
+  echo "  \"mismatch_count\": $total_mismatch"
+  echo "}"
+} >"$JSON"
+
+# Digest to stdout.
+echo "corpus-run @ $TRUNK | timeout ${TIMEOUT}s | $JOBS workers | ${wall}s | ${fps} files/s"
+printf "%-10s %8s %8s %8s %8s %8s %8s %8s %8s %8s\n" \
+  logic scanned solv-sat solv-uns unknown incr parsefail timeout toobig MISMATCH
+emit_row() {
+  local l="$1"
+  printf "%-10s %8s %8s %8s %8s %8s %8s %8s %8s %8s\n" \
+    "$l" "$(awk -v l="$l" '$1==l' "$RAW" | wc -l)" \
+    "$(c "$l" solved-sat)" "$(c "$l" solved-unsat)" "$(c "$l" unknown)" \
+    "$(c "$l" unknown-incremental)" "$(c "$l" parse-fail)" "$(c "$l" timeout)" \
+    "$(c "$l" skip-too-big)" "$(c "$l" mismatch)"
+}
+for l in $logics; do emit_row "$l"; done
+printf "%-10s %8s %8s %8s %8s %8s %8s %8s %8s %8s\n" \
+  TOTAL "$nfiles" \
+  "$(awk '$2=="solved-sat"' "$RAW" | wc -l)" "$(awk '$2=="solved-unsat"' "$RAW" | wc -l)" \
+  "$(awk '$2=="unknown"' "$RAW" | wc -l)" "$(awk '$2=="unknown-incremental"' "$RAW" | wc -l)" \
+  "$(awk '$2=="parse-fail"' "$RAW" | wc -l)" "$(awk '$2=="timeout"' "$RAW" | wc -l)" \
+  "$(awk '$2=="skip-too-big"' "$RAW" | wc -l)" "$total_mismatch"
+echo "json: $JSON"
+echo "raw:  $RAW"
+
+# board #60 calibration aid: the effort distribution over SOLVED files (effort is RAW col
+# 3; "-" rows — skip/timeout/error — are excluded). The counted cutoff is picked near the
+# knee (e.g. p99) so counted-solved is a SUPERSET of today's wall-quiet-solved set.
+solved_eff=$(awk '($2=="solved-sat"||$2=="solved-unsat") && $3!="-"{print $3}' "$RAW" | sort -n)
+n_solved=$(printf '%s\n' "$solved_eff" | grep -c . || true)
+pct() {
+  printf '%s\n' "$solved_eff" \
+    | awk -v p="$1" 'NF{a[++n]=$1} END{if(n==0){print 0;exit} i=int((p/100)*n); if(i<1)i=1; if(i>n)i=n; print a[i]}'
+}
+[ -n "$MAXEFFORT" ] \
+  && echo "cutoff: --max-effort $MAXEFFORT (deterministic; solved-set is load-independent)"
+echo "effort (solved, #60): n=$n_solved p50=$(pct 50) p90=$(pct 90) p99=$(pct 99) max=$(pct 100)  [pick --max-effort near the knee]"
+
+if [ "$total_mismatch" -gt 0 ]; then
+  echo ""
+  echo "CRITICAL: $total_mismatch SOUNDNESS MISMATCH(ES) — verdict contradicts label:"
+  awk '$2=="mismatch"{print "  "$4}' "$RAW" | head -20
+  exit 1
+fi
+echo "soundness: 0 mismatches"

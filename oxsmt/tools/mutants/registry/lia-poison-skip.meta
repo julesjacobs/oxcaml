@@ -1,0 +1,6 @@
+module=lia
+suite=lia-test
+target=smt/theories/lia/lia.ml
+description=ensure_live short-circuited to a no-op: a poisoned (post-overflow, mid-pivot) instance is no longer bricked, so reuse resumes returning verdicts computed from corrupt tableau state (the review item-10 spurious-verdict hazard).
+review=lia-review.md item 10 (poisoned-instance reuse); INVARIANTS I8; DESIGN §10 (mutation testing)
+expected=KILLED-TEST

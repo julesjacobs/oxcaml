@@ -1,0 +1,7 @@
+; Test-only cert step-2 corpus gate: drives real .smt2 files through the shipped Session
+; with a recorder installed, and replays each Unsat cert through Oxsmt_certificate.Checker.
+; Links the test-only SMT-LIB parser (never shipped). Run via `make cert-corpus-gate`.
+
+(executable
+ (name cert_corpus_gate)
+ (libraries oxsmt_core oxsmt_interface oxsmt_smtlib_parser oxsmt_certificate))

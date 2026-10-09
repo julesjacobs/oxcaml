@@ -1,0 +1,13 @@
+diff --git aa/smt/interface/presolve.ml bb/smt/interface/presolve.ml
+index 9a3e3d7981..456e953d61 100644
+--- aa/smt/interface/presolve.ml
++++ bb/smt/interface/presolve.ml
+@@ -725,7 +725,7 @@ let bool_ite ctx (c : Term.t) (x : Term.t) (y : Term.t) =
+   | Bool_const false -> y
+   | _ ->
+     (match x.node, y.node with
+-     | Bool_const true, Bool_const false -> c
++     | Bool_const true, Bool_const false -> Context.not_ ctx c
+      | Bool_const false, Bool_const true -> Context.not_ ctx c
+      | Bool_const true, _ -> Context.or_ ctx [ c; y ]
+      | Bool_const false, _ -> Context.and_ ctx [ Context.not_ ctx c; y ]

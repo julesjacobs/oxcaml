@@ -1,0 +1,22 @@
+; Test-harness executables. Outside the smt/ firewall (I3), stdlib + Unix only.
+
+; run_harness: the .smt2 golden/expect regression runner (make test / make promote).
+
+(executable
+ (name run_harness)
+ (modules run_harness)
+ (libraries harness_lib))
+
+; stub_solver: stands in for the real solver via the CLI contract until it exists.
+
+(executable
+ (name stub_solver)
+ (modules stub_solver)
+ (libraries harness_lib))
+
+; harness_test: pure unit self-test proving the harness classifies red correctly.
+
+(test
+ (name harness_test)
+ (modules harness_test)
+ (libraries harness_lib))

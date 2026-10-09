@@ -1,0 +1,9 @@
+; Consumer test for the M4 core prelude (task/core-prelude). Depends ONLY on oxsmt_core,
+; so it is a faithful external consumer: it proves the ADR-0005 THEORY vocabulary
+; (Atom/Lit/Explanation/Theory/Model) is reachable as Oxsmt_core.* and that Model.of_alist
+; behaves. Run via `make core-prelude-test`.
+
+(executable
+ (name prelude_test)
+ (modules prelude_test)
+ (libraries oxsmt_core))

@@ -1,0 +1,575 @@
+(* Adversarial self-test for the QF_BV bit-blaster (smt/bitblast), driven through
+   bv-front's real term vocabulary ({!Oxsmt_core.Bv}) and the {!Bv_adapter} classifier.
+
+   Three layers, in increasing coverage:
+
+   1. EXHAUSTIVE SMALL-WIDTH ORACLE. For every operator, at widths 3 and 4, enumerate ALL
+      input assignments and check the Tseitin circuit against {!Bv_eval} — an INDEPENDENT
+      value-arithmetic evaluator that shares none of the circuit machinery. Two solves per
+      input combo prove the circuit computes EXACTLY the evaluator:
+      - "wrong answer is UNSAT": inputs pinned AND output != expected => Unsat (rules out
+        under-constraint);
+      - "right answer is SAT": inputs pinned AND output = expected => Sat (rules out
+        over-constraint). For a Bool-result op the same two directions run on its literal.
+        Division (the mul-wraparound spurious-quotient trap) also gets a wider width-5
+        pass, including divide-by-zero.
+
+   2. END-TO-END through {!Bv_solve}: hand sat/unsat formulas; every Sat model is checked
+      by re-evaluating the formula under it (also enforced inside the driver as a
+      fail-closed net).
+
+   3. FAIL-CLOSED door: a formula with an unencoded construct (an uninterpreted function
+      over bit-vectors, outside QF_BV) returns [Unknown], never a verdict.
+
+   Stdlib-only (I3); deterministic (full enumeration, no PRNG, no wall-clock). Nonzero
+   exit on any failed check. *)
+
+open Oxsmt_core
+module Sat = Oxsmt_solver.Sat
+open Oxsmt_bitblast
+
+let defs = Bv_adapter.defs
+let big = Bigint.of_int
+let checks = ref 0
+let failures = ref 0
+
+let check name cond =
+  incr checks;
+  if not cond
+  then (
+    incr failures;
+    Printf.printf "  FAIL %s\n" name)
+;;
+
+(* A capped env plus its reserved-namespace minter: the bit-vector builders mint their
+   [.oxsmt.bv.*] symbols through [mint] (board #58), while [bvvar] declares an ordinary
+   user-named bit-vector variable through the public [Env] door. *)
+let fresh () =
+  let env, cap = Env.create_with_cap () in
+  env, Context.create env, Env.declare_reserved cap env
+;;
+
+let bvvar env ctx name w =
+  let sym = Env.declare_fun env name (Rank.create [] (Sort.bitvec w)) in
+  Context.const ctx sym
+;;
+
+let bvconst ctx mint v w = Bv.const ctx mint ~value:v ~width:w
+let bvconst_i ctx mint i w = bvconst ctx mint (big i) w
+
+let assert_eq ctx mint blaster x i w =
+  Blast.assert_term blaster (Context.eq ctx x (bvconst_i ctx mint i w))
+;;
+
+let is_sat blaster =
+  match Sat.solve (Blast.sat blaster) with
+  | Sat.Sat -> true
+  | Sat.Unsat -> false
+;;
+
+(* {2 Layer 1 — exhaustive oracle} *)
+
+(* bit-vector-valued binary op [make mint ctx x y], operands width [w], result width [wr]. *)
+let oracle_bv2 name w wr make =
+  let env, ctx, mint = fresh () in
+  let x = bvvar env ctx (name ^ "_x") w in
+  let y = bvvar env ctx (name ^ "_y") w in
+  let term = make mint ctx x y in
+  let n = 1 lsl w in
+  for a = 0 to n - 1 do
+    for b = 0 to n - 1 do
+      let lookup t =
+        if Term.equal t x
+        then Some (big a)
+        else if Term.equal t y
+        then Some (big b)
+        else None
+      in
+      let expected, _ = Bv_eval.eval_bv defs ~lookup term in
+      let exp_const = bvconst ctx mint expected wr in
+      let b1 = Blast.create defs in
+      assert_eq ctx mint b1 x a w;
+      assert_eq ctx mint b1 y b w;
+      Blast.assert_term b1 (Context.not_ ctx (Context.eq ctx term exp_const));
+      check (Printf.sprintf "%s w=%d wrong-unsat a=%d b=%d" name w a b) (not (is_sat b1));
+      let b2 = Blast.create defs in
+      assert_eq ctx mint b2 x a w;
+      assert_eq ctx mint b2 y b w;
+      Blast.assert_term b2 (Context.eq ctx term exp_const);
+      check (Printf.sprintf "%s w=%d right-sat a=%d b=%d" name w a b) (is_sat b2)
+    done
+  done
+;;
+
+let oracle_bv1 name w wr make =
+  let env, ctx, mint = fresh () in
+  let x = bvvar env ctx (name ^ "_x") w in
+  let term = make mint ctx x in
+  for a = 0 to (1 lsl w) - 1 do
+    let lookup t = if Term.equal t x then Some (big a) else None in
+    let expected, _ = Bv_eval.eval_bv defs ~lookup term in
+    let exp_const = bvconst ctx mint expected wr in
+    let b1 = Blast.create defs in
+    assert_eq ctx mint b1 x a w;
+    Blast.assert_term b1 (Context.not_ ctx (Context.eq ctx term exp_const));
+    check (Printf.sprintf "%s w=%d wrong-unsat a=%d" name w a) (not (is_sat b1));
+    let b2 = Blast.create defs in
+    assert_eq ctx mint b2 x a w;
+    Blast.assert_term b2 (Context.eq ctx term exp_const);
+    check (Printf.sprintf "%s w=%d right-sat a=%d" name w a) (is_sat b2)
+  done
+;;
+
+(* Bool-valued binary predicate. *)
+let oracle_pred name w make =
+  let env, ctx, mint = fresh () in
+  let x = bvvar env ctx (name ^ "_x") w in
+  let y = bvvar env ctx (name ^ "_y") w in
+  let term = make mint ctx x y in
+  let n = 1 lsl w in
+  for a = 0 to n - 1 do
+    for b = 0 to n - 1 do
+      let lookup t =
+        if Term.equal t x
+        then Some (big a)
+        else if Term.equal t y
+        then Some (big b)
+        else None
+      in
+      let expected = Bv_eval.eval_bool defs ~lookup term in
+      let wrong = if expected then Context.not_ ctx term else term in
+      let right = if expected then term else Context.not_ ctx term in
+      let b1 = Blast.create defs in
+      assert_eq ctx mint b1 x a w;
+      assert_eq ctx mint b1 y b w;
+      Blast.assert_term b1 wrong;
+      check (Printf.sprintf "%s w=%d wrong-unsat a=%d b=%d" name w a b) (not (is_sat b1));
+      let b2 = Blast.create defs in
+      assert_eq ctx mint b2 x a w;
+      assert_eq ctx mint b2 y b w;
+      Blast.assert_term b2 right;
+      check (Printf.sprintf "%s w=%d right-sat a=%d b=%d" name w a b) (is_sat b2)
+    done
+  done
+;;
+
+let binop op mint ctx x y = Bv.binop ctx mint op x y
+let unop op mint ctx x = Bv.unop ctx mint op x
+
+(* Memoization TRANSPARENCY (task #50/rider): the memoized {!Bv_eval.eval_bv} must agree
+   byte-for-byte with the unmemoized reference on every term+model — that is the proof
+   that caching by hash-consed term (per-call, model fixed) is semantics-preserving, not
+   an argument. Enumerate every binary op / predicate at widths 3-4 over ALL inputs (the
+   same space as the layer-1 oracle), plus nested + SHARED-subterm terms (where memo
+   actually changes the traversal), and assert memoized = unmemoized. *)
+let run_eval_memo_equiv () =
+  print_endline "eval memoization transparency: memoized == unmemoized (all inputs)";
+  let bv_cmp (v1, w1) (v2, w2) = Bigint.equal v1 v2 && w1 = w2 in
+  let check_bin name w make =
+    let env, ctx, mint = fresh () in
+    let x = bvvar env ctx (name ^ "_mx") w in
+    let y = bvvar env ctx (name ^ "_my") w in
+    let t = make mint ctx x y in
+    let is_bool = Sort.equal t.Term.sort Sort.bool in
+    let n = 1 lsl w in
+    for a = 0 to n - 1 do
+      for b = 0 to n - 1 do
+        let lookup u =
+          if Term.equal u x
+          then Some (big a)
+          else if Term.equal u y
+          then Some (big b)
+          else None
+        in
+        if is_bool
+        then
+          check
+            (Printf.sprintf "memo-eq %s w=%d a=%d b=%d" name w a b)
+            (Bool.equal
+               (Bv_eval.eval_bool defs ~lookup t)
+               (Bv_eval.eval_bool_unmemoized defs ~lookup t))
+        else
+          check
+            (Printf.sprintf "memo-eq %s w=%d a=%d b=%d" name w a b)
+            (bv_cmp
+               (Bv_eval.eval_bv defs ~lookup t)
+               (Bv_eval.eval_bv_unmemoized defs ~lookup t))
+      done
+    done
+  in
+  List.iter
+    (fun w ->
+      List.iter
+        (fun (nm, op) -> check_bin nm w (binop op))
+        [ "bvand", Bv.Bvand
+        ; "bvor", Bv.Bvor
+        ; "bvxor", Bv.Bvxor
+        ; "bvadd", Bv.Bvadd
+        ; "bvsub", Bv.Bvsub
+        ; "bvmul", Bv.Bvmul
+        ; "bvshl", Bv.Bvshl
+        ; "bvlshr", Bv.Bvlshr
+        ; "bvashr", Bv.Bvashr
+        ; "bvudiv", Bv.Bvudiv
+        ; "bvurem", Bv.Bvurem
+        ; "bvult", Bv.Bvult
+        ; "bvsle", Bv.Bvsle
+        ];
+      (* nested + SHARED subterm: exercises the DAG path where memo changes traversal *)
+      check_bin "nested_and" w (fun m c x y ->
+        Bv.binop c m Bv.Bvand (Bv.binop c m Bv.Bvand x y) (Bv.binop c m Bv.Bvand x y));
+      check_bin "ite_shared" w (fun m c x y ->
+        let s = Bv.binop c m Bv.Bvadd x y in
+        Context.ite c (Context.eq c x y) s s))
+    [ 3; 4 ]
+;;
+
+let run_oracle () =
+  print_endline "layer 1: exhaustive small-width oracle";
+  List.iter
+    (fun w ->
+      List.iter
+        (fun (name, op) -> oracle_bv2 name w w (binop op))
+        [ "bvand", Bv.Bvand
+        ; "bvor", Bv.Bvor
+        ; "bvxor", Bv.Bvxor
+        ; "bvadd", Bv.Bvadd
+        ; "bvsub", Bv.Bvsub
+        ; "bvmul", Bv.Bvmul
+        ; "bvshl", Bv.Bvshl
+        ; "bvlshr", Bv.Bvlshr
+        ; "bvashr", Bv.Bvashr
+        ; "bvudiv", Bv.Bvudiv
+        ; "bvurem", Bv.Bvurem
+        ];
+      List.iter
+        (fun (name, op) -> oracle_bv1 name w w (unop op))
+        [ "bvnot", Bv.Bvnot; "bvneg", Bv.Bvneg ];
+      List.iter
+        (fun (name, op) -> oracle_pred name w (binop op))
+        [ "bvult", Bv.Bvult; "bvule", Bv.Bvule; "bvslt", Bv.Bvslt; "bvsle", Bv.Bvsle ])
+    [ 3; 4 ];
+  (* division is the subtle case (the mul-wraparound spurious-quotient trap): a wider
+     exhaustive pass over all inputs, including divide-by-zero. *)
+  List.iter
+    (fun w ->
+      oracle_bv2 "bvudiv" w w (binop Bv.Bvudiv);
+      oracle_bv2 "bvurem" w w (binop Bv.Bvurem))
+    [ 5 ];
+  (* width-changing ops *)
+  oracle_bv1 "zero_extend" 3 5 (fun mint ctx x -> Bv.zero_extend ctx mint ~n:2 x);
+  oracle_bv1 "sign_extend" 3 5 (fun mint ctx x -> Bv.sign_extend ctx mint ~n:2 x);
+  oracle_bv1 "extract" 4 2 (fun mint ctx x -> Bv.extract ctx mint ~i:2 ~j:1 x);
+  (* concat: distinct widths per arg (hi=2, lo=3, result 5) *)
+  let env, ctx, mint = fresh () in
+  let x = bvvar env ctx "cc_x" 2 in
+  let y = bvvar env ctx "cc_y" 3 in
+  let term = Bv.concat ctx mint x y in
+  for a = 0 to 3 do
+    for b = 0 to 7 do
+      let lookup t =
+        if Term.equal t x
+        then Some (big a)
+        else if Term.equal t y
+        then Some (big b)
+        else None
+      in
+      let expected, _ = Bv_eval.eval_bv defs ~lookup term in
+      let exp_const = bvconst ctx mint expected 5 in
+      let b1 = Blast.create defs in
+      Blast.assert_term b1 (Context.eq ctx x (bvconst_i ctx mint a 2));
+      Blast.assert_term b1 (Context.eq ctx y (bvconst_i ctx mint b 3));
+      Blast.assert_term b1 (Context.not_ ctx (Context.eq ctx term exp_const));
+      check (Printf.sprintf "concat wrong-unsat a=%d b=%d" a b) (not (is_sat b1))
+    done
+  done
+;;
+
+(* {2 Layer 2 — end-to-end via Bv_solve} *)
+
+let run_e2e () =
+  print_endline "layer 2: end-to-end solve + model check";
+  (* unsat: x + 1 = x (width 4) *)
+  let env, ctx, mint = fresh () in
+  let x = bvvar env ctx "e_x" 4 in
+  let f = Context.eq ctx (Bv.binop ctx mint Bv.Bvadd x (bvconst_i ctx mint 1 4)) x in
+  check
+    "unsat x+1=x"
+    (match Bv_solve.solve defs [ f ] with
+     | Bv_solve.Unsat -> true
+     | _ -> false);
+  (* sat: 3*x = 6 (width 4) -> x=2; the driver's model check must pass *)
+  let env, ctx, mint = fresh () in
+  let x = bvvar env ctx "s_x" 4 in
+  let f =
+    Context.eq
+      ctx
+      (Bv.binop ctx mint Bv.Bvmul (bvconst_i ctx mint 3 4) x)
+      (bvconst_i ctx mint 6 4)
+  in
+  (match Bv_solve.solve defs [ f ] with
+   | Bv_solve.Sat (model, _) ->
+     check "sat 3x=6 found" true;
+     (match List.assoc_opt x model with
+      | Some (v, _) -> check "sat 3x=6 x=2" (Bigint.equal v (big 2))
+      | None -> check "sat 3x=6 has x" false)
+   | _ -> check "sat 3x=6 found" false);
+  (* unsat: x <u y AND y <u x *)
+  let env, ctx, mint = fresh () in
+  let x = bvvar env ctx "l_x" 4 in
+  let y = bvvar env ctx "l_y" 4 in
+  let lt1 = Bv.binop ctx mint Bv.Bvult x y in
+  let lt2 = Bv.binop ctx mint Bv.Bvult y x in
+  check
+    "unsat x<y & y<x"
+    (match Bv_solve.solve defs [ Context.and_ ctx [ lt1; lt2 ] ] with
+     | Bv_solve.Unsat -> true
+     | _ -> false);
+  (* sat: x <u 3 with a genuine model *)
+  let env, ctx, mint = fresh () in
+  let x = bvvar env ctx "b_x" 4 in
+  let f = Bv.binop ctx mint Bv.Bvult x (bvconst_i ctx mint 3 4) in
+  match Bv_solve.solve defs [ f ] with
+  | Bv_solve.Sat (model, _) ->
+    (match List.assoc_opt x model with
+     | Some (v, _) -> check "sat x<3 model valid" (Bigint.compare v (big 3) < 0)
+     | None -> check "sat x<3 has x" false)
+  | _ -> check "sat x<3 found" false
+;;
+
+(* {2 Layer 3 — fail-closed} *)
+
+let run_fail_closed () =
+  print_endline "layer 3: fail-closed on unencoded construct";
+  let env, ctx, _mint = fresh () in
+  let x = bvvar env ctx "d_x" 4 in
+  let bv4 = Sort.bitvec 4 in
+  let f = Env.declare_fun env "uf_f" (Rank.create [ bv4 ] bv4) in
+  let fx = Context.app ctx f [ x ] in
+  let g = Context.eq ctx fx x in
+  check
+    "uninterpreted BV function -> Unknown"
+    (match Bv_solve.solve defs [ g ] with
+     | Bv_solve.Unknown _ -> true
+     | _ -> false)
+;;
+
+(* {2 Layer 4 — word-level simplifier equivalence oracle}
+
+   The pre-blast rewrite {!Bv_simplify} must be equivalence-preserving. For a battery of
+   additive expressions over free variables, prove [e = simplify e] through the real
+   blaster: assert the NEGATION and require Unsat, so the blaster certifies the two forms
+   agree on ALL assignments (an exhaustive symbolic check for these widths). A [Sat] here
+   is an unsound rewrite (the whole point of the oracle, since the bv model re-check
+   validates only the rewritten formula). *)
+let simplify1 ctx mint e =
+  match Bv_simplify.simplify ctx mint [ e ] with
+  | [ e' ] -> e'
+  | _ -> failwith "simplify returned wrong arity"
+;;
+
+let equiv name w build =
+  let env, ctx, mint = fresh () in
+  let x = bvvar env ctx (name ^ "_x") w in
+  let y = bvvar env ctx (name ^ "_y") w in
+  let z = bvvar env ctx (name ^ "_z") w in
+  let e = build ctx mint x y z in
+  let e' = simplify1 ctx mint e in
+  let b = Blast.create defs in
+  Blast.assert_term b (Context.not_ ctx (Context.eq ctx e e'));
+  check (Printf.sprintf "simplify-equiv %s w=%d" name w) (not (is_sat b))
+;;
+
+let run_simplify_equiv () =
+  print_endline "layer 4: word-level simplifier equivalence (assert negation -> unsat)";
+  let a ctx m p q = Bv.binop ctx m Bv.Bvadd p q in
+  let s ctx m p q = Bv.binop ctx m Bv.Bvsub p q in
+  let n ctx m p = Bv.unop ctx m Bv.Bvneg p in
+  let band ctx m p q = Bv.binop ctx m Bv.Bvand p q in
+  let k ctx m v w = Bv.const ctx m ~value:(big v) ~width:w in
+  List.iter
+    (fun w ->
+      equiv "cancel" w (fun ctx m x y _ -> s ctx m (a ctx m x y) x);
+      equiv "cancel2" w (fun ctx m x y z ->
+        s ctx m (a ctx m (a ctx m x y) z) (a ctx m y x));
+      equiv "const_fold" w (fun ctx m x _ _ ->
+        a ctx m (a ctx m x (k ctx m 3 w)) (k ctx m 5 w));
+      equiv "coeff2" w (fun ctx m x _ _ -> a ctx m x x);
+      equiv "coeff3" w (fun ctx m x _ _ -> a ctx m (a ctx m x x) x);
+      equiv "neg" w (fun ctx m x y _ -> n ctx m (s ctx m x y));
+      equiv "sub_chain" w (fun ctx m x y z -> s ctx m (s ctx m x y) z);
+      equiv "shared_atom" w (fun ctx m x y _ ->
+        let g = band ctx m x y in
+        a ctx m g g);
+      equiv "mixed_zero" w (fun ctx m x y _ -> s ctx m (a ctx m x y) (a ctx m y x));
+      equiv "wrap_const" w (fun ctx m x _ _ -> a ctx m x (k ctx m ((1 lsl w) - 1) w)))
+    [ 3; 4; 8 ];
+  (* Family 1 (task #36): extract/concat normalization + eq-over-concat splitting. The
+     rewrite fires only under OXSMT_BV_REWRITE2; with the gate off these are near-identity
+     and the equivalence is trivial, so running both ways exercises soundness in both
+     configs. Widths chosen so every extract index is in range. *)
+  let cc ctx m p q = Bv.concat ctx m p q in
+  let ex ctx m ~i ~j p = Bv.extract ctx m ~i ~j p in
+  let ze ctx m ~n p = Bv.zero_extend ctx m ~n p in
+  let se ctx m ~n p = Bv.sign_extend ctx m ~n p in
+  List.iter
+    (fun w ->
+      (* O-bv1: extract of zero_extend — inside the original, in the zero fill, straddling *)
+      equiv "ext_of_zext_lo" w (fun ctx m x _ _ ->
+        ex ctx m ~i:(w - 1) ~j:0 (ze ctx m ~n:2 x));
+      equiv "ext_of_zext_fill" w (fun ctx m x _ _ ->
+        ex ctx m ~i:(w + 1) ~j:w (ze ctx m ~n:2 x));
+      equiv "ext_of_zext_straddle" w (fun ctx m x _ _ ->
+        ex ctx m ~i:w ~j:(w - 1) (ze ctx m ~n:2 x));
+      (* O-bv1: extract of sign_extend — slice fully inside the original (the fired arm)
+         and a straddle (falls to the default Bv.extract; equivalence must still hold) *)
+      equiv "ext_of_sext_lo" w (fun ctx m x _ _ ->
+        ex ctx m ~i:(w - 1) ~j:0 (se ctx m ~n:2 x));
+      equiv "ext_of_sext_straddle" w (fun ctx m x _ _ ->
+        ex ctx m ~i:w ~j:(w - 1) (se ctx m ~n:2 x));
+      (* O-bv1: adjacent contiguous extracts of the SAME base merge back (concat (extract
+         [w-1:1] x) (extract [0:0] x) = x) *)
+      equiv "concat_adjacent_ext_merge" w (fun ctx m x _ _ ->
+        cc ctx m (ex ctx m ~i:(w - 1) ~j:1 x) (ex ctx m ~i:0 ~j:0 x));
+      (* extract straddling a concat seam (bits from both hi and lo) *)
+      equiv "ext_of_concat_straddle" w (fun ctx m x y _ ->
+        ex ctx m ~i:w ~j:(w - 2) (cc ctx m x y));
+      (* extract fully inside the low / high halves *)
+      equiv "ext_of_concat_lo" w (fun ctx m x y _ ->
+        ex ctx m ~i:(w - 1) ~j:0 (cc ctx m x y));
+      equiv "ext_of_concat_hi" w (fun ctx m x y _ ->
+        ex ctx m ~i:((2 * w) - 1) ~j:w (cc ctx m x y));
+      (* nested extract *)
+      equiv "ext_of_ext" w (fun ctx m x _ _ ->
+        ex ctx m ~i:1 ~j:0 (ex ctx m ~i:(w - 1) ~j:1 x));
+      (* extract of a constant *)
+      equiv "ext_of_const" w (fun ctx m _ _ _ -> ex ctx m ~i:(w - 1) ~j:1 (k ctx m 5 w));
+      (* concat of two constants folds *)
+      equiv "concat_const" w (fun ctx m _ _ _ -> cc ctx m (k ctx m 2 w) (k ctx m 3 w));
+      (* equality over concats (the ext_con killer): mixed operands so the per-slice split
+         is nontrivial ((concat x y) = (concat y x) iff x=y) *)
+      equiv "eq_concat_mixed" w (fun ctx m x y _ ->
+        Context.eq ctx (cc ctx m x y) (cc ctx m y x));
+      (* equality of an extract against a concat slice *)
+      equiv "eq_ext_concat" w (fun ctx m x y _ ->
+        Context.eq ctx (ex ctx m ~i:(w - 1) ~j:0 (cc ctx m x y)) y))
+    [ 3; 4; 8 ];
+  (* Family 2 (task #36): bitwise identities + constant folding. Same OXSMT_BV_REWRITE2
+     gate; equivalence must hold both ways. *)
+  let bnot ctx m p = Bv.unop ctx m Bv.Bvnot p in
+  let band ctx m p q = Bv.binop ctx m Bv.Bvand p q in
+  let bor ctx m p q = Bv.binop ctx m Bv.Bvor p q in
+  let bxor ctx m p q = Bv.binop ctx m Bv.Bvxor p q in
+  let bmul ctx m p q = Bv.binop ctx m Bv.Bvmul p q in
+  List.iter
+    (fun w ->
+      let zero ctx m = k ctx m 0 w in
+      let ones ctx m = k ctx m ((1 lsl w) - 1) w in
+      let one ctx m = k ctx m 1 w in
+      equiv "and_zero" w (fun ctx m x _ _ -> band ctx m x (zero ctx m));
+      equiv "and_ones" w (fun ctx m x _ _ -> band ctx m x (ones ctx m));
+      equiv "and_self" w (fun ctx m x _ _ -> band ctx m x x);
+      equiv "or_zero" w (fun ctx m x _ _ -> bor ctx m x (zero ctx m));
+      equiv "or_ones" w (fun ctx m x _ _ -> bor ctx m x (ones ctx m));
+      equiv "or_self" w (fun ctx m x _ _ -> bor ctx m x x);
+      equiv "xor_zero" w (fun ctx m x _ _ -> bxor ctx m x (zero ctx m));
+      equiv "xor_self" w (fun ctx m x _ _ -> bxor ctx m x x);
+      equiv "xor_ones" w (fun ctx m x _ _ -> bxor ctx m x (ones ctx m));
+      equiv "not_not" w (fun ctx m x _ _ -> bnot ctx m (bnot ctx m x));
+      equiv "mul_zero" w (fun ctx m x _ _ -> bmul ctx m x (zero ctx m));
+      equiv "mul_one" w (fun ctx m x _ _ -> bmul ctx m x (one ctx m));
+      equiv "and_const_fold" w (fun ctx m _ _ _ -> band ctx m (k ctx m 6 w) (k ctx m 3 w));
+      equiv "not_const_fold" w (fun ctx m _ _ _ -> bnot ctx m (k ctx m 5 w)))
+    [ 3; 4; 8 ];
+  (* Family 3 (task #36): shift by a constant amount folds to extract/concat. Cover
+     in-range, zero, and over-width amounts for shl/lshr/ashr; same gate. *)
+  let shl ctx m p q = Bv.binop ctx m Bv.Bvshl p q in
+  let lshr ctx m p q = Bv.binop ctx m Bv.Bvlshr p q in
+  let ashr ctx m p q = Bv.binop ctx m Bv.Bvashr p q in
+  List.iter
+    (fun w ->
+      List.iter
+        (fun kk ->
+          equiv (Printf.sprintf "shl_k%d" kk) w (fun ctx m x _ _ ->
+            shl ctx m x (k ctx m kk w));
+          equiv (Printf.sprintf "lshr_k%d" kk) w (fun ctx m x _ _ ->
+            lshr ctx m x (k ctx m kk w));
+          equiv (Printf.sprintf "ashr_k%d" kk) w (fun ctx m x _ _ ->
+            ashr ctx m x (k ctx m kk w)))
+        [ 0; 1; w - 1; w ])
+    [ 3; 4; 8 ]
+;;
+
+(* rw3 (bv-rw3 probe): comparison-vs-bound + extract-into-op propagation. Same equivalence
+   discipline as families 1-3 — the rewrite fires only under OXSMT_BV_RW3, so with the
+   gate off these are identity and the equivalence is trivial; run in the ON config
+   (Makefile) to certify the real rewrites. [equiv] works for Bool-valued [e] too
+   (Context.eq on Bool = iff), so the comparison folds are exhaustively checked over all
+   width-w assignments. *)
+let run_rw3_equiv () =
+  print_endline "layer 4 (rw3): comparison-vs-bound + extract-into-op (negation -> unsat)";
+  let k ctx m v w = Bv.const ctx m ~value:(big v) ~width:w in
+  let a ctx m p q = Bv.binop ctx m Bv.Bvadd p q in
+  let mul ctx m p q = Bv.binop ctx m Bv.Bvmul p q in
+  let band ctx m p q = Bv.binop ctx m Bv.Bvand p q in
+  let bor ctx m p q = Bv.binop ctx m Bv.Bvor p q in
+  let bxor ctx m p q = Bv.binop ctx m Bv.Bvxor p q in
+  let bnot ctx m p = Bv.unop ctx m Bv.Bvnot p in
+  let ex ctx m ~i ~j p = Bv.extract ctx m ~i ~j p in
+  let ule ctx m p q = Bv.binop ctx m Bv.Bvule p q in
+  let ult ctx m p q = Bv.binop ctx m Bv.Bvult p q in
+  let sle ctx m p q = Bv.binop ctx m Bv.Bvsle p q in
+  let slt ctx m p q = Bv.binop ctx m Bv.Bvslt p q in
+  List.iter
+    (fun w ->
+      let maxv = (1 lsl w) - 1 in
+      (* comparison-vs-bound: reflexivity, bound tautologies/contradictions in both
+         operand positions, unsigned and signed, strict and non-strict *)
+      equiv "ule_refl" w (fun ctx m x _ _ -> ule ctx m x x);
+      equiv "ule_lo_left" w (fun ctx m x _ _ -> ule ctx m (k ctx m 0 w) x);
+      equiv "ule_hi_right" w (fun ctx m x _ _ -> ule ctx m x (k ctx m maxv w));
+      equiv "ule_zero_right" w (fun ctx m x _ _ -> ule ctx m x (k ctx m 0 w));
+      equiv "ule_max_left" w (fun ctx m x _ _ -> ule ctx m (k ctx m maxv w) x);
+      equiv "ult_refl" w (fun ctx m x _ _ -> ult ctx m x x);
+      equiv "ult_lo_right" w (fun ctx m x _ _ -> ult ctx m x (k ctx m 0 w));
+      equiv "ult_hi_left" w (fun ctx m x _ _ -> ult ctx m (k ctx m maxv w) x);
+      equiv "sle_refl" w (fun ctx m x _ _ -> sle ctx m x x);
+      equiv "sle_min_right" w (fun ctx m x _ _ -> sle ctx m x (k ctx m (1 lsl (w - 1)) w));
+      equiv "sle_max_right" w (fun ctx m x _ _ ->
+        sle ctx m x (k ctx m ((1 lsl (w - 1)) - 1) w));
+      equiv "sle_min_left" w (fun ctx m x _ _ -> sle ctx m (k ctx m (1 lsl (w - 1)) w) x);
+      equiv "sle_max_left" w (fun ctx m x _ _ ->
+        sle ctx m (k ctx m ((1 lsl (w - 1)) - 1) w) x);
+      equiv "slt_refl" w (fun ctx m x _ _ -> slt ctx m x x);
+      equiv "both_const_ule" w (fun ctx m _ _ _ -> ule ctx m (k ctx m 2 w) (k ctx m 5 w));
+      equiv "both_const_sle" w (fun ctx m _ _ _ ->
+        sle ctx m (k ctx m maxv w) (k ctx m 1 w));
+      (* is_zero_bit unsigned split: b is a middle constant with high zero bits, over a
+         FREE var and over an arithmetic operand (exercises the extract pushdown inside) *)
+      equiv "ule_split_var" w (fun ctx m x _ _ -> ule ctx m x (k ctx m (maxv / 2) w));
+      equiv "ule_split_sum" w (fun ctx m x y _ ->
+        ule ctx m (a ctx m x y) (k ctx m (maxv / 2) w));
+      (* extract-into-op width propagation *)
+      equiv "ext_add_low" w (fun ctx m x y _ -> ex ctx m ~i:(w - 2) ~j:0 (a ctx m x y));
+      equiv "ext_mul_low" w (fun ctx m x y _ -> ex ctx m ~i:(w - 2) ~j:0 (mul ctx m x y));
+      equiv "ext_and" w (fun ctx m x y _ -> ex ctx m ~i:(w - 1) ~j:1 (band ctx m x y));
+      equiv "ext_or" w (fun ctx m x y _ -> ex ctx m ~i:(w - 1) ~j:1 (bor ctx m x y));
+      equiv "ext_xor" w (fun ctx m x y _ -> ex ctx m ~i:(w - 2) ~j:1 (bxor ctx m x y));
+      equiv "ext_not" w (fun ctx m x _ _ -> ex ctx m ~i:(w - 2) ~j:1 (bnot ctx m x));
+      (* nested: extract of a sum of a bitwise op (composition through the pushdown) *)
+      equiv "ext_add_nested" w (fun ctx m x y z ->
+        ex ctx m ~i:(w - 2) ~j:0 (a ctx m (band ctx m x y) z)))
+    [ 3; 4; 8 ]
+;;
+
+let () =
+  print_endline "bv-blast self-test:";
+  run_oracle ();
+  run_e2e ();
+  run_fail_closed ();
+  run_simplify_equiv ();
+  run_rw3_equiv ();
+  run_eval_memo_equiv ();
+  Printf.printf "\nbv-blast self-test: %d checks, %d failure(s)\n" !checks !failures;
+  if !failures > 0 then exit 1
+;;

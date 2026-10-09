@@ -1,0 +1,6 @@
+module=lia
+suite=lia-test
+target=smt/theories/lia/simplex.ml
+description=empty_interval_conflict short-circuited to None, so check no longer detects an asserted lower>upper (empty bound interval) on a nonbasic variable — the invisible-to-first_violating contradiction is dropped => false-SAT (codex re-verify R1; supersedes the pending-scalar bug).
+review=codex-review lia2-reverify.md item R1; DESIGN §10 (mutation testing)
+expected=KILLED-TEST

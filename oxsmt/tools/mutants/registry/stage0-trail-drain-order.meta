@@ -1,0 +1,6 @@
+module=core
+suite=stage0-test
+target=smt/core/trail.ml
+description=Trail.drain_to replays the undo trail OLDEST-first instead of newest-first (the shared substrate's pop watermark loop, ADR-0014 Stage 0 — the cross-trail pop-ordering fault: every migrated site's pop drains through this one loop). Applying an older inverse before a newer one leaves the newest write in place, so a backtrack restores an intermediate state instead of the checkpoint. Killed by smt/fabric/test/stage0_trail_test.ml test_pop_ordering (drain order must be 3,2,1 and a single cell must restore to its pre-frame value) and the substrate/EUF drain-order checks; with the mutant those go red on a clean build (the real EUF self-test also diverges under the corrupted forest undo order).
+review=ADR-0014 §C Stage 0 item 5 / master build item 5 (cross-trail pop-ordering mutant must be KILLED)
+expected=KILLED-TEST

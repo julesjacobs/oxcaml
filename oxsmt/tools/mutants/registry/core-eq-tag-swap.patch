@@ -1,0 +1,13 @@
+diff --git a/smt/core/node.ml b/smt/core/node.ml
+index 3260952..ce36640 100644
+--- a/smt/core/node.ml
++++ b/smt/core/node.ml
+@@ -57,7 +57,7 @@ let equal_node (a : node) (b : node) =
+          l1.coeffs
+          l2.coeffs
+   | Le x, Le y -> x.tag = y.tag
+-  | Eq (a1, a2), Eq (b1, b2) -> a1.tag = b1.tag && a2.tag = b2.tag
++  | Eq (a1, a2), Eq (b1, b2) -> a1.tag = b2.tag && a2.tag = b1.tag
+   | Not x, Not y -> x.tag = y.tag
+   | And xs, And ys -> same_children xs ys
+   | Or xs, Or ys -> same_children xs ys

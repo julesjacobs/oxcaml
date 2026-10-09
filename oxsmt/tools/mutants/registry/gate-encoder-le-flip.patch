@@ -1,0 +1,13 @@
+diff --git a/tests/gate/encoder.ml b/tests/gate/encoder.ml
+index 209879c..71d3f32 100644
+--- a/tests/gate/encoder.ml
++++ b/tests/gate/encoder.ml
+@@ -80,7 +80,7 @@ let rec enc names (t : term) : string =
+   | Eq (a, b) -> Printf.sprintf "(%s = %s)" (enc names a) (enc names b)
+   | Iff (a, b) -> Printf.sprintf "(%s ↔ %s)" (enc names a) (enc names b)
+   | Distinct xs -> enc_distinct names xs
+-  | Le (a, b) -> Printf.sprintf "(%s ≤ %s)" (enc names a) (enc names b)
++  | Le (a, b) -> Printf.sprintf "(%s ≥ %s)" (enc names a) (enc names b)
+   | Lt (a, b) -> Printf.sprintf "(%s < %s)" (enc names a) (enc names b)
+   | Ge (a, b) -> Printf.sprintf "(%s ≥ %s)" (enc names a) (enc names b)
+   | Gt (a, b) -> Printf.sprintf "(%s > %s)" (enc names a) (enc names b)

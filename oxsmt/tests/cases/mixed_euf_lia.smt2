@@ -1,0 +1,10 @@
+; Mixed EUF + LIA: x = y + 1 and y = 0 give x = 1, so g x must equal g 1.
+(set-logic QF_UFLIA)
+(set-info :status unsat)
+(declare-fun g (Int) Int)
+(declare-const x Int)
+(declare-const y Int)
+(assert (= x (+ y 1)))
+(assert (= y 0))
+(assert (distinct (g x) (g 1)))
+(check-sat)

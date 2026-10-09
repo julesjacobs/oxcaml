@@ -1,0 +1,4 @@
+(model
+  (fun h (default false)
+         (case (false) true))
+  (const p false))

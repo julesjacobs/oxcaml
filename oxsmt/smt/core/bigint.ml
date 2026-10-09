@@ -1,0 +1,428 @@
+(* Hand-rolled arbitrary-precision signed integers. See bigint.mli.
+
+   Stdlib-only (INVARIANTS.md I3): no Zarith, no external deps. This is the [Big]-tier
+   fallback arithmetic for {!Rational} (core-bignum W2): when the guarded native-int fast
+   path overflows int63, operands promote here and the op is redone exactly.
+
+   Representation (core-bignum-review.md R3): sign-magnitude, little-endian base-2^31 limbs.
+     - [radix = 2^31]; every limb is in [0, radix).
+     - CANONICAL invariants, enforced by every constructor:
+       * no trailing (most-significant) zero limbs ([mag] has no leading zeros);
+       * a UNIQUE zero: the value 0 is exactly [{ sign = 0; mag = [||] }] — never [-0],
+         never [[|0|]];
+       * [sign] is [-1 | 0 | +1], and [sign = 0] iff [mag = [||]].
+     These make [compare]/[equal] and the [to_string] decimal grammar well-defined and make
+     a mis-canonicalized value unconstructible.
+
+   Radix choice (R3): 2^31, NOT 2^62. OCaml's native [int] is 63-bit, so there is no
+   double-width product; base-2^31 keeps every intermediate within [int]. The load-bearing
+   bound is proved at [mag_mul] below: the schoolbook inner accumulator never exceeds
+   [radix^2 - 1 = 2^62 - 1 = max_int]. *)
+
+let radix_bits = 31
+let radix = 1 lsl radix_bits (* 2^31 *)
+let mask = radix - 1
+
+type t =
+  { sign : int (* -1 | 0 | +1 ; sign = 0 iff mag = [||] *)
+  ; mag :
+      int array (* little-endian base-2^31 limbs, each in [0, radix), no trailing 0s *)
+  }
+
+(* ---- magnitude helpers (unsigned; canonical = no trailing zero limbs) ---- *)
+
+(* Drop most-significant zero limbs so the array is canonical. Returns [[||]] for zero. *)
+let trim (a : int array) : int array =
+  let n = ref (Array.length a) in
+  while !n > 0 && a.(!n - 1) = 0 do
+    decr n
+  done;
+  if !n = Array.length a then a else Array.sub a 0 !n
+;;
+
+(* The single constructor: canonicalize a (sign, magnitude) pair. If the magnitude is zero
+   the value is the unique zero regardless of the sign intent. *)
+let mk sign mag =
+  let mag = trim mag in
+  if Array.length mag = 0
+  then { sign = 0; mag = [||] }
+  else { sign = (if sign >= 0 then 1 else -1); mag }
+;;
+
+let zero = { sign = 0; mag = [||] }
+let is_zero t = t.sign = 0
+let sign t = t.sign
+
+(* Unsigned comparison of canonical magnitudes: longer is larger; else most-significant
+   limb down. *)
+let mag_compare a b =
+  let la = Array.length a
+  and lb = Array.length b in
+  if la <> lb
+  then Int.compare la lb
+  else (
+    let rec go i =
+      if i < 0 then 0 else if a.(i) <> b.(i) then Int.compare a.(i) b.(i) else go (i - 1)
+    in
+    go (la - 1))
+;;
+
+let mag_add a b =
+  let la = Array.length a
+  and lb = Array.length b in
+  let n = max la lb in
+  let r = Array.make (n + 1) 0 in
+  let carry = ref 0 in
+  for i = 0 to n - 1 do
+    let s = (if i < la then a.(i) else 0) + (if i < lb then b.(i) else 0) + !carry in
+    r.(i) <- s land mask;
+    carry := s lsr radix_bits
+  done;
+  r.(n) <- !carry;
+  trim r
+;;
+
+(* Unsigned subtract, REQUIRES a >= b (checked by callers via [mag_compare]). *)
+let mag_sub a b =
+  let la = Array.length a
+  and lb = Array.length b in
+  let r = Array.make la 0 in
+  let borrow = ref 0 in
+  for i = 0 to la - 1 do
+    let d = a.(i) - (if i < lb then b.(i) else 0) - !borrow in
+    if d < 0
+    then (
+      r.(i) <- d + radix;
+      borrow := 1)
+    else (
+      r.(i) <- d;
+      borrow := 0)
+  done;
+  trim r
+;;
+
+(* Schoolbook multiply. SAFETY (R3): the inner accumulator is t = r.(i+j) + a.(i)*b.(j) +
+   carry with r.(i+j) < radix, a.(i)*b.(j) <= (radix-1)^2, and (by induction) carry <=
+   radix-1. Hence t <= (radix-1) + (radix-1)^2 + (radix-1) = radix^2 - 1 = 2^62 - 1 =
+   max_int, so no native overflow, and the next carry = t lsr 31 <= radix-1 preserves the
+   induction. The carry-out lands in r.(i+lb), which no prior step has written (it holds
+   0), so it stays < radix too. *)
+let mag_mul a b =
+  let la = Array.length a
+  and lb = Array.length b in
+  if la = 0 || lb = 0
+  then [||]
+  else (
+    let r = Array.make (la + lb) 0 in
+    for i = 0 to la - 1 do
+      let carry = ref 0 in
+      let ai = a.(i) in
+      for j = 0 to lb - 1 do
+        let t = r.(i + j) + (ai * b.(j)) + !carry in
+        r.(i + j) <- t land mask;
+        carry := t lsr radix_bits
+      done;
+      r.(i + lb) <- r.(i + lb) + !carry
+    done;
+    trim r)
+;;
+
+(* A magnitude of <= 2 limbs has value <= radix^2 - 1 = max_int, so it fits a NONNEGATIVE
+   native int. Euclid's gcd and the normalization divisions spend most of their time on
+   such small operands (measured: values stay <= 5 limbs, and each division/Euclid step
+   shrinks them), so a native fast path here is the dominant speedup — it turns the bulk
+   of gcd/ divmod work into O(1) int arithmetic instead of the bit-by-bit general path. *)
+let mag_fits_int m = Array.length m <= 2
+
+let mag_to_pos_int m =
+  (if Array.length m >= 1 then m.(0) else 0)
+  + if Array.length m >= 2 then m.(1) * radix else 0
+;;
+
+let mag_of_pos_int n =
+  if n = 0
+  then [||]
+  else if n < radix
+  then [| n |]
+  else [| n land mask; n lsr radix_bits |]
+;;
+
+let rec int_gcd a b = if b = 0 then a else int_gcd b (a mod b)
+
+(* Divide a magnitude by a small positive [d] in [1, radix); returns (quotient, remainder).
+   SAFETY: cur = rem*radix + m.(i) with rem <= d-1 <= radix-1 and m.(i) < radix, so
+   cur <= (radix-1)*radix + (radix-1) = radix^2 - 1 = max_int. *)
+let mag_divmod_small m d =
+  let len = Array.length m in
+  let q = Array.make len 0 in
+  let rem = ref 0 in
+  for i = len - 1 downto 0 do
+    let cur = (!rem * radix) + m.(i) in
+    q.(i) <- cur / d;
+    rem := cur mod d
+  done;
+  trim q, !rem
+;;
+
+let limb_bitlen v =
+  let rec go v acc = if v = 0 then acc else go (v lsr 1) (acc + 1) in
+  go v 0
+;;
+
+(* Knuth Algorithm D (TAOCP 4.3.1), base radix=2^31. Divide magnitude [u] by [v]; requires
+   |v| = n >= 2, |u| >= n, u >= v. Non-allocating in the inner loops (O(n*(m+1)) limb ops,
+   not O(bits) with per-bit allocation), which is the [Big]-tier hot path once values
+   exceed 2 limbs (logs/core-bignum-measurement Phase 2). All limb products stay < radix^2
+   = max_int+1 (see the qhat bounds below), so no native overflow. *)
+let mag_divmod_knuth u v =
+  let n = Array.length v in
+  let m = Array.length u - n in
+  (* D1: normalize by a left shift [s] so v's top limb has its high bit set (>= radix/2),
+     which bounds the quotient-digit estimate error to <= 2 (Knuth Thm B). *)
+  let s = radix_bits - limb_bitlen v.(n - 1) in
+  let vn = Array.make n 0 in
+  let carry = ref 0 in
+  for i = 0 to n - 1 do
+    let vv = (v.(i) lsl s) lor !carry in
+    vn.(i) <- vv land mask;
+    carry := vv lsr radix_bits
+  done;
+  let un = Array.make (m + n + 1) 0 in
+  carry := 0;
+  for i = 0 to m + n - 1 do
+    let src = if i < Array.length u then u.(i) else 0 in
+    let vv = (src lsl s) lor !carry in
+    un.(i) <- vv land mask;
+    carry := vv lsr radix_bits
+  done;
+  un.(m + n) <- !carry;
+  let q = Array.make (m + 1) 0 in
+  for j = m downto 0 do
+    (* D3: estimate qhat, rhat from the top two limbs. *)
+    let top = (un.(j + n) * radix) + un.(j + n - 1) in
+    let qhat = ref (top / vn.(n - 1)) in
+    let rhat = ref (top mod vn.(n - 1)) in
+    let refine = ref true in
+    while !refine do
+      if !qhat >= radix || !qhat * vn.(n - 2) > (!rhat * radix) + un.(j + n - 2)
+      then (
+        decr qhat;
+        rhat := !rhat + vn.(n - 1);
+        if !rhat >= radix then refine := false)
+      else refine := false
+    done;
+    (* D4: multiply-and-subtract qhat*vn from un[j..j+n]. *)
+    let borrow = ref 0 in
+    carry := 0;
+    for i = 0 to n - 1 do
+      let p = (!qhat * vn.(i)) + !carry in
+      carry := p lsr radix_bits;
+      let t = un.(j + i) - (p land mask) - !borrow in
+      if t < 0
+      then (
+        un.(j + i) <- t + radix;
+        borrow := 1)
+      else (
+        un.(j + i) <- t;
+        borrow := 0)
+    done;
+    let t = un.(j + n) - !carry - !borrow in
+    (* D5/D6: if the subtraction went negative, qhat was 1 too big — add vn back. *)
+    if t < 0
+    then (
+      un.(j + n) <- t + radix;
+      decr qhat;
+      let c = ref 0 in
+      for i = 0 to n - 1 do
+        let ss = un.(j + i) + vn.(i) + !c in
+        un.(j + i) <- ss land mask;
+        c := ss lsr radix_bits
+      done;
+      un.(j + n) <- (un.(j + n) + !c) land mask)
+    else un.(j + n) <- t;
+    q.(j) <- !qhat
+  done;
+  (* Quotient = q; remainder = (un[0..n-1]) >> s. *)
+  let rem = Array.make n 0 in
+  carry := 0;
+  for i = n - 1 downto 0 do
+    let cur = un.(i) in
+    rem.(i) <- (cur lsr s) lor (!carry lsl (radix_bits - s));
+    carry := cur land ((1 lsl s) - 1)
+  done;
+  trim q, trim rem
+;;
+
+(* Unsigned division: [a = q*b + r], [0 <= r < b], [b] nonzero. Native int fast path when
+   both fit (<= 2 limbs), single-limb-divisor fast path, else Knuth Algorithm D. *)
+let mag_divmod a b =
+  let lb = Array.length b in
+  if lb = 0 then invalid_arg "Bigint.mag_divmod: divide by zero";
+  if mag_fits_int a && mag_fits_int b
+  then (
+    let ai = mag_to_pos_int a
+    and bi = mag_to_pos_int b in
+    mag_of_pos_int (ai / bi), mag_of_pos_int (ai mod bi))
+  else if mag_compare a b < 0
+  then [||], a
+  else if lb = 1
+  then (
+    let q, r = mag_divmod_small a b.(0) in
+    q, if r = 0 then [||] else [| r |])
+  else mag_divmod_knuth a b
+;;
+
+let rec mag_gcd a b =
+  if mag_fits_int a && mag_fits_int b
+  then mag_of_pos_int (int_gcd (mag_to_pos_int a) (mag_to_pos_int b))
+  else if Array.length b = 0
+  then a
+  else mag_gcd b (snd (mag_divmod a b))
+;;
+
+(* ---- signed API ---- *)
+
+let compare x y =
+  if x.sign <> y.sign
+  then Int.compare x.sign y.sign
+  else (
+    match x.sign with
+    | 0 -> 0
+    | s ->
+      let c = mag_compare x.mag y.mag in
+      if s > 0 then c else -c)
+;;
+
+let equal x y = compare x y = 0
+
+(* Value-based hash: fold sign and every limb. Canonical representation ⇒ equal values
+   have identical (sign, mag) ⇒ equal hashes. Deterministic (no polymorphic hash, no
+   allocation-order dependence). *)
+let hash t =
+  let h = ref (t.sign + 1) in
+  Array.iter (fun limb -> h := (!h * 31) + limb) t.mag;
+  !h land max_int
+;;
+
+let neg x = { sign = -x.sign; mag = x.mag }
+let abs x = if x.sign = 0 then zero else { sign = 1; mag = x.mag }
+
+let add x y =
+  match x.sign, y.sign with
+  | 0, _ -> y
+  | _, 0 -> x
+  | sx, sy when sx = sy -> mk sx (mag_add x.mag y.mag)
+  | sx, _ ->
+    (* opposite signs: larger magnitude keeps its sign, subtract the smaller *)
+    let c = mag_compare x.mag y.mag in
+    if c = 0
+    then zero
+    else if c > 0
+    then mk sx (mag_sub x.mag y.mag)
+    else mk (-sx) (mag_sub y.mag x.mag)
+;;
+
+let sub x y = add x (neg y)
+
+let mul x y =
+  if x.sign = 0 || y.sign = 0 then zero else mk (x.sign * y.sign) (mag_mul x.mag y.mag)
+;;
+
+(* Signed division, TRUNCATING TOWARD ZERO with the remainder carrying the DIVIDEND's sign
+   (R3; matches OCaml [/]/[mod] so Rational.floor/ceil reuse their [r<0]/[r>0]
+   correction). [x = q*y + r], [q = truncate(x/y)], [sign r = sign x] (or r = 0). *)
+let divmod x y =
+  if y.sign = 0 then invalid_arg "Bigint.divmod: division by zero";
+  if x.sign = 0
+  then zero, zero
+  else (
+    let qm, rm = mag_divmod x.mag y.mag in
+    mk (x.sign * y.sign) qm, mk x.sign rm)
+;;
+
+(* Nonnegative gcd; gcd(0,0) = 0. *)
+let gcd x y = mk 1 (mag_gcd x.mag y.mag)
+
+(* ---- native-int conversions ---- *)
+
+let of_int n =
+  if n = 0
+  then zero
+  else if n = min_int
+  then { sign = -1; mag = [| 0; 0; 1 |] } (* |min_int| = 2^62 = radix^2 *)
+  else (
+    let s = if n < 0 then -1 else 1 in
+    let m = Stdlib.abs n in
+    let rec limbs m acc =
+      if m = 0 then acc else limbs (m lsr radix_bits) ((m land mask) :: acc)
+    in
+    { sign = s; mag = Array.of_list (List.rev (limbs m [])) })
+;;
+
+let one = of_int 1
+
+(* [Some v] iff the value fits native int63, else [None]. A magnitude of <= 2 limbs always
+   fits (max = radix^2 - 1 = max_int); a 3-limb magnitude fits only as exactly min_int. *)
+let to_int_opt t =
+  match t.sign with
+  | 0 -> Some 0
+  | s ->
+    let m = t.mag in
+    let len = Array.length m in
+    if len <= 2
+    then (
+      let v = (if len >= 1 then m.(0) else 0) + if len >= 2 then m.(1) * radix else 0 in
+      Some (s * v))
+    else if len = 3 && m.(0) = 0 && m.(1) = 0 && m.(2) = 1 && s = -1
+    then Some min_int
+    else None
+;;
+
+let fits_int : t -> bool = fun t -> to_int_opt t <> None
+
+(* ---- decimal string (R7 grammar): sign on the number only, no leading zeros, zero
+   renders exactly "0". ---- *)
+let to_string x =
+  if x.sign = 0
+  then "0"
+  else (
+    let chunk = 1_000_000_000 in
+    (* 10^9 < radix; one divmod_small per 9 decimal digits *)
+    let rec collect m acc =
+      if Array.length m = 0
+      then acc
+      else (
+        let q, r = mag_divmod_small m chunk in
+        collect q (r :: acc))
+    in
+    match collect x.mag [] with
+    | [] -> "0"
+    | hd :: tl ->
+      let b = Buffer.create 32 in
+      if x.sign < 0 then Buffer.add_char b '-';
+      Buffer.add_string b (string_of_int hd);
+      List.iter (fun c -> Buffer.add_string b (Printf.sprintf "%09d" c)) tl;
+      Buffer.contents b)
+;;
+
+(* Parse the R7 grammar STRICTLY: optional leading '-', then digits with no leading zero
+   (except the single literal "0"); reject "-0", empty, non-digits. *)
+let of_string s =
+  let n = String.length s in
+  if n = 0 then invalid_arg "Bigint.of_string: empty";
+  let neg_flag, start = if s.[0] = '-' then true, 1 else false, 0 in
+  if start >= n then invalid_arg "Bigint.of_string: no digits";
+  let digits = String.sub s start (n - start) in
+  String.iter
+    (fun c -> if c < '0' || c > '9' then invalid_arg "Bigint.of_string: non-digit")
+    digits;
+  if String.length digits > 1 && digits.[0] = '0'
+  then invalid_arg "Bigint.of_string: leading zero";
+  if neg_flag && digits = "0" then invalid_arg "Bigint.of_string: negative zero";
+  let ten = of_int 10 in
+  let acc = ref zero in
+  String.iter
+    (fun c -> acc := add (mul !acc ten) (of_int (Char.code c - Char.code '0')))
+    digits;
+  if neg_flag then neg !acc else !acc
+;;

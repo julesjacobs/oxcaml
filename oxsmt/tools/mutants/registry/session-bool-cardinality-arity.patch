@@ -1,0 +1,13 @@
+diff --git a/smt/interface/session.ml b/smt/interface/session.ml
+index 1ef445b2a6..5a9da93bda 100644
+--- a/smt/interface/session.ml
++++ b/smt/interface/session.ml
+@@ -267,7 +267,7 @@ let register_bool_terms t (pterm : Term.t) =
+       Term.Table.add seen term ();
+       match term.node with
+       | App (_, args) ->
+-        if Iarr.length args >= 1 && Sort.equal term.sort Sort.bool
++        if Iarr.length args >= 2 && Sort.equal term.sort Sort.bool
+         then (
+           t.has_theory <- true;
+           ignore (Cdclt.intern_atom t.cdclt term : Oxsmt_solver.Sat.var));

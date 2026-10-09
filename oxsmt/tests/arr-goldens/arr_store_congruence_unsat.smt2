@@ -1,0 +1,15 @@
+(set-info :smt-lib-version 2.6)
+(set-logic QF_AX)
+(set-info :status unsat)
+; Pure congruence (no extensionality needed): v = w makes store a i v and
+; store a i w congruent, so asserting them distinct is unsat.
+(declare-sort I 0)
+(declare-sort E 0)
+(declare-fun a () (Array I E))
+(declare-fun i () I)
+(declare-fun v () E)
+(declare-fun w () E)
+(assert (= v w))
+(assert (not (= (store a i v) (store a i w))))
+(check-sat)
+(exit)

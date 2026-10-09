@@ -1,0 +1,6 @@
+module=euf
+suite=euf-test
+target=smt/theories/euf/euf.ml
+description=Euf.propagate builds its per-call separated-root-pair set (#103) from each disequality's RAW e-node ids (d_a, d_b) instead of their current representatives (find d_a, find d_b). After any merge involving a diseq endpoint the stored pair no longer matches the endpoints' roots, so the O(1) membership test diverges from the true full scan — missing real separations (false negative: a dropped distinct-propagation) and, when a stale non-root id coincides with a watched atom's root pair, claiming a spurious separation (false positive: a WRONG distinct-propagation, the soundness-critical direction). Killed by euf_test test_propagate_pushpop_vs_full, whose INDEPENDENT full-scan reference (status over active_diseqs, using are_equal on roots) is compared for byte-identical propagation output across randomized assert/neq/push/pop; the mutant's output diverges as soon as a diseq endpoint is merged.
+review=#103 QG search-scaling (per-call sep-set replaces the O(#diseqs) distinct_witness rescan; invariant: reps are stable within a propagate call, so the set must key on find-roots)
+expected=KILLED-TEST

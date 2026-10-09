@@ -1,0 +1,20 @@
+diff --git a/smt/theories/lia/simplex.ml b/smt/theories/lia/simplex.ml
+index 1083a05..ebdab03 100644
+--- a/smt/theories/lia/simplex.ml
++++ b/smt/theories/lia/simplex.ml
+@@ -163,14 +163,7 @@ let new_slack t (pairs : (int * Rational.t) list) =
+        overwriting with IntMap.add would build the wrong def and Farkas-certify a false
+        conflict. A resulting zero coefficient is dropped so [def] keeps its "no explicit
+        zero" invariant. *)
+-    let def =
+-      List.fold_left
+-        (fun m (j, c) ->
+-           let c' = Rational.add (coeff m j) c in
+-           if Rational.is_zero c' then IntMap.remove j m else IntMap.add j c' m)
+-        IntMap.empty
+-        pairs
+-    in
++    let def = List.fold_left (fun m (j, c) -> IntMap.add j c m) IntMap.empty pairs in
+     let id = Dynarray.length t.vars in
+     let v =
+       { id

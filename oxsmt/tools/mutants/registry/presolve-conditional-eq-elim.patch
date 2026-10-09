@@ -1,0 +1,11 @@
+diff --git a/smt/interface/presolve.ml b/smt/interface/presolve.ml
+--- a/smt/interface/presolve.ml
++++ b/smt/interface/presolve.ml
+@@ -23,6 +23,7 @@
+ let rec flatten (c : Term.t) =
+   match c.node with
+   | And xs -> List.concat_map flatten (Iarr.to_list xs)
++  | Or xs -> List.concat_map flatten (Iarr.to_list xs)
+   | _ -> [ c ]
+ ;;
+ 

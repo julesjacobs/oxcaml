@@ -1,0 +1,13 @@
+diff --git a/smt/theories/euf/euf.ml b/smt/theories/euf/euf.ml
+index 7b6e44121b..c9462a7ead 100644
+--- a/smt/theories/euf/euf.ml
++++ b/smt/theories/euf/euf.ml
+@@ -666,7 +666,7 @@ let propagate t =
+          let du = find t d.d_a
+          and dv = find t d.d_b in
+          let key = if du <= dv then pack du dv else pack dv du in
+-         Int_set.replace sep key ())
++         ignore (key : int))
+       t.diseqs;
+     Dynarray.iteri
+       (fun idx w ->

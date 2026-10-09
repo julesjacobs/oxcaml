@@ -1,0 +1,6 @@
+module=presolve
+suite=wiring-test
+target=smt/interface/presolve.ml
+description=Contextual simplification builds the ELSE-branch scope with the THEN assumption (assume ... ~truth:true instead of ~truth:false), so the condition's positive assumption (atom true + the equality substitution x->k) leaks into the sibling branch where only the negation holds. On (ite (= x 5) false (= x 7)) the correct answer is sat (x=7: condition false, else (= 7 7) true); the mutant substitutes x->5 into the else-branch, (= x 7) folds to (= 5 7) = false, the ite collapses to false, and it flips to unsat. This is the substitute-in-the-else-branch mis-scope (a wrong-Unsat, the win direction where R1 does not run). Killed by test_ctx_simp_else_branch_oracle.
+review=task #13 contextual simplification; logs/simplifier-log.md soundness net (then/else scoping)
+expected=KILLED-TEST

@@ -1,0 +1,6 @@
+; The one shared SMT-LIB 2.6 lexer (ADR-0008). Stdlib-only (I3), zero deps: it is linked
+; by the shipped printer AND by test-only readers/the gate, so it must carry no baggage.
+; Scope is strictly lexical — token kinds only, no s-expr nesting or grammar.
+
+(library
+ (name oxsmt_lexical))

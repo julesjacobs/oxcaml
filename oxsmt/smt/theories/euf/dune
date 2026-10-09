@@ -1,0 +1,8 @@
+; stdlib-only + oxsmt_core (AGENTS.md dependency firewall, INVARIANTS.md I3): no
+; opam packages, no Base/Core, no ppx. This is the engine-independent EUF core
+; (proof-producing congruence closure); the ADR-0005 THEORY adapter is a later
+; thin layer and does NOT live here yet.
+
+(library
+ (name oxsmt_euf)
+ (libraries oxsmt_core))

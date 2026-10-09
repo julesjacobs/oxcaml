@@ -1,0 +1,6 @@
+module=presolve
+suite=wiring-test
+target=smt/interface/presolve.ml
+description=The reduced-set builder drops the RETAINED (non-definition) conjuncts instead of substituting and keeping them (`Keep _ -> None instead of Some (subst c)): only the dropped definitions leave the problem, so every genuine constraint vanishes and an unsat problem is reported sat. On (= x 5) /\ x >= 10 the correct answer is unsat (x=5 -> 5>=10 false); the mutant drops the retained bound and reports sat. This is the dropped-non-def-assert unsoundness (a spurious constraint drop -> unsat->sat flip, the acceptance tripwire). Killed by test_presolve_dropped_nondef and test_presolve_shadowed_alias.
+review=logs/w1b-design.md build-soundness (equisatisfiability: only the redundant definition may be dropped) + acceptance unsat-direction tripwire
+expected=KILLED-TEST

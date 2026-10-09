@@ -1,0 +1,13 @@
+diff --git a/smt/combine/combine.ml b/smt/combine/combine.ml
+index 01c33d19e5..a8d6c86f8a 100644
+--- a/smt/combine/combine.ml
++++ b/smt/combine/combine.ml
+@@ -710,7 +710,7 @@ struct
+         (match model_eval ma term with
+          | Some (Model.Uninterp cid as v) ->
+            (match Hashtbl.find_opt class_int cid with
+-            | Some n -> Some (Model.Int n)
++            | Some _n -> Some v
+             | None -> Some v)
+          | _ -> None)
+     in

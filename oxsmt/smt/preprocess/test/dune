@@ -1,0 +1,13 @@
+; In-tree unit + property tests for smt/preprocess. Depends only on oxsmt_core
+; and oxsmt_preprocess, so it honors the dependency firewall (I3) even though it
+; lives under smt/. Run via `make preprocess-test`; also built by `make build`.
+;
+; The brute-force evaluator here is deliberately test-only and written from the
+; term semantics alone (DESIGN §10): it is NOT the project's official N-version
+; model evaluator (that comes later from a separate agent), and it was written
+; without consulting tests/gate's encoder/evaluator.
+
+(executable
+ (name preprocess_test)
+ (modules preprocess_test)
+ (libraries oxsmt_core oxsmt_preprocess))

@@ -1,0 +1,8 @@
+; stdlib-only + oxsmt_core + oxsmt_solver (AGENTS.md dependency firewall, INVARIANTS.md
+; I3): no opam packages, no Base/Core, no ppx. Eager QF_BV bit-blasting into the
+; propositional SAT core — a presolve-style transform, NOT a theory client, so it depends
+; on the core term layer and the SAT solver only (no combinator / theory / adapters).
+
+(library
+ (name oxsmt_bitblast)
+ (libraries oxsmt_core oxsmt_solver))

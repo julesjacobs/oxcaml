@@ -1,0 +1,8 @@
+; Shared .smt2 -> Session loader for the test-only drivers (oxsmt_cli, corpus_classify).
+; Links the shipped session layer, the test-only parser, and the ematch qvar handle. It
+; lives under tests/ (never shipped) because it links the test-only parser, and it exists
+; to keep the two drivers' assertion path identical (the driver-equivalence invariant).
+
+(library
+ (name oxsmt_query_loader)
+ (libraries oxsmt_interface oxsmt_smtlib_parser oxsmt_ematch oxsmt_core))

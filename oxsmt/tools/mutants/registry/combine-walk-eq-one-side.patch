@@ -1,0 +1,13 @@
+diff --git a/smt/combine/combine.ml b/smt/combine/combine.ml
+index 68f8a83a33..036a71c202 100644
+--- a/smt/combine/combine.ml
++++ b/smt/combine/combine.ml
+@@ -171,7 +171,7 @@ struct
+     | Term.App (_, args) -> Iarr.to_list args
+     | Term.Arith lin -> List.map fst (Iarr.to_list lin.Term.coeffs)
+     | Term.Le a -> [ a ]
+-    | Term.Eq (a, b) -> [ a; b ]
++    | Term.Eq (a, _b) -> [ a ]
+     | Term.Not a -> [ a ]
+     | Term.And xs | Term.Or xs -> Iarr.to_list xs
+     | Term.Ite (a, b, c) -> [ a; b; c ]

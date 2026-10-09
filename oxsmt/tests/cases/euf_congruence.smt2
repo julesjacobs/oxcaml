@@ -1,0 +1,10 @@
+; EUF congruence: a = b implies f a = f b, so asserting they differ is unsat.
+(set-logic QF_UFLIA)
+(set-info :status unsat)
+(declare-sort S 0)
+(declare-fun f (S) S)
+(declare-const a S)
+(declare-const b S)
+(assert (= a b))
+(assert (distinct (f a) (f b)))
+(check-sat)

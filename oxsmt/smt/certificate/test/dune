@@ -1,0 +1,14 @@
+; Test-only. Depends on oxsmt_solver + oxsmt_certificate (both stdlib-only), honoring the
+; dependency firewall (I3). cert_emit_test = step-1 emission wiring; checker_test = step-2
+; replay checker (VALID on honest streams, INVALID/UNSUPPORTED on corrupted ones). Run via
+; `make cert-test` / `make checker-test`.
+
+(executable
+ (name cert_emit_test)
+ (modules cert_emit_test)
+ (libraries oxsmt_solver oxsmt_certificate))
+
+(executable
+ (name checker_test)
+ (modules checker_test)
+ (libraries oxsmt_solver oxsmt_certificate))

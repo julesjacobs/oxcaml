@@ -1,0 +1,13 @@
+diff --git a/smt/combine/combine.ml b/smt/combine/combine.ml
+index d7e2267126..3fe46e0c95 100644
+--- a/smt/combine/combine.ml
++++ b/smt/combine/combine.ml
+@@ -307,7 +307,7 @@ struct
+   let internalize_uf_subterms t (term : Term.t) =
+     let rec go (u : Term.t) =
+       match u.Term.node with
+-      | Term.App (_, args) when Iarr.length args > 0 -> A.internalize_term t.a u
++      | Term.App (_, args) when Iarr.length args > 1 -> A.internalize_term t.a u
+       | _ -> List.iter go (walk_children u)
+     in
+     go term

@@ -1,0 +1,1750 @@
+(* The arrays theory as an e-graph client. See arr.mli for the contract.
+
+   The theory owns a [prem Euf.t] engine: select/store are App nodes, so the engine gives
+   congruence closure over them for free. On top of that substrate this module enforces
+   the read-over-write and extensionality axioms. The select/store symbol classification
+   (which App head is a select vs a store, over which index/element sorts) is read from
+   {!Oxsmt_core.Array_defs}; the theory grows its own copy when it mints a fresh [select]
+   for a ROW step.
+
+   THEORY boilerplate (atom<->term bookkeeping, watches, propagation-reason caching,
+   pop-frame reason dropping) mirrors {!Oxsmt_dt.Dt} / Euf_adapter. *)
+
+open Oxsmt_core
+module Euf = Oxsmt_euf.Euf
+module Defs = Array_defs
+
+(* Weak-equivalence decision procedure (ADR-weakeq / DESIGN.md A12), gated OXSMT_ARR_WEQ,
+   default OFF. W0 (this stage) is DARK: it maintains the {!Weq_graph} off the Euf merge
+   stream and (under OXSMT_ARR_WEQ_SELFCHECK) cross-checks its connectivity against the
+   engine, but emits NO lemmas and changes NO verdict — with the gate unset AND set the
+   solver is byte-identical. The L1/L2 generators that consume the graph land at W1/W2. *)
+let env_flag name =
+  match Sys.getenv_opt name with
+  | Some ("1" | "true" | "yes") -> true
+  | _ -> false
+;;
+
+(* W0.5 (ADR-weakeq §2a): the DARK store-chain analyzer — the storecomm arbiter. Read-only
+   (no lemmas, no verdict change): at Final it takes each asserted array diseq's canonical
+   L2 path and symbolically closes every path-index read down both store chains using ONLY
+   ROW1 + entailed off-diagonal diseqs, counting the UNRESOLVED index tests. Green-lights
+   the W2-storecomm expectation only if ~all paths close with zero open tests (linear
+   closure). Implies the graph is on. *)
+let weq_analyze = env_flag "OXSMT_ARR_WEQ_ANALYZE"
+
+(* Definite ROW2 propagation (z3 [assert_store_axiom2_core]): the missing deterministic
+   complement of [row_round]'s ROW1. When [i <> j] is ENTAILED (an asserted index diseq,
+   modulo congruence — [an_distinct]) for a store [st = store(base,i,v)] and a read
+   [select(arr,j)] with [arr ~ st], propagate [select(arr,j) = select(base,j)] with BOTH
+   the [arr = st] chain AND the FULL [i <> j] explanation as premises, instead of waiting
+   for [row_split] to branch on an [i=j] atom already decided false. z3 wins QF_AX with
+   plain theory_array + this rule (NOT Christ-Hoenicke): the deterministic read-through
+   telescopes a decided [i<>j] down the store chain, closing the swap refutation without
+   the blind index split blow-up. Needs [an_diseqs] populated, so it implies the graph
+   ([weq_on]).
+
+   DEFAULT-ON (pair-measured +23 on QF_AX, W=24: ROW2 leg 518/551 vs default 495; 0
+   both-solved flips, 0 z3 disagreements -- logs/pair-2026-07-15c.md). ROW2 was -58
+   intrinsic BEFORE the rung-1a [an_diseqs] class-pair index (storecomm wall cost); the
+   index reversed it (rung-1a landed at trunk b3d4a76e72). [OXSMT_ARR_ROW2] set to
+   0/false/no opts out (byte-identical to the pre-flip trunk); any other value / unset =>
+   ON. The opt-out token set is the SAME as [OXSMT_SYMBREAK] / [OXSMT_BASE_L0] (whose flip
+   precedent this mirrors). *)
+let weq_row2 =
+  match Sys.getenv_opt "OXSMT_ARR_ROW2" with
+  | Some ("0" | "false" | "no") -> false
+  | Some _ | None -> true
+;;
+
+(* Rung-1a measurement toggle: disable the [an_diseqs] class-pair index (below) and fall
+   back to the O(|an_diseqs|) list scan in [an_distinct]. Default OFF (index ON under
+   ROW2). Verdict/counter-identical either way -- it only trades a scan for a lookup -- so
+   the A/B of ROW2 vs ROW2+NOINDEX isolates the scan's share of the storecomm wall cost. *)
+let weq_row2_noindex = env_flag "OXSMT_ARR_ROW2_NOINDEX"
+
+(* The graph is maintained whenever the decision procedure is enabled OR the dark analyzer
+   needs it OR definite ROW2 needs the [an_diseqs] it populates. OXSMT_ARR_WEQ turns on
+   the W1 L1 read-over-weak-equivalence rule (added to [row_split], not yet replacing it). *)
+let weq_on = env_flag "OXSMT_ARR_WEQ" || weq_analyze || weq_row2
+
+(* OXSMT_AX_OCCIDX (W5 Lever A, dark, default OFF byte-identical): cache the per-class
+   select occurrence index ({!selects_by_arr_class}) across calls instead of rebuilding it
+   O(selects) on every ROW pass / theory check. Sound-by-rebuild: the cache is INVALIDATED
+   (dropped, then rebuilt fresh) on any event that can change a select's array-class — an
+   Euf class union (detected via a private merge cursor), a new select registration, or a
+   pop (merge retraction). It never remaps a persisted class key, so there is no
+   stale-key-across-pop hazard ([[dt-liveref-overwrite-wrong-unsat]] / #51 class). *)
+let occidx_on = env_flag "OXSMT_AX_OCCIDX"
+let weq_l1_on = env_flag "OXSMT_ARR_WEQ"
+let weq_selfcheck = env_flag "OXSMT_ARR_WEQ_SELFCHECK"
+
+(* O7 fuel: a hard cap on L1 clause emissions per solve. On exhaustion L1 stops emitting
+   and the sound [row_split] backstop continues (W1), so a pathological input degrades to
+   the engine's split budget (-> unknown), never a wrong verdict. Deterministic and load-
+   independent. *)
+let weq_fuel_cap =
+  match Sys.getenv_opt "OXSMT_ARR_WEQ_FUEL" with
+  | Some s ->
+    (try int_of_string s with
+     | _ -> 200_000)
+  | None -> 200_000
+;;
+
+(* W2-PREVIEW knob (experimental, gated): retire the blind [row_split] so L1 (+ ROW1 +
+   ensure_store_reads) is the sole Final-time saturation — the payoff configuration the
+   ADR predicts turns the W1 add-phase perturbation net-positive. Measurement-only for
+   now; the real W2 lands the retirement after this A/B clears. *)
+let weq_no_rowsplit = env_flag "OXSMT_ARR_WEQ_NOROW"
+
+(* General path-width cap (ADR §6 weq_max_idx): L1 fires only when the path has at most
+   this many distinct store indices, so the emitted avoidance disjunction stays a
+   genuinely SMALL finite case split. A general structural bound (NOT a per-logic/family
+   heuristic): a wide path (deep storecomm chain) yields a family-2-shaped wide clause
+   that wrecks the mostly-sat neighbours, so it is left to the definite ROW machinery.
+   Default: no cap. *)
+let weq_max_idx =
+  match Sys.getenv_opt "OXSMT_ARR_WEQ_MAXIDX" with
+  | Some s ->
+    (try int_of_string s with
+     | _ -> max_int)
+  | None -> max_int
+;;
+
+(* Component C (fair (b), the path-confined narrow split): drive the open extensionality
+   witness [k] against the a<->b path store indices one at a time (ROW1-style, restricted
+   to the path stores), instead of the wide [k = j1 ∨ ... ∨ k = jm] clause or blind
+   [row_split] over every congruent store. Default ON under [OXSMT_ARR_WEQ]; set
+   [OXSMT_ARR_WEQ_NONARROW] to isolate the propagation half in an A/B. *)
+let weq_narrow_on = not (env_flag "OXSMT_ARR_WEQ_NONARROW")
+
+(* Component A (fair (b), the incremental trigger): skip the whole
+   propagation/narrow-split round at a Final when nothing merged and no array diseq was
+   asserted since the last round — only a new merge or new diseq can enable a new
+   propagation. Set [OXSMT_ARR_WEQ_NOTRIGGER] to run the round every Final (the unfair
+   per-Final rescan) for an A/B on the trigger itself. *)
+let weq_trigger_on = not (env_flag "OXSMT_ARR_WEQ_NOTRIGGER")
+
+(* The engine's ['p]. A real assertion carries [P_lit]; the standing [true <> false]
+   disequality carries [P_axiom]; a ROW-derived equality carries [P_derived reasons] — the
+   trail literals whose conjunction entails the trigger. [P_axiom] is dropped when
+   building an Explanation so a returned premise set holds only asserted literals. *)
+type prem =
+  | P_lit of Lit.t
+  | P_axiom
+  | P_derived of Lit.t list
+
+type kind =
+  | K_eq of Term.t * Term.t
+  | K_bool
+  | K_foreign
+
+type info =
+  { term : Term.t
+  ; kind : kind
+  }
+
+type t =
+  { ctx : Context.t
+  ; env : Env.t
+  ; cap : Env.reserved_cap
+      (* ADR-0012 R1 reserved-minting capability for [env], threaded from the session (the
+         sole holder). The arrays theory is a legitimate reserved-symbol minter — like
+         preprocessing and the lemma tier — because its extensionality rule introduces
+         FRESH witness indices mid-solve, which MUST be unforgeable (see [witness_index]). *)
+  ; mutable reg : Defs.t (* select/store classification; grows as we mint fresh selects *)
+  ; engine : prem Euf.t
+  ; true_const : Term.t
+  ; false_const : Term.t
+  ; atoms : info Atom.Table.t
+  ; watched : Atom.t Term.Table.t (* watched Eq/predicate term -> atom, for propagation *)
+  ; mutable atom_terms : Term.t list (* registration order; model enumeration *)
+  ; seen_cat : unit Term.Table.t
+  ; mutable store_terms : Term.t list (* registered store applications, rev order *)
+  ; mutable select_terms : Term.t list (* registered select applications, rev order *)
+  ; select_syms :
+      (string, Symbol.t) Hashtbl.t (* minted select symbols, by canonical name *)
+  ; ensured_reads : (int * int, unit) Hashtbl.t
+      (* (store term tag, index term tag) pairs for which [select store index] has already
+         been materialized by the upward read-propagation rule ([ensure_store_reads]).
+         Guards termination: each (store, index) pair triggers at most one fresh select,
+         and a fresh select's index is drawn from an existing select, so no new index is
+         ever created. NOT backtracked on pop, and that is safe — NOT because e-graph
+         nodes persist (they do not: [Euf.pop] truncates enodes to the push watermark),
+         but because [select_terms]/[store_terms] are themselves monotonic ([Arr.pop]
+         never truncates them) and every ROW consumer reaches a term through
+         [Euf.are_equal]/[Euf.class_of], which lazily re-register an enode truncated by a
+         pop. So a memoized pair whose select was dropped by [Euf.pop] is simply
+         re-materialized on demand the next time it is read; the memo only ever suppresses
+         a redundant [build_select], never a needed one. *)
+  ; ext_witness : (int * int, Term.t) Hashtbl.t
+      (* fresh extensionality witness index per asserted array-diseq pair (by term tags,
+         orientation-normalized), reused so re-assertion after a pop is stable *)
+  ; mutable fresh_counter : int
+  ; mutable explain_cache : Explanation.t Lit.Map.t
+  ; mutable frames : Lit.t list list
+  ; weq : (Weq_graph.t * Euf.merge_cursor) option
+      (* the dark weak-equivalence graph + its merge cursor, [Some] iff OXSMT_ARR_WEQ
+         (W0). [None] keeps the OFF path byte-identical (no merge recording, no graph). *)
+  ; mutable an_diseqs : (Term.t * Term.t * Lit.t) list
+      (* Asserted disequalities (both array and index sorted) with their asserting
+         literal, appended when a negative [Eq] is asserted; populated when the graph is
+         on (W0.5 analyzer reads all of them via [an_distinct]; W1 L1 and definite ROW2
+         read them via [an_distinct] as diseq-reachable / off-diagonal triggers, and the
+         literal is the propagation premise). TRAILED via [an_diseq_stack] (snapshot on
+         [push], restored on [pop]) so [an_distinct] reflects only currently-LIVE
+         disequalities. That trailing is not the whole soundness story: under ROW2 a
+         served conclusion is sound because the [i <> j] explanation travels IN the
+         propagation's reason (premise-in-reason completeness), so the RED fixture
+         tests/arr-goldens-red wrong-UNSATs a satisfiable instance if that premise is
+         dropped even with the trailing fully intact. Empty unless the graph is on. *)
+  ; mutable an_done : bool (* W0.5 analyzer: emit the per-solve summary at most once *)
+  ; mutable an_diseq_stack : (Term.t * Term.t * Lit.t) list list
+      (* Backtrack stack for [an_diseqs] (one saved snapshot per open [push] frame). The
+         W1 propagation is CONFLICT-ONLY — it fires [assert_eq] on a read pair only when
+         the pair is currently entailed-DISTINCT ([an_distinct] finds a live diseq), so
+         the merge refutes the branch and never survives into a SAT model (whose
+         reconstruction it would corrupt — the naive/clause forms' storecomm-SAT ->
+         unknown regression). That gate is sound only if [an_diseqs] is CURRENT: a stale
+         (popped) diseq would let the propagation merge a pair that is no longer distinct,
+         both corrupting the SAT model and (via [weq_read_premise]'s [an_distinct]
+         store-index tests) admitting a stale premise. So [an_diseqs] is trailed here in
+         lockstep with [Euf]/[push]/[pop]. Empty unless the graph is on. *)
+  ; mutable weq_fuel : int (* W1 L1: remaining propagation fuel this solve (O7) *)
+  ; mutable weq_dirty : bool
+      (* Component A incremental trigger: [true] iff a merge was folded or an array diseq
+         was asserted since the last propagation round ran, so a re-scan could enable a
+         new propagation. Starts [true] (the first Final must run). Set by [weq_sync] on a
+         non-empty drain, by [assert_lit] on a new array diseq, and by [pop] (state
+         changed); cleared when the round runs. Only meaningful when the graph is on. *)
+  ; mutable occ_idx : (int, Term.t) Hashtbl.t option
+      (* W5 Lever A (OXSMT_AX_OCCIDX): the cached [selects_by_arr_class] index, or [None]
+         when it must be rebuilt. Dropped to [None] on any select-class-changing event
+         (see [occ_cursor] / select registration / [pop]). Always [None] when [occidx_on]
+         is off. *)
+  ; occ_cursor : Euf.merge_cursor option
+  (* Private merge cursor (only allocated when [occidx_on]); a non-empty drain means an
+     Euf union changed some class since [occ_idx] was built, so the cache is invalidated. *)
+  }
+
+let max_iters = 1_000_000
+
+let rec lits_of_prem = function
+  | P_lit l -> [ l ]
+  | P_axiom -> []
+  | P_derived ls -> ls
+
+and lits_of_prems ps = List.concat_map lits_of_prem ps
+
+let dedup_lits (ls : Lit.t list) : Lit.t list =
+  let seen = ref Lit.Map.empty in
+  List.filter
+    (fun l ->
+      if Lit.Map.mem l !seen
+      then false
+      else (
+        seen := Lit.Map.add l () !seen;
+        true))
+    ls
+;;
+
+(* The abstract e-graph view (O6) the weak-equivalence graph reads through — standalone,
+   it closes over this theory's private Euf engine; on the fabric hub (W3) it is re-bound. *)
+let weq_view engine : Weq_graph.egraph_view =
+  { Weq_graph.class_of = (fun tm -> Euf.class_of engine tm)
+  ; are_equal = (fun a b -> Euf.are_equal engine a b)
+  ; explain_equal =
+      (fun a b -> dedup_lits (lits_of_prems (Euf.explain engine a b)))
+      (* premise literals entailing [a = b]; dark in W0, consumed by the W1 guards *)
+  }
+;;
+
+let create ctx env cap reg =
+  let engine = Euf.create ctx in
+  let true_const = Context.bool_const ctx true in
+  let false_const = Context.bool_const ctx false in
+  Euf.register_term engine true_const;
+  Euf.register_term engine false_const;
+  Euf.assert_neq engine ~premise:P_axiom true_const false_const;
+  let weq =
+    if weq_on
+    then (
+      Euf.set_record_merges engine true;
+      Some (Weq_graph.create (weq_view engine), Euf.add_merge_consumer engine))
+    else None
+  in
+  (* W5 Lever A needs the merge log recorded so its private cursor can detect the class
+     unions that invalidate the cached occurrence index. When [weq_on] this is already
+     enabled above; enable it here for the occidx-only configuration. *)
+  let occ_cursor =
+    if occidx_on
+    then (
+      Euf.set_record_merges engine true;
+      Some (Euf.add_merge_consumer engine))
+    else None
+  in
+  { ctx
+  ; env
+  ; cap
+  ; reg
+  ; engine
+  ; true_const
+  ; false_const
+  ; atoms = Atom.Table.create 64
+  ; watched = Term.Table.create 64
+  ; atom_terms = []
+  ; seen_cat = Term.Table.create 128
+  ; store_terms = []
+  ; select_terms = []
+  ; select_syms = Hashtbl.create 16
+  ; ensured_reads = Hashtbl.create 64
+  ; ext_witness = Hashtbl.create 32
+  ; fresh_counter = 0
+  ; explain_cache = Lit.Map.empty
+  ; frames = [ [] ]
+  ; weq
+  ; an_diseqs = []
+  ; an_done = false
+  ; an_diseq_stack = []
+  ; weq_fuel = weq_fuel_cap
+  ; weq_dirty = true
+  ; occ_idx = None
+  ; occ_cursor
+  }
+;;
+
+(* --- small helpers --- *)
+
+let head_args (term : Term.t) : (Symbol.t * Term.t array) option =
+  match term.Term.node with
+  | Term.App (s, args) -> Some (s, Array.of_list (Iarr.to_list args))
+  | _ -> None
+;;
+
+let role_of t (term : Term.t) : Defs.entry option =
+  match term.Term.node with
+  | Term.App (sym, _) -> Defs.role_of_sym t.reg sym
+  | _ -> None
+;;
+
+let array_sort (sort : Sort.t) : (Sort.t * Sort.t) option =
+  match sort with
+  | Sort.Array (i, e) -> Some (i, e)
+  | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.BitVec _ ->
+    None
+;;
+
+(* --- minting fresh terms (select for a ROW step, a witness index for extensionality) --- *)
+
+(* Get-or-mint the [select] symbol for one (index, element) instantiation. Uses the SAME
+   canonical name the parser uses ({!Array_defs.op_symbol_name}), so a fresh [select] the
+   theory builds hash-conses with any [select] already in the problem; records it in [reg]
+   so [role_of] classifies it. *)
+let select_sym t ~index ~element : Symbol.t =
+  let name = Defs.op_symbol_name Defs.Select ~index ~element in
+  match Hashtbl.find_opt t.select_syms name with
+  | Some sym -> sym
+  | None ->
+    let arr = Sort.array_ ~index ~element in
+    (* board #58: the op name is a reserved [.oxsmt.arr.*] symbol with [|] sort-key
+       separators, so it must be minted through the cap door (the same [cap] the
+       ext-witness Skolem uses), not [Env.declare_fun] — the public door rejects both the
+       prefix and the byte class. *)
+    let sym =
+      Env.declare_reserved t.cap t.env name (Rank.create [ arr; index ] element)
+    in
+    Hashtbl.replace t.select_syms name sym;
+    t.reg <- Defs.add t.reg sym Defs.Select ~index ~element;
+    sym
+;;
+
+(* --- registration: catalog select/store while registering into the e-graph --- *)
+
+let rec catalog t (term : Term.t) =
+  if not (Term.Table.mem t.seen_cat term)
+  then (
+    Term.Table.replace t.seen_cat term ();
+    match head_args term with
+    | Some (_, args) ->
+      (match role_of t term with
+       | Some { Defs.role = Defs.Store; _ } ->
+         t.store_terms <- term :: t.store_terms;
+         (* record the permanent store edge in the weak-equivalence graph (W0, dark). The
+            [Array.length args = 3] guard is load-bearing exactly as in the ROW consuming
+            sites: a store-role symbol can be registered at a non-3 arity via the public
+            API ([[arr-arity-guard-load-bearing]]), and indexing args.(0)/args.(1)
+            unguarded would forge an edge over an extended-arity uninterpreted function. *)
+         (match t.weq with
+          | Some (g, _) when Array.length args = 3 ->
+            Weq_graph.add_store_edge g ~store_term:term ~base:args.(0) ~index:args.(1)
+          | _ -> ())
+       | Some { Defs.role = Defs.Select; _ } ->
+         t.select_terms <- term :: t.select_terms;
+         (* new select ⇒ the cached occurrence index is stale (W5 Lever A) *)
+         if occidx_on then t.occ_idx <- None
+       | None -> ());
+      Array.iter (catalog t) args
+    | None ->
+      (match term.Term.node with
+       | Term.Eq (a, b) ->
+         catalog t a;
+         catalog t b
+       | Term.Not a | Term.Le a -> catalog t a
+       | Term.And xs | Term.Or xs -> List.iter (catalog t) (Iarr.to_list xs)
+       | Term.Ite (a, b, c) ->
+         catalog t a;
+         catalog t b;
+         catalog t c
+       | Term.Arith lin ->
+         List.iter (fun (c, _) -> catalog t c) (Iarr.to_list lin.Term.coeffs)
+       | Term.Bool_const _ | Term.Int_const _ -> ()
+       | Term.App _ -> ()))
+;;
+
+(* [build_select t base j] is the (registered, cataloged) term [select base j] for a ROW
+   step, where [base] has an array sort. *)
+let build_select t (base : Term.t) (j : Term.t) : Term.t option =
+  match array_sort base.Term.sort with
+  | None -> None
+  | Some (index, element) ->
+    let sym = select_sym t ~index ~element in
+    let sel = Context.app t.ctx sym [ base; j ] in
+    Euf.register_term t.engine sel;
+    catalog t sel;
+    Some sel
+;;
+
+let classify (term : Term.t) : kind =
+  if not (Theory_view.is_atom term)
+  then invalid_arg "Arr.register_atom: term is not a theory atom";
+  match Theory_view.atom term with
+  | Theory_view.Equality (a, b) -> K_eq (a, b)
+  | Theory_view.Predicate (_, _) | Theory_view.Bool_lit _ -> K_bool
+  | Theory_view.Le_zero _ -> K_foreign
+;;
+
+let register_atom t atom term =
+  Euf.register_term t.engine term;
+  catalog t term;
+  if not (Atom.Table.mem t.atoms atom)
+  then (
+    let kind = classify term in
+    Atom.Table.replace t.atoms atom { term; kind };
+    t.atom_terms <- term :: t.atom_terms;
+    match kind with
+    | K_eq _ -> Term.Table.replace t.watched term atom
+    | K_bool ->
+      (match term.Term.node with
+       | Term.App (_, args) when Iarr.length args >= 1 ->
+         Term.Table.replace t.watched term atom;
+         Euf.rearm_watch t.engine term
+       | _ -> ())
+    | K_foreign -> ())
+;;
+
+(* --- extensionality: a <> b (arrays) => fresh k, select a k <> select b k --- *)
+
+let witness_index t (a : Term.t) (b : Term.t) (index : Sort.t) : Term.t =
+  let ta = a.Term.tag
+  and tb = b.Term.tag in
+  let key = if ta <= tb then ta, tb else tb, ta in
+  match Hashtbl.find_opt t.ext_witness key with
+  | Some w -> w
+  | None ->
+    (* A fresh nullary index constant for the extensionality Skolem. It MUST be
+       unforgeable: if the same symbol could be named elsewhere, an equality asserted at
+       this very index would turn our [select a k <> select b k] into a false conflict — a
+       wrong-UNSAT. The reserved [".oxsmt.arr.ext."] namespace closes the EXTERNAL door
+       (parsed input / public [declare_fun] / raw [Env] can never produce a [.oxsmt.*]
+       symbol with a rank), NOT lexical illegality — [@arr.ext.N] would have been
+       forgeable since [@]/[.] are legal simple-symbol characters.
+
+       board #58 (codex critical, freshness by CONSTRUCTION not by counter trust): the
+       minting door [Session.internal_minter] is PUBLIC, so a trusted in-process caller
+       could pre-mint [.oxsmt.arr.ext.N] (giving that name a rank) and then our counter,
+       trusting itself, would hand the extensionality rule the CALLER's symbol -> capture
+       -> wrong verdict. So advance past any index whose name already carries a rank in
+       [env] (i.e. is already declared/minted), and only then mint. This makes the witness
+       fresh against the actual env state, not merely against our own counter. The counter
+       also keeps distinct diseq pairs on distinct witnesses. *)
+    let rec fresh_name () =
+      let name = Printf.sprintf ".oxsmt.arr.ext.%d" t.fresh_counter in
+      t.fresh_counter <- t.fresh_counter + 1;
+      match Env.rank t.env (Symbol.intern name) with
+      | (_ : Rank.t) -> fresh_name () (* already declared/minted — skip it *)
+      | exception Not_found -> name
+    in
+    let name = fresh_name () in
+    let sym = Env.declare_reserved t.cap t.env name (Rank.create [] index) in
+    let w = Context.const t.ctx sym in
+    Euf.register_term t.engine w;
+    Hashtbl.replace t.ext_witness key w;
+    w
+;;
+
+let extensionality t lit (a : Term.t) (b : Term.t) =
+  match array_sort a.Term.sort with
+  | None -> ()
+  | Some (index, _element) ->
+    let k = witness_index t a b index in
+    (match build_select t a k, build_select t b k with
+     | Some sa, Some sb ->
+       Euf.assert_neq t.engine ~premise:(P_lit lit) sa sb;
+       (* Record the witness read disequality so the weak-equivalence propagation can see
+          the reads are entailed-distinct and fire ONLY as a refutation (conflict-only —
+          never merging reads that would survive into a SAT model and corrupt the array
+          model reconstruction, the known storecomm-SAT failure mode of the naive/clause
+          forms). The lit is the array-diseq lit that justifies the witness diseq. *)
+       if weq_on
+       then (
+         t.an_diseqs <- (sa, sb, lit) :: t.an_diseqs;
+         t.weq_dirty <- true)
+     | _ -> ())
+;;
+
+let assert_lit t lit =
+  let atom = Lit.atom lit in
+  let positive = Lit.sign lit in
+  match Atom.Table.find_opt t.atoms atom with
+  | None -> invalid_arg "Arr.assert_lit: atom was not registered"
+  | Some { kind = K_eq (a, b); _ } ->
+    if positive
+    then Euf.assert_eq t.engine ~premise:(P_lit lit) a b
+    else (
+      Euf.assert_neq t.engine ~premise:(P_lit lit) a b;
+      (* An array disequality demands an extensionality witness: a <> b is satisfiable
+         only if a and b differ at some index, so introduce a fresh one. Sound
+         (Skolemization); it drives ROW to close read-over-write refutations. *)
+      extensionality t lit a b;
+      (* Record the asserted diseq (array + index) for the graph-based rules: the W0.5
+         analyzer's store-chain closure and the W1 L1 diseq-reachable triggers. A new
+         array diseq is a fresh propagation trigger (component A); a new index diseq can
+         close an open path store-index test (an_distinct), likewise enabling a
+         propagation. *)
+      if weq_on
+      then (
+        t.an_diseqs <- (a, b, lit) :: t.an_diseqs;
+        t.weq_dirty <- true))
+  | Some { kind = K_bool; term } ->
+    let target = if positive then t.true_const else t.false_const in
+    Euf.assert_eq t.engine ~premise:(P_lit lit) term target
+  | Some { kind = K_foreign; _ } ->
+    invalid_arg "Arr.assert_lit: a foreign (non-array/EUF) atom must not be asserted"
+;;
+
+(* --- read-over-write saturation --- *)
+
+(* Upward read propagation. The read-over-write rules ([row_round] / [row_split]) relate a
+   read of a STORE, [select (store base i v) j], to a read of its BASE, [select base j].
+   But they only fire once BOTH reads exist as terms, and the only term-introduction they
+   do is the base read ([build_select ... base]) given a store read. Nothing introduces
+   the store read given only a base read — so a read of an array [a] never reaches the
+   stores built over [a]. Two symptoms, one cause:
+
+   - the storeinv shape (store(a,i,select(b,i)) = store(b,i,select(a,i)), a<>b): unsat,
+     but the disequality's witness reads [select a k]/[select b k] never reach the two
+     stores, so the store equality is never exercised and the engine wrongly saturates
+     (unsat -> unknown);
+   - satisfiable queries whose model the self-check REJECTS: the engine saturates on an
+     under-constrained arrangement (reads on the declared arrays were never propagated up
+     to the store terms mentioned by the assertions), so the extracted model does not in
+     fact satisfy the assertions.
+
+   This closes both: for every store [st = store base i v] and every read [select arr j]
+   whose array [arr] is congruent to the store's [base], materialize [select st j]. The
+   existing round/split then relates it to [select base j] (i = j entailed => select st j
+   = v, else the guarded [row_split]).
+
+   Cost is controlled by WHEN this runs, not by restricting which indices it fires at:
+   [check] calls it only at [Final], once ordinary ROW saturation is otherwise clean and
+   quiet (see [final_introduce_reads]). A query that refutes during propagation never
+   reaches that point, so its fast refutation is untouched; the reads (and the
+   [row_split]s they spawn) are paid for only on a branch that survives to a full,
+   otherwise-consistent assignment — exactly where a store equality would otherwise go
+   unexercised. Running this eagerly inside [saturate] at every effort instead was
+   measured to flood deep store chains (swap/storecomm: ~22 nested stores) with case
+   splits and net out to a wash.
+
+   Termination: each (store term, index term) pair fires at most once ([ensured_reads]); a
+   fresh read's index [j] is an existing index term, so no new index — hence no new
+   (store,index) pair — is ever created. The introduction walks up a store chain across
+   rounds: reading a base introduces a read of the store over it, which is itself the base
+   of the next store, and so on. *)
+(* Per-call index: array e-class id -> the registered selects whose array argument is in
+   that class. The ROW passes below relate a select [select arr j] to a store
+   [store base i v] exactly when [arr] is congruent to the store's own array ([row_round])
+   or to its base ([ensure_store_reads]) — i.e. when [class_of arr] equals [class_of st]
+   resp. [class_of base]. Grouping the selects by [class_of arr] once (O(selects)) lets
+   each store look up only the relevant selects instead of scanning the full selects x
+   stores product, which is the dominant per-decision cost on deep store chains (~130
+   selects x ~22 stores). Rebuilt each call because e-classes change as the search merges
+   classes. *)
+let rebuild_selects_idx t : (int, Term.t) Hashtbl.t =
+  let idx = Hashtbl.create 64 in
+  List.iter
+    (fun sel ->
+      (* [Iarr.length a = 2] is load-bearing, NOT a redundant sanity check: a select-role
+         symbol can be REGISTERED at a non-2 arity via the public API
+         (Session.parse_minter admits any canonical [.oxsmt.arr.*] name with a
+         caller-supplied rank; Array_defs classifies by name, not rank). The old
+         [head_args] match on [[| arr; _j |]] silently skipped such a mis-ranked App;
+         without this length guard the ROW rules would treat an extended-arity
+         uninterpreted function as a select and derive a wrong verdict. Every consuming
+         site below re-checks arity for the same reason. *)
+      match sel.Term.node with
+      | Term.App (_, a) when Iarr.length a = 2 && role_of t sel <> None ->
+        Hashtbl.add idx (Euf.class_of t.engine (Iarr.get a 0)) sel
+      | _ -> ())
+    t.select_terms;
+  idx
+;;
+
+(* The per-class select occurrence index. OFF ([occidx_on] false): rebuilt every call,
+   byte-identical to trunk. ON (W5 Lever A): returns the cached index, rebuilding only
+   when invalidated. Invalidation is by REBUILD (never key-remap): draining the private
+   merge cursor detects any Euf union since the last build (a select's array-class may
+   have changed) and drops the cache; select registration and [pop] also drop it. So a
+   cache hit means the select set AND every select's array-class are unchanged since the
+   build — the rebuilt index would be identical (same [Hashtbl.add] insertion order ⇒
+   identical [find_all] order), preserving counted-identity and the class→reads query
+   interface. *)
+let selects_by_arr_class t : (int, Term.t) Hashtbl.t =
+  if not occidx_on
+  then rebuild_selects_idx t
+  else (
+    (match t.occ_cursor with
+     | Some c -> if Euf.drain_merges t.engine c <> [] then t.occ_idx <- None
+     | None -> ());
+    match t.occ_idx with
+    | Some idx -> idx
+    | None ->
+      let idx = rebuild_selects_idx t in
+      t.occ_idx <- Some idx;
+      idx)
+;;
+
+let ensure_store_reads t ~changed =
+  let idx = selects_by_arr_class t in
+  List.iter
+    (fun st ->
+      match st.Term.node with
+      | Term.App (_, a)
+        when Iarr.length a = 3
+             &&
+             match role_of t st with
+             | Some { Defs.role = Defs.Store; _ } -> true
+             | _ -> false ->
+        let base = Iarr.get a 0 in
+        (* selects on an array congruent to this store's base — [Euf.are_equal arr base]
+           is [class_of arr = class_of base], which is exactly the index bucket. *)
+        List.iter
+          (fun sel ->
+            match sel.Term.node with
+            | Term.App (_, sa) when Iarr.length sa = 2 ->
+              let j = Iarr.get sa 1 in
+              let key = st.Term.tag, j.Term.tag in
+              if not (Hashtbl.mem t.ensured_reads key)
+              then (
+                Hashtbl.replace t.ensured_reads key ();
+                match build_select t st j with
+                | Some _ -> changed := true
+                | None -> ())
+            | _ -> ())
+          (Hashtbl.find_all idx (Euf.class_of t.engine base))
+      | _ -> ())
+    t.store_terms
+;;
+
+(* [i <> j] entailed by an asserted index disequality, modulo current congruence: some
+   recorded asserted diseq (x, y) has [i ~ x] and [j ~ y] (or swapped). O(#diseqs) per
+   test. Array-sorted recorded diseqs never match an index test (cross-sort terms are
+   never congruent). Some premise-lits entailing [i <> j] (the diseq's lit + the
+   congruence chains linking its endpoints to i and j), or None. The premise is what a
+   propagation relying on [i <> j] must carry so a later retract of that diseq/chain
+   retracts the propagation (PREMISE-COMPLETENESS — omitting it is a wrong-unsat vector;
+   the definite-ROW2 mutant). *)
+let an_distinct t (i : Term.t) (j : Term.t) : Lit.t list option =
+  List.find_map
+    (fun (x, y, lit) ->
+      if Euf.are_equal t.engine i x && Euf.are_equal t.engine j y
+      then
+        Some
+          (dedup_lits
+             (lit
+              :: (lits_of_prems (Euf.explain t.engine i x)
+                  @ lits_of_prems (Euf.explain t.engine j y))))
+      else if Euf.are_equal t.engine i y && Euf.are_equal t.engine j x
+      then
+        Some
+          (dedup_lits
+             (lit
+              :: (lits_of_prems (Euf.explain t.engine i y)
+                  @ lits_of_prems (Euf.explain t.engine j x))))
+      else None)
+    t.an_diseqs
+;;
+
+(* One ROW pass: for each store [st = store base i v] and each select [sel = select arr j]
+   with [arr] congruent to [st], propagate the ENTAILED ROW equality. The definite ROW1
+   direction ([i = j] known ⇒ sel = v) always fires. Under OXSMT_ARR_ROW2, the definite
+   ROW2 direction ([i <> j] entailed ⇒ sel = select(base,j)) fires too (z3's
+   [assert_store_axiom2_core]); its complement (undecided [i=j]) stays deferred to the
+   [row_split] [Split] at [Final]. Sets [changed] on a propagation. Never reports a
+   conflict directly (Euf.check does).
+
+   Iterating stores-outer over the [selects_by_arr_class] index (instead of the old
+   selects x stores product) is order-insensitive and fixpoint-preserving: [saturate]
+   re-runs to a fixpoint on [changed], so a propagation that a within-pass merge would
+   newly enable is caught on the next pass (which rebuilds the index); and a pass that
+   propagates nothing did so against a valid index (no merge happened), i.e. it has
+   genuinely converged. The set of ROW consequences at the fixpoint is unchanged. *)
+(* Rung-1a: a class-pair index over [an_diseqs] making [an_distinct] O(1) in the ROW2 hot
+   loop (it was a per-(store,read)-per-pass O(|an_diseqs|) [List.find_map] with 2-4
+   [are_equal] per entry -- the storecomm 00060 scan storm). Built ONCE per [row_round]
+   pass, keyed on the normalized (min,max) INDEX-class pair, storing the FIRST [an_diseqs]
+   entry (list order) touching that pair. COUNTED-IDENTICAL to the scan: [an_distinct_idx]
+   returns the same first-match entry and the same explanation. SOUND to build once per
+   pass: [row_round] merges only READ classes (element/array sort) via [assert_eq], never
+   INDEX classes, so the index-class reps this is keyed on are stable for the pass it
+   serves (the next pass rebuilds after [Euf.check]). *)
+let build_an_diseq_index t : (int * int, Term.t * Term.t * Lit.t) Hashtbl.t =
+  let idx = Hashtbl.create 64 in
+  List.iter
+    (fun ((x, y, _) as e) ->
+      let cx = Euf.class_of t.engine x
+      and cy = Euf.class_of t.engine y in
+      let key = if cx <= cy then cx, cy else cy, cx in
+      if not (Hashtbl.mem idx key) then Hashtbl.add idx key e)
+    t.an_diseqs;
+  idx
+;;
+
+(* Indexed [an_distinct]: same result (first-match entry, same premise explanation) as the
+   [an_diseqs] scan, O(1) via [build_an_diseq_index]. [ci = cj] -> [None] (a live diseq
+   never has both endpoints in one class in a consistent state, so the scan finds nothing
+   either). Orientation recomputed per call ([i ~ x] ? normal : swapped), matching the
+   scan's [i ~ x]-first check. *)
+let an_distinct_idx t index (i : Term.t) (j : Term.t) : Lit.t list option =
+  let ci = Euf.class_of t.engine i
+  and cj = Euf.class_of t.engine j in
+  if Int.equal ci cj
+  then None
+  else (
+    let key = if ci <= cj then ci, cj else cj, ci in
+    match Hashtbl.find_opt index key with
+    | None -> None
+    | Some (x, y, lit) ->
+      (* Mirror the scan's per-entry guard (codex bounce): VERIFY the candidate's
+         orientation live rather than assume it. The (ci,cj) key match only guarantees
+         index-CLASS membership at index-BUILD time; for a same-sort [(Array T T)] array an
+         in-pass element merge (ROW2 asserts read-result equalities, and a read is the
+         element = index sort here) can stale the hit, so an ASSUMED orientation could
+         [explain] over non-equal terms -> a wrong premise on a TCB path. Checking both
+         [are_equal] pairs makes it sound BY CONSTRUCTION: a valid hit is byte-identical to
+         the scan; a stale / non-matching hit degrades to [None] (a missed match,
+         completeness-only -> the [row_split] backstop still fires), never a wrong premise.
+         Distinct index/element sorts (the whole corpus) never stale, so counted-identity
+         and the +21 hold. *)
+      if Euf.are_equal t.engine i x && Euf.are_equal t.engine j y
+      then
+        Some
+          (dedup_lits
+             (lit
+              :: (lits_of_prems (Euf.explain t.engine i x)
+                  @ lits_of_prems (Euf.explain t.engine j y))))
+      else if Euf.are_equal t.engine i y && Euf.are_equal t.engine j x
+      then
+        Some
+          (dedup_lits
+             (lit
+              :: (lits_of_prems (Euf.explain t.engine i y)
+                  @ lits_of_prems (Euf.explain t.engine j x))))
+      else None)
+;;
+
+let row_round t ~changed =
+  let idx = selects_by_arr_class t in
+  (* rung-1a: build the [an_diseqs] class-pair index once for this pass unless NOINDEX (or
+     ROW2 off, where the ROW2 arm below never runs). *)
+  let diseq_idx =
+    if weq_row2 && not weq_row2_noindex then Some (build_an_diseq_index t) else None
+  in
+  List.iter
+    (fun st ->
+      match st.Term.node with
+      | Term.App (_, a)
+        when Iarr.length a = 3
+             &&
+             match role_of t st with
+             | Some { Defs.role = Defs.Store; _ } -> true
+             | _ -> false ->
+        let base = Iarr.get a 0
+        and i = Iarr.get a 1
+        and v = Iarr.get a 2 in
+        List.iter
+          (fun sel ->
+            match sel.Term.node with
+            | Term.App (_, sa) when Iarr.length sa = 2 ->
+              let arr = Iarr.get sa 0
+              and j = Iarr.get sa 1 in
+              (* definite ROW1: i = j entailed ⇒ sel = v *)
+              if Euf.are_equal t.engine i j
+              then (
+                if not (Euf.are_equal t.engine sel v)
+                then (
+                  let prem =
+                    P_derived
+                      (dedup_lits
+                         (lits_of_prems
+                            (Euf.explain t.engine arr st @ Euf.explain t.engine i j)))
+                  in
+                  Euf.assert_eq t.engine ~premise:prem sel v;
+                  changed := true))
+              else if weq_row2
+              then (
+                (* definite ROW2: i <> j entailed ⇒ sel = select(base,j). The FULL i<>j
+                   explanation ([an_distinct]) is a premise alongside [arr = st], so a
+                   retract of the diseq retracts this equality (PREMISE-COMPLETENESS).
+                   Build [select(base,j)] (hash-consed; catalog idempotent) so it
+                   telescopes down the chain; terminates (finite arrays × existing
+                   indices, each merged once then [are_equal] skips). *)
+                match
+                  (match diseq_idx with
+                   | Some di -> an_distinct_idx t di i j
+                   | None -> an_distinct t i j)
+                with
+                | Some dprem ->
+                  (match build_select t base j with
+                   | Some selbase when not (Euf.are_equal t.engine sel selbase) ->
+                     let prem =
+                       P_derived
+                         (dedup_lits
+                            (lits_of_prems (Euf.explain t.engine arr st) @ dprem))
+                     in
+                     Euf.assert_eq t.engine ~premise:prem sel selbase;
+                     changed := true
+                   | _ -> ())
+                | None -> ())
+            | _ -> ())
+          (Hashtbl.find_all idx (Euf.class_of t.engine st))
+      | _ -> ())
+    t.store_terms
+;;
+
+(* Saturate ROW definite propagations to a fixpoint, interleaving [Euf.check] (a merge can
+   expose a diseq violation or a new congruence). [Some prems] on the first conflict. *)
+let saturate t : prem list option =
+  let rec loop n =
+    if n > max_iters then failwith "Arr.saturate: fixpoint did not converge (bug)";
+    match Euf.check t.engine with
+    | Euf.Conflict prems -> Some prems
+    | Euf.Consistent ->
+      let changed = ref false in
+      row_round t ~changed;
+      if !changed then loop (n + 1) else None
+  in
+  loop 0
+;;
+
+(* At [Final]: find the tag-least open ROW pair (select arr j, store base i v) with
+   [arr ~ st], [i = j] not entailed, and [sel] not already equal to [select base j], and
+   return the theory-valid split disjunction. Building [select base j] introduces it into
+   the e-graph so the split's second disjunct is a real atom. The disjunction:
+
+   (guard ⇒) i = j ∨ select (store base i v) j = select base j
+
+   where [guard] is [arr <> st] when [arr] is only congruent to (not syntactically) [st]
+   (so the clause is unconditionally array-valid). Two/three distinct atoms, not a
+   propositional tautology, so the SAT core keeps it. *)
+(* Per-call index: array e-class id -> the registered stores in that class. Mirror of
+   [selects_by_arr_class] for the store side, so [row_split] can enumerate the stores
+   congruent to a select's array ([Euf.are_equal arr st] = [class_of arr = class_of st])
+   without scanning every store. *)
+let stores_by_class t : (int, Term.t) Hashtbl.t =
+  let idx = Hashtbl.create 64 in
+  List.iter
+    (fun st ->
+      match role_of t st with
+      | Some { Defs.role = Defs.Store; _ } ->
+        Hashtbl.add idx (Euf.class_of t.engine st) st
+      | _ -> ())
+    t.store_terms;
+  idx
+;;
+
+let row_split t : Term.t list option =
+  let cand = ref None in
+  let by_tag a b = compare a.Term.tag b.Term.tag in
+  let sidx = stores_by_class t in
+  List.iter
+    (fun sel ->
+      if !cand = None
+      then (
+        match sel.Term.node with
+        | Term.App (_, sa) when Iarr.length sa = 2 && role_of t sel <> None ->
+          let arr = Iarr.get sa 0
+          and j = Iarr.get sa 1 in
+          (* stores congruent to [arr], in tag order — same set and order the old
+             full-scan visited, so the tag-least open pair chosen is identical. *)
+          let stores =
+            List.sort by_tag (Hashtbl.find_all sidx (Euf.class_of t.engine arr))
+          in
+          List.iter
+            (fun st ->
+              if !cand = None
+              then (
+                match st.Term.node with
+                | Term.App (_, a)
+                  when Iarr.length a = 3 && not (Euf.are_equal t.engine (Iarr.get a 1) j)
+                  ->
+                  let base = Iarr.get a 0
+                  and i = Iarr.get a 1 in
+                  (match build_select t base j with
+                   | Some selbase when not (Euf.are_equal t.engine sel selbase) ->
+                     let idx_eq = Context.eq t.ctx i j in
+                     let read_eq = Context.eq t.ctx sel selbase in
+                     let disjuncts =
+                       if Term.equal arr st
+                       then [ idx_eq; read_eq ]
+                       else
+                         [ Context.not_ t.ctx (Context.eq t.ctx arr st); idx_eq; read_eq ]
+                     in
+                     cand := Some disjuncts
+                   | _ -> ())
+                | _ -> ()))
+            stores
+        | _ -> ()))
+    (List.sort by_tag t.select_terms);
+  !cand
+;;
+
+(* --- propagation reason caching (mirrors Dt / Euf_adapter) --- *)
+
+let reason_of_implied t (imp : Euf.implied) : Explanation.t =
+  let premises = dedup_lits (lits_of_prems (Euf.explain_implied t.engine imp)) in
+  let rule =
+    if premises = []
+    then Explanation.Rule_tag.Trivial
+    else Explanation.Rule_tag.Euf_congruence
+  in
+  { Explanation.premises; rule }
+;;
+
+let cache_reason t lit expl =
+  if not (Lit.Map.mem lit t.explain_cache)
+  then (
+    t.explain_cache <- Lit.Map.add lit expl t.explain_cache;
+    match t.frames with
+    | fr :: rest -> t.frames <- (lit :: fr) :: rest
+    | [] -> t.frames <- [ [ lit ] ])
+;;
+
+let collect_propagations t : Lit.t list =
+  List.filter_map
+    (fun (imp : Euf.implied) ->
+      match Term.Table.find_opt t.watched imp.Euf.atom with
+      | None -> None
+      | Some atom ->
+        let lit = Lit.make atom imp.Euf.value in
+        cache_reason t lit (reason_of_implied t imp);
+        Some lit)
+    (Euf.propagate t.engine)
+;;
+
+let conflict_of prems =
+  let premises = dedup_lits (lits_of_prems prems) in
+  if premises = [] then failwith "Arr: empty conflict premise set (unsound) [tripwire]";
+  Theory.Conflict { Explanation.premises; rule = Explanation.Rule_tag.Euf_congruence }
+;;
+
+(* At [Final] only, after ordinary ROW saturation is clean and quiet: introduce the upward
+   witness reads ([ensure_store_reads]) and re-saturate. Deferring the introduction to
+   [Final] — rather than running it eagerly in [saturate] at every effort — is the
+   difference between +completeness with no regression and a net wash: a query that
+   refutes during propagation never reaches here, so its fast refutation is untouched; the
+   witness reads (and the [row_split]s they spawn) are paid for only on a branch that
+   survives to a full, otherwise-consistent assignment, which is exactly where the store
+   equality would otherwise go unexercised. Returns a re-saturation verdict (conflict /
+   propagations) if the new reads forced one; otherwise [None] to fall through to
+   [row_split]/[Sat]. *)
+let final_introduce_reads t : Theory.check_result option =
+  let changed = ref false in
+  ensure_store_reads t ~changed;
+  if not !changed
+  then None
+  else (
+    match saturate t with
+    | Some prems -> Some (conflict_of prems)
+    | None ->
+      (match collect_propagations t with
+       | _ :: _ as lits -> Some (Theory.Propagations lits)
+       | [] -> None))
+;;
+
+(* --- weak-equivalence graph maintenance (W0, dark) --- *)
+
+(* Drain the Euf merge log into the graph. Called at the top of every {!check} and before
+   every {!push}/{!pop}, so between any two drains no push/pop intervened and the whole
+   drained batch belongs to the CURRENT frame — the edges are then trailed in the frame
+   they actually occurred in, and {!pop} removes exactly the right ones. (The engine
+   clears the log on its own [pop], so draining before ours is also what stops a
+   surviving-frame merge from being lost.) A no-op with the gate OFF (the log is empty; no
+   cursor). *)
+let weq_sync t =
+  match t.weq with
+  | None -> ()
+  | Some (g, cursor) ->
+    (match Euf.drain_merges t.engine cursor with
+     | [] -> ()
+     | _ :: _ as evs ->
+       (* a class union since the last drain — fold it into the graph and mark the
+          propagation trigger dirty (component A): a new merge can complete a path, make
+          two read indices congruent, or bring a read's array into an endpoint class. *)
+       t.weq_dirty <- true;
+       List.iter
+         (fun (ev : Euf.merge_event) ->
+           Weq_graph.on_merge g ev.Fabric.kept ev.Fabric.merged)
+         evs)
+;;
+
+(* The admissible (stably-infinite-index) array terms the self-check samples: store terms,
+   their bases, and select arrays — the domain the weak-equivalence graph reasons over. *)
+let weq_array_sample t : Term.t list =
+  let acc = ref [] in
+  let add tm = if array_sort tm.Term.sort <> None then acc := tm :: !acc in
+  List.iter
+    (fun st ->
+      add st;
+      match st.Term.node with
+      | Term.App (_, a) when Iarr.length a = 3 -> add (Iarr.get a 0)
+      | _ -> ())
+    t.store_terms;
+  List.iter
+    (fun sel ->
+      match sel.Term.node with
+      | Term.App (_, a) when Iarr.length a = 2 -> add (Iarr.get a 0)
+      | _ -> ())
+    t.select_terms;
+  !acc
+;;
+
+(* At Final under OXSMT_ARR_WEQ_SELFCHECK: re-drain (to fold this check's own saturation
+   merges) then cross-check graph connectivity against the engine. Raises on divergence
+   (test/CI only). Dark otherwise. *)
+let weq_final_self_check t =
+  match t.weq with
+  | Some (g, _) when weq_selfcheck ->
+    weq_sync t;
+    Weq_graph.self_check g (weq_array_sample t)
+  | _ -> ()
+;;
+
+(* --- W0.5 dark store-chain analyzer (storecomm arbiter, §2a) --- *)
+
+(* Symbolically normalize the read [select(x0, j)] down [x0]'s store chain using ONLY ROW1
+   (i ~ j -> the store value) and entailed off-diagonal diseqs (i <> j -> recurse the
+   base), counting the UNRESOLVED index tests. Returns [(terminal, opens, reads)]:
+   - [terminal] is [`Value v] when ROW1 fired at a store on [j], else [`Leaf x] for the
+     array the walk stopped at (root, cycle, or an unresolved test) — used to compare the
+     two sides' reductions;
+   - [opens] counts index tests (j vs a store index) that were neither entailed-equal nor
+     entailed-distinct — the metric that decides linear closure;
+   - [reads] counts store hops walked. Terminates via a visited-class set (congruence
+     cycles), bounded by the store count. *)
+let an_normalize t sidx (x0 : Term.t) (j : Term.t)
+  : [ `Value of Term.t | `Leaf of Term.t ] * int * int
+  =
+  let visited = Hashtbl.create 16 in
+  let opens = ref 0
+  and reads = ref 0 in
+  let rec go (x : Term.t) =
+    let cx = Euf.class_of t.engine x in
+    if Hashtbl.mem visited cx
+    then `Leaf x
+    else (
+      Hashtbl.replace visited cx ();
+      let stores =
+        List.sort (fun a b -> compare a.Term.tag b.Term.tag) (Hashtbl.find_all sidx cx)
+      in
+      match stores with
+      | [] -> `Leaf x
+      | st :: _ ->
+        (match st.Term.node with
+         | Term.App (_, a) when Iarr.length a = 3 ->
+           let base = Iarr.get a 0
+           and i = Iarr.get a 1
+           and v = Iarr.get a 2 in
+           incr reads;
+           if Euf.are_equal t.engine i j
+           then `Value v (* ROW1: select(store(_,j,v), j) = v *)
+           else if an_distinct t i j <> None
+           then go base (* off-diagonal: value unchanged at j *)
+           else (
+             incr opens;
+             `Leaf x)
+           (* unresolved test *)
+         | _ -> `Leaf x))
+  in
+  let terminal = go x0 in
+  terminal, !opens, !reads
+;;
+
+(* Two read reductions are forced equal (the L2 disjunct [select(a,j) <> select(b,j)] is
+   refuted) iff both fired ROW1 to congruent values, or both bottomed out at a congruent
+   base leaf. A Value-vs-Leaf pair is not decidable by this closure. *)
+let an_terminals_equal t (ta : [ `Value of Term.t | `Leaf of Term.t ]) tb : bool =
+  match ta, tb with
+  | `Value va, `Value vb -> Euf.are_equal t.engine va vb
+  | `Leaf la, `Leaf lb -> Euf.are_equal t.engine la lb
+  | _ -> false
+;;
+
+(* Run once at the first Final under OXSMT_ARR_WEQ_ANALYZE: for each asserted array diseq
+   that is weakly equivalent, take its canonical L2 path and symbolically close every path
+   store index; report the open-test distribution to stderr (one tab-separated line per
+   solve, so a per-file corpus run aggregates). Emits no lemmas, changes no verdict. *)
+let weq_analyze_final t =
+  match t.weq with
+  | Some (g, _) when weq_analyze && not t.an_done ->
+    t.an_done <- true;
+    weq_sync t;
+    let sidx = stores_by_class t in
+    let n_diseqs = ref 0
+    and n_weq = ref 0
+    and n_path_idx = ref 0
+    and n_open = ref 0
+    and max_open = ref 0
+    and n_reads = ref 0
+    and n_eqguards = ref 0
+    and n_closed = ref 0 in
+    List.iter
+      (fun (a, b, _lit) ->
+        if array_sort a.Term.sort <> None
+        then (
+          incr n_diseqs;
+          match Weq_graph.find_path g a b with
+          | None -> ()
+          | Some edges ->
+            incr n_weq;
+            (* distinct store indices on the path (term identity), and the eq-guard count *)
+            let seen = Hashtbl.create 16 in
+            let idxs = ref [] in
+            List.iter
+              (fun (e : Weq_graph.edge) ->
+                match e with
+                | Weq_graph.Store { index; _ } ->
+                  if not (Hashtbl.mem seen index.Term.tag)
+                  then (
+                    Hashtbl.replace seen index.Term.tag ();
+                    idxs := index :: !idxs)
+                | Weq_graph.Equality _ -> incr n_eqguards)
+              edges;
+            let diseq_open = ref 0
+            and diseq_closed = ref true in
+            List.iter
+              (fun jl ->
+                incr n_path_idx;
+                let ta, oa, ra = an_normalize t sidx a jl in
+                let tb, ob, rb = an_normalize t sidx b jl in
+                n_reads := !n_reads + ra + rb;
+                diseq_open := !diseq_open + oa + ob;
+                if oa + ob > 0 || not (an_terminals_equal t ta tb)
+                then diseq_closed := false)
+              !idxs;
+            n_open := !n_open + !diseq_open;
+            if !diseq_open > !max_open then max_open := !diseq_open;
+            if !diseq_closed then incr n_closed)
+        else ())
+      t.an_diseqs;
+    Printf.eprintf
+      "ARR_WEQ_ANALYZE\tarr_diseqs=%d\tweq=%d\tpath_idx=%d\teqguards=%d\topen=%d\tmax_open=%d\treads=%d\tclosed=%d\n\
+       %!"
+      !n_diseqs
+      !n_weq
+      !n_path_idx
+      !n_eqguards
+      !n_open
+      !max_open
+      !n_reads
+      !n_closed
+  | _ -> ()
+;;
+
+(* --- W1: L1 read-over-weak-equivalence (ADR §4), gated OXSMT_ARR_WEQ, ADDS to row_split
+   --- *)
+
+(* The (array, index) of a genuine arity-2 Select term, or [None]. The
+   [Iarr.length a = 2] + role guard is the load-bearing arity contract
+   ([[arr-arity-guard-load-bearing]]). *)
+let weq_read_parts t (sel : Term.t) : (Term.t * Term.t) option =
+  match sel.Term.node with
+  | Term.App (_, a) when Iarr.length a = 2 ->
+    (match role_of t sel with
+     | Some { Defs.role = Defs.Select; _ } -> Some (Iarr.get a 0, Iarr.get a 1)
+     | _ -> None)
+  | _ -> None
+;;
+
+(* Distinct store-index terms (term identity — O2, NOT e-class: a by-class dedup drops a
+   congruent-but-distinct store index under an unguarded search-level congruence, a
+   wrong-unsat vector) on [path], the store TERMS on it, and the e-class ids it visits
+   (for the narrow split's path confinement). *)
+let weq_path_info t (path : Weq_graph.edge list)
+  : Term.t list * (int, unit) Hashtbl.t * int
+  =
+  let stores = ref [] in
+  let classes = Hashtbl.create 16 in
+  let idx_seen = Hashtbl.create 16 in
+  let add_class tm = Hashtbl.replace classes (Euf.class_of t.engine tm) () in
+  List.iter
+    (fun (e : Weq_graph.edge) ->
+      match e with
+      | Weq_graph.Store { u; v; store_term; index; _ } ->
+        add_class u;
+        add_class v;
+        stores := store_term :: !stores;
+        if not (Hashtbl.mem idx_seen index.Term.tag)
+        then Hashtbl.replace idx_seen index.Term.tag ()
+      | Weq_graph.Equality { u; v } ->
+        add_class u;
+        add_class v)
+    path;
+  !stores, classes, Hashtbl.length idx_seen
+;;
+
+(* PREMISE for propagating [select(x1,i1) = select(x2,i2)] where [x1] is congruent to path
+   endpoint [a], [x2] to endpoint [b], along the weak-equivalence [path] from [a] to [b],
+   when the whole condition is ENTAILED (ADR §4 as THEORY PROPAGATION, team-lead ruling
+   (b)). The read equality holds GIVEN: [i1 = i2]; the ENDPOINT congruences [x1 = a] and
+   [x2 = b] (O1'(ii) — a search-level array merge bringing a read's array to an endpoint
+   MUST be a premise, else a retract of it is a wrong-unsat, RED #7); every path
+   Equality-edge [u = v] (O1'(iii)); and [i1 <> jₗ] for every path store index jₗ (ROW2
+   telescoping). Returns [Some premise-lits] carrying the justification of ALL of those
+   (PREMISE-COMPLETENESS — omitting any is a wrong-unsat vector, the propagation-form of
+   the O1' guards), or [None] if any store index test is OPEN (not entailed distinct) or a
+   path Equality edge no longer holds — those cases are left to the narrow split. Store
+   indices deduped by TERM identity (O2). Precondition (caller): [are_equal x1 a],
+   [are_equal x2 b], [are_equal i1 i2]. *)
+let weq_read_premise
+  t
+  ~(x1 : Term.t)
+  ~(i1 : Term.t)
+  ~(x2 : Term.t)
+  ~(i2 : Term.t)
+  ~(a : Term.t)
+  ~(b : Term.t)
+  (path : Weq_graph.edge list)
+  : Lit.t list option
+  =
+  let ok = ref true in
+  let prem =
+    ref
+      (lits_of_prems (Euf.explain t.engine i1 i2)
+       @ lits_of_prems (Euf.explain t.engine x1 a)
+       @ lits_of_prems (Euf.explain t.engine x2 b))
+  in
+  let store_seen = Hashtbl.create 16 in
+  List.iter
+    (fun (e : Weq_graph.edge) ->
+      if !ok
+      then (
+        match e with
+        | Weq_graph.Equality { u; v } ->
+          if Euf.are_equal t.engine u v
+          then prem := lits_of_prems (Euf.explain t.engine u v) @ !prem
+          else ok := false (* the path merge no longer holds — not currently propagable *)
+        | Weq_graph.Store { index; _ } ->
+          if not (Hashtbl.mem store_seen index.Term.tag)
+          then (
+            Hashtbl.replace store_seen index.Term.tag ();
+            match an_distinct t i1 index with
+            | Some p -> prem := p @ !prem
+            | None -> ok := false (* open index test: leave to the narrow split *))))
+    path;
+  if !ok then Some (dedup_lits !prem) else None
+;;
+
+(* W1 L1 as theory PROPAGATION (ruling (b)), component B (TARGETED): for each asserted,
+   weakly-equivalent array diseq [(a,b)] take its canonical a->b path and propagate ONLY
+   the refutation-relevant read pairs — a read on [a]'s class ("a-side") against a read on
+   [b]'s class ("b-side") at a congruent index (the extensionality witness reads
+   [select(a,k)]/[select(b,k)] are the primary such pair) — NOT every diseq-reachable
+   congruent pair (that O(reads²) rescan collapsed the naive checkpoint). When the a->b
+   path is fully ENTAILED (all store indices entailed distinct from the read index, all
+   path merges hold — W0.5's common case: 0 open tests on storecomm) ASSERT the read
+   equality with the path condition as its PREMISE, rather than emitting a wide avoidance
+   clause the SAT solver must re-derive propositionally (which inflated exactly like blind
+   row_split, the measured -108). No permanent memo (a propagation retracts with its
+   premise and re-derives, like [row_round]); [are_equal] skips an already-merged pair.
+   Fuel (O7) caps total propagations. Sets [changed] on a propagation. *)
+let weq_propagate_round t ~changed =
+  match t.weq with
+  | Some (g, _) when weq_l1_on ->
+    List.iter
+      (fun (a, b, _) ->
+        if array_sort a.Term.sort <> None && Weq_graph.weakly_equivalent g a b
+        then (
+          match Weq_graph.find_path g a b with
+          | None -> ()
+          | Some path ->
+            let _stores, _classes, n_idx = weq_path_info t path in
+            if n_idx <= weq_max_idx
+            then (
+              let side arr =
+                List.filter_map
+                  (fun sel ->
+                    match weq_read_parts t sel with
+                    | Some (x, i) when Euf.are_equal t.engine x arr -> Some (sel, x, i)
+                    | _ -> None)
+                  t.select_terms
+              in
+              let a_reads = side a
+              and b_reads = side b in
+              List.iter
+                (fun (r1, x1, i1) ->
+                  List.iter
+                    (fun (r2, x2, i2) ->
+                      (* conflict-only: fire ONLY when the two reads are already
+                         entailed-distinct (some asserted diseq separates them, incl. the
+                         extensionality witness diseq), so asserting the read equality
+                         refutes the branch. On a SAT-surviving branch no such diseq
+                         exists, so nothing is merged and the array model reconstruction
+                         is not corrupted (O5: this is what keeps the mostly-SAT
+                         storecomm/swap neighbours from degrading to unknown, the
+                         naive-form -477 / clause -108 failure). *)
+                      if t.weq_fuel > 0
+                         && (not (Euf.are_equal t.engine r1 r2))
+                         && Euf.are_equal t.engine i1 i2
+                         && an_distinct t r1 r2 <> None
+                      then (
+                        match weq_read_premise t ~x1 ~i1 ~x2 ~i2 ~a ~b path with
+                        | Some prem ->
+                          t.weq_fuel <- t.weq_fuel - 1;
+                          Euf.assert_eq t.engine ~premise:(P_derived prem) r1 r2;
+                          changed := true
+                        | None -> ()))
+                    b_reads)
+                a_reads)))
+      t.an_diseqs
+  | _ -> ()
+;;
+
+(* Component C (fair (b), the PATH-CONFINED NARROW SPLIT): for a weakly-equivalent array
+   diseq [(a,b)] whose extensionality witness reads are not yet forced equal, drive the
+   witness index [k] against the a<->b path store indices ONE at a time, ROW1-style — NOT
+   the wide [k = j1 ∨ ... ∨ k = jm] clause (family 2, measured -107) and NOT blind
+   [row_split] over every congruent store. Emit the tag-least open ROW split
+   [(¬(arr = st) ∨) k = i ∨ select(arr,k) = select(base,k)] for a read [select(arr,k)] on
+   the path (the witness read or a telescoped continuation, [ensure_store_reads]
+   materialises the upward ones) against a PATH store [st = store(base,i,_)] congruent to
+   [arr] — the same theory-valid disjunction as [row_split] (validity: [arr ~ st] gives
+   [select(arr,k) = select(st,k)], and [k ≠ i ⇒ select(st,k) = select(base,k)]; the
+   [¬(arr = st)] guard makes it unconditional when [arr] is only congruent to [st]),
+   confined to the a<->b path so the search telescopes along the refutation chain instead
+   of every congruent store globally. The all-[k ≠ jₗ] branch is then closed by the
+   entailed propagation above, and each [k = jₗ] branch by definite ROW1. *)
+let weq_narrow_split t : Term.t list option =
+  match t.weq with
+  | Some (g, _) when weq_l1_on && weq_narrow_on ->
+    let by_tag a b = compare a.Term.tag b.Term.tag in
+    let cand = ref None in
+    List.iter
+      (fun (a, b, _) ->
+        if !cand = None
+           && array_sort a.Term.sort <> None
+           && Weq_graph.weakly_equivalent g a b
+        then (
+          match Weq_graph.find_path g a b with
+          | None -> ()
+          | Some path ->
+            let path_stores, path_classes, n_idx = weq_path_info t path in
+            if n_idx <= weq_max_idx
+            then (
+              match array_sort a.Term.sort with
+              | None -> ()
+              | Some (index, _) ->
+                let k = witness_index t a b index in
+                (* reads at index ~ k whose array is on the a<->b path: the witness reads
+                   and their telescoped continuations *)
+                let reads =
+                  List.filter_map
+                    (fun sel ->
+                      match weq_read_parts t sel with
+                      | Some (x, i)
+                        when Euf.are_equal t.engine i k
+                             && Hashtbl.mem path_classes (Euf.class_of t.engine x) ->
+                        Some (sel, x)
+                      | _ -> None)
+                    t.select_terms
+                in
+                let reads = List.sort (fun (s1, _) (s2, _) -> by_tag s1 s2) reads in
+                let path_stores = List.sort_uniq by_tag path_stores in
+                List.iter
+                  (fun (sel, arr) ->
+                    if !cand = None
+                    then
+                      List.iter
+                        (fun st ->
+                          if !cand = None
+                          then (
+                            match st.Term.node with
+                            | Term.App (_, sa)
+                              when Iarr.length sa = 3
+                                   && Euf.are_equal t.engine arr st
+                                   && not (Euf.are_equal t.engine (Iarr.get sa 1) k) ->
+                              let base = Iarr.get sa 0
+                              and i = Iarr.get sa 1 in
+                              (match build_select t base k with
+                               | Some selbase
+                                 when not (Euf.are_equal t.engine sel selbase) ->
+                                 let idx_eq = Context.eq t.ctx i k in
+                                 let read_eq = Context.eq t.ctx sel selbase in
+                                 let disjuncts =
+                                   if Term.equal arr st
+                                   then [ idx_eq; read_eq ]
+                                   else
+                                     [ Context.not_ t.ctx (Context.eq t.ctx arr st)
+                                     ; idx_eq
+                                     ; read_eq
+                                     ]
+                                 in
+                                 cand := Some disjuncts
+                               | _ -> ())
+                            | _ -> ()))
+                        path_stores)
+                  reads)))
+      t.an_diseqs;
+    !cand
+  | _ -> None
+;;
+
+(* At Final, after [final_introduce_reads]: (A) skip entirely when nothing merged and no
+   diseq was asserted since the last round ran (the incremental trigger — the naive
+   checkpoint's per-Final O(reads²) rescan was the -477 artifact); else run the (B)
+   targeted propagation round, re-saturate to surface any conflict / propagation, and if
+   none, offer the (C) path-confined narrow split. [None] falls through to row_split (W1
+   add-phase; W2 retires it). *)
+let final_weq t : Theory.check_result option =
+  if not weq_l1_on
+  then None
+  else (
+    weq_sync t;
+    if weq_trigger_on && not t.weq_dirty
+    then None
+    else (
+      t.weq_dirty <- false;
+      let changed = ref false in
+      weq_propagate_round t ~changed;
+      let saturated =
+        if not !changed
+        then None
+        else (
+          match saturate t with
+          | Some prems -> Some (conflict_of prems)
+          | None ->
+            (match collect_propagations t with
+             | _ :: _ as lits -> Some (Theory.Propagations lits)
+             | [] -> None))
+      in
+      match saturated with
+      | Some _ as r -> r
+      | None ->
+        (match weq_narrow_split t with
+         | Some disjuncts -> Some (Theory.Split disjuncts)
+         | None -> None)))
+;;
+
+let check t effort =
+  weq_sync t;
+  match saturate t with
+  | Some prems -> conflict_of prems
+  | None ->
+    let lits = collect_propagations t in
+    (match lits, effort with
+     | _ :: _, _ -> Theory.Propagations lits
+     | [], Theory.Propagate -> Theory.Propagations []
+     | [], Theory.Final ->
+       weq_analyze_final t;
+       (match final_introduce_reads t with
+        | Some result -> result
+        | None ->
+          weq_final_self_check t;
+          (* W1: run the L1 read-over-weakeq PROPAGATION round first (entailed read
+             equalities, ruling (b)); on any conflict/propagation it forced, return that,
+             else fall back to the (still present) blind row_split. W2 retires row_split. *)
+          (match final_weq t with
+           | Some result -> result
+           | None ->
+             (match if weq_no_rowsplit then None else row_split t with
+              | Some terms -> Theory.Split terms
+              | None -> Theory.Sat))))
+;;
+
+let explain t lit =
+  match Lit.Map.find_opt lit t.explain_cache with
+  | Some expl -> expl
+  | None ->
+    failwith
+      "Arr.explain: no cached reason for literal (not theory-propagated, or its frame \
+       was popped)"
+;;
+
+let push t =
+  weq_sync t;
+  (* fold pending merges into the current frame before it becomes a parent *)
+  (match t.weq with
+   | Some (g, _) ->
+     Weq_graph.push g;
+     (* snapshot [an_diseqs] so [pop] can restore it (trailed distinctness, see field doc) *)
+     t.an_diseq_stack <- t.an_diseqs :: t.an_diseq_stack
+   | None -> ());
+  Euf.push t.engine;
+  t.frames <- [] :: t.frames
+;;
+
+let pop t n =
+  weq_sync t;
+  (* fold pending (current-frame) merges before the engine clears its log on pop, then
+     unwind the graph's equality edges for the popped frames in lockstep with Euf *)
+  (match t.weq with
+   | Some (g, _) ->
+     Weq_graph.pop g n;
+     (* a pop retracts merges/diseqs, so premise-based propagations retract too and may
+        need re-deriving in the restored state (component A) *)
+     t.weq_dirty <- true;
+     (* restore [an_diseqs] to its value at the push of the frame we are popping into, so
+        [an_distinct] reflects only currently-live disequalities *)
+     let rec restore k stack =
+       if k <= 0
+       then stack (* pop nothing: no-op, matching [drop] below (codex M1) *)
+       else (
+         match stack with
+         | saved :: rest ->
+           if k = 1
+           then (
+             t.an_diseqs <- saved;
+             rest)
+           else restore (k - 1) rest
+         | [] ->
+           t.an_diseqs <- [];
+           [])
+     in
+     t.an_diseq_stack <- restore n t.an_diseq_stack
+   | None -> ());
+  Euf.pop t.engine n;
+  (* a pop retracts merges ⇒ select array-classes revert ⇒ the cached occurrence index is
+     stale; drop it (rebuilt fresh on next use). W5 Lever A. Load-bearing: neutralizing
+     this line flips 14/30 swap files sat→unknown under the counted-identity sweep (RED,
+     mutant- verified 2026-07-15 — stale-across-pop cache ⇒ wrong verdict). *)
+  if occidx_on then t.occ_idx <- None;
+  let rec drop k frames =
+    if k = 0
+    then frames
+    else (
+      match frames with
+      | fr :: rest ->
+        List.iter (fun l -> t.explain_cache <- Lit.Map.remove l t.explain_cache) fr;
+        drop (k - 1) rest
+      | [] -> [])
+  in
+  t.frames
+  <- (match drop n t.frames with
+      | [] -> [ [] ]
+      | fs -> fs)
+;;
+
+(* --- models (never trusted for a client verdict: array sat degrades to unknown) --- *)
+
+let children (term : Term.t) : Term.t list =
+  match term.Term.node with
+  | Term.Bool_const _ | Term.Int_const _ -> []
+  | Term.App (_, args) -> Iarr.to_list args
+  | Term.Arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
+  | Term.Le a | Term.Not a -> [ a ]
+  | Term.Eq (a, b) -> [ a; b ]
+  | Term.And a | Term.Or a -> Iarr.to_list a
+  | Term.Ite (c, a, b) -> [ c; a; b ]
+;;
+
+let model t =
+  let seen = Term.Table.create 64 in
+  let acc = ref [] in
+  let rec walk (term : Term.t) =
+    if not (Term.Table.mem seen term)
+    then (
+      Term.Table.replace seen term ();
+      let v =
+        match term.Term.node with
+        | Term.Eq (a, b) -> Model.Bool (Euf.are_equal t.engine a b)
+        | _ ->
+          if Sort.equal term.Term.sort Sort.bool
+          then
+            if Euf.are_equal t.engine term t.true_const
+            then Model.Bool true
+            else if Euf.are_equal t.engine term t.false_const
+            then Model.Bool false
+            else Model.Uninterp (Euf.class_of t.engine term)
+          else Model.Uninterp (Euf.class_of t.engine term)
+      in
+      acc := (term, v) :: !acc;
+      List.iter walk (children term))
+  in
+  List.iter walk (List.rev t.atom_terms);
+  Model.of_alist !acc
+;;
+
+(* --- array sat models (§8 self-check via Array_model_check) --- *)
+
+type value =
+  | Scalar of Model.value
+  | Array of
+      { entries : (value * value) list
+      ; default : value
+      }
+
+let array_model t : (Term.t * value) list option =
+  (* A per-e-class scalar for a NON-array leaf (an index/element value). Uninterpreted and
+     Int classes take a per-class-distinct witness (distinct classes => distinct values,
+     so an index/element disequality holds); Bool is a bounded 2-value domain (like the DT
+     Bool completion); an Int class carrying a literal takes it. *)
+  let bool_memo : (int, bool) Hashtbl.t = Hashtbl.create 16 in
+  let bool_next = ref 0 in
+  let scalar_of (x : Term.t) : Model.value =
+    if Sort.equal x.Term.sort Sort.bool
+    then
+      if Euf.are_equal t.engine x t.true_const
+      then Model.Bool true
+      else if Euf.are_equal t.engine x t.false_const
+      then Model.Bool false
+      else (
+        let k = Euf.class_of t.engine x in
+        match Hashtbl.find_opt bool_memo k with
+        | Some b -> Model.Bool b
+        | None ->
+          let b = !bool_next = 1 in
+          incr bool_next;
+          Hashtbl.replace bool_memo k b;
+          Model.Bool b)
+    else (
+      match x.Term.sort with
+      | Sort.Int _ ->
+        let members = Euf.class_members t.engine x in
+        (match
+           List.find_map
+             (fun (m : Term.t) ->
+               match m.Term.node with
+               | Term.Int_const n -> Some n
+               | _ -> None)
+             members
+         with
+         | Some n -> Model.Int n
+         | None -> Model.Uninterp (Euf.class_of t.engine x))
+      | _ -> Model.Uninterp (Euf.class_of t.engine x))
+  in
+  (* Group every registered [select b j] by the e-class of its array argument [b], so an
+     array class's model map lists (value of j -> value of that select) for every read of
+     a congruent array. This is the finite part of the weak-array value; unread indices
+     take the element sort's base default. *)
+  let by_class : (int, (Term.t * Term.t) list) Hashtbl.t = Hashtbl.create 64 in
+  List.iter
+    (fun sel ->
+      match head_args sel, role_of t sel with
+      | Some (_, [| arr; j |]), Some { Defs.role = Defs.Select; _ } ->
+        let k = Euf.class_of t.engine arr in
+        Hashtbl.replace
+          by_class
+          k
+          ((j, sel) :: Option.value (Hashtbl.find_opt by_class k) ~default:[])
+      | _ -> ())
+    (List.rev t.select_terms);
+  (* A representative store term per e-class that contains one (tag-least, for
+     determinism). An array class that equals a [store base i v] must take that store's
+     VALUE — its base's value with [(i,v)] overlaid — not an independent map reconstructed
+     from its own reads: the two disagree at any index read on one side of the store
+     equality but not the other, and the self-check (which recomputes [store]
+     structurally) then rejects the whole model. This is the storecomm shape (a_k = store
+     a_j .. chains): deriving each array structurally over the store DAG makes the
+     [a_k = store ..] equalities hold by construction. *)
+  let store_of_class : (int, Term.t) Hashtbl.t = Hashtbl.create 64 in
+  List.iter
+    (fun st ->
+      match head_args st, role_of t st with
+      | Some (_, [| _b; _i; _v |]), Some { Defs.role = Defs.Store; _ } ->
+        let k = Euf.class_of t.engine st in
+        (match Hashtbl.find_opt store_of_class k with
+         | Some prev when prev.Term.tag <= st.Term.tag -> ()
+         | _ -> Hashtbl.replace store_of_class k st)
+      | _ -> ())
+    t.store_terms;
+  let memo : (int, value) Hashtbl.t = Hashtbl.create 64 in
+  let rec default_of (element : Sort.t) (depth : int) : value =
+    if depth > 1_000
+    then Scalar (Model.Uninterp 0)
+    else (
+      match element with
+      | Sort.Array (_, e2) -> Array { entries = []; default = default_of e2 (depth + 1) }
+      | Sort.Bool -> Scalar (Model.Bool false)
+      | Sort.Int _ -> Scalar (Model.Int Bigint.zero)
+      | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.BitVec _ ->
+        Scalar (Model.Uninterp 0))
+  and value_of (x : Term.t) (depth : int) : value =
+    if depth > 1_000
+    then Scalar (Model.Uninterp 0)
+    else (
+      match x.Term.sort with
+      | Sort.Array (_index, element) ->
+        let k = Euf.class_of t.engine x in
+        (match Hashtbl.find_opt memo k with
+         | Some v -> v
+         | None ->
+           (* seed a base value first (cycle guard; array sorts are non-recursive so this
+              is only defensive) *)
+           Hashtbl.replace
+             memo
+             k
+             (Array { entries = []; default = default_of element (depth + 1) });
+           let v =
+             match Hashtbl.find_opt store_of_class k with
+             | Some { Term.node = Term.App (_, args); _ } when Iarr.length args = 3 ->
+               (* store-respecting: this class equals [store base i v]; take base's value
+                  with [(i, v)] overlaid, exactly as the checker computes [store base i v]
+                  (prepend (i-value, v-value); keep base's default), so the
+                  [a_k = store ..] equality holds by construction. *)
+               let a = Array.of_list (Iarr.to_list args) in
+               (match value_of a.(0) (depth + 1) with
+                | Array base ->
+                  Array
+                    { entries =
+                        (value_of a.(1) (depth + 1), value_of a.(2) (depth + 1))
+                        :: base.entries
+                    ; default = base.default
+                    }
+                | Scalar _ as s -> s (* base must be an array; defensive *))
+             | _ ->
+               (* root array (no store in its class): the finite map from its own reads. *)
+               let sels = Option.value (Hashtbl.find_opt by_class k) ~default:[] in
+               let entries =
+                 List.map
+                   (fun (j, sel) -> value_of j (depth + 1), value_of sel (depth + 1))
+                   sels
+               in
+               Array { entries; default = default_of element (depth + 1) }
+           in
+           Hashtbl.replace memo k v;
+           v)
+      | _ -> Scalar (scalar_of x))
+  in
+  (* one value per registered subterm of an asserted atom (array leaves + index/element
+     leaves; the checker computes select/store/equality itself) *)
+  let seen = Term.Table.create 128 in
+  let acc = ref [] in
+  let rec collect (term : Term.t) =
+    if not (Term.Table.mem seen term)
+    then (
+      Term.Table.replace seen term ();
+      acc := (term, value_of term 0) :: !acc;
+      List.iter collect (children term))
+  in
+  List.iter collect (List.rev t.atom_terms);
+  Some !acc
+;;

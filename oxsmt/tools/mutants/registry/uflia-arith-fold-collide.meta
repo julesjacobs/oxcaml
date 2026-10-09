@@ -1,0 +1,6 @@
+module=interface
+suite=test
+target=smt/interface/cdclt.ml
+description=Cdclt.model's §10-v2 gap-B structural Arith fold drops the linear form's constant term (folds from 0 instead of lin.const), so a pure-EUF arith UF-argument like x+2 realizes to value(x) instead of value(x)+2. The stored table key no longer equals R1's structural evaluation (ev folds x+2 = ev(x)+2), and the dropped-constant value collides with the x-keyed row, so p's table becomes inconsistent / the p(x+2)=5 assertion reads the wrong cell and R1 rejects. The committed sat fixture uflia_gap_arith_below_uf_unknown.smt2 reverts to unknown -> golden mismatch -> `make test` red. Exercises the value-collision direction (a mis-folded key colliding with a sibling class's key).
+review=task #117 gap B (logic uflia-models-design.md §8-B, uflia-v2-design.md §2/§4); codex MED
+expected=KILLED-TEST

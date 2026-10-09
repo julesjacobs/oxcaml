@@ -1,0 +1,13 @@
+diff --git aa/smt/interface/presolve.ml bb/smt/interface/presolve.ml
+index 961dbf3a86..2b53c06fb0 100644
+--- aa/smt/interface/presolve.ml
++++ bb/smt/interface/presolve.ml
+@@ -613,7 +613,7 @@ let simplify_contextual ctx assertions =
+          let env_else = assume env c' ~truth:false in
+          let a' = simp env_then a in
+          let b' = simp env_else b in
+-         Context.ite ctx c' a' b')
++         Context.ite ctx (simp env_then c') a' b')
+   in
+   let emit ~aborted =
+     match Sys.getenv_opt "OXSMT_PRESOLVE_CTX_STATS" with

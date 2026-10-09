@@ -1,0 +1,12 @@
+diff --git a/smt/core/node.ml b/smt/core/node.ml
+index 3260952..7d071e3 100644
+--- a/smt/core/node.ml
++++ b/smt/core/node.ml
+@@ -275,7 +275,6 @@ let mk_le st terms const =
+ 
+ let le st a b =
+   require_int "le" a;
+-  require_int "le" b;
+   let ta, ka = terms_of a
+   and tb, kb = terms_of b in
+   mk_le st (ta @ List.map (fun (t, c) -> t, neg_ovf c) tb) (sub_ovf ka kb)

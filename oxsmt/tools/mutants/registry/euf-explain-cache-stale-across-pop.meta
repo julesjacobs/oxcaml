@@ -1,0 +1,6 @@
+module=euf
+suite=euf-adapter-test
+target=smt/theories/euf/euf_adapter.ml
+description=Euf_adapter.pop stops uncaching the popped frames' explanation reasons (the List.iter Lit.Map.remove becomes a no-op), so a propagated literal's reason SURVIVES the pop of the decision level that produced it — the dangerous "stale cache entry survives pop" direction of the #102 propagation-time cache (the AP1 trailed-state class). The cache then serves a reason whose premises unwound with the popped frame, which can violate CONTRACT-EX / feed 1UIP a premise off the current trail. Killed by euf_adapter_test test_explain_cache_pushpop: after pop, `explain` on the popped-frame literal must fail-loud (check_raises); with the mutant it returns the stale reason instead, so the check_raises fails.
+review=#102 euf-explain-fix (frame-scoped cache mirroring Lia_adapter; recovery invariant: every trailed cache entry restorable by cancel_until 0)
+expected=KILLED-TEST

@@ -1,0 +1,2 @@
+cross-logic byte-identity A/B (trunk db07aa58ca vs fix), verdict+counters:
+TOTAL=62 diffs=0

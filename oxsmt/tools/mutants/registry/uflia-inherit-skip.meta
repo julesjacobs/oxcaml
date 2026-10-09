@@ -1,0 +1,6 @@
+module=combine
+suite=test
+target=smt/combine/combine.ml
+description=Combine.model's §10-v2 gap-A class-value inheritance stops inheriting: a pure-EUF Int term whose EUF class carries a LIA integer (class_int hit) surfaces the realize-me [Uninterp] signal instead of [Model.Int n]. Then congruent App twins split across tiers (f(a) LIA-valued 7, f(b) pure-EUF under a=b) realize to disagreeing integers, f's table gets two rows at one key, and R1 rejects the model. The committed sat fixture uflia_gap_congruent_tier_split_unknown.smt2 reverts to unknown -> golden mismatch -> `make test` red.
+review=task #117 gap A (logic uflia-models-design.md §8-A, uflia-v2-design.md §1); codex MED
+expected=KILLED-TEST

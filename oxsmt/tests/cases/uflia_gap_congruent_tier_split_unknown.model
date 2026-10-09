@@ -1,0 +1,7 @@
+(model
+  (const a 0)
+  (const b 0)
+  (fun f (default 0)
+        (case (0) 7))
+  (fun g (default 0)
+        (case (7) 0)))

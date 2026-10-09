@@ -1,0 +1,12 @@
+diff --git a/smt/interface/presolve.ml b/smt/interface/presolve.ml
+--- a/smt/interface/presolve.ml
++++ b/smt/interface/presolve.ml
+@@ -230,7 +230,7 @@
+       List.filter_map
+         (function
+           | `Def -> None
+-          | `Keep c -> Some (subst c))
++          | `Keep _ -> None)
+         tagged
+     in
+     (* Defs in ELIMINATION order (order is newest-first; [rev_map] restores oldest-first).

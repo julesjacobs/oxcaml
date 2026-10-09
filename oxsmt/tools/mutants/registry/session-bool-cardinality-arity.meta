@@ -1,0 +1,6 @@
+module=interface
+suite=test
+target=smt/interface/session.ml
+description=Session.register_bool_terms (the Bool-cardinality rule) guards on Iarr.length args >= 2 instead of >= 1, an off-by-one that STOPS interning unary Bool-sorted predicate applications p(x) as SAT atoms. Those are exactly the buried finite-sort terms the rule exists to surface: a unary predicate occurring only in a UF argument position (e.g. f a inside g (f a), f : S -> Bool) is then never case-split true/false, so pigeonhole over the two Bool values is missed and the combinator's H2 guard degrades to unknown. Completeness fault (not soundness — the degrade stays sound). Killed by tests/cases/pigeonhole_bool_unsat.smt2 (three unary predicate apps forced pairwise-distinct by congruence: expected unsat, the mutant yields unknown), run under make test's golden harness.
+review=TODO Predicates item 2 (Bool-cardinality rule: every Bool-sorted e-graph term registers as a SAT atom). Invariant: the arity guard admits every applied (arity >= 1) Bool predicate; arity-0 Bool Apps are bare propositional vars already surfaced by the clausifier, so the boundary is >= 1, not >= 2. Discrimination independently verified: neutering register_bool_terms flips pigeonhole_bool_unsat from unsat to unknown.
+expected=KILLED-TEST

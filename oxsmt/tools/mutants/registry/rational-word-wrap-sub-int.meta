@@ -1,0 +1,6 @@
+module=rational
+suite=rational-word-test
+target=smt/theories/lia/rational.ml
+description=sub_int drops its overflow/min_int guard (raw native op), so a native sub that should PROMOTE to Big instead WRAPS silently — a soundness-critical wrong VALUE. Part of the wrap-instead-of-promote mutant SET covering every guarded primitive (codex fix-round: the original mutant patched only add_int). Kills via the rational-word-test overflow/min_int boundary vectors + the Python fractions.Fraction differential oracle.
+review=user hard constraint 3 (wrap-instead-of-promote stays RED, widened to all ops per codex fix-round); core-bignum-review.md R1; DESIGN §10
+expected=KILLED-TEST

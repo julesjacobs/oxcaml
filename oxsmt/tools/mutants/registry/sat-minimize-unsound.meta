@@ -1,0 +1,6 @@
+module=sat
+suite=sat-test
+target=smt/solver/sat.ml
+description=clause minimization marks needed literals redundant (ok:=true): drops sound literals
+review=sat-review clause-minimization soundness
+expected=KILLED-TEST

@@ -1,0 +1,6 @@
+(goal 1
+  (verdict unknown)
+  (counters (conflicts <10) (decisions <10) (propagations <10)))
+(goal 2
+  (verdict unknown)
+  (counters (conflicts <10) (decisions <10) (propagations <10)))

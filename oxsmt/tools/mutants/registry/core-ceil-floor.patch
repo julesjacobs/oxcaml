@@ -1,0 +1,13 @@
+diff --git a/smt/core/node.ml b/smt/core/node.ml
+index 3260952..3ecd011 100644
+--- a/smt/core/node.ml
++++ b/smt/core/node.ml
+@@ -160,7 +160,7 @@ let gcd_pos a b =
+    k). *)
+ let ceil_div k g =
+   let q = k / g in
+-  if k mod g <> 0 && k > 0 then q + 1 else q
++  if k mod g <> 0 && k > 0 then q else q
+ ;;
+ 
+ (* ------------------------------------------------------------------ *)

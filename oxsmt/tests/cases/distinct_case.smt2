@@ -1,0 +1,10 @@
+; distinct a b c means all three pairwise different, so a = b is unsat.
+(set-logic QF_UF)
+(set-info :status unsat)
+(declare-sort S 0)
+(declare-const a S)
+(declare-const b S)
+(declare-const c S)
+(assert (distinct a b c))
+(assert (= a b))
+(check-sat)

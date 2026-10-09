@@ -1,0 +1,3 @@
+(model
+  (const p true)
+  (const q false))

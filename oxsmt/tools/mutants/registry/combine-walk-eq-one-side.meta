@@ -1,0 +1,6 @@
+module=combine
+suite=combine-test
+target=smt/combine/combine.ml
+description=walk_children descends only ONE side of an Eq (returns [a] not [a;b]): drops the mixed-equality totality requirement (f x = x+y must record BOTH f x and the sum), under-approximating the interface set so a buried crossing is missed -> wrong SAT
+review=internalization-review Priority-1 THE WALK (ADR-0010 §3.1 C2 / §6 mixed-equality totality); builder-proven 14 test failures
+expected=KILLED-TEST

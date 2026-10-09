@@ -1,0 +1,14 @@
+diff --git a/smt/combine/combine.ml b/smt/combine/combine.ml
+index 68f8a83a33..5a16a18dff 100644
+--- a/smt/combine/combine.ml
++++ b/smt/combine/combine.ml
+@@ -199,8 +199,7 @@ struct
+        | O_euf -> t.euf_used <- Term.Set.add term t.euf_used
+        | O_lia -> t.lia_used <- Term.Set.add term t.lia_used
+        | O_neutral -> ());
+-      if Term.Set.mem term t.euf_used && Term.Set.mem term t.lia_used
+-      then t.interface <- Term.Set.add term t.interface
++      if Term.Set.mem term t.euf_used && Term.Set.mem term t.lia_used then ()
+     in
+     let rec go ~parent_owner (term : Term.t) =
+       let key = term.Term.tag, owner_code parent_owner in

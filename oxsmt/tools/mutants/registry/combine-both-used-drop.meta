@@ -1,0 +1,6 @@
+module=combine
+suite=combine-test
+target=smt/combine/combine.ml
+description=mark_use computes the both-used bits but DROPS the interface insertion (then () instead of adding term): a neutral variable used as an operand by BOTH an EUF-owned and a LIA-owned node never enters the interface, so the (distinct x y) /\ x<=y /\ y<=x class (codex H1) disagreement is missed -> wrong SAT. Boundary crossings (the separate insertion at the is_int/o<>parent_owner rule) are unaffected, isolating the both-used clause.
+review=internalization-review Priority-1 both-used clause (ADR-0010 §3.1) + codex H1; builder-proven 6 test failures
+expected=KILLED-TEST

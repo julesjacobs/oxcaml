@@ -1,0 +1,13 @@
+diff --git a/smt/theories/lia/rational.ml b/smt/theories/lia/rational.ml
+index 932be2056d..dd27d5b5e9 100644
+--- a/smt/theories/lia/rational.ml
++++ b/smt/theories/lia/rational.ml
+@@ -67,7 +67,7 @@ let mul_int a b =
+   else r
+ ;;
+ 
+-let abs_int a = if a = min_int then raise Overflow else abs a
++let abs_int a = abs a
+ let rec gcd_pos a b = if b = 0 then a else gcd_pos b (a mod b)
+ 
+ (* gcd of magnitudes; result is >= 0 and 0 only if both are 0. Guarded (abs min_int). *)

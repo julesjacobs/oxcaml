@@ -1,0 +1,13 @@
+diff --git aa/smt/interface/presolve.ml bb/smt/interface/presolve.ml
+index 961dbf3a86..0bb89089f1 100644
+--- aa/smt/interface/presolve.ml
++++ bb/smt/interface/presolve.ml
+@@ -610,7 +610,7 @@ let simplify_contextual ctx assertions =
+        | Bool_const false -> simp env b
+        | App _ | Int_const _ | Arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ ->
+          let env_then = assume env c' ~truth:true in
+-         let env_else = assume env c' ~truth:false in
++         let env_else = assume env c' ~truth:true in
+          let a' = simp env_then a in
+          let b' = simp env_else b in
+          Context.ite ctx c' a' b')

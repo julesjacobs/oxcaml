@@ -1,0 +1,6 @@
+module=presolve
+suite=wiring-test
+target=smt/interface/presolve.ml
+description=flatten also descends into Or, so an equality buried under a disjunction — (or (= x 5) (= x 6)) — is treated as a top-level conjunct and x is eliminated (x -> 5), dropping the disjunction. This is the conditional-equality-elimination unsoundness the W1b design forbids (constraint 1: unconditional/top-level only, descend NO further than a root And). On (or (= x 5) (= x 6)) /\ x >= 6 the correct answer is sat (x=6); the mutant eliminates x->5, drops the or, and 5>=6 is false -> unsat. Killed by test_presolve_conditional_no_elim (verdict sat + empty elimination set) and test_presolve_run_direct.
+review=logs/w1b-design.md build-soundness constraint 1 (unconditional top-level conjuncts only)
+expected=KILLED-TEST

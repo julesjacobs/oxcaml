@@ -1,0 +1,6 @@
+module=presolve
+suite=wiring-test
+target=smt/interface/presolve.ml
+description=The eligibility guard drops its interface-variable check ((ignore uf_vars; true) instead of (not (Term.Set.mem x uf_vars))), so a variable that occurs UNDER an uninterpreted function is eliminated anyway — the ADR-0010 §3.1 interface no-op (build-soundness constraint 3) is defeated. On (= x 5) /\ (g x) <> (g 5) the guard must keep x (it is under g) so congruence gives unsat; the mutant eliminates x and rewrites (g x)->(g 5). The verdict stays unsat (constant propagation is sound), so the STRUCTURAL oracle discriminates: eliminated_vars flips [] -> [x]. Killed by test_presolve_interface_noop and test_presolve_run_direct (under-UF variable skipped).
+review=logs/w1b-design.md build-soundness constraint 3 (NO-OP on ADR-0010 interface variables) + ADR-0010 §3.1
+expected=KILLED-TEST

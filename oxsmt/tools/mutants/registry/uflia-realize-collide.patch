@@ -1,0 +1,13 @@
+diff --git a/smt/interface/cdclt.ml b/smt/interface/cdclt.ml
+index 88453dcbd8..b4a561d8b9 100644
+--- a/smt/interface/cdclt.ml
++++ b/smt/interface/cdclt.ml
+@@ -418,8 +418,6 @@ let model t =
+            incr next
+          done;
+          let v = !next in
+-         Hashtbl.replace int_used v ();
+-         incr next;
+          v
+        in
+        List.iter

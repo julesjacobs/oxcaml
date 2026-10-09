@@ -1,0 +1,13 @@
+diff --git a/smt/interface/session.ml b/smt/interface/session.ml
+index 46f02b47cb..fcf3093211 100644
+--- a/smt/interface/session.ml
++++ b/smt/interface/session.ml
+@@ -1069,7 +1069,7 @@ let splice_elim_defs t (sort_cards, bindings) =
+               if not (Hashtbl.mem bound name) then add_const name (default_value sort))
+            (free_var_leaves d.Presolve.value);
+          match Model_check.eval_in tbls d.Presolve.value with
+-         | Some v -> add_const d.Presolve.name v
++         | Some _v -> add_const d.Presolve.name (VBool true)
+          | None -> ())
+       (List.rev t.elim_defs);
+     sort_cards, !acc

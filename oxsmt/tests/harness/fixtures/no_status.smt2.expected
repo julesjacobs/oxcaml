@@ -1,0 +1,4 @@
+(goal 1
+  (verdict sat)
+  (model (fun p (default false) (case (0) false)) (const x 0))
+  (counters (conflicts <10) (decisions <10) (propagations <10)))

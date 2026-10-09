@@ -1,0 +1,6 @@
+module=rational
+suite=rational-word-test
+target=smt/theories/lia/rational.ml
+description=The immediate-integer add fast path uses the raw wrapping (+) instead of the guarded add_int, so an int63 overflow WRAPS silently (never raises Overflow) and never PROMOTES to a block — e.g. max_int + 1 becomes min_int instead of the exact 2^62. A soundness-critical wrong VALUE (the exact opposite of the promotion contract). Kills via the one-word rep promotion-UP boundary vectors and the Python fractions.Fraction differential oracle (both turn RED on the wrapped result).
+review=user hard constraint 3 (wrap-instead-of-promote stays RED); core-bignum-review.md R1 (internal arithmetic never wraps, promotes on overflow); DESIGN §10 (mutation testing)
+expected=KILLED-TEST
