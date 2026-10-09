@@ -99,6 +99,28 @@ let check block capacity =
   | Error _ -> assert (reference <> D.Done)
 
 let () =
+  let valid block expected =
+    let capacity = String.length expected in
+    assert (checked block capacity = (D.Done, expected));
+    check block capacity
+  in
+  for low = 0 to 15 do
+    let token high = String.make 1 (Char.chr (high * 16 + low)) in
+    valid (token 0) "";
+    valid (token 5 ^ "Hello") "Hello";
+    valid (token 15 ^ "\x00" ^ String.make 15 'a') (String.make 15 'a');
+    valid (token 15 ^ "\xff\x00" ^ String.make 270 'a')
+      (String.make 270 'a');
+    valid ("\x1aa\x01\x00" ^ token 5 ^ "aaaaa") (String.make 20 'a');
+    let invalid block =
+      assert (fst (checked block 20) = D.Malformed);
+      check block 20
+    in
+    invalid ("\x1aa\x01\x00" ^ token 4 ^ "aaaa");
+    invalid ("\x10a\x01\x00" ^ token 5 ^ "aaaaa")
+  done
+
+let () =
   for byte = 0 to 255 do
     let token = D.byte_of_char (Char.chr byte) in
     assert (D.high4 token = byte / 16);

@@ -194,10 +194,9 @@ let rec decode_sequences : (model : char iarray) @ ghost ->
         else
           let after_literals = literal_pos + literal_count in
           if after_literals = n then
-            if Vox_lz4_spec_parse.low15 token <> 0
-               || (last_match_start >= 0
-                   && (literal_count < 5
-                       || last_match_start > used + literal_count - 12))
+            if last_match_start >= 0
+               && (literal_count < 5
+                   || last_match_start > used + literal_count - 12)
             then { buffer; error = Some (Malformed (Invalid_terminal_sequence, after_literals)) }
             else
               { error = None;
