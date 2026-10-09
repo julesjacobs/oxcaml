@@ -2260,18 +2260,24 @@ let rec register_logical_maps ctx env s ty =
     register_logical_maps ctx env s ty
   | Tconstr (_, [payload], _) ->
     let model =
-      Option.bind (Vox_encoding.logical_map_key env ty) (fun path ->
-          Option.map (fun map_sort -> path, map_sort) (sort ctx.encoding env ty))
+      Option.bind (Vox_encoding.logical_map_key env ty) (fun key ->
+          Option.map (fun map_sort -> key, map_sort) (sort ctx.encoding env ty))
     in
     begin match model with
-    | Some (path, map_sort) when not (Hashtbl.mem ctx.finite_maps map_sort) ->
-      let eq_type =
-        (Subst.Lazy.force_value_description (Env.find_value path env)).val_type
+    | Some (key, map_sort) when not (Hashtbl.mem ctx.finite_maps map_sort) ->
+      let key_type =
+        match key with
+        | Vox_encoding.Key_path path ->
+          let eq_type =
+            (Subst.Lazy.force_value_description (Env.find_value path env))
+              .val_type
+          in
+          first_argument_type env eq_type
+        | Vox_encoding.Key_opaque (_, key_type) -> Some key_type
       in
-      let eq = lookup ctx s env eq_type path in
       let option_type = Predef.type_option payload in
       begin match
-        ( first_argument_type env eq_type,
+        ( key_type,
           data_of_type ctx env option_type,
           sort ctx.encoding env option_type )
       with
@@ -2282,22 +2288,41 @@ let rec register_logical_maps ctx env s ty =
             data_constructor data "None" )
         with
         | Some key_sort, Some some, Some none ->
-          let key = fresh_symbol key_sort "map key" in
+          let sample_key = fresh_symbol key_sort "map key" in
           let class_ =
             comparison_class ctx ctx.map_class_sorts "Logical_map.key" map_sort
-              key
+              sample_key
           in
           let at =
             intern_function ctx "Logical_map.at"
               [map_sort; term_sort class_]
               option_sort
           in
-          let equal left right =
-            scalar
-              (apply_function ctx env eq_type Predef.type_bool
-                 (primitive env path) eq
-                 [scalar_value left; scalar_value right]
-                 ~total:true)
+          let equal =
+            match key with
+            | Vox_encoding.Key_path path ->
+              let eq_type =
+                (Subst.Lazy.force_value_description (Env.find_value path env))
+                  .val_type
+              in
+              let eq = lookup ctx s env eq_type path in
+              fun left right ->
+                scalar
+                  (apply_function ctx env eq_type Predef.type_bool
+                     (primitive env path) eq
+                     [scalar_value left; scalar_value right]
+                     ~total:true)
+            | Vox_encoding.Key_opaque (uid, _) ->
+              (* Hidden equalities stay separate for each map instance. *)
+              let label =
+                Format.asprintf "Logical_map.equal:%a" Shape.Uid.print uid
+              in
+              let fn =
+                Function.create ~label ~arguments:[key_sort; key_sort]
+                  ~result:Bool
+              in
+              ctx.functions <- fn :: ctx.functions;
+              fun left right -> Some (Call (fn, [left; right]))
           in
           Hashtbl.replace ctx.pref_observers at (Some (some, none));
           Hashtbl.replace ctx.pref_heaps map_sort ();

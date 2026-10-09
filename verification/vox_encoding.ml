@@ -247,18 +247,66 @@ let is_map_type env ty =
 let logical_map_make =
   Path.Pdot (Path.Pident (Ident.create_persistent "Stdlib__Map"), "MakeLogical")
 
+type logical_map_key =
+  | Key_path of Path.t
+  | Key_opaque of Shape.Uid.t * type_expr
+
 let logical_map_key env ty =
+  let is_standard actual =
+    match
+      actual, shape_uid env Shape.Sig_component_kind.Module logical_map_make
+    with
+    | Some actual, Some standard -> Shape.Uid.equal actual standard
+    | _ -> false
+  in
   match get_desc (Ctype.expand_head env ty) with
   | Tconstr (Path.Pdot (Path.Papply (make, key), "t"), [_], _) ->
     (* The type's originating functor matters: an ascribed wrapper can expose
        its type while accepting an unrelated module argument. *)
-    begin match
-      ( shape_uid env Shape.Sig_component_kind.Module make,
-        shape_uid env Shape.Sig_component_kind.Module logical_map_make )
-    with
-    | Some actual, Some standard when Shape.Uid.equal actual standard ->
-      Some (Path.Pdot (key, "equal"))
-    | _ -> None
+    if is_standard (shape_uid env Shape.Sig_component_kind.Module make)
+    then Some (Key_path (Path.Pdot (key, "equal")))
+    else None
+  | Tconstr ((Path.Pdot (owner, "t") as path), [_], _) ->
+    (* Declaration UIDs survive separate compilation. Authenticate both the map
+       type and lookup, without trusting a wrapper's module argument. *)
+    begin try
+      let standard = Env.find_module logical_map_make env in
+      match standard.md_type with
+      | Mty_functor (_, Mty_signature signature, _) ->
+        let type_uid =
+          List.find_map
+            (function
+              | Sig_type (id, decl, _, _) when Ident.name id = "t" ->
+                Some decl.type_uid
+              | _ -> None)
+            signature
+        in
+        let lookup_uid =
+          List.find_map
+            (function
+              | Sig_value (id, value, _) when Ident.name id = "find_opt" ->
+                Some value.val_uid
+              | _ -> None)
+            signature
+        in
+        let decl = Env.find_type path env in
+        let lookup =
+          Env.find_value (Path.Pdot (owner, "find_opt")) env
+          |> Subst.Lazy.force_value_description
+        in
+        begin match type_uid, lookup_uid with
+        | Some type_uid, Some lookup_uid
+          when Shape.Uid.equal decl.type_uid type_uid
+               && Shape.Uid.equal lookup.val_uid lookup_uid ->
+          begin match get_desc (Ctype.expand_head env lookup.val_type) with
+          | Tarrow (_, argument, _, _) ->
+            Some (Key_opaque (lookup_uid, Btype.tpoly_get_mono argument))
+          | _ -> None
+          end
+        | _ -> None
+        end
+      | _ -> None
+    with Not_found -> None
     end
   | _ -> None
 

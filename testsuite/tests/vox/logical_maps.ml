@@ -115,6 +115,23 @@ module Demo : sig end = struct
       {u : unit | M.find_opt k (M.add k true (M.empty ())) === Some true
         && M.find_opt k (M.add k 12 (M.empty ())) === Some 12}
       @ ghost = ghost_ ()
+
+  module Anonymous = Map.MakeLogical (struct
+    type t = int
+    let[@def] equal (x : int) (y : int) = x = y
+    let (reflexive @ total) x : {u : unit | equal x x} =
+      equal_def x x; ()
+    let (symmetric @ total) x y : {u : unit | equal x y = equal y x} =
+      equal_def x y; equal_def y x; ()
+    let (transitive @ total) x y z :
+        {u : unit | not (equal x y && equal y z) || equal x z} =
+      equal_def x y; equal_def y z; equal_def x z; ()
+  end)
+
+  let (anonymous @ total) (m : int Anonymous.t) (k : int) (v : int) :
+      {u : unit | Anonymous.find_opt k (Anonymous.add k v m) === Some v
+        && Anonymous.cardinal (Anonymous.add k v (Anonymous.empty ())) = 1Z}
+      @ ghost = ghost_ ()
 end;;
 [%%expect{|
 module Demo : sig end

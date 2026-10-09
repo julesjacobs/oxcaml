@@ -37,7 +37,11 @@ val is_iarray_sort : context -> Vox_smt.sort -> bool
 
 val is_set_sort : context -> Vox_smt.sort -> bool
 
-val logical_map_key : Env.t -> Types.type_expr -> Path.t option
+type logical_map_key =
+  | Key_path of Path.t
+  | Key_opaque of Shape.Uid.t * Types.type_expr
+
+val logical_map_key : Env.t -> Types.type_expr -> logical_map_key option
 
 val is_map_sort : context -> Vox_smt.sort -> bool
 

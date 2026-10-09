@@ -274,3 +274,37 @@ Line 2, characters 16-66:
                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
 |}]
+
+module Anonymous_forgery : sig end = struct
+  module A = Disguised (struct include Everything end)
+  let (claim @ total) (x : int) (y : int) :
+      {u : unit | A.find_opt y (A.add x 42 (A.empty ())) === Some 42}
+      @ ghost = ghost_ (Everything.equal_def x y; ())
+end;;
+[%%expect{|
+Line 5, characters 50-52:
+5 |       @ ghost = ghost_ (Everything.equal_def x y; ())
+                                                      ^^
+Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-68:
+4 |       {u : unit | A.find_opt y (A.add x 42 (A.empty ())) === Some 42}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
+module Anonymous_wrong_lookup : sig end = struct
+  module A = Map.MakeLogical (struct include Key end)
+  let (claim @ total) (x : int) (y : int) :
+      {u : unit | A.find_opt y (A.add x 42 (A.empty ())) === Some 42}
+      @ ghost = ghost_ ()
+end;;
+[%%expect{|
+Line 5, characters 23-25:
+5 |       @ ghost = ghost_ ()
+                           ^^
+Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-68:
+4 |       {u : unit | A.find_opt y (A.add x 42 (A.empty ())) === Some 42}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]
