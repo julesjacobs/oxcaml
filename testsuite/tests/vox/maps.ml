@@ -1069,3 +1069,20 @@ end;;
 [%%expect{|
 module Polymorphic_sparse_pair : sig end
 |}]
+
+let (falsehood @ total) () : {u : unit | false} =
+  (CamlinternalMap.trust_total (fun () -> failwith "falsehood")) ();;
+[%%expect{|
+Line 2, characters 3-30:
+2 |   (CamlinternalMap.trust_total (fun () -> failwith "falsehood")) ();;
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Unbound value "CamlinternalMap.trust_total"
+|}]
+
+let _ = CamlinternalMap.trust_total_immutable2;;
+[%%expect{|
+Line 1, characters 8-46:
+1 | let _ = CamlinternalMap.trust_total_immutable2;;
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Unbound value "CamlinternalMap.trust_total_immutable2"
+|}]

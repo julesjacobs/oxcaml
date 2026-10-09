@@ -1108,14 +1108,14 @@ module MakePortable(Ord: sig @@ portable include OrderedType end) = struct
       seq_of_enum_ (aux low m End)
 end [@@inline available]
 
-external trust_total : ('a : value). 'a -> 'a @ total = "%identity"
-external trust_total_immutable2 :
-  ('a : value) ('b : value) ('c : value).
-  ('a -> 'b -> 'c) -> ('a @ immutable -> 'b @ immutable -> 'c) @ total
-  = "%identity"
-
 module MakeTotal(Ord: TotalOrderedType) : TotalS with type key = Ord.t =
   struct
+    external trust_total : ('a : value). 'a -> 'a @ total = "%identity"
+    external trust_total_immutable2 :
+      ('a : value) ('b : value) ('c : value).
+      ('a -> 'b -> 'c) -> ('a @ immutable -> 'b @ immutable -> 'c) @ total
+      = "%identity"
+
     module Base = Make(Ord)
     type key = Ord.t
     type 'a t = 'a Base.t

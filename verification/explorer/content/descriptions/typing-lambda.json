@@ -386,7 +386,7 @@
     "what": {
       "short": "New in Vox: decides whether a let rec is total by structural descent on a parameter of an [@@inductive] type.",
       "long": [
-        "`check` tries each parameter of inductive type in turn. It tracks which variables are proper descendants of that parameter through `match` and `let` patterns, looking only at constructor fields of the same type (and tuples of them), and requires every recursive call to pass such a variable in that position.",
+        "`check` tries each parameter of inductive type in turn. It tracks which variables are proper descendants of that parameter through `match` and `let` patterns, looking at constructor fields of the same type, including tuple components and immutable inline-record fields, and requires every recursive call to pass such a variable in that position.",
         "Failure is not an error: the function is then partial, and `Typecore` records the reason for interface errors."
       ]
     },

@@ -120,8 +120,8 @@
       "path": "typing/structural_recursion.ml",
       "from": "let check_parameter self body index root",
       "to": "let it = iterator (Ident.Map.singleton root Root) in",
-      "lines": "105-144",
-      "text": "`check`, below, tries each parameter whose type is `[@@inductive]`. `check_parameter` walks the body with a map from variables to `Root` or `Smaller`, and every recursive call must pass a `Smaller` value in that position. Descent is learnt only by matching: `bind_pattern` marks the variables under a constructor of the same inductive type, through tuples, and through or-patterns by intersection, and `let` and `match` carry the facts into their bodies. `[@@inductive]` itself is checked by `check_inductive_decl` in [typedecl.ml](src:typing/typedecl.ml): a single type whose recursive occurrences are direct fields or tuple components with unchanged parameters."
+      "lines": "128-167",
+      "text": "`check`, below, tries each parameter whose type is `[@@inductive]`. `check_parameter` walks the body with a map from variables to `Root` or `Smaller`, and every recursive call must pass a `Smaller` value in that position. Descent is learnt only by matching: `bind_pattern` marks variables under a constructor of the same inductive type, including tuple components and immutable inline-record fields, and intersects the facts from or-patterns. `let` and `match` carry the facts into their bodies. `[@@inductive]` itself is checked by `check_inductive_decl` in [typedecl.ml](src:typing/typedecl.ml): a single type whose recursive occurrences are direct fields or tuple components with unchanged parameters."
     },
     {
       "title": "The verifier plugs into the typer",
@@ -142,7 +142,7 @@
         "scan.structure scan str"
       ],
       "to": "with_warnings warnings (fun () -> verify_steps ctx prove result.code)",
-      "lines": "5618-5645",
+      "lines": "5643-5670",
       "text": "`generate` first runs `check_total_shift` on every primitive declaration, then scans for a refinement introduction, a subsumption, a refined parameter or a proof step; a unit with none of these, no interface to check against and no pending inclusion check generates no query. Otherwise `structure` executes the Typedtree once, forward, into a list of commands: `Define`s of SSA symbols, `Assume`s for path conditions and eliminated refinements, `Assert`s for obligations, and a `Choice` for each branch, whose values are joined rather than enumerated. Each function body becomes one batch in `ctx.batches`. `verify_steps` hands each batch to `verify_batch`, which proves it as one quantifier-free query and, only if that fails, proves each refinement and then each conjunct alone, so the error names the conjunct that fails."
     },
     {
@@ -150,7 +150,7 @@
       "path": "verification/vox_vc.ml",
       "from": "and expression_extras ?deferred ctx s e ty = function",
       "to": "| None | Some _ -> introduce ctx e.exp_env s target value loc",
-      "lines": "3928-3959",
+      "lines": "3953-3984",
       "text": "Here the typer's extras become verification commands. `expression_extras` handles an expression's extras from the inside out: the value is exposed with `expose_outer`, which assumes its outer refinement, and each `Texp_refinement` whose target is refined calls `introduce`, at once or deferred to the end of a function body. `introduce`, just below, splits the predicate at top-level `&&`, and each conjunct becomes an `Assert` proved under the ones before it, as `&&` evaluates. Besides `introduce`, obligations come from subsumption (a `Texp_subsumption` extra, just below, and the value comparisons of a module inclusion, both proved by `subsume`), shift counts and `[@@decreases]` measures; everything else, including the declared types of callees, is assumed. The meaning is partial correctness on normal return: a raise or `assert false` ends a path, and `@@ total` adds termination."
     },
     {
@@ -166,7 +166,7 @@
       "path": "verification/vox_encoding.ml",
       "from": "| \"%addint\" -> binary Int63 Add",
       "to": "| \"%geint\" -> binary Int63 Ge",
-      "lines": "850-889",
+      "lines": "898-937",
       "text": [
         "`Vox_encoding.operation` maps a primitive's name to its built-in meaning, part of the trusted base; `primitive`, above, supplies that name for every declaration of a `%` primitive, for a C primitive only when the declaration is the library's own (`Vox_type.carries_builtin_meaning`), and for a few `Iarray` and `Stdlib` values recognized by identity. `int` is the `Int63` sort, exact signed 63-bit wrapping arithmetic: [vox_smt.ml](src:verification/vox_smt.ml) renders it as SMT `Int` with range facts and wrapping macros such as `int63_add`, or as `(_ BitVec 63)` in a query with a bitwise operator, which the verifier first tries with those operators abstracted. `=` and `compare` are interpreted only at `int`, `bool` and `Bigint`, and `Bigint` is unbounded `Int`.",
         "Shifts are exact for counts in [0, 63], and since the shift-encoding fix `require_shift_count` in `Vox_vc` makes that range an obligation at every shift that verified code performs. The SMT term type has no binder, so no quantifier ever reaches Z3."

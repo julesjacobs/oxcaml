@@ -261,6 +261,68 @@ type inline = I of { child : inline } [@@inductive]
 type inline = I of { child : inline; } [@@inductive]
 |}]
 
+module Test_inline_record = struct
+  type t = Leaf | Node of { tail : t } [@@inductive]
+  let rec (depth @ total) n =
+    match n with Leaf -> 0 | Node {tail} -> 1 + depth tail
+  let rec (alias @ total) n =
+    match n with Leaf -> 0 | Node ({tail} as fields) -> alias tail
+  let rec (good_or @ total) n =
+    match n with
+    | Leaf -> 0
+    | Node {tail = Node {tail}} | Node {tail} -> good_or tail
+end
+[%%expect{|
+module Test_inline_record :
+  sig
+    type t = Leaf | Node of { tail : t; } [@@inductive]
+    val depth : t -> int
+    val alias : t -> int
+    val good_or : t -> int
+  end
+|}]
+
+module Test_inline_tuple = struct
+  type t = Leaf | Node of { children : t * t } [@@inductive]
+  let rec (size @ total) n =
+    match n with
+    | Leaf -> 0
+    | Node {children = (left, right)} -> 1 + size left + size right
+end
+[%%expect{|
+module Test_inline_tuple :
+  sig
+    type t = Leaf | Node of { children : t * t; } [@@inductive]
+    val size : t -> int
+  end
+|}]
+
+module Test_inline_same = struct
+  let rec (same @ total) n =
+    match n with
+    | Test_inline_record.Leaf -> 0
+    | Test_inline_record.Node {tail = _} -> same n
+end
+[%%expect{|
+Line 5, characters 44-50:
+5 |     | Test_inline_record.Node {tail = _} -> same n
+                                                ^^^^^^
+Error: This recursive function cannot be total: the recursive argument is not a known proper descendant.
+|}]
+
+module Test_inline_fresh_payload = struct
+  type 'a box = Box of { payload : 'a } [@@inductive]
+  let rec (same @ total) (n : nat) =
+    let wrapped = Box {payload = n} in
+    match wrapped with Box {payload} -> same payload
+end
+[%%expect{|
+Line 5, characters 40-52:
+5 |     match wrapped with Box {payload} -> same payload
+                                            ^^^^^^^^^^^^
+Error: This recursive function cannot be total: the recursive argument is not a known proper descendant.
+|}]
+
 type bad_mutable = M of { mutable child : bad_mutable } [@@inductive]
 [%%expect{|
 Line 1, characters 0-69:

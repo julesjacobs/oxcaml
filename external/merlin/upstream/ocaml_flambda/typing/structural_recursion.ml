@@ -55,10 +55,33 @@ let rec bind_pattern facts descent pat =
       else
         let owner = constructor_path pat.pat_env desc.cstr_res in
         (* Use the declaration's fields, not instantiated parameter payloads. *)
-        List.fold_left2
-          (fun facts (arg : Types.constructor_argument) (_, pat) ->
-            bind_field facts owner arg.ca_type pat)
-          facts desc.cstr_args args
+        begin match desc.cstr_inlined, args with
+        | Some {type_kind = Type_record (fields, Record_inlined _, _); _},
+          [(_, pat)] ->
+            bind_inline_record facts owner fields pat
+        | _ ->
+            List.fold_left2
+              (fun facts (arg : Types.constructor_argument) (_, pat) ->
+                bind_field facts owner arg.ca_type pat)
+              facts desc.cstr_args args
+        end
+  | _ -> facts
+
+and bind_inline_record facts owner fields pat =
+  match pat.pat_desc with
+  | Tpat_record (patterns, _, _) ->
+      List.fold_left
+        (fun facts (_, label, pat) ->
+          match List.nth_opt fields label.Data_types.lbl_pos with
+          | Some field when not (Types.is_mutable field.ld_mutable) ->
+              bind_field facts owner field.ld_type pat
+          | Some _ | None -> facts)
+        facts patterns
+  | Tpat_alias {pattern = pat; _} ->
+      bind_inline_record facts owner fields pat
+  | Tpat_or (left, right, _) ->
+      intersection (bind_inline_record facts owner fields left)
+        (bind_inline_record facts owner fields right)
   | _ -> facts
 
 and bind_field facts owner ty pat =
