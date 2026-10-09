@@ -5,7 +5,7 @@ let () =
   let source =
     "type 'a heap\n\
      type hidden = { contents : hidden heap }\n\
-     type 'a handle [@@phantom_parameters]\n\
+     type 'a handle : logical_data\n\
      type node = { next : node handle }\n"
   in
   let parsed = Parse.implementation (Lexing.from_string source) in

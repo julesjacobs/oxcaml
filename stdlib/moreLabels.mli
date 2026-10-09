@@ -1154,6 +1154,9 @@ module Map : sig
   (** Like {!Make}, with a total comparison and totality modes on operations
       that cannot raise on their own. *)
 
+  module type EquatableType = Map.EquatableType
+  module MakeLogical = Map.MakeLogical
+
 end
 
 module Set : sig

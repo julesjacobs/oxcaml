@@ -2276,7 +2276,31 @@ module Const = struct
     then
       raise ~loc:annot.pjka_loc
         (Insufficient_level { jkind = annot; required_layouts_level });
-    const
+    let expanded = Base_and_axes.fully_expand_aliases_const env const in
+    let has_immediate_bounds =
+      match expanded.base with
+      | Layout (Base (Scannable, { separability; _ })) ->
+        let bounds =
+          match separability with
+          | Non_pointer -> Some Builtin.immediate.jkind.mod_bounds
+          | Non_pointer64 -> Some Builtin.immediate64.jkind.mod_bounds
+          | Non_float | Separable | Maybe_separable -> None
+        in
+        Option.fold ~none:false
+          ~some:(fun bounds ->
+            Mod_bounds.less_or_equal
+              (Mod_bounds.set_logicality Logical expanded.mod_bounds)
+              bounds
+            |> Sub_result.is_le)
+          bounds
+      | Layout _ | Kconstr _ -> false
+    in
+    if has_immediate_bounds
+    then
+      { const with
+        mod_bounds = Mod_bounds.set_logicality Logical const.mod_bounds
+      }
+    else const
 
   let of_annotation ?(use_abstract_jkinds = true) ?(warn = true) ~context env
       annot =

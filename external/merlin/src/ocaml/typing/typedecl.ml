@@ -629,7 +629,7 @@ let transl_labels (type rep) ~(record_form : rep record_form) ~new_var_jkind
          check_no_repr arg;
          let arg = Ast_helper.Typ.force_poly arg in
          let cty = transl_simple_type ~new_var_jkind env ?univars ~closed Mode.Alloc.Const.legacy arg in
-         {ld_id = Ident.create_scoped ~scope:Ident.lowest_scope name.txt;
+         {ld_id = Ident.create_local name.txt;
           ld_name = name;
           ld_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
           ld_mutable = mut;
@@ -645,6 +645,8 @@ let transl_labels (type rep) ~(record_form : rep record_form) ~new_var_jkind
             (fun () -> mk env label) in
         let ty = label.ld_type.ctyp_type in
         let ty = match get_desc ty with Tpoly (ty, []) -> ty | _ -> ty in
+        Ctype.register_refinement_value_scope ~level:Ident.lowest_scope
+          [label.ld_id];
         let rest =
           Typetexp.with_dependent_binder env label.ld_id ~uid:label.ld_uid
             ty label.ld_loc (fun env -> translate env rest)
@@ -1520,6 +1522,8 @@ let derive_unboxed_version env path_in_group_has_unboxed_version decl =
         List.exists (fun (binder : Types.label_declaration) ->
           Ctype.refinement_ident_occurs binder.ld_id field.ld_type) lbls) lbls)
       then lbls_unboxed else
+        let () = Ctype.register_refinement_value_scope ~level:Ident.lowest_scope
+          (List.map (fun label -> label.Types.ld_id) lbls_unboxed) in
         let subst = List.fold_left2 (fun subst
             (source : Types.label_declaration)
             (target : Types.label_declaration) ->
@@ -3803,7 +3807,9 @@ let check_redefined_unit (td: Parsetree.type_declaration) =
 let set_inferred_logicality env path decl jkind =
   match decl.type_kind, decl.type_manifest with
   | (Type_variant _ | Type_record _ | Type_record_unboxed_product _), _ ->
-    let logicality, bearing = Ikind.declaration_logicality ~env ~path in
+    let logicality, bearing =
+      Ikind.declaration_logicality_lower_bound ~env ~path
+    in
     let jkind = Jkind.set_logicality logicality jkind in
     if List.compare_lengths bearing decl.type_params <> 0
     then Jkind.set_logicality Maybe_logical jkind
@@ -3815,7 +3821,7 @@ let set_inferred_logicality env path decl jkind =
   | (Type_abstract _ | Type_open), Some _ ->
     (* An abbreviation has the kind of its manifest. Only correct a logicality
        that normalization got wrong by cutting off recursion. *)
-    begin match Ikind.declaration_logicality ~env ~path with
+    begin match Ikind.declaration_logicality_lower_bound ~env ~path with
     | Maybe_logical, _ -> Jkind.set_logicality Maybe_logical jkind
     | Logical, _ -> jkind
     end
@@ -4007,6 +4013,8 @@ let check_inductive_decl env ~single id decl =
           | Cstr_record labels ->
               (* An inline record's fields are the constructor's fields. *)
               List.iter (fun (label : Types.label_declaration) ->
+                if Types.is_mutable label.ld_mutable then
+                  reject "mutable inline-record fields are not supported";
                 check TypeSet.empty true label.ld_type) labels
           | Cstr_tuple args ->
               List.iter (fun (arg : Types.constructor_argument) ->

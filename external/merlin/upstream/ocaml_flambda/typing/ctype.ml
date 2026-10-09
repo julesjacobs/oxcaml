@@ -210,6 +210,11 @@ let register_refinement_value_scope ~level ids =
     List.iter (fun id -> Hashtbl.replace !refinement_value_scopes id level) ids
   end
 
+let () =
+  Subst.register_refinement_field_binders := (fun ids ->
+    List.iter (fun id ->
+      Hashtbl.replace !refinement_value_scopes id Ident.lowest_scope) ids)
+
 let direct_refinement_scope_dependency ty =
   let ty = Transient_expr.repr ty in
   match
@@ -9752,7 +9757,9 @@ let rec nondep_type_decl env mid is_covariant decl =
         let context = mk_jkind_context_check_principal env in
         match Jkind.round_up ~context env jkind with
         | None -> raise err
-        | Some jkind -> jkind |> Jkind.disallow_right
+        | Some rounded ->
+          Jkind.set_logicality (Ikind.logicality_of_jkind env jkind) rounded
+          |> Jkind.disallow_right
     in
     clear_hash ();
     let priv =

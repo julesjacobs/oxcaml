@@ -26,7 +26,7 @@ Line 1, characters 0-94:
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: The kind of type "int list list list list list list list list list list
                         list list list" is
-           immutable_data
+           logical_data
              with int list list list list list list list list list list list list
          because it's a boxed variant type.
        But the kind of type "int list list list list list list list list list
@@ -44,7 +44,7 @@ Line 1, characters 0-104:
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: The kind of type "'a list list list list list list list list list list
                         list list list" is
-           immutable_data
+           logical_data
              with 'a list list list list list list list list list list list list
          because it's a boxed variant type.
        But the kind of type "'a list list list list list list list list list

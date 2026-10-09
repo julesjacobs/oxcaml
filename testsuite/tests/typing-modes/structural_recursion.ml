@@ -210,7 +210,7 @@ end
 Line 5, characters 26-29:
 5 |     match n with O -> 0 | C x -> ordinary_depth x
                               ^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (ordinary is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at lines 4-5, characters 35-49
          which is expected to be "total".
@@ -256,12 +256,9 @@ Line 1, characters 0-52:
 Error: Invalid inductive declaration: recursive occurrences must be direct fields or tuple components.
 |}]
 
-type bad_inline = I of { child : bad_inline } [@@inductive]
+type inline = I of { child : inline } [@@inductive]
 [%%expect{|
-Line 1, characters 0-59:
-1 | type bad_inline = I of { child : bad_inline } [@@inductive]
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Invalid inductive declaration: inline-record constructors are not supported.
+type inline = I of { child : inline; } [@@inductive]
 |}]
 
 type bad_mutable = M of { mutable child : bad_mutable } [@@inductive]
@@ -269,7 +266,7 @@ type bad_mutable = M of { mutable child : bad_mutable } [@@inductive]
 Line 1, characters 0-69:
 1 | type bad_mutable = M of { mutable child : bad_mutable } [@@inductive]
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Invalid inductive declaration: inline-record constructors are not supported.
+Error: Invalid inductive declaration: mutable inline-record fields are not supported.
 |}]
 
 type payload = P of (int -> int) | Next of payload [@@inductive]
@@ -708,11 +705,6 @@ Line 3, characters 4-21:
 3 |     let* x = n in f x
         ^^^^^^^^^^^^^^^^^
 Error: This recursive function cannot be total: the recursive function cannot be used as a binding operator.
-|}, Principal{|
-Line 3, characters 4-21:
-3 |     let* x = n in f x
-        ^^^^^^^^^^^^^^^^^
-Error: This recursive function cannot be total: the recursive function cannot be used as a binding operator.
 |}]
 
 module Test_recursive_andop = struct
@@ -721,11 +713,6 @@ module Test_recursive_andop = struct
     let* x = n and* y = m in (x, y)
 end
 [%%expect{|
-Line 4, characters 9-25:
-4 |     let* x = n and* y = m in (x, y)
-             ^^^^^^^^^^^^^^^^
-Error: This recursive function cannot be total: the recursive function cannot be used as a binding operator.
-|}, Principal{|
 Line 4, characters 9-25:
 4 |     let* x = n and* y = m in (x, y)
              ^^^^^^^^^^^^^^^^

@@ -906,6 +906,8 @@ let rename_ident s id =
 let rename_decl_ident s id =
   if Ident.is_global_or_predef id then id else rename_ident s id
 
+let register_refinement_field_binders = ref ignore
+
 let label_declaration copy_scope s l =
   {
     ld_id = (match Ident.Map.find_opt l.ld_id s.bound_values with
@@ -923,6 +925,8 @@ let label_declaration copy_scope s l =
 let label_declarations copy_scope s labels =
   let s = List.fold_left (fun s l ->
     add_bound_value l.ld_id (rename_decl_ident s l.ld_id) s) s labels in
+  !register_refinement_field_binders
+    (List.map (fun l -> Ident.Map.find l.ld_id s.bound_values) labels);
   List.map (label_declaration copy_scope s) labels
 
 let constructor_argument copy_scope s ca =

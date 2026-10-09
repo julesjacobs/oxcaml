@@ -842,9 +842,31 @@ let report_kind_mismatch first second ppf (kind1, kind2) =
     (kind_to_string kind2)
 
 let print_unsafe_mode_crossing ppf umc =
-  Fmt.fprintf ppf "mod %a@ %a"
-    Mode.Crossing.print umc.unsafe_mod_bounds
-    Jkind.With_bounds.format umc.unsafe_with_bounds
+  let dependencies =
+    Jkind.With_bounds.to_seq umc.unsafe_with_bounds
+    |> Seq.filter_map
+         (fun (ty, { With_bounds_type_info.relevant_axes }) ->
+           let axes =
+             Jkind_axis.Axis_set.to_seq relevant_axes
+             |> Seq.filter_map (fun (Jkind_axis.Axis.Pack axis) ->
+               match axis with
+               | Modal crossing_axis
+                 when not (Mode.Crossing.Per_axis.le crossing_axis
+                   (Mode.Crossing.Per_axis.max crossing_axis)
+                   (Mode.Crossing.proj crossing_axis umc.unsafe_mod_bounds)) ->
+                 Some (Jkind_axis.Axis.name axis)
+               | Modal _ | Nonmodal _ -> None)
+             |> List.of_seq
+           in
+           match axes with
+           | [] -> None
+           | _ -> Some (Fmt.asprintf "with %a along %s"
+                    Jkind.format_type_expr ty (String.concat ", " axes)))
+    |> List.of_seq
+    |> List.sort String.compare
+  in
+  Fmt.fprintf ppf "mod %a" Mode.Crossing.print umc.unsafe_mod_bounds;
+  List.iter (fun dependency -> Fmt.fprintf ppf "@ %s" dependency) dependencies
 
 let report_unsafe_mode_crossing_mismatch first second ppf e =
   let pr fmt = Fmt.fprintf ppf fmt in

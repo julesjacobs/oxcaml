@@ -776,10 +776,42 @@ module Solver = struct
       Ldd.join base (kind ~use_tables:true child_ctx t)
     | Types.Tfield _ -> failwith "Tfield shouldn't appear in kind"
     | Types.Tnil -> failwith "Tnil shouldn't appear in kind"
-    | Types.Tquote _ | Types.Tsplice _ | Types.Tquote_eval _ ->
-      (* Treat quoted/spliced/evaluated quoted types conservatively as
-         boxed values. *)
-      self_provenance (Ldd.const Axis_lattice.value)
+    | Types.Tquote ty | Types.Tsplice ty | Types.Tquote_eval ty ->
+      let env =
+        Option.map
+          (fun env ->
+            match desc with
+            | Types.Tsplice _ -> Env.enter_splice ~loc:Location.none env
+            | _ -> Env.enter_quote env)
+          child_ctx.env
+      in
+      let ty_to_kind = TyTbl.create 1 in
+      TyTbl.iter
+        (fun ty () ->
+          Option.iter (TyTbl.add ty_to_kind ty)
+            (TyTbl.find_opt child_ctx.ty_to_kind ty))
+        !(child_ctx.tys_in_progress);
+      let constr_to_coeffs = ConstrTbl.create 1 in
+      ConstrTbl.iter
+        (fun path _ ->
+          Option.iter
+            (ConstrTbl.add constr_to_coeffs path)
+            (ConstrTbl.find_opt child_ctx.constr_to_coeffs path))
+        child_ctx.constrs_in_progress;
+      (* Stage-specific constraints invalidate completed kinds, but recursive
+         occurrences must still see the active placeholders. *)
+      let staged_ctx =
+        { child_ctx with
+          env;
+          provenance =
+            Option.map
+              (fun provenance -> { provenance with kinds = Hashtbl.create 1 })
+              child_ctx.provenance;
+          ty_to_kind;
+          constr_to_coeffs
+        }
+      in
+      self_provenance (kind ~use_tables:true staged_ctx ty)
     | Types.Tvariant row ->
       if Btype.tvariant_not_immediate row
       then
@@ -1591,21 +1623,30 @@ let type_declaration_ikind ~(env : Env.t option) ~(path : Path.t) :
    logical when its parameters are, and for each parameter whether it bears
    on the result. Computed with ikinds even when they are disabled, since
    logicality has no other source. *)
-let declaration_logicality ~(env : Env.t) ~(path : Path.t) :
+let declaration_logicality_gen ~round_base ~(env : Env.t) ~(path : Path.t) :
     Jkind_axis.Logicality.t * bool list =
   let ({ base; coeffs } : Types.constructor_ikind) =
     type_declaration_ikind ~env:(Some env) ~path
   in
   let logicality poly = Axis_lattice.logicality (Ldd.round_up poly) in
-  ( logicality base,
+  ( Axis_lattice.logicality (round_base base),
     Array.to_list coeffs
     |> List.map (fun coeff ->
         match logicality coeff with Maybe_logical -> true | Logical -> false) )
+
+let declaration_logicality = declaration_logicality_gen ~round_base:Ldd.round_up
+
+let declaration_logicality_lower_bound =
+  declaration_logicality_gen ~round_base:Ldd.round_down
 
 let declaration_is_logical ~(env : Env.t) ~(path : Path.t) : bool =
   match declaration_logicality ~env ~path with
   | Logical, _ -> true
   | Maybe_logical, _ -> false
+
+let logicality_of_jkind env jkind =
+  let ctx = create_ctx ~mode:Solver.Round_up ~env:(Some env) in
+  Solver.ckind_of_jkind ctx jkind |> Solver.round_up |> Axis_lattice.logicality
 
 let type_declaration_ikind_gated ~(env : Env.t option) ~(path : Path.t) :
     Types.type_ikind =

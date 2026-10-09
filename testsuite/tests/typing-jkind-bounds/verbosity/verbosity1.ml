@@ -15,12 +15,12 @@ type t : value non_float mod forkable unyielding many total immutable
 
 type t : immediate
 [%%expect {|
-type t : value non_pointer mod global many total immutable external_
+type t : value non_pointer mod global many total immutable external_ logical
 |}]
 
 type t : float64
 [%%expect {|
-type t : float64 mod external_
+type t : float64 mod external_ logical
 |}]
 
 type t : any

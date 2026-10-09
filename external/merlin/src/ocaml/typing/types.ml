@@ -1638,28 +1638,35 @@ end
 
 let equal_unsafe_mode_crossing
       ~type_equal
-      { unsafe_mod_bounds = mc1; unsafe_with_bounds = wb2 }
+      { unsafe_mod_bounds = mc1; unsafe_with_bounds = wb1 }
       umc2 =
+  let open Jkind_axis in
+  let relevant_axes =
+    Axis_set.create ~f:(fun ~axis:(Axis.Pack axis) ->
+      match axis with
+      | Modal axis ->
+          not (Mode.Crossing.Per_axis.le axis
+            (Mode.Crossing.Per_axis.max axis) (Mode.Crossing.proj axis mc1))
+      | Nonmodal _ -> false)
+  in
+  let bounds = function
+    | No_with_bounds -> With_bounds_types.empty
+    | With_bounds bounds -> bounds
+  in
+  let included bounds1 bounds2 =
+    With_bounds_types.for_all
+      (fun ty1 { With_bounds_type_info.relevant_axes = axes1 } ->
+        Axis_set.to_seq (Axis_set.intersection axes1 relevant_axes)
+        |> Seq.for_all (fun (Axis.Pack axis) ->
+          With_bounds_types.exists
+            (fun ty2 { With_bounds_type_info.relevant_axes = axes2 } ->
+              Axis_set.mem axes2 axis && type_equal ty1 ty2)
+            bounds2))
+      bounds1
+  in
   Misc.Le_result.equal ~le:Mode.Crossing.le mc1 umc2.unsafe_mod_bounds
-  && (match wb2, umc2.unsafe_with_bounds with
-    | No_with_bounds, No_with_bounds -> true
-    | No_with_bounds, With_bounds _ | With_bounds _, No_with_bounds -> false
-    | With_bounds wb1, With_bounds wb2 ->
-      (* It's tough (impossible?) to do better than a double subset check here because of
-         the fact that these maps are best-effort. But in practice these will usually not
-         be huge, and the attribute triggering this check is (hopefully) rare. *)
-      With_bounds_types.for_all
-        (fun ty1 _info ->
-           With_bounds_types.exists
-             (fun ty2 _info -> type_equal ty1 ty2)
-             wb2)
-        wb1
-      && With_bounds_types.for_all
-        (fun ty2 _info ->
-           With_bounds_types.exists
-             (fun ty1 _info -> type_equal ty1 ty2)
-             wb1)
-        wb2)
+  && included (bounds wb1) (bounds umc2.unsafe_with_bounds)
+  && included (bounds umc2.unsafe_with_bounds) (bounds wb1)
 
 (* Constructor and accessors for [row_desc] *)
 

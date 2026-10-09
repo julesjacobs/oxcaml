@@ -22,9 +22,17 @@ val type_declaration_ikind_gated :
 val declaration_logicality :
   env:Env.t -> path:Path.t -> Jkind_axis.Logicality.t * bool list
 
+(** As [declaration_logicality], but the base assumes logical abstract types.
+    Their contribution must remain in the declaration's with-bounds. *)
+val declaration_logicality_lower_bound :
+  env:Env.t -> path:Path.t -> Jkind_axis.Logicality.t * bool list
+
 (** Whether the type constructor [path] is logical when its parameters are.
     Total code may look inside a value only if its type constructor is one. *)
 val declaration_is_logical : env:Env.t -> path:Path.t -> bool
+
+val logicality_of_jkind :
+  Env.t -> ('l * 'r) Types.jkind -> Jkind_axis.Logicality.t
 
 val type_declaration_ikind_of_jkind :
   env:Env.t option ->

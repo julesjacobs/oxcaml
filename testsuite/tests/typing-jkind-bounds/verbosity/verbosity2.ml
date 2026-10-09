@@ -29,6 +29,7 @@ type t
           static
           ghost
           internal
+          maybe_logical
 |}]
 
 type t : immediate
@@ -46,6 +47,7 @@ type t
           portable
           contended
           external_
+          logical
           static
           ghost
 |}]
@@ -55,6 +57,7 @@ type t : float64
 type t
   : float64
       mod external_
+          logical
           local
           unforkable
           yielding
@@ -86,6 +89,7 @@ type t
           static
           ghost
           internal
+          maybe_logical
 |}]
 
 type t : value mod portable
@@ -105,6 +109,7 @@ type t
           static
           ghost
           internal
+          maybe_logical
 |}]
 
 type t : value mod stateless
@@ -124,6 +129,7 @@ type t
           static
           ghost
           internal
+          maybe_logical
 |}]
 
 type 'a t : immutable_data with 'a
@@ -143,6 +149,7 @@ type 'a t
           static
           ghost
           internal
+          maybe_logical
       with 'a
 |}]
 
@@ -162,7 +169,8 @@ type ('a
              unique
              static
              ghost
-             internal)
+             internal
+             maybe_logical)
      t
 |}]
 
@@ -182,7 +190,8 @@ type ('a
              uncontended
              static
              ghost
-             internal)
+             internal
+             maybe_logical)
      t
 |}]
 
@@ -203,6 +212,7 @@ type 'a t
           uncontended
           static
           ghost
+          maybe_logical
       with 'a @@ external_
 |}]
 
@@ -223,6 +233,7 @@ type 'a t
           uncontended
           static
           ghost
+          maybe_logical
 |}]
 
 type 'a t : immutable_data with 'a @@ external_
@@ -242,5 +253,6 @@ type 'a t
           static
           ghost
           internal
+          maybe_logical
       with 'a
 |}]

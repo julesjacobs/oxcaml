@@ -73,7 +73,7 @@ Line 2, characters 23-24:
                            ^
 Error: The value "x" has type "q" but an expression was expected of type
          "('a : immutable_data)"
-       The kind of q is immutable_data with M.t
+       The kind of q is logical_data with M.t
          because of the definition of q at line 1, characters 0-32.
        But the kind of q must be a subkind of immutable_data
          because of the definition of takes_only_immutable at line 1, characters 25-64.
@@ -202,10 +202,17 @@ type 'a opaque
 Lines 2-3, characters 0-53:
 2 | type 'a at : value mod portable =
 3 |   | K : ('b : value mod portable). 'b opaque -> 'b at
-Error: The kind of type "at" is immutable_data with ('a @@ portable) opaque
+Error: The kind of type "at" is
+           logical_data
+             with 'a @@ forkable unyielding many total immutable
+             with ('a @@ portable) opaque
          because it's a boxed variant type.
        But the kind of type "at" must be a subkind of value mod portable
          because of the annotation on the declaration of the type at.
+
+       The first mode-crosses less than the second along:
+         portability: mod portable with ('a @@ portable) opaque ≰
+           mod portable
 |}]
 
 type 'a mbox = { mutable yy : 'a }
@@ -217,7 +224,7 @@ Lines 2-3, characters 0-52:
 2 | type 'a ct : value mod contended =
 3 |   | K : ('b : value mod contended). 'b mbox -> 'b ct
 Error: The kind of type "ct" is
-           mutable_data with 'a @@ forkable unyielding many
+           mutable_data mod logical with 'a @@ forkable unyielding many
          because it's a boxed variant type.
        But the kind of type "ct" must be a subkind of value mod contended
          because of the annotation on the declaration of the type ct.
@@ -250,6 +257,8 @@ Lines 1-3, characters 0-87:
 3 |   | Cons : ('b : value mod portable). { value : 'b; mutable next : 'b cell } -> 'b cell
 Error: The kind of type "cell" is
            mutable_data
+             mod logical
+             with 'a @@ forkable unyielding many total
              with ('a @@ portable)
              with ('a @@ portable) cell @@ forkable unyielding many
          because it's a boxed variant type.
@@ -413,6 +422,8 @@ Error: The layout of type "u" is value non_float
        Note: The layout of immediate is value non_pointer.
        Note: The kinds mutable_data, immutable_data, and sync_data have
        the layout value non_float.
+       It is not logical:
+       a constructor has an existential type, which could be the matched type itself.
 |}]
 
 type 'a u : immutable_data =
@@ -528,6 +539,8 @@ Error: The layout of type "existential_abstract" is value non_float
        Note: The layout of immediate is value non_pointer.
        Note: The kinds mutable_data, immutable_data, and sync_data have
        the layout value non_float.
+       It is not logical:
+       abstract is abstract and its kind does not say mod logical.
 |}]
 
 type existential_abstract : immutable_data with (type : value mod portable) abstract =
@@ -582,8 +595,7 @@ Error: Signature mismatch:
          type t = P : ('a : immediate). 'a abstract -> t
        is not included in
          type t : immutable_data with (type : value) abstract
-       The kind of the first is
-           immutable_data with (type : immediate) abstract
+       The kind of the first is logical_data with (type : immediate) abstract
          because of the definition of t at line 4, characters 2-49.
        But the kind of the first must be a subkind of
            immutable_data with (type : value) abstract
@@ -785,6 +797,8 @@ Error: The layout of type "t2" is value non_float
        Note: The layout of immediate is value non_pointer.
        Note: The kinds mutable_data, immutable_data, and sync_data have
        the layout value non_float.
+       It is not logical:
+       t is abstract and its kind does not say mod logical.
 |}]
 
 (* Existential row variables *)

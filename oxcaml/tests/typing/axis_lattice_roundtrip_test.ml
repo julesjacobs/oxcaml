@@ -31,7 +31,8 @@ type sample =
     statefulness : Mode.Statefulness.Const.t;
     visibility : Mode.Visibility.Const.t;
     staticity : Mode.Staticity.const;
-    externality : Jkind_axis.Externality.t
+    externality : Jkind_axis.Externality.t;
+    logicality : Jkind_axis.Logicality.t
   }
 
 let sample_of_lattice x =
@@ -46,7 +47,8 @@ let sample_of_lattice x =
     statefulness = statefulness x;
     visibility = visibility x;
     staticity = staticity x;
-    externality = externality x
+    externality = externality x;
+    logicality = logicality x
   }
 
 let lattice_of_sample sample =
@@ -56,6 +58,7 @@ let lattice_of_sample sample =
     ~yielding:sample.yielding ~statefulness:sample.statefulness
     ~totality:sample.totality ~visibility:sample.visibility
     ~staticity:sample.staticity ~externality:sample.externality
+    ~logicality:sample.logicality
 
 let base_samples = [sample_of_lattice bot; sample_of_lattice top]
 
@@ -108,7 +111,7 @@ let mod_bounds_of_sample sample =
            (Mode.Modality.Comonadic.Atom.Meet_const Mode.Ghostliness.Const.Ghost))
   in
   Btype.Jkind0.Mod_bounds.create { monadic; comonadic }
-    ~externality:sample.externality
+    ~externality:sample.externality ~logicality:sample.logicality
 
 let check_mod_bounds_roundtrip label sample =
   let bounds = mod_bounds_of_sample sample in
@@ -236,6 +239,9 @@ let mask_of_axis : type a. a Jkind_axis.Axis.t -> t =
   | Modal (Comonadic Ghostliness) -> ghost_mask
   | Nonmodal Externality ->
     non_ghost_mask { sample with externality = Jkind_axis.Externality.Internal }
+  | Nonmodal Logicality ->
+    non_ghost_mask
+      { sample with logicality = Jkind_axis.Logicality.Maybe_logical }
 
 let of_axis_set' (set : Jkind_axis.Axis_set.t) : t =
   Jkind_axis.Axis_set.to_seq set
@@ -346,4 +352,10 @@ let () =
     [ Jkind_axis.Externality.External;
       Jkind_axis.Externality.External64;
       Jkind_axis.Externality.Internal ];
+  check_axis
+    (module Jkind_axis.Logicality)
+    "logicality"
+    (fun sample logicality -> { sample with logicality })
+    logicality
+    [Jkind_axis.Logicality.Logical; Jkind_axis.Logicality.Maybe_logical];
   check_of_axis_set ()

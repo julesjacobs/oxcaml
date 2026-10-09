@@ -571,7 +571,7 @@ Line 1, characters 22-23:
                           ^
 Error: The value "t" has type "t" but an expression was expected of type
          "('a : value mod global)"
-       The kind of t is immutable_data
+       The kind of t is logical_data
          because of the definition of t at line 1, characters 0-32.
        But the kind of t must be a subkind of value mod global
          because of the definition of cross_global at line 7, characters 53-64.
@@ -603,7 +603,7 @@ Line 2, characters 13-16:
                  ^^^
 Error: The value "int" has type "int t" but an expression was expected of type
          "('a : value mod many)"
-       The kind of int t is immutable_data with int
+       The kind of int t is logical_data with int
          because of the definition of t at line 1, characters 0-22.
        But the kind of int t must be a subkind of value mod many
          because of the definition of cross_many at line 11, characters 49-60.
@@ -616,7 +616,7 @@ Line 1, characters 23-26:
                            ^^^
 Error: The value "int" has type "int t" but an expression was expected of type
          "('a : value mod aliased)"
-       The kind of int t is immutable_data
+       The kind of int t is logical_data
          because of the definition of t at line 1, characters 0-22.
        But the kind of int t must be a subkind of value mod aliased
          because of the definition of cross_aliased at line 8, characters 55-66.
@@ -626,7 +626,7 @@ Line 1, characters 23-26:
                            ^^^
 Error: The value "int" has type "int t" but an expression was expected of type
          "('a : value mod aliased)"
-       The kind of int t is immutable_data with int
+       The kind of int t is logical_data with int
          because of the definition of t at line 1, characters 0-22.
        But the kind of int t must be a subkind of value mod aliased
          because of the definition of cross_aliased at line 8, characters 55-66.
@@ -650,7 +650,7 @@ Line 1, characters 24-28:
                             ^^^^
 Error: The value "func" has type "(unit -> unit) t"
        but an expression was expected of type "('a : value mod portable)"
-       The kind of (unit -> unit) t is immutable_data with unit -> unit
+       The kind of (unit -> unit) t is logical_data with unit -> unit
          because of the definition of t at line 1, characters 0-22.
        But the kind of (unit -> unit) t must be a subkind of
            value mod portable
@@ -675,7 +675,7 @@ Line 1, characters 24-28:
                             ^^^^
 Error: The value "func" has type "(unit -> unit) t"
        but an expression was expected of type "('a : value mod external_)"
-       The kind of (unit -> unit) t is immutable_data with unit -> unit
+       The kind of (unit -> unit) t is logical_data with unit -> unit
          because of the definition of t at line 1, characters 0-22.
        But the kind of (unit -> unit) t must be a subkind of
            value mod external_
@@ -704,7 +704,7 @@ Line 2, characters 14-19:
 2 | type t_test = int t require_many
                   ^^^^^
 Error: This type "int t" should be an instance of type "('a : value mod many)"
-       The kind of int t is immutable_data with int
+       The kind of int t is logical_data with int
          because of the definition of t at line 1, characters 0-22.
        But the kind of int t must be a subkind of value mod many
          because of the definition of require_many at line 19, characters 0-39.
@@ -716,7 +716,7 @@ Line 1, characters 14-19:
 1 | type t_test = int t require_global
                   ^^^^^
 Error: This type "int t" should be an instance of type "('a : value mod global)"
-       The kind of int t is immutable_data
+       The kind of int t is logical_data
          because of the definition of t at line 1, characters 0-22.
        But the kind of int t must be a subkind of value mod global
          because of the definition of require_global at line 15, characters 0-43.
@@ -725,7 +725,7 @@ Line 1, characters 14-19:
 1 | type t_test = int t require_global
                   ^^^^^
 Error: This type "int t" should be an instance of type "('a : value mod global)"
-       The kind of int t is immutable_data with int
+       The kind of int t is logical_data with int
          because of the definition of t at line 1, characters 0-22.
        But the kind of int t must be a subkind of value mod global
          because of the definition of require_global at line 15, characters 0-43.
@@ -737,7 +737,7 @@ Line 1, characters 14-19:
 1 | type t_test = int t require_aliased
                   ^^^^^
 Error: This type "int t" should be an instance of type "('a : value mod aliased)"
-       The kind of int t is immutable_data
+       The kind of int t is logical_data
          because of the definition of t at line 1, characters 0-22.
        But the kind of int t must be a subkind of value mod aliased
          because of the definition of require_aliased at line 16, characters 0-45.
@@ -746,7 +746,7 @@ Line 1, characters 14-19:
 1 | type t_test = int t require_aliased
                   ^^^^^
 Error: This type "int t" should be an instance of type "('a : value mod aliased)"
-       The kind of int t is immutable_data with int
+       The kind of int t is logical_data with int
          because of the definition of t at line 1, characters 0-22.
        But the kind of int t must be a subkind of value mod aliased
          because of the definition of require_aliased at line 16, characters 0-45.
@@ -770,7 +770,7 @@ Line 1, characters 14-30:
                   ^^^^^^^^^^^^^^^^
 Error: This type "(unit -> unit) t" should be an instance of type
          "('a : value mod portable)"
-       The kind of (unit -> unit) t is immutable_data with unit -> unit
+       The kind of (unit -> unit) t is logical_data with unit -> unit
          because of the definition of t at line 1, characters 0-22.
        But the kind of (unit -> unit) t must be a subkind of
            value mod portable
@@ -783,7 +783,7 @@ Line 1, characters 41-45:
 1 | type ('a : value mod contended) t_test = 'a t require_portable
                                              ^^^^
 Error: This type "'a t" should be an instance of type "('b : value mod portable)"
-       The kind of 'a t is immutable_data with 'a
+       The kind of 'a t is logical_data with 'a
          because of the definition of t at line 1, characters 0-22.
        But the kind of 'a t must be a subkind of value mod portable
          because of the definition of require_portable at line 18, characters 0-47.
@@ -796,7 +796,7 @@ Line 1, characters 41-45:
                                              ^^^^
 Error: This type "'a t" should be an instance of type
          "('b : value mod external_)"
-       The kind of 'a t is immutable_data with 'a
+       The kind of 'a t is logical_data with 'a
          because of the definition of t at line 1, characters 0-22.
        But the kind of 'a t must be a subkind of value mod external_
          because of the definition of require_external at line 21, characters 0-48.
@@ -897,7 +897,7 @@ Error: Signature mismatch:
          type t = { mutable x : int; y : string; }
        is not included in
          type t : immutable_data
-       The kind of the first is mutable_data
+       The kind of the first is mutable_data mod logical
          because of the definition of t at line 4, characters 2-42.
        But the kind of the first must be a subkind of immutable_data
          because of the definition of t at line 2, characters 2-25.
@@ -923,7 +923,7 @@ Error: Signature mismatch:
          type t = { x : int ref; y : string; }
        is not included in
          type t : immutable_data
-       The kind of the first is mutable_data
+       The kind of the first is mutable_data mod logical
          because of the definition of t at line 4, characters 2-38.
        But the kind of the first must be a subkind of immutable_data
          because of the definition of t at line 2, characters 2-25.
@@ -949,7 +949,7 @@ Error: Signature mismatch:
          type 'a t = { x : 'a; y : string; }
        is not included in
          type 'a t : immutable_data
-       The kind of the first is immutable_data with 'a
+       The kind of the first is logical_data with 'a
          because of the definition of t at line 4, characters 2-36.
        But the kind of the first must be a subkind of immutable_data
          because of the definition of t at line 2, characters 2-28.

@@ -1084,6 +1084,7 @@ let decl_of_type_constr type_constr =
          newgenty (Tquote_eval (newgenty (Tsplice param))))
        ~jkind:(fun param ->
          Jkind.Builtin.any ~why:Evaluated_quote |>
+           Jkind.set_logicality Logical |>
            Jkind.add_with_bounds
              ~modality:Mode.Modality.Const.id
              ~type_expr:param)
