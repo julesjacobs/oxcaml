@@ -129,7 +129,7 @@
       "short": "Computes constructor and label descriptions from type declarations, including the declarations of inline records."
     },
     "vox": {
-      "short": "Copies ld_ghost into lbl_ghost, and gives inline-record declarations the new flags type_inductive and type_phantom_parameters, both false."
+      "short": "Copies ld_ghost into lbl_ghost, and initializes synthesized inline-record declarations with type_inductive false."
     },
     "notes": [
       {
@@ -139,11 +139,11 @@
         "text": "`label_descrs` is where every record field's description is built, so this is the one place the flag has to be copied."
       },
       {
-        "title": "Inline records are never inductive",
+        "title": "Synthesized inline-record declarations",
         "from": "type_inductive = false;",
         "span": 2,
         "kind": "vox",
-        "text": "The synthesized declaration of an inline record carries no `[@@inductive]` or `[@@phantom_parameters]` guarantee."
+        "text": "The synthesized inline-record declaration has `type_inductive` false. An enclosing variant can still be `[@@inductive]`; its declaration check requires immutable inline-record fields."
       }
     ]
   },
@@ -272,11 +272,11 @@
         "text": "A field cannot be ghost on one side and real on the other: the two records would have different representations."
       },
       {
-        "title": "Inductiveness and phantom parameters must match",
+        "title": "Inductiveness must match",
         "from": "| Inductiveness",
         "span": 2,
         "kind": "vox",
-        "text": "An interface may only state `[@@inductive]` or `[@@phantom_parameters]` if the implementation does. An implementation can hide `[@@inductive]` only by making the type abstract."
+        "text": "An interface may only state `[@@inductive]` if the implementation does. An implementation can hide `[@@inductive]` only by making the type abstract."
       }
     ]
   },
@@ -738,7 +738,7 @@
       "short": "Class parameters, class-level lets, opens, self and instance variables are registered as term scopes, and a class type may not mention them in a refinement once they go out of scope.",
       "long": [
         "A method's type may contain a predicate that names a class parameter or instance variable. That is fine inside the class but meaningless outside it. Each class form that binds values now enters a level (only when refinement types may exist, via `with_local_level_generalize_if (may_track_refinement_scopes ())`), registers the bound identifiers with `Ctype.register_refinement_value_scope`, and on exit calls `Ctype.check_refinement_class_level_escape` on the resulting class type.",
-        "The other changes follow from type definitions: arrow descriptions gain a `None` binder, the class's type abbreviations have `type_inductive` and `type_phantom_parameters` set to false, and unused-variable warnings carry the new `refined_unit` field."
+        "The other changes follow from type definitions: arrow descriptions gain a `None` binder, the class's type abbreviations have `type_inductive` set to false, and unused-variable warnings carry the new `refined_unit` field."
       ]
     },
     "notes": [
@@ -896,7 +896,7 @@
         "from": "| Inductive_type_in_recursive_module of string",
         "span": 3,
         "kind": "vox",
-        "text": "A recursive module signature may not declare an `[@@inductive]` type, expose a total value whose type depends on the group, or contain another item that depends on the group in an unsupported form. `find_forbidden_recursive_signature` in `typemod.ml` finds the offending item; it also rejects `[@@phantom_parameters]` in such a signature directly."
+        "text": "A recursive module signature may not declare an `[@@inductive]` type, expose a total value whose type depends on the group, or contain another item that depends on the group in an unsupported form. `find_forbidden_recursive_signature` in `typemod.ml` finds the offending item."
       }
     ]
   },
@@ -959,11 +959,11 @@
         "text": "`refinement_types_created` is a `Local_store` flag, so it is reset per compilation state. Once set, every created or updated node is reported, because a node that stops being a `Trefine` must drop its cached dependency."
       },
       {
-        "title": "New declaration flags",
+        "title": "Inductive declaration flag",
         "from": "type_inductive: bool;",
         "span": 2,
         "kind": "vox",
-        "text": "Set by `[@@inductive]` and `[@@phantom_parameters]`. Upstream code that builds declarations sets both to false."
+        "text": "Set by `[@@inductive]`. Upstream code that builds declarations initializes it to false."
       },
       {
         "title": "Ghost fields",

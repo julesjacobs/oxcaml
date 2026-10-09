@@ -62,7 +62,7 @@
     },
     "vox": {
       "short": "MAGIC_NUMBER__VERSION goes from 584 to 585, because Vox changes the serialized type representation in .cmi and .cmt files.",
-      "long": "`Types.type_desc` gains `Trefine`, `arrow_desc` gains a binder, type declarations gain `type_inductive` and `type_phantom_parameters`, and label declarations gain `ld_ghost`. The bump makes an upstream compiler reject Vox artifacts, and the reverse, instead of misreading them."
+      "long": "`Types.type_desc` gains `Trefine`, `arrow_desc` gains a binder, type declarations gain `type_inductive`, jkinds gain logicality, and label declarations gain `ld_ghost`. The bump makes an upstream compiler reject Vox artifacts, and the reverse, instead of misreading them."
     }
   },
   "bytecomp/": {
@@ -264,7 +264,7 @@
       "short": "New syntax: {x : t | p}, (x : t) -> u, ghost_, refine_, assume_, unreachable_ (), let refine_ x = e in, and the refinement_types extension.",
       "long": [
         "The Parsetree gains `Ptyp_refine`, a binder on `Ptyp_arrow`, and `Pexp_ghost`, `Pexp_refine`, `Pexp_assume` and `Pexp_let_refine`; `unreachable_ ()` is parsed as the extension node `[%vox.unreachable]`. The keywords are OxCaml keywords, reserved whether or not the extension is on.",
-        "`Refinement_types` is an alpha extension; the typer checks it for the refinement forms. `def`, `decreases`, `inductive` and `phantom_parameters` are registered as built-in attributes, and a misplaced `[@def]` or `[@decreases]` is an error rather than a warning."
+        "`Refinement_types` is an alpha extension; the typer checks it for the refinement forms. `def`, `decreases` and `inductive` are registered as built-in attributes, and a misplaced `[@def]` or `[@decreases]` is an error rather than a warning."
       ]
     }
   },

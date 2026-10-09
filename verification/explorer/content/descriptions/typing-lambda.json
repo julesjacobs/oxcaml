@@ -6,10 +6,10 @@
       "long": "`type_desc` is the mutable node of the type graph; `type_declaration`, `label_declaration`, `constructor_declaration` and `value_description` are what `Env` stores and `.cmi` files serialize. OxCaml's additions (modes on arrows, jkinds and ikinds, modalities) are defined or referenced here."
     },
     "vox": {
-      "short": "Adds Trefine with a resolved predicate language, a dependent binder on arrows, and the type_inductive, type_phantom_parameters and ld_ghost flags.",
+      "short": "Adds Trefine with a resolved predicate language, a dependent binder on arrows, logicality in jkinds, and the type_inductive and ld_ghost flags.",
       "long": [
         "`Trefine { ref_binder; ref_payload; ref_pred; ref_structural_scope }` is `{x : t | p}`. The payload alone decides layout and representation. `ref_pred` is a `refinement_expression`: a small, name-resolved expression language (`Rexp_var` for bound names, `Rexp_ident` for free value paths that module substitution rewrites, plus application, `===`, constructors, records, `let`, `fun`, `match`). Each node keeps its instantiated type.",
-        "`arrow_desc` gains an `Ident.t option`: `Some x` is the dependent arrow `(x : a) -> b`. `type_inductive` is set by `[@@inductive]`, `type_phantom_parameters` by `[@@phantom_parameters]`, and `ld_ghost` by the `@@ ghost` field modality. `set_type_desc_observer` lets `Ctype` track the scope of refinement dependencies."
+        "`arrow_desc` gains an `Ident.t option`: `Some x` is the dependent arrow `(x : a) -> b`. `type_inductive` is set by `[@@inductive]`, a declaration's jkind stores its inferred or declared logicality, and `ld_ghost` is set by the `@@ ghost` field modality. `set_type_desc_observer` lets `Ctype` track the scope of refinement dependencies."
       ]
     }
   },
@@ -36,7 +36,7 @@
       "long": [
         "Two `Trefine` nodes unify when their payloads unify and their predicates are alpha-equal after path normalization (`refinement_predicate_types`). The comparison skips elimination wrappers (`Rexp_refinement`) on both sides, because the verifier does not assume the types they record. It returns the types of corresponding predicate nodes, and `relate_predicate_types` unifies them by their skeletons, so a law about `int t` does not unify with the same law about `bool t`. A refined and an unrefined type never unify. Weakening a refinement is subsumption, which is not done by unification: at module inclusion and at a coercion `:>` the typer records an obligation, and the verifier proves the implication. Variance treats parameters that occur only in predicate types as non-phantom.",
         "A predicate can mention term variables, so a type now has term dependencies. `register_refinement_value_scope` and `Refinement_scope_escape` extend the GADT-style escape check to them. `Typecore` substitutes an argument for a dependent binder with `substitute_refinement_expression`, and renames one with `substitute_refinement_ident`; `apply_dependent_type` is exported but has no caller.",
-        "`is_inductive` and `can_pattern_match_total` decide when a match is total: the representation of the scrutinee's type must not lead back to the type itself, except through the direct, unchanged recursive fields of an `[@@inductive]` type. This stops a Landin-style knot from being built and taken apart in total code. `can_unpack_total` applies the same jkind test to the abstract types of a first-class module that total code unpacks."
+        "`can_pattern_match_total` requires a visible record or variant representation whose type constructor is logical when its parameters are, as determined by `Ikind.declaration_is_logical`. `Ikind` tracks which parameters affect logicality; recursion through such parameters needs `[@@inductive]`. A directly matched constructor's existential types must rule out pointers. Logicality is carried in jkinds, so abstract types need a declared logicality guarantee. `can_unpack_total` requires logicality for the hidden types of a first-class module that total code unpacks."
       ]
     },
     "notes": [
@@ -55,7 +55,7 @@
         "from": "let can_pattern_match_total env ty",
         "to": "check Path.Set.empty ty",
         "kind": "vox",
-        "text": "Variants and records are checked by `declaration_can_pattern_match_total`, which walks the representation and rejects any route back to the type other than a direct, unchanged recursive field of an `[@@inductive]` type. Since the hidden-types fix (`09dfd7e2fa`) the walk tracks polarity through the arrows it traverses and rejects a matched constructor's existentials, and any abstract or open type reached in negative position, unless the hidden type's jkind rules out pointers. One route remains open: an abstract type equal to a function type and consumed by an exported total function, which needs a declared matchability attribute."
+        "text": "`declaration_can_pattern_match_total` requires a visible record or variant representation, calls `Ikind.declaration_is_logical`, and rejects a directly matched constructor's existential types unless their jkinds rule out pointers. The kind solver computes logicality from the representation and its dependencies; abstract types contribute their declared logicality. This keeps an abstract type equal to a function type from silently certifying a datatype that could tie a knot."
       }
     ]
   },
@@ -140,9 +140,9 @@
       "long": "`transl_type_decl` handles a group of declarations, computing jkinds, unboxed versions and mixed-block layouts; separability and variance are delegated to `typedecl_separability.ml` and `typedecl_variance.ml`."
     },
     "vox": {
-      "short": "Checks [@@inductive] and [@@phantom_parameters] declarations, and gives @@ ghost fields a void slot; an all-ghost record has kind void.",
+      "short": "Checks [@@inductive] declarations, infers logicality, and gives @@ ghost fields a void slot; an all-ghost record has kind void.",
       "long": [
-        "`check_inductive_decl` accepts a single, closed, non-GADT variant whose recursive occurrences are direct constructor arguments or tuple components with unchanged parameters. That is what makes structural recursion on it well-founded and lets the verifier encode it as an SMT datatype.",
+        "`check_inductive_decl` accepts a single, closed, non-GADT variant whose recursive occurrences are direct constructor arguments, immutable inline-record fields or tuple components with unchanged parameters. That is what makes structural recursion on it well-founded and lets the verifier encode it as an SMT datatype.",
         "A `@@ ghost` field cannot be mutable. It gets the `Void` element representation; a record whose fields are all ghost gets kind `void` (this is `'a Ghost.t`), and a one-field unboxed ghost record is void too."
       ]
     }
@@ -575,7 +575,7 @@
       "long": "An attribute in `builtin_attrs` is expected to be consumed; one that is not triggers warning 53."
     },
     "vox": {
-      "short": "Registers def, decreases, inductive and phantom_parameters; a misplaced [@def] or [@decreases] is an error; is_transparent_definition reads [@def transparent].",
+      "short": "Registers def, decreases and inductive; a misplaced [@def] or [@decreases] is an error; is_transparent_definition reads [@def transparent].",
       "long": "The error replaces warning 53 for these two, since a silently ignored `[@def]` or `[@decreases]` would change what is proved."
     }
   },
