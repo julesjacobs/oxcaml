@@ -142,7 +142,7 @@
     "vox": {
       "short": "Checks [@@inductive] declarations, infers logicality, and gives @@ ghost fields a void slot; an all-ghost record has kind void.",
       "long": [
-        "`check_inductive_decl` accepts a single, closed, non-GADT variant whose recursive occurrences are direct constructor arguments, immutable inline-record fields or tuple components with unchanged parameters. That is what makes structural recursion on it well-founded and lets the verifier encode it as an SMT datatype.",
+        "`check_inductive_decl` accepts a single, closed, non-GADT variant whose recursive occurrences are direct constructor arguments, immutable inline-record fields or tuple components with unchanged parameters. That makes structural recursion on it well-founded. The verifier encodes inductive variants with tuple arguments as SMT datatypes; inline-record constructors currently fall back to an uninterpreted type.",
         "A `@@ ghost` field cannot be mutable. It gets the `Void` element representation; a record whose fields are all ghost gets kind `void` (this is `'a Ghost.t`), and a one-field unboxed ghost record is void too."
       ]
     }
