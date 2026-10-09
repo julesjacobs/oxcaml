@@ -47,7 +47,7 @@
         "(Tarrow ((l1,a1,r1,binder1), t1, u1, c1),"
       ],
       "to": "relate_predicate_types (get_env uenv) (unify uenv) types",
-      "lines": "5838-5866",
+      "lines": "5843-5871",
       "text": "Two arrows unify only if both or neither are dependent; `align_arrow_codomains` renames one binder to the other before the codomains are unified. Refinements stay rigid in unification: the payloads unify, and `refinement_predicate_types` requires the predicates to be alpha-equivalent, pairing the types of their subterms, which `relate_predicate_types` then unifies. A refined type never unifies with an unrefined one. Weakening a refinement happens elsewhere: at module inclusion and at a coercion `:>`, the typer records a `Texp_subsumption` obligation, and the verifier proves the implication. An implementation that proves `r > c` therefore matches an interface that states `r >= c`."
     },
     {
@@ -104,7 +104,7 @@
       "path": "typing/ctype.ml",
       "from": "let can_pattern_match_total env ty =",
       "to": "check Path.Set.empty ty",
-      "lines": "3952-3969",
+      "lines": "3957-3974",
       "text": "A negative datatype such as `type t = Roll of (t -> int)` gives a fixpoint without `let rec`, so destructuring can itself diverge. A constructor, record or variant pattern, and a field projection, is therefore partial unless `can_pattern_match_total` holds for the scrutinee's type. It expands abbreviations and asks `declaration_can_pattern_match_total`, above, whether the declaration is definitely non-recursive, allowing direct recursion only in a checked `[@@inductive]` type. Abstract and open types are rejected at the top; inside a declaration, since the hidden-types fix, the walk tracks polarity and rejects a matched constructor's existentials and any abstract or open type reached in negative position unless its jkind rules out pointers, and `can_unpack_total` applies the same test to unpacked modules. One route remains open: an abstract type equal to a function type, consumed by an exported total function."
     },
     {
