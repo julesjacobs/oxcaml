@@ -55,13 +55,13 @@ Error: Modules do not match:
        sig type t = int val compare : int -> int -> int end
      is not included in MoreLabels.Set.TotalOrderedType
      The value "reflexive" is required but not provided
-     File "moreLabels.mli", lines 1211-1212, characters 6-24:
+     File "moreLabels.mli", lines 1214-1215, characters 6-24:
        Expected declaration
      The value "antisymmetric" is required but not provided
-     File "moreLabels.mli", lines 1213-1215, characters 6-68:
+     File "moreLabels.mli", lines 1216-1218, characters 6-68:
        Expected declaration
      The value "transitive" is required but not provided
-     File "moreLabels.mli", lines 1216-1218, characters 6-47:
+     File "moreLabels.mli", lines 1219-1221, characters 6-47:
        Expected declaration
 |}]
 
