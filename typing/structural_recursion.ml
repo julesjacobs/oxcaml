@@ -67,7 +67,7 @@ let rec bind_pattern facts descent pat =
         end
   | _ -> facts
 
-and bind_inline_record facts owner fields pat =
+and bind_inline_record facts owner (fields : Types.label_declaration list) pat =
   match pat.pat_desc with
   | Tpat_record (patterns, _, _) ->
       List.fold_left
