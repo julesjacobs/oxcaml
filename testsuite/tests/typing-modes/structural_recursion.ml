@@ -275,7 +275,8 @@ end
 [%%expect{|
 module Test_inline_record :
   sig
-    type t = Leaf | Node of { tail : t; } [@@inductive]
+    type t = Leaf | Node of { tail : t; }
+    [@@inductive]
     val depth : t -> int
     val alias : t -> int
     val good_or : t -> int
@@ -292,7 +293,8 @@ end
 [%%expect{|
 module Test_inline_tuple :
   sig
-    type t = Leaf | Node of { children : t * t; } [@@inductive]
+    type t = Leaf | Node of { children : t * t; }
+    [@@inductive]
     val size : t -> int
   end
 |}]
