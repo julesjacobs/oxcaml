@@ -427,8 +427,8 @@ type unary_primitive =
       { kind : Duplicate_block_kind.t;
         alloc_region : Variable.t
       }
-      (** [Duplicate_block] may not be used to change the tag or the mutability
-          of a block. *)
+      (** [Duplicate_block] preserves the tag of a block. The result may be
+          mutated, even when the source block is immutable. *)
   | Duplicate_array of
       { kind : Duplicate_array_kind.t;
         source_mutability : Mutability.t;

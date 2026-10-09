@@ -756,10 +756,10 @@ let simplify_duplicate_array ~kind:_ ~(source_mutability : Mutability.t)
       Named.print original_term
 
 let simplify_duplicate_block ~kind:_ ~alloc_region:_ dacc ~original_term ~arg:_
-    ~arg_ty ~result_var =
-  (* Any alias in the type to the whole block will be dropped, but aliases
-     inside the type (e.g. in fields) can remain. *)
-  let ty = T.remove_outermost_alias (DA.typing_env dacc) arg_ty in
+    ~arg_ty:_ ~result_var =
+  (* Functional record updates mutate the duplicated block before returning it,
+     even when the source block is immutable. *)
+  let ty = T.mutable_block Alloc_mode.For_types.heap in
   let dacc = DA.add_variable dacc result_var ty in
   SPR.create original_term ~try_reify:false dacc
 
