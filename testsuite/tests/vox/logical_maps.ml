@@ -40,6 +40,35 @@ module Demo : sig end = struct
         (if M.find_opt k m === None then M.cardinal m
          else Bigint.sub (M.cardinal m) 1Z)} @ ghost = ghost_ ()
 
+  let (conditional_cardinal @ total) (k : Key.t)
+      (b0 : bool) (b1 : bool) (b2 : bool) (b3 : bool) (b4 : bool)
+      (b5 : bool) (b6 : bool) (b7 : bool) (b8 : bool) (b9 : bool)
+      (b10 : bool) (b11 : bool) (b12 : bool) (b13 : bool) (b14 : bool)
+      (b15 : bool) (b16 : bool) (b17 : bool) : unit @ ghost = ghost_ (
+    let m0 = M.empty () in
+    let m1 = if b0 then M.add k 1 m0 else M.remove k m0 in
+    let m2 = if b1 then M.add k 2 m1 else M.remove k m1 in
+    let (_ : {n : Bigint.t | n = if b1 then 1Z else 0Z}) =
+      M.cardinal m2 in
+    let m3 = if b2 then M.add k 3 m2 else M.remove k m2 in
+    let m4 = if b3 then M.add k 4 m3 else M.remove k m3 in
+    let m5 = if b4 then M.add k 5 m4 else M.remove k m4 in
+    let m6 = if b5 then M.add k 6 m5 else M.remove k m5 in
+    let m7 = if b6 then M.add k 7 m6 else M.remove k m6 in
+    let m8 = if b7 then M.add k 8 m7 else M.remove k m7 in
+    let m9 = if b8 then M.add k 9 m8 else M.remove k m8 in
+    let m10 = if b9 then M.add k 10 m9 else M.remove k m9 in
+    let m11 = if b10 then M.add k 11 m10 else M.remove k m10 in
+    let m12 = if b11 then M.add k 12 m11 else M.remove k m11 in
+    let m13 = if b12 then M.add k 13 m12 else M.remove k m12 in
+    let m14 = if b13 then M.add k 14 m13 else M.remove k m13 in
+    let m15 = if b14 then M.add k 15 m14 else M.remove k m14 in
+    let m16 = if b15 then M.add k 16 m15 else M.remove k m15 in
+    let m17 = if b16 then M.add k 17 m16 else M.remove k m16 in
+    let m18 = if b17 then M.add k 18 m17 else M.remove k m17 in
+    let _ = M.cardinal m18 in
+    ())
+
   let (equivalent @ total) (m : int M.t) (x : Key.t) (y : Key.t)
       (v : int) : {u : unit | not (Key.equal x y) ||
         (M.add x v m === M.add y v m

@@ -142,7 +142,7 @@
         "scan.structure scan str"
       ],
       "to": "with_warnings warnings (fun () -> verify_steps ctx prove result.code)",
-      "lines": "5603-5630",
+      "lines": "5618-5645",
       "text": "`generate` first runs `check_total_shift` on every primitive declaration, then scans for a refinement introduction, a subsumption, a refined parameter or a proof step; a unit with none of these, no interface to check against and no pending inclusion check generates no query. Otherwise `structure` executes the Typedtree once, forward, into a list of commands: `Define`s of SSA symbols, `Assume`s for path conditions and eliminated refinements, `Assert`s for obligations, and a `Choice` for each branch, whose values are joined rather than enumerated. Each function body becomes one batch in `ctx.batches`. `verify_steps` hands each batch to `verify_batch`, which proves it as one quantifier-free query and, only if that fails, proves each refinement and then each conjunct alone, so the error names the conjunct that fails."
     },
     {
@@ -150,7 +150,7 @@
       "path": "verification/vox_vc.ml",
       "from": "and expression_extras ?deferred ctx s e ty = function",
       "to": "| None | Some _ -> introduce ctx e.exp_env s target value loc",
-      "lines": "3913-3944",
+      "lines": "3928-3959",
       "text": "Here the typer's extras become verification commands. `expression_extras` handles an expression's extras from the inside out: the value is exposed with `expose_outer`, which assumes its outer refinement, and each `Texp_refinement` whose target is refined calls `introduce`, at once or deferred to the end of a function body. `introduce`, just below, splits the predicate at top-level `&&`, and each conjunct becomes an `Assert` proved under the ones before it, as `&&` evaluates. Besides `introduce`, obligations come from subsumption (a `Texp_subsumption` extra, just below, and the value comparisons of a module inclusion, both proved by `subsume`), shift counts and `[@@decreases]` measures; everything else, including the declared types of callees, is assumed. The meaning is partial correctness on normal return: a raise or `assert false` ends a path, and `@@ total` adds termination."
     },
     {

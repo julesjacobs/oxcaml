@@ -29,7 +29,7 @@ relative to the explorer (default ../catalogue/).
 Serve with `python3 -m http.server -d _build/explorer`.
 """
 from pathlib import Path
-import argparse, gzip, hashlib, html, json, re, shlex, shutil, subprocess, sys, time
+import argparse, gzip, hashlib, html, json, re, shlex, shutil, subprocess, sys, tempfile, time
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -60,8 +60,12 @@ def language(path, config):
 def read_blobs(entries):
     """{path: bytes} for [(path, sha)], through one `git cat-file --batch`."""
     shas = '\n'.join(sha for _, sha in entries) + '\n'
-    out = subprocess.run(['git', '-C', str(ROOT), 'cat-file', '--batch'], input=shas.encode(),
-                         check=True, capture_output=True).stdout
+    # Large batches can fill both pipes while requests and blobs are written.
+    with tempfile.TemporaryFile() as requests:
+        requests.write(shas.encode())
+        requests.seek(0)
+        out = subprocess.run(['git', '-C', str(ROOT), 'cat-file', '--batch'], stdin=requests,
+                             check=True, capture_output=True).stdout
     blobs, offset = {}, 0
     for path, sha in entries:
         header_end = out.index(b'\n', offset)

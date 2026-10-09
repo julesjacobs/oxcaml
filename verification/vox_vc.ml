@@ -1450,83 +1450,90 @@ let pref_location ctx heap pointer =
   comparison_class ctx ctx.map_class_sorts "Pref.location" (term_sort heap)
     pointer
 
-let rec pref_observe ctx budget fn heap key =
-  let call = Call (fn, [heap; key]) in
-  if budget = 0
-  then call
-  else
-    let value =
-      match expose_head ctx heap with
-      | App (Ite, [condition; left; right])
-        when Hashtbl.mem ctx.finite_maps (term_sort heap) ->
-        App
-          ( Ite,
-            [ condition;
-              pref_observe ctx (budget - 1) fn left key;
-              pref_observe ctx (budget - 1) fn right key ] )
-      | Call (update, [source; changed; value])
-        when Hashtbl.find_opt ctx.pref_constructors update = Some `Put ->
-        let old = pref_observe ctx (budget - 1) fn source key in
-        let changed_value =
-          match Hashtbl.find_opt ctx.pref_observers fn with
-          | Some None -> Boolean true
-          | Some (Some (some, _)) ->
-            begin match Constructor.fields some with
-            | [(_, sort)] when sort = term_sort value ->
-              Construct (some, [value])
-            | _ -> call
-            end
-          | None -> call
-        in
-        App (Ite, [both Eq key changed; changed_value; old])
-      | Call (update, [source; changed])
-        when Hashtbl.find_opt ctx.pref_constructors update = Some `Remove ->
-        let old = pref_observe ctx (budget - 1) fn source key in
-        let removed =
-          match Hashtbl.find_opt ctx.pref_observers fn with
-          | Some None -> Boolean false
-          | Some (Some (_, none)) -> Construct (none, [])
-          | None -> call
-        in
-        App (Ite, [both Eq key changed; removed; old])
-      | Call (op, [left; right])
-        when List.mem
-               (Hashtbl.find_opt ctx.pref_constructors op)
-               [Some `Union; Some `Restrict; Some `Exclude] ->
-        let mem heap =
-          let mem =
-            intern_function ctx "Pref.mem" [term_sort heap; term_sort key] Bool
-          in
-          Hashtbl.replace ctx.pref_observers mem None;
-          pref_observe ctx (budget - 1) mem heap key
-        in
-        let empty =
-          match Hashtbl.find_opt ctx.pref_observers fn with
-          | Some None -> Boolean false
-          | Some (Some (_, none)) -> Construct (none, [])
-          | None -> call
-        in
-        let left_value = pref_observe ctx (budget - 1) fn left key in
-        begin match Hashtbl.find_opt ctx.pref_constructors op with
-        | Some `Union ->
+let pref_observe ctx budget fn heap key =
+  (* Each call records its own proof-step provenance; the cache also preserves
+     the remaining expansion budget. *)
+  let expanded = Hashtbl.create 16 in
+  let rec observe budget fn heap key =
+    let call = Call (fn, [heap; key]) in
+    if budget = 0 || Hashtbl.mem expanded (budget, call)
+    then call
+    else begin
+      Hashtbl.add expanded (budget, call) ();
+      let value =
+        match expose_head ctx heap with
+        | App (Ite, [condition; left; right])
+          when Hashtbl.mem ctx.finite_maps (term_sort heap) ->
           App
             ( Ite,
-              [mem left; left_value; pref_observe ctx (budget - 1) fn right key]
-            )
-        | Some `Restrict -> App (Ite, [mem right; left_value; empty])
-        | Some `Exclude -> App (Ite, [mem right; empty; left_value])
+              [ condition;
+                observe (budget - 1) fn left key;
+                observe (budget - 1) fn right key ] )
+        | Call (update, [source; changed; value])
+          when Hashtbl.find_opt ctx.pref_constructors update = Some `Put ->
+          let old = observe (budget - 1) fn source key in
+          let changed_value =
+            match Hashtbl.find_opt ctx.pref_observers fn with
+            | Some None -> Boolean true
+            | Some (Some (some, _)) ->
+              begin match Constructor.fields some with
+              | [(_, sort)] when sort = term_sort value ->
+                Construct (some, [value])
+              | _ -> call
+              end
+            | None -> call
+          in
+          App (Ite, [both Eq key changed; changed_value; old])
+        | Call (update, [source; changed])
+          when Hashtbl.find_opt ctx.pref_constructors update = Some `Remove ->
+          let old = observe (budget - 1) fn source key in
+          let removed =
+            match Hashtbl.find_opt ctx.pref_observers fn with
+            | Some None -> Boolean false
+            | Some (Some (_, none)) -> Construct (none, [])
+            | None -> call
+          in
+          App (Ite, [both Eq key changed; removed; old])
+        | Call (op, [left; right])
+          when List.mem
+                 (Hashtbl.find_opt ctx.pref_constructors op)
+                 [Some `Union; Some `Restrict; Some `Exclude] ->
+          let mem heap =
+            let mem =
+              intern_function ctx "Pref.mem"
+                [term_sort heap; term_sort key]
+                Bool
+            in
+            Hashtbl.replace ctx.pref_observers mem None;
+            observe (budget - 1) mem heap key
+          in
+          let empty =
+            match Hashtbl.find_opt ctx.pref_observers fn with
+            | Some None -> Boolean false
+            | Some (Some (_, none)) -> Construct (none, [])
+            | None -> call
+          in
+          let left_value = observe (budget - 1) fn left key in
+          begin match Hashtbl.find_opt ctx.pref_constructors op with
+          | Some `Union ->
+            App (Ite, [mem left; left_value; observe (budget - 1) fn right key])
+          | Some `Restrict -> App (Ite, [mem right; left_value; empty])
+          | Some `Exclude -> App (Ite, [mem right; empty; left_value])
+          | _ -> call
+          end
+        | Call (empty, [])
+          when Hashtbl.find_opt ctx.pref_constructors empty = Some `Empty ->
+          begin match Hashtbl.find_opt ctx.pref_observers fn with
+          | Some None -> Boolean false
+          | Some (Some (_, none)) -> Construct (none, [])
+          | None -> call
+          end
         | _ -> call
-        end
-      | Call (empty, [])
-        when Hashtbl.find_opt ctx.pref_constructors empty = Some `Empty ->
-        begin match Hashtbl.find_opt ctx.pref_observers fn with
-        | Some None -> Boolean false
-        | Some (Some (_, none)) -> Construct (none, [])
-        | None -> call
-        end
-      | _ -> call
-    in
-    observe_iarray ctx call value
+      in
+      observe_iarray ctx call value
+    end
+  in
+  observe budget fn heap key
 
 let rec pref_disjoint ctx budget left right =
   let fn =
@@ -1635,42 +1642,50 @@ let pref_extensionality ctx env heap_type left right =
     | _ -> None)
   | _ -> None
 
-let rec logical_map_cardinal ctx budget map =
-  let fn = intern_function ctx "Logical_map.cardinal" [term_sort map] Int in
-  let call = Call (fn, [map]) in
-  let value =
-    if budget = 0
+let logical_map_cardinal ctx budget map =
+  let expanded = Hashtbl.create 16 in
+  let rec cardinal budget map =
+    let fn = intern_function ctx "Logical_map.cardinal" [term_sort map] Int in
+    let call = Call (fn, [map]) in
+    if budget = 0 || Hashtbl.mem expanded (budget, call)
     then call
-    else
-      match expose_head ctx map with
-      | Call (op, [])
-        when Hashtbl.find_opt ctx.pref_constructors op = Some `Empty ->
-        Big_integer "0"
-      | Call (op, source :: key :: _)
-        when List.mem
-               (Hashtbl.find_opt ctx.pref_constructors op)
-               [Some `Put; Some `Remove] ->
-        let info = Hashtbl.find ctx.finite_maps (term_sort map) in
-        let present = Is (info.some, pref_observe ctx 128 info.at source key) in
-        let size = logical_map_cardinal ctx (budget - 1) source in
-        let adding = Hashtbl.find ctx.pref_constructors op = `Put in
-        let changed =
-          App ((if adding then Int_add else Int_sub), [size; Big_integer "1"])
-        in
-        App
-          ( Ite,
-            [ present;
-              (if adding then size else changed);
-              (if adding then changed else size) ] )
-      | App (Ite, [condition; left; right]) ->
-        App
-          ( Ite,
-            [ condition;
-              logical_map_cardinal ctx (budget - 1) left;
-              logical_map_cardinal ctx (budget - 1) right ] )
-      | _ -> call
+    else begin
+      Hashtbl.add expanded (budget, call) ();
+      let value =
+        match expose_head ctx map with
+        | Call (op, [])
+          when Hashtbl.find_opt ctx.pref_constructors op = Some `Empty ->
+          Big_integer "0"
+        | Call (op, source :: key :: _)
+          when List.mem
+                 (Hashtbl.find_opt ctx.pref_constructors op)
+                 [Some `Put; Some `Remove] ->
+          let info = Hashtbl.find ctx.finite_maps (term_sort map) in
+          let present =
+            Is (info.some, pref_observe ctx 128 info.at source key)
+          in
+          let size = cardinal (budget - 1) source in
+          let adding = Hashtbl.find ctx.pref_constructors op = `Put in
+          let changed =
+            App ((if adding then Int_add else Int_sub), [size; Big_integer "1"])
+          in
+          App
+            ( Ite,
+              [ present;
+                (if adding then size else changed);
+                (if adding then changed else size) ] )
+        | App (Ite, [condition; left; right]) ->
+          App
+            ( Ite,
+              [ condition;
+                cardinal (budget - 1) left;
+                cardinal (budget - 1) right ] )
+        | _ -> call
+      in
+      observe_iarray ctx call value
+    end
   in
-  observe_iarray ctx call value
+  cardinal budget map
 
 let logical_map_key ctx map key =
   comparison_class ctx ctx.map_class_sorts "Logical_map.key" (term_sort map) key
