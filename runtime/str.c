@@ -487,17 +487,81 @@ CAMLprim value caml_bytes_notequal(value s1, value s2)
   return caml_string_notequal(s1,s2);
 }
 
+/* Load a natural-word-sized chunk starting at [p] and return it in big-endian
+   byte order, so that an unsigned integer comparison of two such words orders
+   them lexicographically by their bytes (byte at [p[0]] most significant). */
+Caml_inline uintnat caml_str_load_be(const unsigned char *p)
+{
+  uintnat w;
+  memcpy(&w, p, sizeof(uintnat));
+#ifndef ARCH_BIG_ENDIAN
+#ifdef ARCH_SIXTYFOUR
+  w = __builtin_bswap64(w);
+#else
+  w = __builtin_bswap32(w);
+#endif
+#endif
+  return w;
+}
+
+/* Word-at-a-time lexicographic string comparison.
+
+   Exploits the OCaml string representation: the payload is word-aligned and the
+   block size in bytes ([Bosize_val]) is a multiple of the word size, with the
+   final byte holding the padding count.  Hence for any offset [i] that is a
+   multiple of the word size and satisfies [i < len], a full word load at [p + i]
+   stays within the block (i + word <= Bosize).
+
+   Correctness: we only ever *decide the result* from bytes at positions < min
+   (the shorter length).  The main loop compares full words wholly inside the
+   common prefix.  The sub-word tail masks off the low (word - rem) bytes, i.e.
+   every byte at position >= min, so the padding/count bytes of a shorter string
+   never participate.  If the whole common prefix is equal, the result is the
+   length order (equal lengths => equal strings; otherwise the shorter string is
+   a proper prefix of the longer, hence smaller).  This matches memcmp + length
+   tiebreak exactly.
+
+   The long-common-prefix case (>= 32 bytes matched) falls back to memcmp, whose
+   SIMD implementation beats a scalar word loop on long scans; short strings
+   (the overwhelmingly common case) avoid memcmp's call/dispatch overhead. */
 CAMLprim value caml_string_compare(value s1, value s2)
 {
-  mlsize_t len1, len2;
-  int res;
+  mlsize_t len1, len2, min, i;
+  const unsigned char *p1, *p2;
 
   if (s1 == s2) return Val_int(0);
   len1 = caml_string_length(s1);
   len2 = caml_string_length(s2);
-  res = memcmp(String_val(s1), String_val(s2), len1 <= len2 ? len1 : len2);
-  if (res < 0) return Val_int(-1);
-  if (res > 0) return Val_int(1);
+  min = len1 <= len2 ? len1 : len2;
+  p1 = (const unsigned char *) String_val(s1);
+  p2 = (const unsigned char *) String_val(s2);
+
+  /* Scan by word, but at most the first 32 bytes: past that a long common
+     prefix is handled by memcmp below. */
+  {
+    mlsize_t wordcap = min < 32 ? min : 32;
+    for (i = 0; i + sizeof(uintnat) <= wordcap; i += sizeof(uintnat)) {
+      uintnat w1 = caml_str_load_be(p1 + i);
+      uintnat w2 = caml_str_load_be(p2 + i);
+      if (w1 != w2) return w1 < w2 ? Val_int(-1) : Val_int(1);
+    }
+  }
+  if (min - i >= sizeof(uintnat)) {
+    /* Long matching prefix: let memcmp (SIMD) compare the remainder. */
+    int res = memcmp(p1 + i, p2 + i, min - i);
+    if (res < 0) return Val_int(-1);
+    if (res > 0) return Val_int(1);
+  } else {
+    /* Sub-word tail (< word bytes): compare only the top [rem] bytes. */
+    mlsize_t rem = min - i;
+    if (rem != 0) {
+      uintnat w1 = caml_str_load_be(p1 + i);
+      uintnat w2 = caml_str_load_be(p2 + i);
+      unsigned shift = (unsigned) ((sizeof(uintnat) - rem) * 8);
+      w1 >>= shift; w2 >>= shift;
+      if (w1 != w2) return w1 < w2 ? Val_int(-1) : Val_int(1);
+    }
+  }
   if (len1 < len2) return Val_int(-1);
   if (len1 > len2) return Val_int(1);
   return Val_int(0);
