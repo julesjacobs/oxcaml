@@ -437,7 +437,7 @@ type t = A of int | B of string | C of string | D of string
           case tag 0:
            (switch t2/0
             case tag 0:
-             (apply (field_imm 8 (global Stdlib__Int!)) (field_imm 0 t1/0)
+             (apply (field_imm 9 (global Stdlib__Int!)) (field_imm 0 t1/0)
                (field_imm 0 t2/0))
             default: -1)
           case tag 1:
