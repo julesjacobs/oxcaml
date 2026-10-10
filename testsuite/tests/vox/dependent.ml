@@ -136,7 +136,7 @@ let stale_borrow () =
 Line 6, characters 38-44:
 6 |   let (_ : {n : int | n = now + y}) = result in
                                           ^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: y = 0)
 Line 6, characters 22-33:
 6 |   let (_ : {n : int | n = now + y}) = result in
                           ^^^^^^^^^^^

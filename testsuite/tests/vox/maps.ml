@@ -355,7 +355,7 @@ end;;
 Line 19, characters 33-40:
 19 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: key = 0)
 Line 19, characters 28-29:
 19 |     let proof : {b : bool | b} = present in
                                  ^
@@ -421,7 +421,7 @@ end;;
 Line 19, characters 33-40:
 19 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: key = 0)
 Line 19, characters 28-29:
 19 |     let proof : {b : bool | b} = present in
                                  ^
@@ -599,7 +599,7 @@ end;;
 Line 35, characters 33-39:
 35 |     let proof : {b : bool | b} = second in
                                       ^^^^^^
-Error: Refinement could not be proved (counterexample: key = 0, other = 1)
+Error: Refinement could not be proved (counterexample: key = -1, other = 1)
 Line 35, characters 28-29:
 35 |     let proof : {b : bool | b} = second in
                                  ^
@@ -658,7 +658,7 @@ Warning 228 [trusted-external]: The verifier assumes this external's cast of its
 Line 34, characters 33-40:
 34 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: key = 0)
 Line 34, characters 28-29:
 34 |     let proof : {b : bool | b} = present in
                                  ^
@@ -719,7 +719,7 @@ Warning 228 [trusted-external]: The verifier assumes this external's cast of its
 Line 38, characters 33-40:
 38 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: key = 0)
 Line 38, characters 28-29:
 38 |     let proof : {b : bool | b} = present in
                                  ^
@@ -763,7 +763,7 @@ end;;
 Line 30, characters 33-40:
 30 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: other = 0, key = 0)
 Line 30, characters 28-29:
 30 |     let proof : {b : bool | b} = present in
                                  ^
@@ -1085,4 +1085,165 @@ Line 1, characters 8-46:
 1 | let _ = CamlinternalMap.trust_total_immutable2;;
             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Unbound value "CamlinternalMap.trust_total_immutable2"
+|}]
+
+module Shared_history : sig end = struct
+  module Probe (Order : Map.TotalOrderedType with type t = int) = struct
+    module M = Map.MakeTotal (Order)
+
+    let (membership @ total) (b : bool @ immutable) (m : int M.t @ total) :
+        {present : bool | present = b} =
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.remove 1 m
+      in
+      M.mem 1 m
+
+    let lookup (b : bool @ immutable) (m : int M.t @ total) :
+        {value : int | (b && value = 1) || (not b && value = 2)} =
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      let m =
+        if b then M.Refined.add 1 1 m else M.Refined.add 1 2 m
+      in
+      M.find 1 m
+  end
+end;;
+[%%expect{|
+module Shared_history : sig end
 |}]

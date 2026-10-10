@@ -71,7 +71,7 @@ let (wrong_lookup @ total) (m : int M.t) (k : Key.t) :
 Line 2, characters 74-76:
 2 |     {u : unit | M.find_opt k (M.add k 42 m) === Some 43} @ ghost = ghost_ ();;
                                                                               ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: k = 0)
 Line 2, characters 16-55:
 2 |     {u : unit | M.find_opt k (M.add k 42 m) === Some 43} @ ghost = ghost_ ();;
                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -84,7 +84,7 @@ let (wrong_equality @ total) (k : Key.t) :
 Line 2, characters 73-75:
 2 |     {u : unit | M.add k 42 (M.empty ()) === M.empty ()} @ ghost = ghost_ ();;
                                                                              ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: k = 0)
 Line 2, characters 16-54:
 2 |     {u : unit | M.add k 42 (M.empty ()) === M.empty ()} @ ghost = ghost_ ();;
                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -98,7 +98,7 @@ let (wrong_cardinal @ total) (k : Key.t) :
 Line 3, characters 21-23:
 3 |     @ ghost = ghost_ ();;
                          ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: k = 0)
 Line 2, characters 16-70:
 2 |     {u : unit | M.cardinal (M.add k 42 (M.add k 41 (M.empty ()))) = 2Z}
                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -112,7 +112,7 @@ let (distinct_keys @ total) (x : Key.t) (y : Key.t) :
 Line 3, characters 72-74:
 3 |       M.find_opt y (M.add x 42 (M.empty ())) === None} @ ghost = ghost_ ();;
                                                                             ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0, y = 0)
 Lines 2-3, characters 16-53:
 2 | ................not (Key.equal x y) ||
 3 |       M.find_opt y (M.add x 42 (M.empty ())) === None.......................
@@ -180,7 +180,7 @@ Warning 228 [trusted-external]: The verifier assumes this external's totality;
 Line 4, characters 69-71:
 4 |       {u : unit | M.find_opt k (empty ()) === None} @ ghost = ghost_ ()
                                                                          ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: k = 0)
 Line 4, characters 18-50:
 4 |       {u : unit | M.find_opt k (empty ()) === None} @ ghost = ghost_ ()
                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -268,7 +268,7 @@ let (wrong_functor_argument @ total) (x : int) (y : int) :
 Line 3, characters 48-50:
 3 |     @ ghost = ghost_ (Everything.equal_def x y; ());;
                                                     ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0, y = 0)
 Line 2, characters 16-66:
 2 |     {u : unit | D.find_opt y (D.add x 42 (D.empty ())) === Some 42}
                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -285,7 +285,7 @@ end;;
 Line 5, characters 50-52:
 5 |       @ ghost = ghost_ (Everything.equal_def x y; ())
                                                       ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0, y = 0)
 Line 4, characters 18-68:
 4 |       {u : unit | A.find_opt y (A.add x 42 (A.empty ())) === Some 42}
                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -302,7 +302,7 @@ end;;
 Line 5, characters 23-25:
 5 |       @ ghost = ghost_ ()
                            ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0, y = -1)
 Line 4, characters 18-68:
 4 |       {u : unit | A.find_opt y (A.add x 42 (A.empty ())) === Some 42}
                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

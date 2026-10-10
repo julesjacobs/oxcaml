@@ -429,13 +429,15 @@
     return (r) => ({ x: (r.x - from.x) * sx, y: (r.y - from.y) * sy, w: r.w * sx, h: r.h * sy });
   };
 
-  function animate(rectAt, root, duration) {
+  let viewRequest = 0;
+
+  function animate(rectAt, root, duration, request) {
     return new Promise((resolve) => {
       const token = ++S.anim;
       const start = performance.now();
       octx.clearRect(0, 0, S.W, S.H);
       function frame(now) {
-        if (token !== S.anim) return resolve(false);
+        if (request !== viewRequest || token !== S.anim) return resolve(false);
         const t = Math.min(1, (now - start) / duration);
         const e = ease(t);
         drawMap((n) => rectAt(n, e), root);
@@ -450,8 +452,10 @@
   // into a descendant grows it to fill the view while the rest flies out;
   // zooming out is the reverse; anything else goes through the common
   // ancestor. Filter changes morph each rectangle to its new place.
-  async function view(focus, opts = {}) {
+  async function view(focus, opts = {}, request = ++viewRequest) {
+    if (request !== viewRequest) return;
     if (phone.matches) {
+      S.anim = 0;
       S.focus = focus;
       S.layout = new Map();
       renderList();
@@ -473,7 +477,7 @@
         const a = L1.get(n), b = L2.get(n);
         if (!a && !b) return null;
         return lerp(a || collapse(b), b || collapse(a), t);
-      }, focus, d);
+      }, focus, d, request);
     } else if (isAncestor(from, focus)) {
       const A = affine(L1.get(focus), W, H);
       await animate((n, t) => {
@@ -484,7 +488,7 @@
           return lerp(a || collapse(b), b, t);
         }
         return a ? lerp(a, A(a), t) : null;
-      }, from, d);
+      }, from, d, request);
     } else if (isAncestor(focus, from)) {
       const B = affine(L2.get(from), W, H);
       await animate((n, t) => {
@@ -495,18 +499,18 @@
           return lerp(a, b || collapse(a), t);
         }
         return b ? lerp(B(b), b, t) : null;
-      }, focus, d);
+      }, focus, d, request);
     } else {
       let common = from;
       while (!isAncestor(common, focus)) common = common.parent;
       S.focus = from;
       S.layout = L1;
-      await view(common, { duration: d * 0.7 });
-      if (S.focus !== common) return;
-      await view(focus, { duration: d * 0.7 });
+      await view(common, { duration: d * 0.7 }, request);
+      if (request !== viewRequest || S.focus !== common) return;
+      await view(focus, { duration: d * 0.7 }, request);
       return;
     }
-    if (S.focus === focus) {
+    if (request === viewRequest && S.focus === focus) {
       S.anim = 0;
       render();
     }
@@ -670,6 +674,7 @@
   const LH = 18, CHUNK = 250;
   const cache = new Map();
   const code = $('code');
+  let fileRequest = 0, routeRequest = 0;
 
   function fetchSource(n) {
     if (cache.has(n.path)) return Promise.resolve(cache.get(n.path));
@@ -708,6 +713,7 @@
   }
 
   async function openFile(n, range) {
+    const request = ++fileRequest;
     const left = $('left');
     $('file').hidden = false;
     $('divider').hidden = false;
@@ -715,24 +721,30 @@
     document.body.classList.add('file-open');
     const same = S.file === n;
     S.file = n;
-    S.range = range;
-    fileHeader(n, range);
+    S.range = boundedRange(range,
+      same && S.entry ? S.entry.lines.length : n.lines);
+    fileHeader(n, S.range);
     if (!same) {
+      S.entry = null;
       code.innerHTML = '<div class="message">Loading…</div>';
       if (!phone.matches) { resize(); S.layout = layout(S.focus, S.W, S.H); render(); }
-      if (n.lang === 'binary') {
-        code.innerHTML = `<div class="message">A binary file or link; see it <a href="${esc(githubUrl(n))}">on GitHub</a>.</div>`;
-        return;
-      }
+    }
+    if (n.lang === 'binary') {
+      code.innerHTML = `<div class="message">A binary file or link; see it <a href="${esc(githubUrl(n))}">on GitHub</a>.</div>`;
+      return;
+    }
+    if (!S.entry) {
       let entry;
       try { entry = await fetchSource(n); } catch (e) {
-        if (S.file === n) code.innerHTML = `<div class="message">Could not load the file (${esc(e.message)}).</div>`;
+        if (request === fileRequest) code.innerHTML = `<div class="message">Could not load the file (${esc(e.message)}).</div>`;
         return;
       }
-      if (S.file !== n) return;
+      if (request !== fileRequest) return;
+      S.range = boundedRange(S.range, entry.lines.length);
+      fileHeader(n, S.range);
       buildCode(n, entry);
     }
-    applyRange(range, !same || range);
+    applyRange(S.range, !same || S.range);
   }
 
   function buildCode(n, entry) {
@@ -785,25 +797,28 @@
     }
   }
 
+  function boundedRange(range, count) {
+    if (!range || !Number.isSafeInteger(range[0])
+        || !Number.isSafeInteger(range[1])) return null;
+    const first = Math.max(1, range[0]), last = Math.min(count, range[1]);
+    return first <= last ? [first, last] : null;
+  }
+
   function applyRange(range, scroll) {
-    for (const el of code.querySelectorAll('.ln.hl')) el.classList.remove('hl');
-    if (range) {
-      for (let l = range[0]; l <= range[1]; l++) {
-        const el = document.getElementById(`L${l}`);
-        if (el) el.classList.add('hl');
-      }
-    }
+    range = boundedRange(range, S.entry ? S.entry.lines.length : 0);
     if (scroll && range && S.entry) {
       const lines = code.querySelector('.lines');
-      const len = range[1] - range[0] + 1;
-      const room = Math.floor(code.clientHeight / LH);
-      const before = len < room - 6 ? Math.min(4, Math.floor((room - len) / 3)) : 2;
-      code.scrollTop = lines.offsetTop + (range[0] - 1 - before) * LH;
-      renderChunks();
-      for (let l = range[0]; l <= range[1]; l++) {
-        const el = document.getElementById(`L${l}`);
-        if (el) el.classList.add('hl');
+      if (lines) {
+        const len = range[1] - range[0] + 1;
+        const room = Math.floor(code.clientHeight / LH);
+        const before = len < room - 6 ? Math.min(4, Math.floor((room - len) / 3)) : 2;
+        code.scrollTop = lines.offsetTop + (range[0] - 1 - before) * LH;
+        renderChunks();
       }
+    }
+    for (const el of code.querySelectorAll('.ln')) {
+      const l = +el.id.slice(1);
+      el.classList.toggle('hl', !!range && l >= range[0] && l <= range[1]);
     }
     markActiveNote();
   }
@@ -828,6 +843,7 @@
   }
 
   function closeFile() {
+    ++fileRequest;
     S.file = null;
     S.entry = null;
     S.range = null;
@@ -1041,6 +1057,7 @@
   }
 
   async function route() {
+    const request = ++routeRequest;
     const r = parseHash();
     $('search-results').hidden = true;
     $('tip').hidden = true;
@@ -1094,6 +1111,7 @@
       S.selected = n;
       const focus = focusFor(n);
       await openFile(n, r.range);
+      if (request !== routeRequest) return;
       panelNode(n);
       crumbsAfter(view(focus));
     }

@@ -16,6 +16,37 @@ let sort_error q =
   | exception Sort_error _ -> ()
 
 let () =
+  let opaque = Symbol.create ~label:"map" (Opaque 1) in
+  let x = Symbol.create ~label:"x" Int63 in
+  let data = Datatype.create ~label:"data" in
+  let record = Symbol.create ~label:"record" (Datatype data) in
+  let b = Symbol.create ~label:"b" Bool in
+  let n = Symbol.create ~label:"n" Int in
+  let symbols = [opaque; x; record; b; n] in
+  let interpret symbols text =
+    Vox_smt_response.interpret_response ~resources:(ref None) symbols "sat" text
+  in
+  assert (
+    interpret symbols
+      "((v0 opaque!val!0) (v1 (- 1)) (v2 (C 42)) (v3 true) (v4 123))"
+    = Invalid
+        (Some [x, Int_value (-1L); b, Bool_value true; n, Bigint_value "123"]));
+  assert (
+    interpret [opaque; record] "((v0 opaque!val!0) (v1 (C 42)))"
+    = Invalid (Some []));
+  List.iter
+    (fun text -> assert (interpret symbols text = Invalid None))
+    [ "((v1 opaque!val!0) (v1 0) (v2 (C 42)) (v3 true) (v4 123))";
+      "((v0 opaque!val!0) (v1 0) (v0 (C 42)) (v3 true) (v4 123))";
+      "((v0 opaque!val!0) (v1 0) (v2 (C 42)) (v3 true))";
+      "((v0 opaque!val!0) (v1 0) (v2 (C 42)) (v3 true) (v4 123) (v5 0))";
+      "((v0 opaque!val!0) (v1 invalid) (v2 (C 42)) (v3 true) (v4 123))";
+      "((v0 opaque!val!0) (v1 4611686018427387904) (v2 (C 42)) (v3 true) (v4 \
+       123))";
+      "((v0 opaque!val!0) (v1 0) (v2 (C 42)) (v3 invalid) (v4 123))";
+      "((v0 opaque!val!0) (v1 0) (v2 (C 42)) (v3 true) (v4 invalid))" ]
+
+let () =
   let x = Symbol.create ~label:"x" Int63 in
   let b = Symbol.create ~label:"b" Bool in
   let f = Function.create ~label:"f" ~arguments:[Int63] ~result:Bool in

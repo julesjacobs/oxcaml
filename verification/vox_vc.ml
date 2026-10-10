@@ -660,6 +660,17 @@ let share_observation ctx term =
       Term_table.add ctx.shared_observations term value;
       value)
 
+let record_observation_equation ctx term value =
+  (* An identical equation observed outside a proof step stays available without
+     that step, including when instantiated from a ghost lambda. *)
+  let unguarded =
+    Hashtbl.find_opt ctx.observation_equations term = Some value
+    && Term_table.find_opt equation_steps term = Some []
+  in
+  Hashtbl.replace ctx.observation_equations term value;
+  if not unguarded
+  then Term_table.replace equation_steps term !Vox_proof_steps.current
+
 let map_term_children f = function
   | App (op, args) -> App (op, List.map f args)
   | Call (fn, args) -> Call (fn, List.map f args)
@@ -749,9 +760,7 @@ let instantiate_lambda ctx lambda args =
       Hashtbl.add terms term value;
       Option.iter
         (fun equation ->
-          Hashtbl.replace ctx.observation_equations definition
-            (instantiate equation);
-          record_steps (Term_table.replace equation_steps) definition)
+          record_observation_equation ctx definition (instantiate equation))
         (Hashtbl.find_opt lambda.observations term);
       value
   in
@@ -1046,70 +1055,63 @@ let map_class ctx map_sort key =
 let map_same_key ctx map_sort left right =
   both Eq (map_class ctx map_sort left) (map_class ctx map_sort right)
 
-let rec map_mem ctx map_sort key map =
+let map_observe ctx map_sort key value_sort label expand map =
   let class_ = map_class ctx map_sort key in
-  let unknown () =
-    let function_ =
-      intern_function ctx "Map.mem" [term_sort class_; map_sort] Bool
-    in
-    Call (function_, [class_; map])
+  let function_ =
+    intern_function ctx label [term_sort class_; map_sort] value_sort
   in
-  match expose_head ctx map with
-  | App (Ite, [condition; left; right]) ->
-    App
-      ( Ite,
-        [ condition;
-          map_mem ctx map_sort key left;
-          map_mem ctx map_sort key right ] )
-  | Call (function_, arguments) ->
-    begin match Hashtbl.find_opt ctx.map_origins function_, arguments with
-    | Some Map_empty, [] -> Boolean false
-    | Some Map_singleton, [bound; _] -> map_same_key ctx map_sort key bound
-    | Some Map_add, [bound; _; map] ->
-      both Or
-        (map_same_key ctx map_sort key bound)
-        (map_mem ctx map_sort key map)
-    | Some Map_remove, [bound; map] ->
-      both And
-        (not_ (map_same_key ctx map_sort key bound))
-        (map_mem ctx map_sort key map)
-    | _ -> unknown ()
+  (* Shared histories need one equation for each map observed at this key. *)
+  let expanded = Term_table.create 16 in
+  let rec observe map =
+    ctx.poll ();
+    let call = Call (function_, [class_; map]) in
+    if Term_table.mem expanded map
+    then call
+    else begin
+      Term_table.add expanded map ();
+      let value = expand observe map call in
+      if call <> value then record_observation_equation ctx call value;
+      call
     end
-  | _ -> unknown ()
+  in
+  observe map
 
-let rec map_find ctx map_sort value_sort key map =
-  let unknown () =
-    let class_ = map_class ctx map_sort key in
-    let function_ =
-      intern_function ctx "Map.find" [term_sort class_; map_sort] value_sort
-    in
-    Call (function_, [class_; map])
-  in
-  match expose_head ctx map with
-  | App (Ite, [condition; left; right]) ->
-    App
-      ( Ite,
-        [ condition;
-          map_find ctx map_sort value_sort key left;
-          map_find ctx map_sort value_sort key right ] )
-  | Call (function_, arguments) ->
-    begin match Hashtbl.find_opt ctx.map_origins function_, arguments with
-    | Some Map_singleton, [_; data] when term_sort data = value_sort -> data
-    | Some Map_add, [bound; data; map] when term_sort data = value_sort ->
-      App
-        ( Ite,
-          [ map_same_key ctx map_sort key bound;
-            data;
-            map_find ctx map_sort value_sort key map ] )
-    | Some Map_remove, [bound; rest] ->
-      App
-        ( Ite,
-          [ map_same_key ctx map_sort key bound;
-            unknown ();
-            map_find ctx map_sort value_sort key rest ] )
-    | Some Map_empty, [] | _ -> unknown ()
-    end
-  | _ -> unknown ()
+let map_mem ctx map_sort key map =
+  map_observe ctx map_sort key Bool "Map.mem"
+    (fun observe map call ->
+      match expose_head ctx map with
+      | App (Ite, [condition; left; right]) ->
+        App (Ite, [condition; observe left; observe right])
+      | Call (function_, arguments) ->
+        begin match Hashtbl.find_opt ctx.map_origins function_, arguments with
+        | Some Map_empty, [] -> Boolean false
+        | Some Map_singleton, [bound; _] -> map_same_key ctx map_sort key bound
+        | Some Map_add, [bound; _; map] ->
+          both Or (map_same_key ctx map_sort key bound) (observe map)
+        | Some Map_remove, [bound; map] ->
+          both And (not_ (map_same_key ctx map_sort key bound)) (observe map)
+        | _ -> call
+        end
+      | _ -> call)
+    map
+
+let map_find ctx map_sort value_sort key map =
+  map_observe ctx map_sort key value_sort "Map.find"
+    (fun observe map call ->
+      match expose_head ctx map with
+      | App (Ite, [condition; left; right]) ->
+        App (Ite, [condition; observe left; observe right])
+      | Call (function_, arguments) ->
+        begin match Hashtbl.find_opt ctx.map_origins function_, arguments with
+        | Some Map_singleton, [_; data] when term_sort data = value_sort -> data
+        | Some Map_add, [bound; data; map] when term_sort data = value_sort ->
+          App (Ite, [map_same_key ctx map_sort key bound; data; observe map])
+        | Some Map_remove, [bound; rest] ->
+          App (Ite, [map_same_key ctx map_sort key bound; call; observe rest])
+        | Some Map_empty, [] | _ -> call
+        end
+      | _ -> call)
+    map
 
 let iarray_value ctx env ty s values =
   match iarray ctx.encoding env ty with

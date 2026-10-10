@@ -119,7 +119,7 @@ end;;
 Line 20, characters 14-16:
 20 |               ()));
                    ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: index = 0, query = 0)
 File "vox_table_update_proofs.ml", lines 442-443, characters 8-43:
   The refinement is stated here.
 |}, Principal{|

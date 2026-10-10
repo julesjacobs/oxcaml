@@ -42,5 +42,5 @@ let (decide_fuel @ total) (fuel : int) (n : int) (f : Vox_sat_spec.formula) : bo
 Line 3, characters 64-79:
 3 |   | Ok { Vox_cdcl_total.answer = Vox_cdcl_total.Unknown; _ } -> unreachable_ ()
                                                                     ^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: fuel = 0, n = 0)
 |}]

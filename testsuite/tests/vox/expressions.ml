@@ -156,7 +156,7 @@ let bad_fold (a : int) (b : int) input :
 Line 13, characters 2-4:
 13 |   ()
        ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: a = 0, b = 1, input = 0)
 Lines 3-4, characters 6-61:
 3 | ......Expr.eval (Expr.Lit (a - b)) input
 4 |       === Expr.eval (Expr.Add (Expr.Lit a, Expr.Lit b)) input...

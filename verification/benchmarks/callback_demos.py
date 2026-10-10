@@ -25,27 +25,37 @@ WORKLOADS = {
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--baseline", default="68b3b6a07d")
+    parser.add_argument("--baseline", help="optional compatible baseline revision")
     parser.add_argument("--repeats", type=int, default=3)
     args = parser.parse_args()
     compiler = ROOT / "_install/bin/ocamlc"
     if not compiler.is_file():
         parser.error("run make install before benchmarking")
+    if args.repeats < 1:
+        parser.error("--repeats must be positive")
     output = csv.writer(sys.stdout)
     output.writerow(["version", "demo", "median_ms", "min_ms", "max_ms",
                      "source_lines", "queries", "smt_bytes"])
     for demo, files in WORKLOADS.items():
-        for version in ["baseline", "candidate"]:
+        versions = ["baseline", "candidate"] if args.baseline else ["candidate"]
+        for version in versions:
             modules = []
+            names = ["vox_sequence"]
+            if demo in ("sorted-array", "quicksort"):
+                names.append("vox_int_sequence")
+            if demo == "sorted-array":
+                names.append("vox_iarray")
+            modules += [LIBRARY / (name + suffix)
+                        for name in names for suffix in [".mli", ".ml"]]
             if demo != "sorted-array":
-                modules += [LIBRARY / "borrow_model.mli",
-                            LIBRARY / "borrow_model.ml",
-                            LIBRARY / "borrow.mli", LIBRARY / "borrow.ml"]
-            if demo == "sorted-array" and version == "candidate":
-                modules += [LIBRARY / (name + suffix)
-                            for name in ["vox_sequence", "vox_int_sequence", "vox_iarray"]
-                            for suffix in [".mli", ".ml"]]
-            modules += [DEMOS / name for name in files]
+                modules += [LIBRARY / "borrow.mli", LIBRARY / "borrow.ml"]
+            if demo == "quicksort":
+                modules += [LIBRARY / "vox_parallel.mli",
+                            LIBRARY / "vox_parallel.ml"]
+            selected = files
+            if demo == "sorted-array":
+                selected = [files[0], "sorted_array_model.ml", *files[1:]]
+            modules += [DEMOS / name for name in selected]
             elapsed = []
             with tempfile.TemporaryDirectory(prefix="vox-seq-") as directory:
                 source_lines = 0

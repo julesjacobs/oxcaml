@@ -140,7 +140,12 @@ let model symbols response =
     match symbols, entries with
     | [], [] -> Some (List.rev acc)
     | s :: ss, List [Atom name; v] :: vs when name = "v" ^ string_of_int i ->
-      Option.bind (value s v) (fun v -> bindings (i + 1) ((s, v) :: acc) ss vs)
+      begin match Symbol.sort s with
+      | Opaque _ | Datatype _ -> bindings (i + 1) acc ss vs
+      | Bool | Int63 | Int ->
+        Option.bind (value s v) (fun v ->
+            bindings (i + 1) ((s, v) :: acc) ss vs)
+      end
     | _ -> None
   in
   match response with

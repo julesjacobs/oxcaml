@@ -79,7 +79,7 @@ let different (h : int Pref.heap) (p : int Pref.t) (x : int) (y : int) :
 Line 2, characters 47-49:
 2 |     {u : unit | H.put h p x === H.put h p y} = ();;
                                                    ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: y = 0, x = -1)
 Line 2, characters 16-43:
 2 |     {u : unit | H.put h p x === H.put h p y} = ();;
                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -92,7 +92,7 @@ let order_matters (h : int Pref.heap) (p : int Pref.t) (x : int) (y : int) :
 Line 2, characters 71-73:
 2 |     {u : unit | H.put (H.put h p x) p y === H.put (H.put h p y) p x} = ();;
                                                                            ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: y = 0, x = -1)
 Line 2, characters 16-67:
 2 |     {u : unit | H.put (H.put h p x) p y === H.put (H.put h p y) p x} = ();;
                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

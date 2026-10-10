@@ -27,18 +27,25 @@ site=/srv/lab/site
 work=/srv/lab/vox-deploy
 url=https://lab.julesjacobs.com/vox
 build=1
+out=$root/_build/site/vox
 options=()
-for argument in "$@"; do
-  case $argument in
-    --no-build) build= ;;
-    *) options+=("$argument") ;;
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --no-build) build=; shift ;;
+    --out)
+      [[ $# -ge 2 && -n $2 ]] \
+        || { echo "--out requires a directory" >&2; exit 2; }
+      out=$2
+      options+=("$1" "$2")
+      shift 2 ;;
+    *) options+=("$1"); shift ;;
   esac
 done
+cd "$root"
 
 if [[ -n $build ]]; then
   "$here/build-site.sh" ${options[@]+"${options[@]}"}
 fi
-out=$root/_build/site/vox
 [[ -f $out/index.html && -f $out/playground/z3-built.wasm && -f $out/talk/index.html ]] \
   || { echo "no site in $out; run without --no-build" >&2; exit 1; }
 

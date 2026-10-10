@@ -68,7 +68,7 @@ let insert_sorted (x : int) (xs : {xs : int list | sorted xs}) :
 Line 3, characters 2-13:
 3 |   insert x xs;;
       ^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0)
 Line 2, characters 21-30:
 2 |     {ys : int list | sorted ys} =
                          ^^^^^^^^^
@@ -96,7 +96,7 @@ let run name (prop : int -> {xs : int list | sorted xs} -> unit) =
 Line 9, characters 21-23:
 9 |         match prop x xs with
                          ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: n = -1)
 Line 1, characters 45-54:
 1 | let run name (prop : int -> {xs : int list | sorted xs} -> unit) =
                                                  ^^^^^^^^^

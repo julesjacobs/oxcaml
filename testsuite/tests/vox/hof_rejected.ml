@@ -111,6 +111,16 @@ Line 3, characters 13-27:
 3 |     {r : t | r.trace === []} =
                  ^^^^^^^^^^^^^^
   The refinement is stated here.
+|}, Principal{|
+type t = { value : int; trace : int list @@ ghost; }
+Line 5, characters 2-11:
+5 |   refine_ r;;
+      ^^^^^^^^^
+Error: Refinement could not be proved (counterexample: x = 0)
+Line 3, characters 13-27:
+3 |     {r : t | r.trace === []} =
+                 ^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Frequency_probe = struct

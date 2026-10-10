@@ -1100,7 +1100,7 @@ let invalid : (a : int Sparse_overlay.t) -> (index : int) -> (value : int) ->
 Line 9, characters 58-59:
 9 |     Sparse_overlay.lookup index b === Some (value + 1)} = u in
                                                               ^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: index = 0)
 Line 9, characters 4-54:
 9 |     Sparse_overlay.lookup index b === Some (value + 1)} = u in
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

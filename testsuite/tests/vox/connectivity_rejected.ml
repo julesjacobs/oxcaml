@@ -238,7 +238,7 @@ end;;
 Line 10, characters 4-6:
 10 |     ())
          ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0, y = 0, r = 0)
 Lines 6-7, characters 18-39:
 6 | ..................r === P.representative before x ||
 7 |         r === P.representative before y....................

@@ -145,7 +145,7 @@ end;;
 Line 8, characters 18-19:
 8 |     let u = () in u
                       ^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: index = 0)
 Line 5, characters 35-68:
 5 |       (value : int) -> {u : unit | Slice.final s === Slice.current s} = fun s index value ->
                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

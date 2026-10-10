@@ -48,6 +48,13 @@ Line 5, characters 32-33:
 Error: Refinement could not be proved (counterexample)
 File "vox_iarray.mli", line 41, characters 6-38:
   The refinement is stated here.
+|}, Principal{|
+Line 5, characters 32-33:
+5 |     (fun index -> let u = () in u) in
+                                    ^
+Error: Refinement could not be proved (counterexample: index = 0)
+File "vox_iarray.mli", line 41, characters 6-38:
+  The refinement is stated here.
 |}]
 
 let wrong_length () =
@@ -82,6 +89,13 @@ Line 9, characters 32-33:
 Error: Refinement could not be proved (counterexample)
 File "vox_iarray.mli", lines 178-180, characters 36-59:
   The refinement is stated here.
+|}, Principal{|
+Line 9, characters 32-33:
+9 |     (fun index -> let u = () in u) in
+                                    ^
+Error: Refinement could not be proved (counterexample: index = 0)
+File "vox_iarray.mli", lines 178-180, characters 36-59:
+  The refinement is stated here.
 |}]
 
 let wrong_list_predicate_intro () =
@@ -99,6 +113,13 @@ Line 9, characters 32-33:
 9 |     (fun index -> let u = () in u) in
                                     ^
 Error: Refinement could not be proved (counterexample)
+File "vox_sequence.mli", lines 220-222, characters 41-17:
+  The refinement is stated here.
+|}, Principal{|
+Line 9, characters 32-33:
+9 |     (fun index -> let u = () in u) in
+                                    ^
+Error: Refinement could not be proved (counterexample: index = 0Z)
 File "vox_sequence.mli", lines 220-222, characters 41-17:
   The refinement is stated here.
 |}]

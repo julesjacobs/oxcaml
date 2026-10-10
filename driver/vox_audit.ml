@@ -1,14 +1,25 @@
 open Cmi_format
 
-let names imports =
+let imports_with_digests imports =
   List.map
-    (fun import -> Compilation_unit.Name.to_string (Import_info.name import))
+    (fun import ->
+      ( Compilation_unit.Name.to_string (Import_info.name import),
+        Option.map Digest.to_hex (Import_info.crc import) ))
     imports
+
+let recorded_import import =
+  match String.index_opt import '=' with
+  | Some i ->
+    let digest = String.sub import (i + 1) (String.length import - i - 1) in
+    String.sub import 0 i, (if digest = "" then None else Some digest)
+  | None -> import, None
 
 let read_cmi file =
   match Cmi_format.read_cmi_lazy file with
   | cmi ->
-    Some (Cmi_format.vox_unit cmi.cmi_flags, names (Array.to_list cmi.cmi_crcs))
+    Some
+      ( Cmi_format.vox_unit cmi.cmi_flags,
+        imports_with_digests (Array.to_list cmi.cmi_crcs) )
   | exception _ -> None
 
 let with_magic file magic read =
@@ -27,11 +38,17 @@ let read_cmo file =
       let position = input_binary_int channel in
       seek_in channel position;
       let unit = (input_value channel : Cmo_format.compilation_unit_descr) in
-      Cmi_format.input_vox_record channel, names (Array.to_list unit.cu_imports))
+      ( Cmi_format.input_vox_record channel,
+        imports_with_digests (Array.to_list unit.cu_imports) ))
 
 (* A .cmx starts with its Vox record (see [Compilenv.write_unit_info]). *)
 let read_cmx file =
-  with_magic file Config.cmx_magic_number Cmi_format.input_vox_record
+  with_magic file Config.cmx_magic_number (fun channel ->
+      let record = Cmi_format.input_vox_record channel in
+      ( record,
+        Option.fold ~none:[]
+          ~some:(fun record -> List.map recorded_import record.vox_imports)
+          record ))
 
 let artifact target extension =
   Unit_info.Artifact.filename (Unit_info.artifact target ~extension)
@@ -53,13 +70,10 @@ type unit_entry =
     interface : vox_unit option;
     unrecorded : string list;
         (** extensions of the unit's compiled files that have no record *)
-    found : bool  (** some compiled file of the unit was found *)
+    found : bool;  (** some compiled file of the unit was found *)
+    digests : (string * string) list
+        (** the interface digest recorded in each compiled file *)
   }
-
-let import_name import =
-  match String.index_opt import '=' with
-  | Some i -> String.sub import 0 i
-  | None -> import
 
 (* The .cmx and .cmo of a unit may come from different compilations; the
    weaker record counts, and the items of both. *)
@@ -86,11 +100,11 @@ let lookup name =
   let interface = Option.bind cmi fst in
   let unrecorded =
     List.filter_map Fun.id
-      [ (match cmx with Some None -> Some ".cmx" | _ -> None);
+      [ (match cmx with Some (None, _) -> Some ".cmx" | _ -> None);
         (match cmo with Some (None, _) -> Some ".cmo" | _ -> None) ]
   in
   let implementation =
-    match Option.join cmx, Option.bind cmo fst with
+    match Option.bind cmx fst, Option.bind cmo fst with
     | Some a, Some b -> Some (merge a b)
     | (Some _ as record), None | None, (Some _ as record) -> record
     | None, None -> (
@@ -102,29 +116,30 @@ let lookup name =
   let imports =
     Option.fold ~none:[] ~some:snd cmi
     @ Option.fold ~none:[] ~some:snd cmo
+    @ Option.fold ~none:[] ~some:snd cmx
     @
     match implementation with
-    | Some record -> List.map import_name record.vox_imports
+    | Some record -> List.map recorded_import record.vox_imports
     | None -> []
+  in
+  let digests =
+    List.filter_map
+      (fun (extension, artifact) ->
+        Option.bind artifact (fun (_, imports) ->
+            Option.map (fun digest -> extension, digest)
+              (Option.join (List.assoc_opt name imports))))
+      [".cmi", cmi; ".cmx", cmx; ".cmo", cmo]
   in
   ( { name;
       implementation;
       interface;
       unrecorded;
+      digests;
       found = Option.is_some cmi || Option.is_some cmx || Option.is_some cmo },
     imports )
 
 let closure ~current ~record ~imports =
   let seen = Hashtbl.create 64 in
-  Hashtbl.add seen current ();
-  let rec visit acc = function
-    | [] -> List.rev acc
-    | name :: rest when Hashtbl.mem seen name -> visit acc rest
-    | name :: rest ->
-      Hashtbl.add seen name ();
-      let entry, imports = lookup name in
-      visit (entry :: acc) (rest @ imports)
-  in
   let current_entry =
     { name = current;
       implementation =
@@ -133,9 +148,49 @@ let closure ~current ~record ~imports =
         | _ -> record);
       interface = record;
       unrecorded = [];
+      digests = [];
       found = true }
   in
-  current_entry :: visit [] imports
+  Hashtbl.add seen current current_entry;
+  let inconsistencies = ref [] in
+  let check importer entry expected =
+    match expected with
+    | None -> ()
+    | Some expected ->
+      if entry.found && entry.name <> current && entry.digests = []
+      then
+        inconsistencies :=
+          Printf.sprintf "%s (imported by %s; interface digest unavailable)"
+            entry.name importer
+          :: !inconsistencies;
+      List.iter
+        (fun (extension, actual) ->
+          if expected <> actual
+          then
+            inconsistencies :=
+              Printf.sprintf "%s (imported by %s; mismatched %s)"
+                entry.name importer extension
+              :: !inconsistencies)
+        entry.digests
+  in
+  let rec visit acc = function
+    | [] -> List.rev acc
+    | (importer, (name, expected)) :: rest ->
+      (match Hashtbl.find_opt seen name with
+      | Some entry ->
+        check importer entry expected;
+        visit acc rest
+      | None ->
+        let entry, imports = lookup name in
+        Hashtbl.add seen name entry;
+        check importer entry expected;
+        visit (entry :: acc)
+          (rest @ List.map (fun import -> name, import) imports))
+  in
+  let entries =
+    current_entry :: visit [] (List.map (fun import -> current, import) imports)
+  in
+  entries, List.sort_uniq String.compare !inconsistencies
 
 let items entry =
   let all =
@@ -169,7 +224,7 @@ let kinds =
     Vox_external, "Other externals outside the library" ]
 
 let print ppf ~source_file ~current ~record ~imports =
-  let entries = closure ~current ~record ~imports in
+  let entries, inconsistencies = closure ~current ~record ~imports in
   let count = List.length entries - 1 in
   Format.fprintf ppf "Vox audit of %s and the %d unit%s it depends on@."
     source_file count
@@ -216,6 +271,7 @@ let print ppf ~source_file ~current ~record ~imports =
          entry.implementation = None && entry.interface <> None));
   section "Compiled files not found"
     (units (fun entry -> not entry.found));
+  section "Interface digest checks failed (audit incomplete)" inconsistencies;
   let total = ref 0 in
   List.iter
     (fun (kind, title) ->
@@ -256,5 +312,11 @@ let print ppf ~source_file ~current ~record ~imports =
     (if !total = 1 then "" else "s")
 
 let print_unit ~source_file ~current ~record =
+  let imports =
+    imports_with_digests (Env.imports ())
+    @ Option.fold ~none:[]
+        ~some:(fun record -> List.map recorded_import record.vox_imports)
+        record
+  in
   print Format.std_formatter ~source_file ~current ~record
-    ~imports:(names (Env.imports ()))
+    ~imports

@@ -15,7 +15,8 @@ compile() {
 # it.
 audit() {
   compile -vox-audit "$@" |
-    sed -e 's/the [0-9]* units it/the N units it/' |
+    sed -e 's/the [0-9]* units it/the N units it/' \
+        -e 's/mismatched \.cm[ox]/mismatched implementation/g' |
     awk '/^Vox audit|^File|^Warning|^  [^ ]/ && !/\(library\)/ {
            if (header != "") print header; header = ""; print; next }
          /:$/ { header = $0 }'
@@ -47,3 +48,22 @@ audit -c hidden_client.ml
 echo "== asserted.ml, verified and then compiled with -noassert, not verified"
 compile -c asserted.ml && compile -noassert -smt-assume-verified -c asserted.ml
 compile -c asserted_user.ml
+echo "== Erased proof dependency, original interface"
+printf '%s\n' \
+  'external bogus : unit -> {u : unit | false} @@ total = "%identity"' \
+  > proof_axioms.ml
+printf '%s\n' \
+  'let value : {n : int | n = 1} = ghost_ (Proof_axioms.bogus ()); 0' \
+  > proof.ml
+printf '%s\n' 'let value = Proof.value' > proof_client.ml
+cp proof_axioms.ml proof_axioms.mli
+compile -w -228 -c proof_axioms.mli
+compile -w -228 -c proof_axioms.ml
+compile -c proof.ml
+audit -c proof_client.ml
+echo "== Erased proof dependency, replaced interface"
+printf '%s\n' 'let harmless = 42' > proof_axioms.ml
+printf '%s\n' 'val harmless : int' > proof_axioms.mli
+compile -c proof_axioms.mli
+compile -c proof_axioms.ml
+audit -c proof_client.ml

@@ -726,7 +726,7 @@ let invalid_midpoint : Splitters.splitter = fun left right premise ->
 Line 4, characters 2-16:
 4 |   refine_ result;;
       ^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: left = 0, right = 1)
 Lines 5-7, characters 24-41:
 5 | ........................match m with
 6 |         | None -> right = left + 1

@@ -34,7 +34,7 @@ let bad_fold (a : int) (b : int) input :
 Line 15, characters 2-4:
 15 |   ()
        ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: a = 0, b = 1, input = 0)
 Lines 3-6, characters 6-73:
 3 | ......Expression_folding.eval (Expression_folding.Lit (a - b)) input
 4 |       === Expression_folding.eval

@@ -52,7 +52,7 @@ end;;
 Line 24, characters 4-47:
 24 |     { A.restored = inside; outgoing = outside }
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: before = 1000)
 Line 18, characters 24-73:
 18 |       {r : A.transfer | Invariant.holds k (before + 1) (P.own r.restored)
                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -81,7 +81,7 @@ end;;
 Line 16, characters 8-51:
 16 |         { A.restored = inside; outgoing = outside }))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: before = 0, desired = -1)
 File "verified_atomic.mli", line 86, characters 21-72:
   The refinement is stated here.
 |}]

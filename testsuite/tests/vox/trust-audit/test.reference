@@ -65,3 +65,14 @@ File "asserted_user.ml", line 1:
 Warning 229 [unverified-import]: The interface of Asserted was produced by a compilation that skipped
   verification (-smt-assume-verified), and no verified compilation
   of the same program was found; its refinements are assumed.
+== Erased proof dependency, original interface
+Vox audit of proof_client.ml and the N units it depends on
+Externals whose refinement is assumed:
+  Proof_axioms.bogus (proof_axioms.ml:1)
+== Erased proof dependency, replaced interface
+Vox audit of proof_client.ml and the N units it depends on
+Interface digest checks failed (audit incomplete):
+  Proof_axioms (imported by Proof; mismatched .cmi)
+  Proof_axioms (imported by Proof; mismatched implementation)
+  Proof_axioms (imported by Proof_client; mismatched .cmi)
+  Proof_axioms (imported by Proof_client; mismatched implementation)

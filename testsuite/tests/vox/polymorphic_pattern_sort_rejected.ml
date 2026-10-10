@@ -23,7 +23,7 @@ end;;
 Line 12, characters 38-52:
 12 |     let result : {b : bool | not b} = refine_ result in
                                            ^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: q = 0)
 Line 12, characters 29-34:
 12 |     let result : {b : bool | not b} = refine_ result in
                                   ^^^^^

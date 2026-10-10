@@ -180,7 +180,7 @@ end;;
 Line 12, characters 4-18:
 12 |     refine_ result
          ^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: left = 0, right = 0)
 Lines 6-8, characters 20-48:
 6 | ....................let refine_ token = token in
 7 |         r.#before = (left <= right) &&
