@@ -9,6 +9,9 @@ lock_update=
 lock_record=
 active_child=
 active_group_record=
+active_lock_file=
+library_group_record=
+library_lock_file=
 temp_dir=
 
 usage()
@@ -45,6 +48,13 @@ record_is_live()
 {
   record=$1
   case "$record" in
+    lock\|*)
+      perl -MFcntl=:flock -e '
+        open my $lock, ">>", shift or exit 1;
+        exit(flock($lock, LOCK_EX | LOCK_NB) ? 1 : 0);
+      ' "${record#lock|}"
+      return
+      ;;
     group\|*)
       process=${record#group|}
       if record_is_live "$process"; then
@@ -66,6 +76,14 @@ record_is_live()
   [ "$current" = "$record" ]
 }
 
+job_is_live()
+{
+  if [ -n "$1" ] && record_is_live "$1"; then
+    return 0
+  fi
+  [ -n "$2" ] && record_is_live "lock|$2"
+}
+
 lock_has_live_owner()
 {
   live_owner=
@@ -75,8 +93,10 @@ lock_has_live_owner()
         group\|*)
           live_owner=${record#group|}
           live_owner=${live_owner%%|*}
+          live_owner="pid $live_owner"
           ;;
-        *) live_owner=${record%%|*} ;;
+        lock\|*) live_owner="a surviving child" ;;
+        *) live_owner="pid ${record%%|*}" ;;
       esac
       return 0
     fi
@@ -89,7 +109,7 @@ claim_lock()
   while ! ln "$lock_claim" "$lock_file" 2>/dev/null; do
     [ -f "$lock_claim" ] || exit 1
     if lock_has_live_owner; then
-      echo "$program: another command owns this worktree (pid $live_owner)" >&2
+      echo "$program: another command owns this worktree ($live_owner)" >&2
       exit 75
     fi
     stale=$lock_file.stale.$$
@@ -105,27 +125,57 @@ publish_lock()
   {
     printf '%s\n' "$lock_record"
     [ -z "$child_record" ] || printf '%s\n' "$child_record"
+    [ -z "$active_lock_file" ] || printf 'lock|%s\n' "$active_lock_file"
+    [ -z "$library_group_record" ] || printf '%s\n' "$library_group_record"
+    [ -z "$library_lock_file" ] || printf 'lock|%s\n' "$library_lock_file"
   } > "$lock_update"
   mv -f "$lock_update" "$lock_file"
 }
 
+start_locked_group()
+{
+  start_file=$1
+  job_lock=$2
+  shift 2
+  : > "$job_lock"
+  perl -MPOSIX=setsid -MFcntl=:flock,F_SETFD -e '
+    my ($parent, $start, $path) = splice @ARGV, 0, 3;
+    setsid() >= 0 or die "setsid: $!\n";
+    open my $lock, ">>", $path or die "open $path: $!\n";
+    flock($lock, LOCK_EX) or die "flock $path: $!\n";
+    fcntl($lock, F_SETFD, 0) or die "inherit $path: $!\n";
+    while (!-f $start) {
+      exit 1 if getppid() != $parent;
+      select undef, undef, undef, 0.01;
+    }
+    exec @ARGV; die "exec $ARGV[0]: $!\n";
+  ' "$$" "$start_file" "$job_lock" "$@" &
+  group_child=$!
+}
+
 run_locked()
 {
-  perl -MPOSIX=setsid -e \
-    'setsid() >= 0 or die "setsid: $!\n";
-     my $program = $ARGV[0]; exec @ARGV; die "exec $program: $!\n"' -- "$@" &
-  active_child=$!
-  child_record=$(process_record "$active_child" 2>/dev/null || true)
-  if [ -n "$child_record" ]; then
-    active_group_record="group|$child_record"
-  else
-    active_group_record=
+  if job_is_live "$active_group_record" "$active_lock_file"; then
+    die "the previous command still has running processes"
   fi
+  active_start=$temp_dir/active-start
+  active_lock_file=$active_start.lock
+  rm -f "$active_start"
+  start_locked_group "$active_start" "$active_lock_file" "$@"
+  active_child=$group_child
+  child_record=$(process_record "$active_child" 2>/dev/null || true)
+  active_group_record="group|${child_record:-$active_child|starting}"
   publish_lock "$active_group_record"
+  : > "$active_start"
   child_status=0
   wait "$active_child" || child_status=$?
   active_child=
+  if job_is_live "$active_group_record" "$active_lock_file"; then
+    echo "$program: command left running processes" >&2
+    return 1
+  fi
   active_group_record=
+  active_lock_file=
   publish_lock
   return "$child_status"
 }
@@ -135,6 +185,11 @@ cleanup()
   status=$?
   trap - 0 1 2 3 15
   [ -z "${library_job-}" ] || stop_test_library
+  if [ -z "$active_child" ] && [ -n "$active_group_record" ]; then
+    active_group=${active_group_record#group|}
+    active_group=${active_group%%|*}
+    perl -e 'kill "TERM", -$ARGV[0]' "$active_group" 2>/dev/null || true
+  fi
   if [ -n "$active_child" ]; then
     perl -e 'kill "TERM", -$ARGV[0]' "$active_child" 2>/dev/null || true
     attempts=0
@@ -149,8 +204,10 @@ cleanup()
     active_child=
   fi
   group_still_live=false
-  if [ -n "$active_group_record" ] &&
-     record_is_live "$active_group_record"; then
+  if job_is_live "$active_group_record" "$active_lock_file"; then
+    group_still_live=true
+  fi
+  if job_is_live "$library_group_record" "$library_lock_file"; then
     group_still_live=true
   fi
   if [ "$group_still_live" = false ] &&
@@ -746,7 +803,9 @@ start_test_library()
   while IFS= read -r test_file; do
     set -- "$@" "$test_file"
   done < "$test_files"
-  perl -MPOSIX=setsid -e 'setsid() >= 0 or die "setsid: $!\n"; exec @ARGV' \
+  library_start=$temp_dir/library-start
+  library_lock_file=$library_start.lock
+  start_locked_group "$library_start" "$library_lock_file" \
     sh -c 'status=0
       "$@" > "$0/library.log" 2>&1 || status=$?
       echo "$status" > "$0/library.status"
@@ -756,9 +815,24 @@ start_test_library()
     "$run_dir" sh "$root/testsuite/vox-test-library.sh" \
     "$OCAMLTEST_VOX_TEST_LIBRARY" "$planner" \
     "$OCAMLTEST_OCAMLC_OPT" "$OCAMLTEST_OCAMLOPT_OPT" \
-    "$root/_runtest/stdlib" "$@" &
-  library_job=$!
+    "$root/_runtest/stdlib" "$@"
+  library_job=$group_child
+  child_record=$(process_record "$library_job" 2>/dev/null || true)
+  library_group_record="group|${child_record:-$library_job|starting}"
+  publish_lock "$active_group_record"
   echo "$library_job" > "$library_marker"
+  : > "$library_start"
+}
+
+release_test_library()
+{
+  if job_is_live "$library_group_record" "$library_lock_file"; then
+    return 1
+  fi
+  library_group_record=
+  library_lock_file=
+  rm -f "$library_marker"
+  publish_lock "$active_group_record"
 }
 
 finish_test_library()
@@ -766,8 +840,8 @@ finish_test_library()
   [ -n "$library_job" ] || return 0
   wait "$library_job" 2>/dev/null || true
   library_job=
-  rm -f "$library_marker"
   library_status=$(cat "$run_dir/library.status" 2>/dev/null || echo 1)
+  release_test_library || library_status=1
   if [ -f "$run_dir/library.finished" ]; then
     library_finished_at=$(cat "$run_dir/library.finished")
     library_seconds=$((library_finished_at - library_started_at))
@@ -779,7 +853,7 @@ stop_test_library()
   perl -e 'kill "TERM", -$ARGV[0]' "$library_job" 2>/dev/null || true
   wait "$library_job" 2>/dev/null || true
   library_job=
-  rm -f "$library_marker"
+  release_test_library || true
 }
 
 # Prints the Vox tests that the changes since $affected_base can affect and

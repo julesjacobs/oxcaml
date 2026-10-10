@@ -23,9 +23,10 @@ command -v z3 > /dev/null 2>&1 || exit 0
 # One build at a time uses an output directory.
 if [ -z "${VOX_TEST_LIBRARY_LOCKED-}" ]; then
   mkdir -p "$1"
-  VOX_TEST_LIBRARY_LOCKED=1 exec perl -MFcntl=:flock -e '
+  VOX_TEST_LIBRARY_LOCKED=1 exec perl -MFcntl=:flock,F_SETFD -e '
     open(my $lock, ">", shift) or die "$!\n";
     flock($lock, LOCK_EX) or die "$!\n";
+    fcntl($lock, F_SETFD, 0) or die "$!\n";
     system(@ARGV);
     exit($? == -1 ? 127 : $? & 127 ? 128 + ($? & 127) : $? >> 8)' \
     "$1/.lock" sh "$0" "$@"

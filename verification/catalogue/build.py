@@ -257,6 +257,7 @@ class Links(HTMLParser):
 def check(output, partial=False):
     """Every local link and anchor resolves. A partial build may link to
     demo pages it did not build."""
+    output = output.resolve()
     pages = {p: Links(p.read_text()) for p in output.rglob('*.html')}
     errors = []
     for path, page in pages.items():
