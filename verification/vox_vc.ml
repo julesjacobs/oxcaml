@@ -4592,8 +4592,12 @@ and value_bindings ctx s rec_flag bindings =
           let value =
             fresh ctx vb.vb_pat.pat_env vb.vb_pat.pat_type "recursive"
           in
-          let s, condition = merge_patterns s (pattern ctx s value vb.vb_pat) in
-          branch s condition)
+          (* The closure's refinements are not recursive-call contracts: they
+             must be proved by its introduction before they can be assumed.
+             Function-body checks keep their assumptions in a separate scope. *)
+          match vb.vb_pat.pat_desc with
+          | Tpat_var { id; mode; _ } -> bind s id (at_mode mode value)
+          | _ -> unsupported vb.vb_pat.pat_loc)
         s bindings
   in
   let rec loop s = function

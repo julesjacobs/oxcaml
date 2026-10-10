@@ -303,3 +303,98 @@ end = Inferred
 module Inferred : sig val identity : (x : int) -> {y : int | eq y x} end
 module Checked : sig val identity : (x : int) -> {y : int | eq y x} end
 |}]
+
+let rec bad_closure : {f : int -> int | false} = fun x -> x;;
+[%%expect{|
+Line 1, characters 49-59:
+1 | let rec bad_closure : {f : int -> int | false} = fun x -> x;;
+                                                     ^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 1, characters 40-45:
+1 | let rec bad_closure : {f : int -> int | false} = fun x -> x;;
+                                            ^^^^^
+  The refinement is stated here.
+|}]
+
+let rec bad_self_reference : {f : int -> int | false} =
+  fun x -> let _ = bad_self_reference in x;;
+[%%expect{|
+Line 2, characters 2-42:
+2 |   fun x -> let _ = bad_self_reference in x;;
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 1, characters 47-52:
+1 | let rec bad_self_reference : {f : int -> int | false} =
+                                                   ^^^^^
+  The refinement is stated here.
+|}]
+
+let rec first x = second x
+and second : {f : int -> int | false} = fun x -> x;;
+[%%expect{|
+Line 2, characters 40-50:
+2 | and second : {f : int -> int | false} = fun x -> x;;
+                                            ^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 2, characters 31-36:
+2 | and second : {f : int -> int | false} = fun x -> x;;
+                                   ^^^^^
+  The refinement is stated here.
+|}]
+
+let nested () : {b : bool | b} =
+  let rec f : {f : int -> int | false} = fun x -> x in
+  let _ = f in
+  false;;
+[%%expect{|
+Line 2, characters 41-51:
+2 |   let rec f : {f : int -> int | false} = fun x -> x in
+                                             ^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 2, characters 32-37:
+2 |   let rec f : {f : int -> int | false} = fun x -> x in
+                                    ^^^^^
+  The refinement is stated here.
+|}]
+
+let rec circular :
+    {f : unit -> {x : int | false} |
+      let refine_ x = f () in false} =
+  fun () -> let _ = circular in 1;;
+[%%expect{|
+Line 4, characters 32-33:
+4 |   fun () -> let _ = circular in 1;;
+                                    ^
+Error: Refinement could not be proved (counterexample)
+Line 2, characters 28-33:
+2 |     {f : unit -> {x : int | false} |
+                                ^^^^^
+  The refinement is stated here.
+Line 4, characters 20-28:
+4 |   fun () -> let _ = circular in 1;;
+                        ^^^^^^^^
+  This refinement premise was omitted because it could not be translated to SMT
+Line 3, characters 22-26:
+3 |       let refine_ x = f () in false} =
+                          ^^^^
+  Unsupported refinement predicate in VC generation
+|}]
+
+let rec nonnegative : {f : int -> {n : int | n >= 0} | true} =
+  fun n -> if n <= 0 then 0 else nonnegative (n - 1);;
+[%%expect{|
+val nonnegative : {f : int -> {n : int | n >= 0} | true} = <fun>
+|}]
+
+let rec bad_result : {f : int -> {n : int | n >= 0} | true} =
+  fun n -> n;;
+[%%expect{|
+Line 2, characters 11-12:
+2 |   fun n -> n;;
+               ^
+Error: Refinement could not be proved (counterexample: n = -1)
+Line 1, characters 44-50:
+1 | let rec bad_result : {f : int -> {n : int | n >= 0} | true} =
+                                                ^^^^^^
+  The refinement is stated here.
+|}]
