@@ -782,24 +782,37 @@ let iarray_origin ctx array =
     end
   | _ -> None
 
+let share_iarray_observation ctx term =
+  let value = share_observation ctx term in
+  (match value with
+  | Var symbol when value <> term -> (
+    match Hashtbl.find_opt observation_steps symbol with
+    | None | Some [] -> ()
+    | Some _ ->
+      Hashtbl.replace observation_steps symbol !Vox_proof_steps.current)
+  | _ -> ());
+  value
+
 let observe_iarray ctx call value =
   if call <> value
-  then begin
-    Hashtbl.replace ctx.observation_equations call (share_observation ctx value);
-    record_steps (Term_table.replace equation_steps) call
-  end;
+  then record_observation_equation ctx call (share_observation ctx value);
   call
+
+let reusable_iarray_observation term =
+  match Term_table.find_opt equation_steps term with
+  | None | Some [] -> true
+  | Some steps -> List.equal ( == ) steps !Vox_proof_steps.current
 
 let rec iarray_length ctx iarray_sort array =
   match Hashtbl.find_opt ctx.iarray_lengths array with
-  | Some value -> value
-  | None ->
+  | Some value when reusable_iarray_observation value -> value
+  | Some _ | None ->
     let value = expand_iarray_length ctx iarray_sort array in
     let call =
       Call (intern_function ctx "Iarray.length" [iarray_sort] Int63, [array])
     in
-    let value = observe_iarray ctx call value in
-    Hashtbl.add ctx.iarray_lengths array value;
+    let value = observe_iarray ctx call (share_iarray_observation ctx value) in
+    Hashtbl.replace ctx.iarray_lengths array value;
     value
 
 and expand_iarray_length ctx iarray_sort array =
@@ -827,15 +840,16 @@ and expand_iarray_length ctx iarray_sort array =
 
 let rec iarray_get_with_budget ctx budget iarray_sort element_sort array index =
   let key = element_sort, array, index in
-  match Hashtbl.find_opt ctx.iarray_reads key with
-  | Some value -> value
+  let cached = Hashtbl.find_opt ctx.iarray_reads key in
+  match cached with
+  | Some value when reusable_iarray_observation value -> value
   | None when !budget = 0 ->
     let function_ =
       intern_function ctx "Iarray.get" [iarray_sort; Int63] element_sort
     in
     Call (function_, [array; index])
-  | None ->
-    decr budget;
+  | Some _ | None ->
+    if Option.is_none cached then decr budget;
     let value =
       expand_iarray_get_with_budget ctx budget iarray_sort element_sort array
         index
@@ -845,8 +859,8 @@ let rec iarray_get_with_budget ctx budget iarray_sort element_sort array index =
         ( intern_function ctx "Iarray.get" [iarray_sort; Int63] element_sort,
           [array; index] )
     in
-    let value = observe_iarray ctx call value in
-    Hashtbl.add ctx.iarray_reads key value;
+    let value = observe_iarray ctx call (share_iarray_observation ctx value) in
+    Hashtbl.replace ctx.iarray_reads key value;
     value
 
 and expand_iarray_get_with_budget ctx budget iarray_sort element_sort array
@@ -879,11 +893,11 @@ and expand_iarray_get_with_budget ctx budget iarray_sort element_sort array
       (unknown ())
   | Some (Iarray_append (left, right)) ->
     let length = iarray_length ctx iarray_sort left in
-    let shifted = share_observation ctx (App (Sub, [index; length])) in
+    let shifted = share_iarray_observation ctx (App (Sub, [index; length])) in
     if left = right
     then
       let index =
-        share_observation ctx
+        share_iarray_observation ctx
           (App (Ite, [both Lt index length; index; shifted]))
       in
       bounded
@@ -908,7 +922,7 @@ and expand_iarray_get_with_budget ctx budget iarray_sort element_sort array
   | Some (Iarray_sub (source, position, _)) ->
     bounded
       (iarray_get_with_budget ctx budget iarray_sort element_sort source
-         (share_observation ctx (App (Add, [position; index]))))
+         (share_iarray_observation ctx (App (Add, [position; index]))))
   | None -> (
     match expose_head ctx array with
     | App (Ite, [condition; left; right]) ->
@@ -1457,6 +1471,7 @@ let pref_observe ctx budget fn heap key =
      the remaining expansion budget. *)
   let expanded = Hashtbl.create 16 in
   let rec observe budget fn heap key =
+    ctx.poll ();
     let call = Call (fn, [heap; key]) in
     if budget = 0 || Hashtbl.mem expanded (budget, call)
     then call
@@ -1537,43 +1552,50 @@ let pref_observe ctx budget fn heap key =
   in
   observe budget fn heap key
 
-let rec pref_disjoint ctx budget left right =
-  let fn =
-    intern_function ctx "Pref.disjoint" [term_sort left; term_sort right] Bool
-  in
-  let call = Call (fn, [left; right]) in
-  let expand heap other =
-    match expose_head ctx heap with
-    | Call (fn, []) when Hashtbl.find_opt ctx.pref_constructors fn = Some `Empty
-      ->
-      Some (Boolean true)
-    | Call (fn, [source; key; _])
-      when Hashtbl.find_opt ctx.pref_constructors fn = Some `Put ->
-      let mem =
-        intern_function ctx "Pref.mem" [term_sort other; term_sort key] Bool
-      in
-      Hashtbl.replace ctx.pref_observers mem None;
-      Some
-        (both And
-           (App (Not, [pref_observe ctx budget mem other key]))
-           (pref_disjoint ctx (budget - 1) source other))
-    | Call (fn, [a; b])
-      when Hashtbl.find_opt ctx.pref_constructors fn = Some `Union ->
-      Some
-        (both And
-           (pref_disjoint ctx (budget - 1) a other)
-           (pref_disjoint ctx (budget - 1) b other))
-    | _ -> None
-  in
-  if budget = 0
-  then call
-  else
-    let value =
-      match expand left right with
-      | Some value -> value
-      | None -> Option.value (expand right left) ~default:call
+let pref_disjoint ctx budget left right =
+  let expanded = Hashtbl.create 16 in
+  let rec disjoint budget left right =
+    ctx.poll ();
+    let fn =
+      intern_function ctx "Pref.disjoint" [term_sort left; term_sort right] Bool
     in
-    observe_iarray ctx call value
+    let call = Call (fn, [left; right]) in
+    if budget = 0 || Hashtbl.mem expanded (budget, call)
+    then call
+    else begin
+      Hashtbl.add expanded (budget, call) ();
+      let expand heap other =
+        match expose_head ctx heap with
+        | Call (fn, [])
+          when Hashtbl.find_opt ctx.pref_constructors fn = Some `Empty ->
+          Some (Boolean true)
+        | Call (fn, [source; key; _])
+          when Hashtbl.find_opt ctx.pref_constructors fn = Some `Put ->
+          let mem =
+            intern_function ctx "Pref.mem" [term_sort other; term_sort key] Bool
+          in
+          Hashtbl.replace ctx.pref_observers mem None;
+          Some
+            (both And
+               (App (Not, [pref_observe ctx budget mem other key]))
+               (disjoint (budget - 1) source other))
+        | Call (fn, [a; b])
+          when Hashtbl.find_opt ctx.pref_constructors fn = Some `Union ->
+          Some
+            (both And
+               (disjoint (budget - 1) a other)
+               (disjoint (budget - 1) b other))
+        | _ -> None
+      in
+      let value =
+        match expand left right with
+        | Some value -> value
+        | None -> Option.value (expand right left) ~default:call
+      in
+      observe_iarray ctx call value
+    end
+  in
+  disjoint budget left right
 
 (* Extensionality of heaps, instantiated at one location: if [left] and [right]
    agree at [Pref.diff left right], they are equal. In the model, a heap is a

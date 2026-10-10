@@ -122,6 +122,8 @@ function check() {
     timer: setTimeout(() => { stopButton.hidden = false; }, 4000),
   };
   checkButton.disabled = true;
+  erased.hidden = true;
+  lambda.textContent = '';
   show('checking', 'Checking…', '');
   worker.postMessage({ id, name: current.file, source: pending.source });
 }

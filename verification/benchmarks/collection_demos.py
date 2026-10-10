@@ -25,7 +25,8 @@ WORKLOADS = {
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--baseline", default="7809359026")
+    parser.add_argument("--baseline",
+                        help="optional compatible baseline revision")
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--current-only", action="store_true")
     parser.add_argument("--iarray-model", action="store_true",
@@ -34,30 +35,34 @@ def main():
     compiler = ROOT / "_install/bin/ocamlc"
     if not compiler.is_file():
         parser.error("run make install before benchmarking")
+    if args.repeats < 1:
+        parser.error("--repeats must be positive")
     output = csv.writer(sys.stdout)
     output.writerow(["version", "demo", "scope", "median_ms", "min_ms", "max_ms",
                      "source_lines", "queries", "smt_bytes"])
     for demo, files in WORKLOADS.items():
         if args.iarray_model and demo != "quicksort":
             continue
-        versions = ["candidate"] if args.current_only else ["baseline", "candidate"]
+        versions = (["baseline", "candidate"]
+                    if args.baseline and not args.current_only
+                    else ["candidate"])
         for version in versions:
-            modules = [LIBRARY / "vox_sequence.mli",
-                       LIBRARY / "vox_sequence.ml"]
-            if demo == "quicksort" and (version == "candidate" or
-                    subprocess.run(["git", "cat-file", "-e",
-                        f"{args.baseline}:{LIBRARY}/vox_int_sequence.ml"],
-                        cwd=ROOT, stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL).returncode == 0):
-                modules += [LIBRARY / "vox_int_sequence.mli",
-                            LIBRARY / "vox_int_sequence.ml"]
+            names = ["vox_sequence"]
+            if demo in ("sorted-array", "quicksort"):
+                names.append("vox_int_sequence")
+            if demo == "sorted-array":
+                names.append("vox_iarray")
+            modules = [LIBRARY / (name + suffix)
+                       for name in names for suffix in [".mli", ".ml"]]
             if demo != "sorted-array":
                 modules += [LIBRARY / "borrow.mli", LIBRARY / "borrow.ml"]
-            if demo == "sorted-array" and version == "candidate":
-                modules += [LIBRARY / (name + suffix)
-                            for name in ["vox_int_sequence", "vox_iarray"]
-                            for suffix in [".mli", ".ml"]]
-            modules += [DEMOS / name for name in files]
+            if demo == "quicksort":
+                modules += [LIBRARY / "vox_parallel.mli",
+                            LIBRARY / "vox_parallel.ml"]
+            selected = files
+            if demo == "sorted-array":
+                selected = [files[0], "sorted_array_model.ml", *files[1:]]
+            modules += [DEMOS / name for name in selected]
             if args.iarray_model and version == "candidate":
                 modules = [LIBRARY / (name + suffix)
                            for name in ["vox_sequence", "vox_int_sequence",

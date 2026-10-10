@@ -72,12 +72,15 @@ let () =
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--baseline", default="d9d6a7f6d3")
+    parser.add_argument("--baseline", required=True,
+                        help="revision with the result-pair borrow primitives")
     parser.add_argument("--repeats", type=int, default=5)
     args = parser.parse_args()
     compiler = ROOT / "_install/bin/ocamlopt"
     if not compiler.is_file():
         parser.error("run make install before benchmarking")
+    if args.repeats < 1:
+        parser.error("--repeats must be positive")
     baseline = subprocess.check_output(
         ["git", "show", f"{args.baseline}:runtime/borrow.c"],
         cwd=ROOT, text=True)
