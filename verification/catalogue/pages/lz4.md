@@ -44,7 +44,7 @@ The operations use those relations directly:
 In `decompress`, `?capacity:(c : int)` names the caller's optional argument:
 `None` selects 4,194,304 bytes and an out-of-range `Some n` gives
 `Invalid_capacity`. `@ ghost` erases `roundtrip` and `@@ total` declares
-that it terminates without effects. `let[@def]` generates checked defining
+that it terminates without raising. `let[@def]` generates checked defining
 equations such as `matches_model_def`.
 
 `decode_block` (in `vox_lz4_spec_decode_bytes.ml`) returns a status, a byte count and the decoded bytes in reverse order; `matches_bytes` compares them with the output string. Its recursive worker `decode_model` tracks the wire cursor, last match start and output so far; the block entry point fixes their initial values. `from_source` (in `vox_lz4_spec_scan.ml`) returns the list of matches the compressor chooses, and `wire_matches_plan` fixes their byte layout. Together with the parser, token, plan, hash and match modules, these ten files define the complete specification. The source-distance extension proof is in `vox_lz4_match_proof.ml`; it contributes no model definition.
@@ -69,7 +69,9 @@ The complete pure dependencies are available directly:
 - Sizes: sources above 4,194,304 bytes make `compress` and `compress_decompress` raise `Invalid_argument`. `decompress_verified` requires a capacity from 0 to 4,194,304 as a precondition; `decompress` returns `Invalid_capacity` outside that range, as its contract states. The limit is on uncompressed bytes: `compress` output can be longer, and the wire model allows up to 4,210,768 bytes.
 - Each decoding call with a valid capacity allocates a raw buffer of `capacity` bytes, so `decompress` without `~capacity` allocates 4 MiB whatever the input. Allocation failure raises `Out_of_memory`.
 - `compress`'s contract fixes the output bytes. A compressor that chose different matches would not meet it, and nothing requires the output to be shorter than the input.
-- The decoder model rejects a final token whose low four bits are nonzero, and, in a block with a match, requires the last five decoded bytes to be literals and the last match to start at least 12 bytes before the end.
+- The decoder model ignores the final token's low four bits. In a block with
+  a match, it requires the last five decoded bytes to be literals and the
+  last match to start at least 12 bytes before the end.
 - Errors: only the kind of error is specified (`Malformed`, `Output_limit`, never `Invalid_capacity` from `decompress_verified`, and from `decompress` exactly when the capacity is out of range); the `malformed` reason and position are not. `lz4_fast_decoder_reference.ml` compares them with an unverified reference decoder, `vox_lz4_baseline.ml`, by testing.
 - An exception while scanning or decoding consumes the ownership of the raw buffer, which the finalizer then frees at some later collection; an exception from the final copy releases the buffer before it is re-raised. There is no exception-safety or prompt-cleanup theorem.
 - The ghost `roundtrip` is total; the codec functions are specified for normal return only.

@@ -57,7 +57,7 @@
         "let[@def] rec (valid @ total) tree",
         "&& valid right"
       ],
-      "text": "`Core.tree` stores each node's height as a `Bigint.t`, so neither the code nor the proof has an overflow case; the cost is a call to the C runtime's `caml_bigint_add` whenever `make_node` rebuilds a node. `valid` is the AVL invariant: the ordering through `all_less` and `all_greater`, sibling heights within one of each other, and a cached height equal to one plus the larger. `elements`, just below, is the abstraction function to the list model: the in-order traversal. These are ordinary total OCaml functions, so the same definitions are the logic's vocabulary; `valid` and `elements` are never called at run time."
+      "text": "`Core.tree` stores each node's height as a `Bigint.t`, so neither the code nor the proof has an overflow case; the cost is a call to the C runtime's `caml_bigint_add` whenever `make_node` rebuilds a node. `valid` is the AVL invariant: the ordering through `all_less` and `all_greater`, sibling heights within one of each other, and a cached height equal to one plus the larger. `elements`, just below, is the abstraction function to the list model: the in-order traversal. These are ordinary total OCaml functions, so the same definitions are the logic's vocabulary. `valid` is called only in proofs; `elements` also runs in `equal`, building the two element lists it compares."
     },
     {
       "title": "The abstract type carries the invariant",

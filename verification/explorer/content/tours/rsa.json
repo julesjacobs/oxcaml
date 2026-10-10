@@ -7,7 +7,7 @@
   "demo": "rsa",
   "order": 22,
   "summary": [
-    "`Vox_rsa` computes modular powers of unbounded integers by repeated squaring, proved to return `a^e mod n`, and proves the RSA round trip for any two distinct primes and any message below their product, with Fermat's little theorem, Bézout's identity and the uniqueness half of the Chinese remainder theorem proved in the library. Its conditions are preconditions in argument types, checked at every call.",
+    "`Vox_rsa` computes modular powers of unbounded integers by repeated squaring, proved to return `a^e mod n`, and proves the RSA round trip for any two distinct primes and any nonnegative message below their product, with Fermat's little theorem, Bézout's identity and the uniqueness half of the Chinese remainder theorem proved in the library. Its conditions are preconditions in argument types, checked at every call.",
     "The [catalogue page](demo:rsa) states the claim and the scope: this is the arithmetic of textbook RSA, with no claim about security."
   ],
   "stops": [
@@ -92,7 +92,7 @@
       "from": "let primes = [2; 3; 5; 7; 11; 13] in",
       "to": "end) primes) primes;",
       "lines": "63-83",
-      "text": "`rsa.ml` runs differential tests as bytecode: round trips of every message for each pair of distinct primes up to 13 and every valid `e` and `d` up to 24, then exponents of more than 100 digits, messages sharing a factor with the modulus, and `decrypt_crt` against `decrypt`. Integers built in a loop carry no refinement, so each call establishes its precondition with `(assume_ m : {m : Bigint.t | ...})`, which checks the predicate at run time, raises if it fails, and gives the checker the fact from then on. `assume_` makes the enclosing code partial, so a fact checked this way can never reach erased proof code. [`rsa_public_client.ml`](src:testsuite/tests/vox/rsa_public_client.ml) links and runs the public client with both compilers; the client only defines functions, so that checks compilation and linking."
+      "text": "`rsa.ml` runs differential tests as bytecode: round trips of every message for each pair of distinct primes up to 13 and every valid `e` and `d` up to 24, then exponents of more than 100 digits, messages sharing a factor with the modulus, and `decrypt_crt` against `decrypt`. Integers built in a loop carry no refinement, so each call establishes its precondition with `(assume_ m : {m : Bigint.t | ...})`, which checks the predicate at run time, raises if it fails, and gives the checker the fact from then on. `assume_` makes the enclosing code partial. Its runtime check cannot be erased; the established fact can then be used in ghost proofs. [`rsa_public_client.ml`](src:testsuite/tests/vox/rsa_public_client.ml) links and runs the public client with both compilers; the client only defines functions, so that checks compilation and linking."
     }
   ]
 }

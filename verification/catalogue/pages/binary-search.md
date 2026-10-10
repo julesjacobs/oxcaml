@@ -36,8 +36,8 @@ The search predicates retain their defining equations over `length` and
 `at` returns 0 outside the array. Consequently an interval extending past
 the end can observe 0; operation contracts only use intervals in bounds.
 `length_bounds` requires a nonnegative length whose addition of 1 does not
-wrap. `@@ total` declares a function that terminates without raising or
-touching mutable state, so it may appear in refinements.
+wrap. `@@ total` declares a function that terminates without raising.
+Functions used in refinements must also be stateless.
 
 ## Trusted base
 

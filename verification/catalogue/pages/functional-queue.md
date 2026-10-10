@@ -22,7 +22,7 @@ Not proved: running time. When each version of a queue is used at most once, `en
 
 @code verification/library/vox_sequence.mli "val append :" "  @@ total"
 
-These three operation contracts completely specify FIFO behavior; the implementation’s front/rear representation and reversal proofs are private. `(q : a) -> b` names the argument so that `b` can mention it. The precondition of `dequeue`, `not (contents q === [])`, says that the queue is nonempty. `@@ total` declares a function total: it terminates without raising or touching mutable state, which lets it appear in refinements. `@ immutable` is an OxCaml mode that forbids access to mutable fields; the queue's `immutable_data` values have none, so it does not restrict them.
+These three operation contracts completely specify FIFO behavior; the implementation’s front/rear representation and reversal proofs are private. `(q : a) -> b` names the argument so that `b` can mention it. The precondition of `dequeue`, `not (contents q === [])`, says that the queue is nonempty. `@@ total` declares a function total: it terminates without raising. These operations are also stateless, so they can appear in refinements. `@ immutable` is an OxCaml mode that forbids access to mutable fields; the queue's `immutable_data` values have none, so it does not restrict them.
 
 ## Trusted base
 

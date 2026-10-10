@@ -45,7 +45,7 @@ Nothing beyond the shared base.
 
 ## Client example
 
-The public-only client. `open Bigint` makes `t` the type `Bigint.t` and the arithmetic operators act on it; `0Z` is a `Bigint.t` literal. `(f @ total)` declares that `f` terminates without effects, and `{m : t | p}` is the type `t` refined by the predicate `p`. `ghost_ (...)` is proof code, checked and then erased. `Spec.valid_key_def` and `Spec.prime_def` state the definitions of `valid_key` and `prime`; the client calls them so that the checker can prove `n > 0Z`, which `encrypt` requires. `(() : {u : unit | p})` asks the checker to prove `p` at that point. `crt_equivalence` proves that `decrypt_crt` agrees with ordinary decryption, which it runs only in ghost code.
+The public-only client. `open Bigint` makes `t` the type `Bigint.t` and the arithmetic operators act on it; `0Z` is a `Bigint.t` literal. `(f @ total)` declares that `f` terminates without raising, and `{m : t | p}` is the type `t` refined by the predicate `p`. `ghost_ (...)` is proof code, checked and then erased. `Spec.valid_key_def` and `Spec.prime_def` state the definitions of `valid_key` and `prime`; the client calls them so that the checker can prove `n > 0Z`, which `encrypt` requires. `(() : {u : unit | p})` asks the checker to prove `p` at that point. `crt_equivalence` proves that `decrypt_crt` agrees with ordinary decryption, which it runs only in ghost code.
 
 @code testsuite/tests/vox/rsa_public_client.ml "open Bigint" "  crt"
 

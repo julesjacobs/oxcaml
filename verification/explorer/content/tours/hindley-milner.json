@@ -16,7 +16,7 @@
       "path": "testsuite/tests/vox/hm_inference.mli",
       "from": "type result : immutable_data",
       "to": "{u : unit | false} @ ghost @@ total",
-      "text": "`result` is abstract; `source` gives the inferred term (erased) and `inferred_type` the answer. `infer` is the only runtime function, and it is not `@@ total`. `sound` returns the typing derivation itself, erased. `principal` states an existential in continuation-passing form, because refinements have no existential quantifier: any `claim` that follows from `inferred_type out = Some ty` and `target = substitute delta ty`, for an arbitrary substitution `delta`, holds. `rejected` is its `None` case: a term that `infer` rejects has no typing at any type."
+      "text": "`result` is abstract; `source` gives the inferred term (erased) and `inferred_type` the answer. `infer` and `inferred_type` run normally; `infer` is not `@@ total`. `sound` returns the typing derivation itself, erased. `principal` states an existential in continuation-passing form, because refinements have no existential quantifier: any `claim` that follows from `inferred_type out = Some ty` and `target = substitute delta ty`, for an arbitrary substitution `delta`, holds. `rejected` is its `None` case: a term that `infer` rejects has no typing at any type."
     },
     {
       "title": "Inferred types and variable identities",
@@ -65,7 +65,7 @@
       "path": "testsuite/tests/vox/hm_routed_infer.ml",
       "from": "| T.Let (runtime_rhs, runtime_body) ->",
       "to": "let child_pool : pool = Empty in",
-      "text": "`work`, most of this 1,241-line file, is the inference itself: continuation-passing code that mutates real `Pref` cells through a unique token and builds the ghost `execution` alongside. Its postcondition is `ran` on that execution. At `let` it raises `Failure` through the `raise_any` external if the level would overflow, saves the current pool in the per-level array (`Rp.save`) and starts the child with an empty pool. After the right-hand side, `Rp.close_and_route` generalizes the child's pool and routes the surviving nodes to their levels' pools. Universally quantified invariants such as `facts` and `trees` are passed as ghost functions over nodes, because the logic has no quantifiers."
+      "text": "`work`, most of this file, is the inference itself: continuation-passing code that mutates real `Pref` cells through a unique token and builds the ghost `execution` alongside. Its postcondition is `ran` on that execution. At `let` it raises `Failure` through the `raise_any` external if the level would overflow, saves the current pool in the per-level array (`Rp.save`) and starts the child with an empty pool. After the right-hand side, `Rp.close_and_route` generalizes the child's pool and routes the surviving nodes to their levels' pools. Universally quantified invariants such as `facts` and `trees` are passed as ghost functions over nodes, because the logic has no quantifiers."
     },
     {
       "title": "The core proof: completeness by induction over the execution",

@@ -39,7 +39,7 @@ sources:
 
 ## Client example
 
-From a client that sees only the public interface. `@ total` marks a function that terminates without raising or touching mutable state; only such functions can appear in refinements. `{u : unit | p}` is `unit` refined by the predicate `p`, so a total function returning it is a lemma proving `p`. `===` is logical equality. `extensional` takes a function proving that two sets agree on every `query` and concludes that they are `equal`. The client calls these laws inside `ghost_ (...)`, which marks proof code: it is checked and then erased.
+From a client that sees only the public interface. `@ total` marks a function that terminates without raising. Functions used in refinements must also be stateless. `{u : unit | p}` is `unit` refined by the predicate `p`, so a total function returning it is a lemma proving `p`. `===` is logical equality. `extensional` takes a function proving that two sets agree on every `query` and concludes that they are `equal`. The client calls these laws inside `ghost_ (...)`, which marks proof code: it is checked and then erased.
 
 @code testsuite/tests/vox/collections_boundary_client.ml "let (set_commutes @ total)" "Avl_sets.extensional left right members"
 

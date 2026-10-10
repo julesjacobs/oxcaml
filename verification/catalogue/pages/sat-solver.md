@@ -69,7 +69,7 @@ Termination: `search` decreases the ghost measure `absent * (n + 1) + unassigned
 
 ## Client example
 
-From the public-only client. `{n : int | p}` is the type `int` refined by the predicate `p`; refinements on arguments are preconditions the caller must prove, and the refinement on the result is proved here. `(f @ total)` declares that `f` terminates without effects. `ghost_ (...)` is proof code, checked and then erased. `classify_input_def` and `check_def` state the definitions of `classify_input` and `check`, which the checker does not unfold on its own. `Vox_sat.unsat_at` turns `unsatisfiable` into the fact that a given list of booleans, of any length, falsifies the formula; its result is ghost, so it is called inside `ghost_`.
+From the public-only client. `{n : int | p}` is the type `int` refined by the predicate `p`; refinements on arguments are preconditions the caller must prove, and the refinement on the result is proved here. `(f @ total)` declares that `f` terminates without raising. `ghost_ (...)` is proof code, checked and then erased. `classify_input_def` and `check_def` state the definitions of `classify_input` and `check`, which the checker does not unfold on its own. `Vox_sat.unsat_at` turns `unsatisfiable` into the fact that a given list of booleans, of any length, falsifies the formula; its result is ghost, so it is called inside `ghost_`.
 
 @code testsuite/tests/vox/sat_public.ml "let (decide_cdcl @ total)" "  result"
 

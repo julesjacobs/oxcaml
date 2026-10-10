@@ -56,7 +56,7 @@
       "from": "let[@def] rec (decode_model @ total)",
       "span": 30,
       "lines": "37-66",
-      "text": "The decoder model is a total function that classifies every input: each path ends in a record whose `kind` is `Done`, `Malformed` or `Output_limit`, with the number of bytes produced and the output in reverse. It reads a token, the literal length with its extension bytes, the literals, a two-byte offset and the match length, then recurses; `fuel` bounds the number of sequences and is the `[@@decreases]` measure. The check on the last sequence encodes LZ4's end-of-block rules: the final token's low four bits are zero, and in a block with a match the last five bytes are literals and the last match starts at least 12 bytes before the end. `byte_of_char` is an `%identity` primitive in [`vox_lz4_spec_parse.ml`](src:verification/library/vox_lz4_spec_parse.ml) whose contract is assumed."
+      "text": "The decoder model is a total function that classifies every input: each path ends in a record whose `kind` is `Done`, `Malformed` or `Output_limit`, with the number of bytes produced and the output in reverse. It reads a token, the literal length with its extension bytes, the literals, a two-byte offset and the match length, then recurses; `fuel` bounds the number of sequences and is the `[@@decreases]` measure. The final token's low four bits are unused and ignored. In a block with a match, the check on the last sequence requires the last five bytes to be literals and the last match to start at least 12 bytes before the end. `byte_of_char` is an `%identity` primitive in [`vox_lz4_spec_parse.ml`](src:verification/library/vox_lz4_spec_parse.ml) whose contract is assumed."
     },
     {
       "title": "The compressor model fixes every choice",

@@ -43,7 +43,7 @@
       "path": "testsuite/tests/vox/http_parser.ml",
       "from": "let (decode_serialized @ total)",
       "to": "| _ -> result",
-      "text": "`decode_serialized` proves completeness for one request: parsing `serialize request` followed by any suffix completes with that request and returns the suffix. The fact comes from the law `roundtrip`, called under `ghost_` and erased. `accept_untrusted` is the idiom for untrusted input: a total parse and a match on the status, where the `Complete` branch gets, from `body_agreement`, that the request is `well_formed`, has no Transfer-Encoding, and has a body whose length every Content-Length states. The error statuses pass through as values for the caller. Both functions are `@ total`, and the client sees only the interfaces."
+      "text": "`decode_serialized` proves completeness for one request: parsing `serialize request` followed by any suffix completes with that request and returns the suffix. The fact comes from the law `roundtrip`, called under `ghost_` and erased. `accept_untrusted` is the idiom for untrusted input: a total parse and a match on the status, where `parse` gives the `Complete` branch a `well_formed` request. `body_agreement` then proves that it has no Transfer-Encoding and that every Content-Length matches its body length. The error statuses pass through as values for the caller. Both functions are `@ total`, and the client sees only the interfaces."
     },
     {
       "title": "A rejected client",

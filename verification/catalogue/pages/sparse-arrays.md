@@ -39,7 +39,7 @@ base and indexed lookup; the override representation stays private.
 
 ## Client example
 
-From the client, inside a functor over any `Element : sig type t : immutable_data end`, with `S = Sparse_overlay` and `L = S.Laws (Element)`. `@ total` marks a function that terminates without raising or touching mutable state. `(x : a) -> b` names the argument so that `b` can mention it. `{i : int | p}` is `int` refined by the predicate `p`, and `===` is logical equality. `ghost_ (...)` is proof code, checked and then erased; here it calls laws, which are lemmas returning `unit` refined by their conclusion. `get` needs an index proved in bounds for the overlay it reads, so the index is given the type `{i : int | 0 <= i && i < S.length result}` after the laws show that `result` has the same length as `source`.
+From the client, inside a functor over any `Element : sig type t : immutable_data end`, with `S = Sparse_overlay` and `L = S.Laws (Element)`. `@ total` marks a function that terminates without raising. `(x : a) -> b` names the argument so that `b` can mention it. `{i : int | p}` is `int` refined by the predicate `p`, and `===` is logical equality. `ghost_ (...)` is proof code, checked and then erased; here it calls laws, which are lemmas returning `unit` refined by their conclusion. `get` needs an index proved in bounds for the overlay it reads, so the index is given the type `{i : int | 0 <= i && i < S.length result}` after the laws show that `result` has the same length as `source`.
 
 @code testsuite/tests/vox/sparse_overlay_client.ml "let (read_after_write @ total)" "    actual"
 

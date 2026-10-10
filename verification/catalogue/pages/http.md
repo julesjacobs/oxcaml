@@ -80,7 +80,7 @@ Nothing beyond the shared base.
 
 ## Client example
 
-From the positive client, which sees only the interfaces. `(f @ total)` declares that `f` terminates without effects, and `{result : result | p}` is the type `result` refined by the predicate `p`. `===` is logical equality. `ghost_ (...)` is proof code, checked and then erased; here it calls the laws `roundtrip` and `body_agreement`, whose result types carry the facts. Laws are stated as `if premise then conclusion else true`, and `S` is `Vox_sequence`.
+From the positive client, which sees only the interfaces. `(f @ total)` declares that `f` terminates without raising, and `{result : result | p}` is the type `result` refined by the predicate `p`. `===` is logical equality. `ghost_ (...)` is proof code, checked and then erased; here it calls the laws `roundtrip` and `body_agreement`, whose result types carry the facts. Laws are stated as `if premise then conclusion else true`, and `S` is `Vox_sequence`.
 
 @code testsuite/tests/vox/http_parser.ml "let (decode_serialized @ total)" "| _ -> result"
 
