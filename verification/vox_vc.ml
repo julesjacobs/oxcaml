@@ -4596,7 +4596,8 @@ and value_bindings ctx s rec_flag bindings =
              must be proved by its introduction before they can be assumed.
              Function-body checks keep their assumptions in a separate scope. *)
           match vb.vb_pat.pat_desc with
-          | Tpat_var { id; mode; _ } -> bind s id (at_mode mode value)
+          | Tpat_var { id; mode; _ } | Tpat_fun_layout { id; mode; _ } ->
+            bind s id (at_mode mode value)
           | _ -> unsupported vb.vb_pat.pat_loc)
         s bindings
   in

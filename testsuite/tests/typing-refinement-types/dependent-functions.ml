@@ -1,6 +1,6 @@
 (* TEST
  has-z3;
- flags = "-extension refinement_types";
+ flags = "-extension refinement_types -extension layout_poly_alpha";
  expect;
 *)
 
@@ -397,4 +397,16 @@ Line 1, characters 44-50:
 1 | let rec bad_result : {f : int -> {n : int | n >= 0} | true} =
                                                 ^^^^^^
   The refinement is stated here.
+|}]
+
+let rec poly_ identity x = x
+let verified : {b : bool | b} = true;;
+[%%expect{|
+Line 1, characters 14-22:
+1 | let rec poly_ identity x = x
+                  ^^^^^^^^
+Warning 218: poly_ has no effect in recursive bindings, which do not support layout polymorphism. Consider using a regular let rec instead.
+
+val identity : 'a -> 'a = <fun>
+val verified : {b : bool | b} = true
 |}]
