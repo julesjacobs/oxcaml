@@ -1,0 +1,43 @@
+{
+ "source": "verification/benchmarks/flat_hashtbl_results.csv",
+ "payload": "int",
+ "entries": [
+  8,
+  16,
+  1024,
+  57344,
+  917504,
+  1048576
+ ],
+ "operations": [
+  "build",
+  "hit",
+  "miss"
+ ],
+ "columns": [
+  [
+   "simd",
+   "Verified"
+  ],
+  [
+   "base",
+   "Base.Hashtbl"
+  ],
+  [
+   "stdlib",
+   "Stdlib.Hashtbl"
+  ]
+ ],
+ "ratios": [
+  [
+   "base",
+   "simd",
+   "Base ÷ Verified"
+  ],
+  [
+   "stdlib",
+   "simd",
+   "Stdlib ÷ Verified"
+  ]
+ ]
+}

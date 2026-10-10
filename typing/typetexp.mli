@@ -32,7 +32,15 @@ module TyVarEnv : sig
   val with_local_scope : (unit -> 'a) -> 'a
   (** Evaluate in a narrowed type-variable scope *)
 
+  val protect_reentrant : (unit -> 'a) -> 'a
+  (** Preserve the caller's type-variable state during predicate typing. *)
+
   type poly_univars
+
+  val current_univars : unit -> poly_univars
+  (** The univars in scope, for types written inside a refinement predicate
+      that belongs to a polymorphic type. *)
+
   val make_poly_univars :
     Env.t -> (string Location.loc * Env.stage) list -> poly_univars
     (** A variant of [make_poly_univars_jkinds] that gets variables
@@ -63,6 +71,18 @@ val type_open:
   (?used_slot:bool ref -> Asttypes.override_flag -> Env.t -> Location.t ->
    Longident.t Asttypes.loc -> Path.t * Env.t)
     ref
+
+val type_refinement_predicate:
+  (Env.t -> Ident.Set.t -> Ident.t -> Types.type_expr -> Parsetree.expression ->
+    Typedtree.expression * Types.refinement_expression) ref
+
+val add_dependent_binder:
+  (?uid:Uid.t -> ?sort:Jkind.Sort.t ->
+   Env.t -> Ident.t -> Types.type_expr -> Location.t -> Env.t) ref
+
+val with_dependent_binder :
+  Env.t -> Ident.t -> uid:Uid.t -> Types.type_expr -> Location.t ->
+  (Env.t -> 'a) -> 'a
 
 val valid_tyvar_name : string -> bool
 
@@ -135,10 +155,14 @@ val transl_type_scheme:
         Env.t -> Parsetree.core_type -> valdecl_lpoly_flag ->
         Jkind_types.Sort.var list * Typedtree.core_type
 val transl_type_param:
-  Env.t -> Path.t -> jkind_lr -> Parsetree.core_type -> Typedtree.core_type
+  Env.t -> Path.t -> jkind_lr -> Parsetree.core_type ->
+  Typedtree.core_type * jkind_lr option
 (* the Path.t above is of the type/class whose param we are processing;
    the level defaults to the current level. The jkind_lr is the jkind to
-   use if no annotation is provided. *)
+   use if no annotation is provided. Also returns the translation of the
+   parameter's jkind annotation, if there was one, so that callers can
+   compare against it without re-translating (which would re-trigger
+   alerts and other side effects of translation). *)
 
 val get_type_param_jkind: Env.t -> Path.t -> Parsetree.core_type -> jkind_lr
 (* [get_type_param_jkind] is only used in contexts where the jkind will be

@@ -1,0 +1,980 @@
+{
+  "schema": 1,
+  "claim": "Exact executable finite reference over Global < Regional < Local; not the mutable production adapter.",
+  "executables": [
+    "eliminate",
+    "decide_checked",
+    "project_graph",
+    "decide_graph_checked",
+    "subsumption_residual",
+    "assert_subsumption",
+    "project_guarded",
+    "project_admissible",
+    "assert_graph_subsumption"
+  ],
+  "theorems": [
+    "regionality_adjunction",
+    "eliminate_exact",
+    "eliminate_scoped",
+    "project_graph_exact",
+    "project_graph_scoped",
+    "subsumption_residual_exact",
+    "subsumption_residual_scoped",
+    "assert_subsumption_exact",
+    "project_guarded_exact",
+    "project_admissible_exact",
+    "project_scopes_compose",
+    "project_admissible_scoped",
+    "assert_graph_subsumption_exact",
+    "assert_graph_subsumption_scoped"
+  ],
+  "files": [
+    {
+      "path": "/Users/julesjacobs/git/vox/worktrees/mode-solver-verification-20260924/testsuite/tests/vox/mode_solver_semantics.ml",
+      "relative_path": "testsuite/tests/vox/mode_solver_semantics.ml",
+      "sha256": "fb29463c05afedd526fb297106f13852362b2337796e762c37aac9051304b048",
+      "declarations": [
+        {
+          "name": "elt",
+          "kind": "type",
+          "start_line": 1,
+          "end_line": 2,
+          "sha256": "6b21f4341101acb91d88c11f0ccd601e953934b653c7798d832f12c2a42db69c",
+          "source": "type elt : immutable_data = Global | Regional | Local\n"
+        },
+        {
+          "name": "rank",
+          "kind": "equation",
+          "start_line": 3,
+          "end_line": 7,
+          "sha256": "0a2e7b7c34635ac7225cee304a648f292d1112a3b2a94e7a9cef31f24adebf28",
+          "source": "let[@def] (rank @ total) x = match x with\n  | Global -> 0\n  | Regional -> 1\n  | Local -> 2\n"
+        },
+        {
+          "name": "le",
+          "kind": "equation",
+          "start_line": 8,
+          "end_line": 9,
+          "sha256": "ee8f5b9baae53a7dfc441c3e85f16c94133fcd704261320d7522162328075e85",
+          "source": "let[@def] (le @ total) a b = rank a <= rank b\n"
+        },
+        {
+          "name": "join",
+          "kind": "equation",
+          "start_line": 10,
+          "end_line": 11,
+          "sha256": "b6ed4ca7d90235004053286afc19af4445c1e031a445746415936dad46579526",
+          "source": "let[@def] (join @ total) a b = if le a b then b else a\n"
+        },
+        {
+          "name": "meet",
+          "kind": "equation",
+          "start_line": 12,
+          "end_line": 13,
+          "sha256": "c5d932116856afaad0042a5507e299c44c26b4139a519e8e08a7986299de0fb3",
+          "source": "let[@def] (meet @ total) a b = if le a b then a else b\n"
+        },
+        {
+          "name": "regional_to_global",
+          "kind": "equation",
+          "start_line": 14,
+          "end_line": 17,
+          "sha256": "67ab348f8d2e97e89396648042ceab6ff23303fd0e45fa874b1df055f795d2fa",
+          "source": "let[@def] (regional_to_global @ total) x = match x with\n  | Global | Regional -> Global\n  | Local -> Local\n"
+        },
+        {
+          "name": "regional_to_local",
+          "kind": "equation",
+          "start_line": 18,
+          "end_line": 21,
+          "sha256": "ebfdd8d7c36a6d2282381fdee70f12a2da9d185d4537be0841f8838c5f17ef1a",
+          "source": "let[@def] (regional_to_local @ total) x = match x with\n  | Global -> Global\n  | Regional | Local -> Local\n"
+        },
+        {
+          "name": "term",
+          "kind": "type",
+          "start_line": 22,
+          "end_line": 30,
+          "sha256": "d278f8bf64f5f611d9b1e94e5f33e8127fbea9858ee162aa2b87d9351398932b",
+          "source": "type term : immutable_data =\n  | Const of elt\n  | Var of int\n  | Join of term * term\n  | Meet of term * term\n  | Regional_to_global of term\n  | Table of elt * elt * elt * term\n[@@inductive]\n"
+        },
+        {
+          "name": "apply_table",
+          "kind": "equation",
+          "start_line": 31,
+          "end_line": 36,
+          "sha256": "74bc659f379ea9bc026aa647c7f145654749dd1f04f0ac1f64acc05cf26eaa79",
+          "source": "let[@def] (apply_table @ total) (global : elt) (regional : elt) (local : elt) value =\n  match value with\n  | Global -> global\n  | Regional -> regional\n  | Local -> local\n"
+        },
+        {
+          "name": "qf",
+          "kind": "type",
+          "start_line": 37,
+          "end_line": 43,
+          "sha256": "1364927f633483b5c7d50911bfebf18ec7bfd92812eff00977e895edc1df0b8f",
+          "source": "type qf : immutable_data =\n  | Le of term * term\n  | And of qf * qf\n  | Or of qf * qf\n  | Not of qf\n[@@inductive]\n"
+        },
+        {
+          "name": "formula",
+          "kind": "type",
+          "start_line": 44,
+          "end_line": 52,
+          "sha256": "84513ba8b70ce39dbfb9f8bf5b13273b2b79ec5a168f1b5ea3b2c0a4c5c46aa9",
+          "source": "type formula : immutable_data =\n  | Plain of qf\n  | Conj of formula * formula\n  | Disj of formula * formula\n  | Neg of formula\n  | Exists of formula\n  | Forall of formula\n[@@inductive]\n"
+        },
+        {
+          "name": "lookup",
+          "kind": "equation",
+          "start_line": 53,
+          "end_line": 58,
+          "sha256": "644984b9c7522fbadc5d3565b727700d45c3afd98194b03f4966323c2be09a77",
+          "source": "let[@def] rec (lookup @ total) env i =\n  if i < 0 then Global\n  else match env with\n  | [] -> Global\n  | b :: rest -> if i = 0 then b else lookup rest (i - 1)\n"
+        },
+        {
+          "name": "eval_term",
+          "kind": "equation",
+          "start_line": 59,
+          "end_line": 68,
+          "sha256": "ed442dafca856a95d603556434d14a89533426fee2ccaed9eed40a84330844d3",
+          "source": "let[@def] rec (eval_term @ total) env t =\n  match t with\n  | Const b -> b\n  | Var i -> lookup env i\n  | Join (a, b) -> join (eval_term env a) (eval_term env b)\n  | Meet (a, b) -> meet (eval_term env a) (eval_term env b)\n  | Regional_to_global a -> regional_to_global (eval_term env a)\n  | Table (global, regional, local, a) ->\n    apply_table global regional local (eval_term env a)\n"
+        },
+        {
+          "name": "eval_qf",
+          "kind": "equation",
+          "start_line": 69,
+          "end_line": 75,
+          "sha256": "6bf0ba7de35928a95f70a0d5fe7172a5f9eccbd056543386abf7f4b467fdbe19",
+          "source": "let[@def] rec (eval_qf @ total) env q =\n  match q with\n  | Le (a, b) -> le (eval_term env a) (eval_term env b)\n  | And (a, b) -> eval_qf env a && eval_qf env b\n  | Or (a, b) -> eval_qf env a || eval_qf env b\n  | Not a -> not (eval_qf env a)\n"
+        },
+        {
+          "name": "eval",
+          "kind": "equation",
+          "start_line": 76,
+          "end_line": 88,
+          "sha256": "f18b374d232812879a6c773e4d80082ba698011821890145d5ed44a956c32a56",
+          "source": "let[@def] rec (eval @ total) env f =\n  match f with\n  | Plain q -> eval_qf env q\n  | Conj (a, b) -> eval env a && eval env b\n  | Disj (a, b) -> eval env a || eval env b\n  | Neg a -> not (eval env a)\n  | Exists a ->\n    eval (Global :: env) a || eval (Regional :: env) a\n    || eval (Local :: env) a\n  | Forall a ->\n    eval (Global :: env) a && eval (Regional :: env) a\n    && eval (Local :: env) a\n"
+        },
+        {
+          "name": "scoped_term",
+          "kind": "equation",
+          "start_line": 89,
+          "end_line": 96,
+          "sha256": "0150840112a0af4133e1dee1e0e690a670d73dfaed27f7c3ffc438febc568c76",
+          "source": "let[@def] rec (scoped_term @ total) depth t =\n  match t with\n  | Const _ -> true\n  | Var i -> 0 <= i && i < depth\n  | Join (a, b) | Meet (a, b) ->\n    scoped_term depth a && scoped_term depth b\n  | Regional_to_global a | Table (_, _, _, a) -> scoped_term depth a\n"
+        },
+        {
+          "name": "scoped_qf",
+          "kind": "equation",
+          "start_line": 97,
+          "end_line": 103,
+          "sha256": "2dff57b9dca167e949ac6316bd79562f1866de72a7e51a668625321b819dcebb",
+          "source": "let[@def] rec (scoped_qf @ total) depth q =\n  match q with\n  | Le (a, b) -> scoped_term depth a && scoped_term depth b\n  | And (a, b) | Or (a, b) ->\n    scoped_qf depth a && scoped_qf depth b\n  | Not a -> scoped_qf depth a\n"
+        },
+        {
+          "name": "scoped",
+          "kind": "equation",
+          "start_line": 104,
+          "end_line": 111,
+          "sha256": "14aa35292149a94a949c7cbfe26dd47a875113b3e75419004d4e5c3e22ce2cfc",
+          "source": "let[@def] rec (scoped @ total) depth f =\n  match f with\n  | Plain q -> scoped_qf depth q\n  | Conj (a, b) | Disj (a, b) ->\n    scoped depth a && scoped depth b\n  | Neg a -> scoped depth a\n  | Exists a | Forall a -> scoped (depth + 1) a\n"
+        },
+        {
+          "name": "subsumption_formula",
+          "kind": "equation",
+          "start_line": 112,
+          "end_line": 116,
+          "sha256": "2a59f1bad4edacde3bf1b02c5701e8fe4eb815447c917ba579ba4dcc842a62a3",
+          "source": "let[@def] (subsumption_formula @ total) right obligation =\n  Forall\n    (Disj\n       (Neg (Plain right),\n        Exists (Plain obligation)))\n"
+        }
+      ]
+    },
+    {
+      "path": "/Users/julesjacobs/git/vox/worktrees/mode-solver-verification-20260924/testsuite/tests/vox/mode_solver_semantics.mli",
+      "relative_path": "testsuite/tests/vox/mode_solver_semantics.mli",
+      "sha256": "e3f5184f8d4d11ed0ba3910eb9c1ff06a733ceb2f14be3d2028ca5f2c3936e0c",
+      "declarations": [
+        {
+          "name": "elt",
+          "kind": "type",
+          "start_line": 1,
+          "end_line": 1,
+          "sha256": "6b21f4341101acb91d88c11f0ccd601e953934b653c7798d832f12c2a42db69c",
+          "source": "type elt : immutable_data = Global | Regional | Local\n"
+        },
+        {
+          "name": "rank",
+          "kind": "val",
+          "start_line": 2,
+          "end_line": 3,
+          "sha256": "1326a05bdf50028867f3aa526668275a83d1f4c7094b8f54312a8e6addbe4067",
+          "source": "val rank : elt -> int @@ total\n"
+        },
+        {
+          "name": "rank_def",
+          "kind": "val",
+          "start_line": 4,
+          "end_line": 8,
+          "sha256": "c0fbdf2fa85ffe3f0b9db97dc4737a1bac192950fa29ad7352352712bf618abb",
+          "source": "val rank_def :\n  (x : elt) ->\n  {u : unit\n    | (rank x) === (match x with | Global -> 0 | Regional -> 1 | Local -> 2)} @@ total\n"
+        },
+        {
+          "name": "le",
+          "kind": "val",
+          "start_line": 9,
+          "end_line": 10,
+          "sha256": "e64cbded5bd52ef971c8ff1481093ff4785f8354675f2bfb0a4580bdd9170a3f",
+          "source": "val le : elt -> elt -> bool @@ total\n"
+        },
+        {
+          "name": "le_def",
+          "kind": "val",
+          "start_line": 11,
+          "end_line": 13,
+          "sha256": "61ce26c3e503e74d8d7b63333f552cd0fa18ab6d204d627144edb21729a9957e",
+          "source": "val le_def :\n  (a : elt) -> (b : elt) -> {u : unit | (le a b) === ((rank a) <= (rank b))} @@ total\n"
+        },
+        {
+          "name": "join",
+          "kind": "val",
+          "start_line": 14,
+          "end_line": 15,
+          "sha256": "6064ee0bfc08a1d39e9bb01281b8355ad467ecfb8b30286d8c17f4b9bb9fbbe7",
+          "source": "val join : elt -> elt -> elt @@ total\n"
+        },
+        {
+          "name": "join_def",
+          "kind": "val",
+          "start_line": 16,
+          "end_line": 19,
+          "sha256": "567e74e56c6fdaebd0bb01992e51503fcb6ed98955dd1e8314cc2e2f9b51248c",
+          "source": "val join_def :\n  (a : elt) ->\n  (b : elt) -> {u : unit | (join a b) === (if le a b then b else a)} @@ total\n"
+        },
+        {
+          "name": "meet",
+          "kind": "val",
+          "start_line": 20,
+          "end_line": 21,
+          "sha256": "162b4dcf826217cb192e5ad51195a9660d5009188514a214bca377e531a80063",
+          "source": "val meet : elt -> elt -> elt @@ total\n"
+        },
+        {
+          "name": "meet_def",
+          "kind": "val",
+          "start_line": 22,
+          "end_line": 25,
+          "sha256": "49d558d10fc9713b7b79a372b8fb4aac86a2f55465ff9f7e656cea53ea4df100",
+          "source": "val meet_def :\n  (a : elt) ->\n  (b : elt) -> {u : unit | (meet a b) === (if le a b then a else b)} @@ total\n"
+        },
+        {
+          "name": "regional_to_global",
+          "kind": "val",
+          "start_line": 26,
+          "end_line": 27,
+          "sha256": "47041889da6ca15e7c83d30cf7c763c341bd64d53cb2d233c74843f017a5fba9",
+          "source": "val regional_to_global : elt -> elt @@ total\n"
+        },
+        {
+          "name": "regional_to_global_def",
+          "kind": "val",
+          "start_line": 28,
+          "end_line": 33,
+          "sha256": "f2c9fc6e7abf42ef9782edfbf71308110d4be633b2b142a9b0708672cc1ee81a",
+          "source": "val regional_to_global_def :\n  (x : elt) ->\n  {u : unit\n    | (regional_to_global x) ===\n        (match x with | Global | Regional -> Global | Local -> Local)} @@ total\n"
+        },
+        {
+          "name": "regional_to_local",
+          "kind": "val",
+          "start_line": 34,
+          "end_line": 35,
+          "sha256": "aa2e0f8b4e823c2d7d0f6d2d9b46aedbf42d931d8ed665303523f862569e8656",
+          "source": "val regional_to_local : elt -> elt @@ total\n"
+        },
+        {
+          "name": "regional_to_local_def",
+          "kind": "val",
+          "start_line": 36,
+          "end_line": 41,
+          "sha256": "6e0b800cecd9c0fbf7f2a68ea8d19a1ea7a50139bac948579611844aa5fc5037",
+          "source": "val regional_to_local_def :\n  (x : elt) ->\n  {u : unit\n    | (regional_to_local x) ===\n        (match x with | Global -> Global | Regional | Local -> Local)} @@ total\n"
+        },
+        {
+          "name": "term",
+          "kind": "type",
+          "start_line": 42,
+          "end_line": 49,
+          "sha256": "e55a6f019455259ff74cc1246fc26f0ebd09ed038881cd013548148669f22c57",
+          "source": "type term : immutable_data =\n    Const of elt\n  | Var of int\n  | Join of term * term\n  | Meet of term * term\n  | Regional_to_global of term\n  | Table of elt * elt * elt * term\n[@@inductive]\n"
+        },
+        {
+          "name": "apply_table",
+          "kind": "val",
+          "start_line": 50,
+          "end_line": 51,
+          "sha256": "5a59946ac00b87ea02564a51c25eb5f518801ee2edd5b7b8658519273182eb9a",
+          "source": "val apply_table : elt -> elt -> elt -> elt -> elt @@ total\n"
+        },
+        {
+          "name": "apply_table_def",
+          "kind": "val",
+          "start_line": 52,
+          "end_line": 63,
+          "sha256": "b1b6c7c5a039f48e848daeefbab02ac250eec1717abf03203ac48a6665c0012c",
+          "source": "val apply_table_def :\n  (global : elt) ->\n  (regional : elt) ->\n  (local : elt) ->\n  (value : elt) ->\n  {u : unit\n    | (apply_table global regional local value) ===\n        (match value with\n         | Global -> global\n         | Regional -> regional\n         | Local -> local)} @@ total\n"
+        },
+        {
+          "name": "qf",
+          "kind": "type",
+          "start_line": 64,
+          "end_line": 65,
+          "sha256": "1d065250fb2bfba7ce707da3f7f9264d831a0755ab99441bbcfa71c78cefc5ad",
+          "source": "type qf : immutable_data = Le of term * term | And of qf * qf | Or of qf * qf | Not of qf\n[@@inductive]\n"
+        },
+        {
+          "name": "formula",
+          "kind": "type",
+          "start_line": 66,
+          "end_line": 73,
+          "sha256": "978d2b15210d5dd93fb64fb1652eb0d49eec22f03fb1f0cec798e6931c7958b7",
+          "source": "type formula : immutable_data =\n    Plain of qf\n  | Conj of formula * formula\n  | Disj of formula * formula\n  | Neg of formula\n  | Exists of formula\n  | Forall of formula\n[@@inductive]\n"
+        },
+        {
+          "name": "lookup",
+          "kind": "val",
+          "start_line": 74,
+          "end_line": 75,
+          "sha256": "914d0e4ae5043b121bdbde52b4dc8ddc9236dcb2086520634e9d682a5905b967",
+          "source": "val lookup : elt list -> int -> elt @@ total\n"
+        },
+        {
+          "name": "lookup_def",
+          "kind": "val",
+          "start_line": 76,
+          "end_line": 87,
+          "sha256": "2e225c70302ff964326c015051432b6a0ccd556119f900b213cd7ed1a9f5f843",
+          "source": "val lookup_def :\n  (env : elt list) ->\n  (i : int) ->\n  {u : unit\n    | (lookup env i) ===\n        (if i < 0\n         then Global\n         else\n           (match env with\n            | [] -> Global\n            | b::rest -> if i = 0 then b else lookup rest (i - 1)))} @@ total\n"
+        },
+        {
+          "name": "eval_term",
+          "kind": "val",
+          "start_line": 88,
+          "end_line": 89,
+          "sha256": "df7f3a36864c6c822d4b375817d1b64b14eaeb2baa2ce8b05acdc4dc1f794fe5",
+          "source": "val eval_term : elt list -> term -> elt @@ total\n"
+        },
+        {
+          "name": "eval_term_def",
+          "kind": "val",
+          "start_line": 90,
+          "end_line": 103,
+          "sha256": "190a5489dcda758113b06a017b704799d93a0c15ac1b32e3e01a55ed7296e75b",
+          "source": "val eval_term_def :\n  (env : elt list) ->\n  (t : term) ->\n  {u : unit\n    | (eval_term env t) ===\n        (match t with\n         | Const b' -> b'\n         | Var i -> lookup env i\n         | Join (a', b'') -> join (eval_term env a') (eval_term env b'')\n         | Meet (a'', b) -> meet (eval_term env a'') (eval_term env b)\n         | Regional_to_global a''' -> regional_to_global (eval_term env a''')\n         | Table (global, regional, local, a) ->\n             apply_table global regional local (eval_term env a))} @@ total\n"
+        },
+        {
+          "name": "eval_qf",
+          "kind": "val",
+          "start_line": 104,
+          "end_line": 105,
+          "sha256": "cecf516727f889c8a8c2f7c9255ed27fe2999455e7fecb6d903734cdcf83f4c4",
+          "source": "val eval_qf : elt list -> qf -> bool @@ total\n"
+        },
+        {
+          "name": "eval_qf_def",
+          "kind": "val",
+          "start_line": 106,
+          "end_line": 116,
+          "sha256": "ef50dcff82fa36c08506f1359092934caf81f840b84ae3cf93daf2597261ef83",
+          "source": "val eval_qf_def :\n  (env : elt list) ->\n  (q : qf) ->\n  {u : unit\n    | (eval_qf env q) ===\n        (match q with\n         | Le (a', b') -> le (eval_term env a') (eval_term env b')\n         | And (a'', b'') -> (eval_qf env a'') && (eval_qf env b'')\n         | Or (a''', b) -> (eval_qf env a''') || (eval_qf env b)\n         | Not a -> not (eval_qf env a))} @@ total\n"
+        },
+        {
+          "name": "eval",
+          "kind": "val",
+          "start_line": 117,
+          "end_line": 118,
+          "sha256": "10d0d50afe5987f49108ce33992b3c820cc36d5add50944c6d9c82b799f9c22c",
+          "source": "val eval : elt list -> formula -> bool @@ total\n"
+        },
+        {
+          "name": "eval_def",
+          "kind": "val",
+          "start_line": 119,
+          "end_line": 135,
+          "sha256": "9a988aacb069fcfd9a3b19b706cc6707041f502a11664b4cd773a8ce29d64c0f",
+          "source": "val eval_def :\n  (env : elt list) ->\n  (f : formula) ->\n  {u : unit\n    | (eval env f) ===\n        (match f with\n         | Plain q -> eval_qf env q\n         | Conj (a', b') -> (eval env a') && (eval env b')\n         | Disj (a'', b) -> (eval env a'') || (eval env b)\n         | Neg a''' -> not (eval env a''')\n         | Exists a'''' ->\n             (eval (Global :: env) a'''') ||\n               ((eval (Regional :: env) a'''') || (eval (Local :: env) a''''))\n         | Forall a ->\n             (eval (Global :: env) a) &&\n               ((eval (Regional :: env) a) && (eval (Local :: env) a)))} @@ total\n"
+        },
+        {
+          "name": "scoped_term",
+          "kind": "val",
+          "start_line": 136,
+          "end_line": 137,
+          "sha256": "b712dadf3c284898c2fb4a29f600df66e6a90cf68ec59aa23b2bd47ff7108518",
+          "source": "val scoped_term : int -> term -> bool @@ total\n"
+        },
+        {
+          "name": "scoped_term_def",
+          "kind": "val",
+          "start_line": 138,
+          "end_line": 149,
+          "sha256": "1c024a36397750b92c037a1fd345b6ea27b91717103f2f02d9b5cb627eb6ee46",
+          "source": "val scoped_term_def :\n  (depth : int) ->\n  (t : term) ->\n  {u : unit\n    | (scoped_term depth t) ===\n        (match t with\n         | Const _ -> true\n         | Var i -> (0 <= i) && (i < depth)\n         | Join (a', b) | Meet (a', b) ->\n             (scoped_term depth a') && (scoped_term depth b)\n         | Regional_to_global a | Table (_, _, _, a) -> scoped_term depth a)} @@ total\n"
+        },
+        {
+          "name": "scoped_qf",
+          "kind": "val",
+          "start_line": 150,
+          "end_line": 151,
+          "sha256": "6b5fd8f17de98defc216f0a622c636c9258e233723b93e00683620ac52cd9411",
+          "source": "val scoped_qf : int -> qf -> bool @@ total\n"
+        },
+        {
+          "name": "scoped_qf_def",
+          "kind": "val",
+          "start_line": 152,
+          "end_line": 162,
+          "sha256": "5a88cd9014f4a025067752d3eee9d1ef93fe1940e39b7223963d0d6984905f8c",
+          "source": "val scoped_qf_def :\n  (depth : int) ->\n  (q : qf) ->\n  {u : unit\n    | (scoped_qf depth q) ===\n        (match q with\n         | Le (a', b') -> (scoped_term depth a') && (scoped_term depth b')\n         | And (a'', b) | Or (a'', b) ->\n             (scoped_qf depth a'') && (scoped_qf depth b)\n         | Not a -> scoped_qf depth a)} @@ total\n"
+        },
+        {
+          "name": "scoped",
+          "kind": "val",
+          "start_line": 163,
+          "end_line": 164,
+          "sha256": "4840e51156b76610b42c8b5e16adec1ada81729ffdc9c168ebd25241ecfd3060",
+          "source": "val scoped : int -> formula -> bool @@ total\n"
+        },
+        {
+          "name": "scoped_def",
+          "kind": "val",
+          "start_line": 165,
+          "end_line": 176,
+          "sha256": "52f428db97306adbef7ae22bbdb5d0eb9b7b25c6a50953ae45e7238888e0ae8a",
+          "source": "val scoped_def :\n  (depth : int) ->\n  (f : formula) ->\n  {u : unit\n    | (scoped depth f) ===\n        (match f with\n         | Plain q -> scoped_qf depth q\n         | Conj (a', b) | Disj (a', b) ->\n             (scoped depth a') && (scoped depth b)\n         | Neg a'' -> scoped depth a''\n         | Exists a | Forall a -> scoped (depth + 1) a)} @@ total\n"
+        },
+        {
+          "name": "subsumption_formula",
+          "kind": "val",
+          "start_line": 177,
+          "end_line": 178,
+          "sha256": "807f76d3d1f794893407ab938f16e306f6e2c0be9bfc0224b718893ca4e52d58",
+          "source": "val subsumption_formula : qf -> qf -> formula @@ total\n"
+        },
+        {
+          "name": "subsumption_formula_def",
+          "kind": "val",
+          "start_line": 179,
+          "end_line": 184,
+          "sha256": "c2517908961123c85e1b3301c99feb6a4c6fa2de1208d5ca0899b862d6b80a29",
+          "source": "val subsumption_formula_def :\n  (right : qf) ->\n  (obligation : qf) ->\n  {u : unit\n    | (subsumption_formula right obligation) ===\n        (Forall (Disj ((Neg (Plain right)), (Exists (Plain obligation)))))} @@ total\n"
+        }
+      ]
+    },
+    {
+      "path": "/Users/julesjacobs/git/vox/worktrees/mode-solver-verification-20260924/testsuite/tests/vox/mode_solver_graph_semantics.ml",
+      "relative_path": "testsuite/tests/vox/mode_solver_graph_semantics.ml",
+      "sha256": "363440cfc56a2b6b615c846ad518220db7e4e1f62d286a996142466aac148680",
+      "declarations": [
+        {
+          "name": "inequality",
+          "kind": "type",
+          "start_line": 3,
+          "end_line": 3,
+          "sha256": "a656327df8f7226bb1d9d6bf8c6f0852934dd8f0f2cc0919c0048c935d723864",
+          "source": "type inequality : immutable_data = { left : term; right : term }\n"
+        },
+        {
+          "name": "graph",
+          "kind": "type",
+          "start_line": 4,
+          "end_line": 5,
+          "sha256": "b78b7f91c0bb1dbba7cca6c3fa6f225464219047dc99e341203d3608ecfb1a8d",
+          "source": "type graph : immutable_data = inequality list\n"
+        },
+        {
+          "name": "models",
+          "kind": "equation",
+          "start_line": 6,
+          "end_line": 12,
+          "sha256": "31e5eece5188e5507a4311a280f2bb8d96fb238c611b701c3bc8d1f8ce16acb8",
+          "source": "let[@def] rec (models @ total) env graph =\n  match graph with\n  | [] -> true\n  | edge :: rest ->\n    le (eval_term env edge.left) (eval_term env edge.right)\n    && models env rest\n"
+        },
+        {
+          "name": "scoped_graph",
+          "kind": "equation",
+          "start_line": 13,
+          "end_line": 19,
+          "sha256": "28bf348e786b2421c8ada94cd4dc5f34eb9bed1f7a7a65423619aa17a65ba80b",
+          "source": "let[@def] rec (scoped_graph @ total) depth graph =\n  match graph with\n  | [] -> true\n  | edge :: rest ->\n    scoped_term depth edge.left && scoped_term depth edge.right\n    && scoped_graph depth rest\n"
+        },
+        {
+          "name": "models_exists",
+          "kind": "equation",
+          "start_line": 20,
+          "end_line": 27,
+          "sha256": "fbcda779a9e2558f131fc6c142b5dd9333593a0e4d3a4099138f188d2920f7b2",
+          "source": "let[@def] rec (models_exists @ total) (count : unit list) env graph =\n  match count with\n  | [] -> models env graph\n  | _ :: rest ->\n    models_exists rest (Global :: env) graph\n    || models_exists rest (Regional :: env) graph\n    || models_exists rest (Local :: env) graph\n"
+        },
+        {
+          "name": "scoped_exists",
+          "kind": "equation",
+          "start_line": 28,
+          "end_line": 31,
+          "sha256": "a98abdae2dd78fd2896ccea9d0fd90f4b58fffdbb8d99afe27cc9053250ac69b",
+          "source": "let[@def] rec (scoped_exists @ total) (count : unit list) depth graph =\n  match count with\n  | [] -> scoped_graph depth graph\n  | _ :: rest -> scoped_exists rest (depth + 1) graph\n"
+        }
+      ]
+    },
+    {
+      "path": "/Users/julesjacobs/git/vox/worktrees/mode-solver-verification-20260924/testsuite/tests/vox/mode_solver_graph_semantics.mli",
+      "relative_path": "testsuite/tests/vox/mode_solver_graph_semantics.mli",
+      "sha256": "4fb7f2b058c7cf1b228da65fefe4f98b4d3aa3a2258d6c76c11b41ba36a12eb6",
+      "declarations": [
+        {
+          "name": "inequality",
+          "kind": "type",
+          "start_line": 1,
+          "end_line": 4,
+          "sha256": "ee05e55e941dbeb2d8047d43a2e82db79d627c34ee399174f005f5138aceb0b9",
+          "source": "type inequality : immutable_data = {\n  left : Mode_solver_semantics.term;\n  right : Mode_solver_semantics.term;\n}\n"
+        },
+        {
+          "name": "graph",
+          "kind": "type",
+          "start_line": 5,
+          "end_line": 5,
+          "sha256": "b78b7f91c0bb1dbba7cca6c3fa6f225464219047dc99e341203d3608ecfb1a8d",
+          "source": "type graph : immutable_data = inequality list\n"
+        },
+        {
+          "name": "models",
+          "kind": "val",
+          "start_line": 6,
+          "end_line": 7,
+          "sha256": "52295d10bd45cd477ee054a66e85eb4eeaf210d3cc2264a47e01934558a2fa17",
+          "source": "val models : Mode_solver_semantics.elt list -> inequality list -> bool @@ total\n"
+        },
+        {
+          "name": "models_def",
+          "kind": "val",
+          "start_line": 8,
+          "end_line": 20,
+          "sha256": "8937b08925dafad56357a9f1e2de806e9b4956816d6a547d0f3dd5012ab3629e",
+          "source": "val models_def :\n  (env : Mode_solver_semantics.elt list) ->\n  (graph : inequality list) ->\n  {u : unit\n    | (models env graph) ===\n        (match graph with\n         | [] -> true\n         | edge::rest ->\n             (Mode_solver_semantics.le\n                (Mode_solver_semantics.eval_term env edge.left)\n                (Mode_solver_semantics.eval_term env edge.right))\n               && (models env rest))} @@ total\n"
+        },
+        {
+          "name": "scoped_graph",
+          "kind": "val",
+          "start_line": 21,
+          "end_line": 22,
+          "sha256": "b0db84b5f880defba2038c506f9e01efc476b7dd9baa83626ede451d17225a7a",
+          "source": "val scoped_graph : int -> inequality list -> bool @@ total\n"
+        },
+        {
+          "name": "scoped_graph_def",
+          "kind": "val",
+          "start_line": 23,
+          "end_line": 34,
+          "sha256": "9598981c7e6e0d62f94114febd4c0b4f27e7086a04eea560eb8d87a9cc1588ca",
+          "source": "val scoped_graph_def :\n  (depth : int) ->\n  (graph : inequality list) ->\n  {u : unit\n    | (scoped_graph depth graph) ===\n        (match graph with\n         | [] -> true\n         | edge::rest ->\n             (Mode_solver_semantics.scoped_term depth edge.left) &&\n               ((Mode_solver_semantics.scoped_term depth edge.right) &&\n                  (scoped_graph depth rest)))} @@ total\n"
+        },
+        {
+          "name": "models_exists",
+          "kind": "val",
+          "start_line": 35,
+          "end_line": 37,
+          "sha256": "a91844ddbd37871450cc65607f2e8dd266e7ccac2acea04ece51f17cb291af99",
+          "source": "val models_exists :\n  unit list -> Mode_solver_semantics.elt list -> inequality list -> bool @@ total\n"
+        },
+        {
+          "name": "models_exists_def",
+          "kind": "val",
+          "start_line": 38,
+          "end_line": 54,
+          "sha256": "8fa8df7341b9862fc4563120bc8d1da4f5776e1f6f5863ab37fd0a932bf78b43",
+          "source": "val models_exists_def :\n  (count : unit list) ->\n  (env : Mode_solver_semantics.elt list) ->\n  (graph : inequality list) ->\n  {u : unit\n    | (models_exists count env graph) ===\n        (match count with\n         | [] -> models env graph\n         | _::rest ->\n             (models_exists rest (Mode_solver_semantics.Global :: env) graph)\n               ||\n               ((models_exists rest (Mode_solver_semantics.Regional :: env)\n                   graph)\n                  ||\n                  (models_exists rest (Mode_solver_semantics.Local :: env)\n                     graph)))} @@ total\n"
+        },
+        {
+          "name": "scoped_exists",
+          "kind": "val",
+          "start_line": 55,
+          "end_line": 56,
+          "sha256": "f7bd5d56252a440b7e87a09a8282a3051cbdfc05bb9505ed403a16da24c0732f",
+          "source": "val scoped_exists : unit list -> int -> inequality list -> bool @@ total\n"
+        },
+        {
+          "name": "scoped_exists_def",
+          "kind": "val",
+          "start_line": 57,
+          "end_line": 65,
+          "sha256": "db103f355c8619615742a41442e170b65f349560c769206be885023768d8d4b1",
+          "source": "val scoped_exists_def :\n  (count : unit list) ->\n  (depth : int) ->\n  (graph : inequality list) ->\n  {u : unit\n    | (scoped_exists count depth graph) ===\n        (match count with\n         | [] -> scoped_graph depth graph\n         | _::rest -> scoped_exists rest (depth + 1) graph)} @@ total\n"
+        }
+      ]
+    },
+    {
+      "path": "/Users/julesjacobs/git/vox/worktrees/mode-solver-verification-20260924/testsuite/tests/vox/mode_solver_guarded_semantics.ml",
+      "relative_path": "testsuite/tests/vox/mode_solver_guarded_semantics.ml",
+      "sha256": "ca75d6f37b608782d4794240e67da3c314f04e6f081e95ebc5ef56cc9c25e844",
+      "declarations": [
+        {
+          "name": "quantifier",
+          "kind": "type",
+          "start_line": 3,
+          "end_line": 4,
+          "sha256": "c3bfdf474c6aa1073131424f1141e637f437558ddafcac95e32a5d5080883a00",
+          "source": "type quantifier : immutable_data = Universal | Existential\n"
+        },
+        {
+          "name": "admissible",
+          "kind": "equation",
+          "start_line": 5,
+          "end_line": 12,
+          "sha256": "b193805835265eb3cfe349b14f4d4d2833c496cbff0790ef9a01931bbafa64aa",
+          "source": "let[@def] rec (admissible @ total) (prefix : quantifier list) env guard =\n  match prefix with\n  | [] -> eval_qf env guard\n  | _ :: rest ->\n    admissible rest (Global :: env) guard\n    || admissible rest (Regional :: env) guard\n    || admissible rest (Local :: env) guard\n"
+        },
+        {
+          "name": "game",
+          "kind": "equation",
+          "start_line": 13,
+          "end_line": 30,
+          "sha256": "55bd0fccaaec59efd36b4642a40d959e28e0cd5bb1456eff3f35f66e0bca9460",
+          "source": "let[@def] rec (game @ total) prefix env guard witness =\n  match prefix with\n  | [] -> eval_qf env witness\n  | Existential :: rest ->\n    (admissible rest (Global :: env) guard\n     && game rest (Global :: env) guard witness)\n    || (admissible rest (Regional :: env) guard\n        && game rest (Regional :: env) guard witness)\n    || (admissible rest (Local :: env) guard\n        && game rest (Local :: env) guard witness)\n  | Universal :: rest ->\n    (not (admissible rest (Global :: env) guard)\n     || game rest (Global :: env) guard witness)\n    && (not (admissible rest (Regional :: env) guard)\n        || game rest (Regional :: env) guard witness)\n    && (not (admissible rest (Local :: env) guard)\n        || game rest (Local :: env) guard witness)\n"
+        },
+        {
+          "name": "append_prefix",
+          "kind": "equation",
+          "start_line": 31,
+          "end_line": 35,
+          "sha256": "7b3173ea5f8ce93be10d738d06d6edec402a53e4f2844a0ee62e326aa1cc26ad",
+          "source": "let[@def] rec (append_prefix @ total) (outer : quantifier list) (inner : quantifier list) =\n  match outer with\n  | [] -> inner\n  | head :: rest -> head :: append_prefix rest inner\n"
+        },
+        {
+          "name": "normalized_game",
+          "kind": "equation",
+          "start_line": 36,
+          "end_line": 38,
+          "sha256": "5616b33b93f1a06d821a14eb5b0c98f6b9920408437440c46755aa1eada56933",
+          "source": "let[@def] (normalized_game @ total) prefix env guard witness =\n  admissible prefix env guard && game prefix env guard witness\n"
+        },
+        {
+          "name": "scoped_prefix",
+          "kind": "equation",
+          "start_line": 39,
+          "end_line": 42,
+          "sha256": "e58a128e371ea8ce33472fcb63d12b55568d715f0f22cf5257e553581645c58a",
+          "source": "let[@def] rec (scoped_prefix @ total) (prefix : quantifier list) depth q =\n  match prefix with\n  | [] -> scoped_qf depth q\n  | _ :: rest -> scoped_prefix rest (depth + 1) q\n"
+        }
+      ]
+    },
+    {
+      "path": "/Users/julesjacobs/git/vox/worktrees/mode-solver-verification-20260924/testsuite/tests/vox/mode_solver_guarded_semantics.mli",
+      "relative_path": "testsuite/tests/vox/mode_solver_guarded_semantics.mli",
+      "sha256": "e65ab398e9bd1591dc599577ca37b917764281662983e5a0da43c9350f57a11a",
+      "declarations": [
+        {
+          "name": "quantifier",
+          "kind": "type",
+          "start_line": 1,
+          "end_line": 1,
+          "sha256": "c3bfdf474c6aa1073131424f1141e637f437558ddafcac95e32a5d5080883a00",
+          "source": "type quantifier : immutable_data = Universal | Existential\n"
+        },
+        {
+          "name": "admissible",
+          "kind": "val",
+          "start_line": 2,
+          "end_line": 5,
+          "sha256": "00699545e796e5e8d4a020563f1cb1f578b96296fde91d0e386e2770c260147c",
+          "source": "val admissible :\n  quantifier list ->\n  Mode_solver_semantics.elt list -> Mode_solver_semantics.qf -> bool @@ total\n"
+        },
+        {
+          "name": "admissible_def",
+          "kind": "val",
+          "start_line": 6,
+          "end_line": 20,
+          "sha256": "bc41cbe9acfaae60b51b6af0f07986607f26bbcf0b6b9b1d4e31999a5d475d55",
+          "source": "val admissible_def :\n  (prefix : quantifier list) ->\n  (env : Mode_solver_semantics.elt list) ->\n  (guard : Mode_solver_semantics.qf) ->\n  {u : unit\n    | (admissible prefix env guard) ===\n        (match prefix with\n         | [] -> Mode_solver_semantics.eval_qf env guard\n         | _::rest ->\n             (admissible rest (Mode_solver_semantics.Global :: env) guard) ||\n               ((admissible rest (Mode_solver_semantics.Regional :: env)\n                   guard)\n                  ||\n                  (admissible rest (Mode_solver_semantics.Local :: env) guard)))} @@ total\n"
+        },
+        {
+          "name": "game",
+          "kind": "val",
+          "start_line": 21,
+          "end_line": 25,
+          "sha256": "235d24e246284cefb3898415ce1536484806d3365d360878f54a8491ce083875",
+          "source": "val game :\n  quantifier list ->\n  Mode_solver_semantics.elt list ->\n  Mode_solver_semantics.qf -> Mode_solver_semantics.qf -> bool @@ total\n"
+        },
+        {
+          "name": "game_def",
+          "kind": "val",
+          "start_line": 26,
+          "end_line": 72,
+          "sha256": "6c88f78569304f01914158c84dc41f762d41ee052cbda659adc431f8f81e59f0",
+          "source": "val game_def :\n  (prefix : quantifier list) ->\n  (env : Mode_solver_semantics.elt list) ->\n  (guard : Mode_solver_semantics.qf) ->\n  (witness : Mode_solver_semantics.qf) ->\n  {u : unit\n    | (game prefix env guard witness) ===\n        (match prefix with\n         | [] -> Mode_solver_semantics.eval_qf env witness\n         | (Existential)::rest' ->\n             ((admissible rest' (Mode_solver_semantics.Global :: env) guard)\n                &&\n                (game rest' (Mode_solver_semantics.Global :: env) guard\n                   witness))\n               ||\n               (((admissible rest' (Mode_solver_semantics.Regional :: env)\n                    guard)\n                   &&\n                   (game rest' (Mode_solver_semantics.Regional :: env) guard\n                      witness))\n                  ||\n                  ((admissible rest' (Mode_solver_semantics.Local :: env)\n                      guard)\n                     &&\n                     (game rest' (Mode_solver_semantics.Local :: env) guard\n                        witness)))\n         | (Universal)::rest ->\n             ((not\n                 (admissible rest (Mode_solver_semantics.Global :: env) guard))\n                ||\n                (game rest (Mode_solver_semantics.Global :: env) guard\n                   witness))\n               &&\n               (((not\n                    (admissible rest (Mode_solver_semantics.Regional :: env)\n                       guard))\n                   ||\n                   (game rest (Mode_solver_semantics.Regional :: env) guard\n                      witness))\n                  &&\n                  ((not\n                      (admissible rest (Mode_solver_semantics.Local :: env)\n                         guard))\n                     ||\n                     (game rest (Mode_solver_semantics.Local :: env) guard\n                        witness))))} @@ total\n"
+        },
+        {
+          "name": "append_prefix",
+          "kind": "val",
+          "start_line": 73,
+          "end_line": 74,
+          "sha256": "d38aee2658646fdce05354ea9f8cad1e61da3f717a299d6666ef3b09b19f3b5d",
+          "source": "val append_prefix : quantifier list -> quantifier list -> quantifier list @@ total\n"
+        },
+        {
+          "name": "append_prefix_def",
+          "kind": "val",
+          "start_line": 75,
+          "end_line": 83,
+          "sha256": "fea8f57de7f5121d77a69c2a310a08c8d0aaa264cf5e61bbfdf4635e3ed821f8",
+          "source": "val append_prefix_def :\n  (outer : quantifier list) ->\n  (inner : quantifier list) ->\n  {u : unit\n    | (append_prefix outer inner) ===\n        (match outer with\n         | [] -> inner\n         | head::rest -> head :: (append_prefix rest inner))} @@ total\n"
+        },
+        {
+          "name": "normalized_game",
+          "kind": "val",
+          "start_line": 84,
+          "end_line": 88,
+          "sha256": "ff2b4f4bbfc85c6de7da6164b4602e6d8fa0fec41dfad0c5e420c47789b21e4a",
+          "source": "val normalized_game :\n  quantifier list ->\n  Mode_solver_semantics.elt list ->\n  Mode_solver_semantics.qf -> Mode_solver_semantics.qf -> bool @@ total\n"
+        },
+        {
+          "name": "normalized_game_def",
+          "kind": "val",
+          "start_line": 89,
+          "end_line": 97,
+          "sha256": "43e448ca95d56fc382f1d7131d38d20164a107875f5e0a7b3d59face6d0aafaa",
+          "source": "val normalized_game_def :\n  (prefix : quantifier list) ->\n  (env : Mode_solver_semantics.elt list) ->\n  (guard : Mode_solver_semantics.qf) ->\n  (witness : Mode_solver_semantics.qf) ->\n  {u : unit\n    | (normalized_game prefix env guard witness) ===\n        ((admissible prefix env guard) && (game prefix env guard witness))} @@ total\n"
+        },
+        {
+          "name": "scoped_prefix",
+          "kind": "val",
+          "start_line": 98,
+          "end_line": 100,
+          "sha256": "7bdb94c7462a05c168541c894c6b2ec599830c72dca98410d23c7d1e7b92a9d4",
+          "source": "val scoped_prefix :\n  quantifier list -> int -> Mode_solver_semantics.qf -> bool @@ total\n"
+        },
+        {
+          "name": "scoped_prefix_def",
+          "kind": "val",
+          "start_line": 101,
+          "end_line": 109,
+          "sha256": "472283d533df50980f64c011b16cfa5d39d8b62cc3c0d0bdb24f4ff19458c18b",
+          "source": "val scoped_prefix_def :\n  (prefix : quantifier list) ->\n  (depth : int) ->\n  (q : Mode_solver_semantics.qf) ->\n  {u : unit\n    | (scoped_prefix prefix depth q) ===\n        (match prefix with\n         | [] -> Mode_solver_semantics.scoped_qf depth q\n         | _::rest -> scoped_prefix rest (depth + 1) q)} @@ total\n"
+        }
+      ]
+    },
+    {
+      "path": "/Users/julesjacobs/git/vox/worktrees/mode-solver-verification-20260924/testsuite/tests/vox/mode_solver_public.mli",
+      "relative_path": "testsuite/tests/vox/mode_solver_public.mli",
+      "sha256": "b3217db1d0f2eac96aa7310aa1206c2198f89fc9430ce19b92cf1ed6db595e4e",
+      "declarations": [
+        {
+          "name": "regionality_adjunction",
+          "kind": "val",
+          "start_line": 1,
+          "end_line": 11,
+          "sha256": "5deb466dc81952d587a0e7ee27dc6424446d2e02ad184a2eaae72ef74dfa24af",
+          "source": "val regionality_adjunction :\n  (a : Mode_solver_semantics.elt) ->\n  ((b : Mode_solver_semantics.elt) ->\n   {u : unit\n     | (Mode_solver_semantics.le (Mode_solver_semantics.regional_to_local a)\n          b)\n         =\n         (Mode_solver_semantics.le a\n            (Mode_solver_semantics.regional_to_global b))}) @ total\n  stateful @@ total\n"
+        },
+        {
+          "name": "eliminate",
+          "kind": "val",
+          "start_line": 12,
+          "end_line": 13,
+          "sha256": "ee892f4ddf26ef4dd1cbf349772a50c3d73e560bd746bf37029c2a463b252974",
+          "source": "val eliminate : Mode_solver_semantics.formula -> Mode_solver_semantics.qf @@ total\n"
+        },
+        {
+          "name": "eliminate_exact",
+          "kind": "val",
+          "start_line": 14,
+          "end_line": 21,
+          "sha256": "3ae1208f596d92f9c97c498d77d5aefac74cf2a037c769eeb0c8df0e6f417d78",
+          "source": "val eliminate_exact :\n  (env : Mode_solver_semantics.elt list) ->\n  ((f : Mode_solver_semantics.formula) ->\n   {u : unit\n     | (Mode_solver_semantics.eval_qf env (eliminate f)) =\n         (Mode_solver_semantics.eval env f)}) @ total\n  stateful @@ total\n"
+        },
+        {
+          "name": "eliminate_scoped",
+          "kind": "val",
+          "start_line": 22,
+          "end_line": 28,
+          "sha256": "bdb545d728216d6d1b303b78e88cfa7ecfe134fa903832a2737b4b6c6ce7be61",
+          "source": "val eliminate_scoped :\n  (depth : int) ->\n  ((f : {f : Mode_solver_semantics.formula\n          | Mode_solver_semantics.scoped depth f}) ->\n   {u : unit | Mode_solver_semantics.scoped_qf depth (eliminate f)}) @ total\n  stateful @@ total\n"
+        },
+        {
+          "name": "decide_checked",
+          "kind": "val",
+          "start_line": 29,
+          "end_line": 37,
+          "sha256": "2a2cf4de67837d01231e7ef0e15813900287d7a8e01011b2c7b97652c9f81ad1",
+          "source": "val decide_checked :\n  (f : Mode_solver_semantics.formula) ->\n  {answer : bool option\n    | match answer with\n      | None -> not (Mode_solver_semantics.scoped 0 f)\n      | Some value ->\n          (Mode_solver_semantics.scoped 0 f) &&\n            (value = (Mode_solver_semantics.eval [] f))} @@ total\n"
+        },
+        {
+          "name": "project_graph",
+          "kind": "val",
+          "start_line": 38,
+          "end_line": 41,
+          "sha256": "c75c032629258db39d67449ba08ba5bdfd9cf93eaba9bb38b376757e6cebea53",
+          "source": "val project_graph :\n  unit list ->\n  Mode_solver_graph_semantics.inequality list -> Mode_solver_semantics.qf @@ total\n"
+        },
+        {
+          "name": "project_graph_exact",
+          "kind": "val",
+          "start_line": 42,
+          "end_line": 50,
+          "sha256": "e8039111b14e01990da835b0ce05fa59965e2e23af2901a088dfbb436f6c0170",
+          "source": "val project_graph_exact :\n  (count : unit list) ->\n  ((env : Mode_solver_semantics.elt list) ->\n   (graph : Mode_solver_graph_semantics.graph) ->\n   {u : unit\n     | (Mode_solver_semantics.eval_qf env (project_graph count graph)) =\n         (Mode_solver_graph_semantics.models_exists count env graph)}) @ total\n  stateful @@ total\n"
+        },
+        {
+          "name": "project_graph_scoped",
+          "kind": "val",
+          "start_line": 51,
+          "end_line": 59,
+          "sha256": "de91e530be6fdc441386e8b40fc43acf01fe9700d7c734d41559563b15d86c66",
+          "source": "val project_graph_scoped :\n  (count : unit list) ->\n  ((depth : int) ->\n   (graph : {graph : Mode_solver_graph_semantics.graph\n              | Mode_solver_graph_semantics.scoped_exists count depth graph}) ->\n   {u : unit\n     | Mode_solver_semantics.scoped_qf depth (project_graph count graph)}) @ total\n  stateful @@ total\n"
+        },
+        {
+          "name": "decide_graph_checked",
+          "kind": "val",
+          "start_line": 60,
+          "end_line": 70,
+          "sha256": "63dad197d621b8180dd117e341ab5ea8c9cdaadfeea9bae3b834cbbeeb01daa1",
+          "source": "val decide_graph_checked :\n  (count : unit list) ->\n  (graph : Mode_solver_graph_semantics.graph) ->\n  {answer : bool option\n    | match answer with\n      | None -> not (Mode_solver_graph_semantics.scoped_exists count 0 graph)\n      | Some value ->\n          (Mode_solver_graph_semantics.scoped_exists count 0 graph) &&\n            (value =\n               (Mode_solver_graph_semantics.models_exists count [] graph))} @@ total\n"
+        },
+        {
+          "name": "subsumption_residual",
+          "kind": "val",
+          "start_line": 71,
+          "end_line": 74,
+          "sha256": "0b6673bfc34de9dde88ee7b7b2cccaecf0611dd288762308165cf7fc7eda5577",
+          "source": "val subsumption_residual :\n  Mode_solver_semantics.qf ->\n  Mode_solver_semantics.qf -> Mode_solver_semantics.qf @@ total\n"
+        },
+        {
+          "name": "subsumption_residual_exact",
+          "kind": "val",
+          "start_line": 75,
+          "end_line": 86,
+          "sha256": "acb9130c3695990be29225b1a1029101b3975db345a8d29e5687efffe1af8c87",
+          "source": "val subsumption_residual_exact :\n  (env : Mode_solver_semantics.elt list) ->\n  ((guard : Mode_solver_semantics.qf) ->\n   (obligation : Mode_solver_semantics.qf) ->\n   {u : unit\n     | (Mode_solver_semantics.eval_qf env\n          (subsumption_residual guard obligation))\n         =\n         (Mode_solver_semantics.eval env\n            (Mode_solver_semantics.subsumption_formula guard obligation))}) @ total\n  stateful @@ total\n"
+        },
+        {
+          "name": "subsumption_residual_scoped",
+          "kind": "val",
+          "start_line": 87,
+          "end_line": 97,
+          "sha256": "a250dcfdb2ff0959989a28c2529235506a0f96491583f514ff277abe3d274575",
+          "source": "val subsumption_residual_scoped :\n  (depth : int) ->\n  ((guard : {g : Mode_solver_semantics.qf\n              | Mode_solver_semantics.scoped_qf (depth + 1) g}) ->\n   (obligation : {w : Mode_solver_semantics.qf\n                   | Mode_solver_semantics.scoped_qf (depth + 2) w}) ->\n   {u : unit\n     | Mode_solver_semantics.scoped_qf depth\n         (subsumption_residual guard obligation)}) @ total\n  stateful @@ total\n"
+        },
+        {
+          "name": "assert_subsumption",
+          "kind": "val",
+          "start_line": 98,
+          "end_line": 102,
+          "sha256": "f41a83a4242b0f2dcf76755c325cd8c0482f4b00b1bb2c2e540c2a02dc1fdb6d",
+          "source": "val assert_subsumption :\n  Mode_solver_semantics.qf ->\n  Mode_solver_semantics.qf ->\n  Mode_solver_semantics.qf -> Mode_solver_semantics.qf @@ total\n"
+        },
+        {
+          "name": "assert_subsumption_exact",
+          "kind": "val",
+          "start_line": 103,
+          "end_line": 116,
+          "sha256": "a5f1aea5a58fefa26320785866a744ea010325f95be581e2c7e5c94d2caf8590",
+          "source": "val assert_subsumption_exact :\n  (env : Mode_solver_semantics.elt list) ->\n  ((gamma : Mode_solver_semantics.qf) ->\n   (guard : Mode_solver_semantics.qf) ->\n   (obligation : Mode_solver_semantics.qf) ->\n   {u : unit\n     | (Mode_solver_semantics.eval_qf env\n          (assert_subsumption gamma guard obligation))\n         =\n         ((Mode_solver_semantics.eval_qf env gamma) &&\n            (Mode_solver_semantics.eval env\n               (Mode_solver_semantics.subsumption_formula guard obligation)))}) @ total\n  stateful @@ total\n"
+        },
+        {
+          "name": "projected",
+          "kind": "type",
+          "start_line": 117,
+          "end_line": 120,
+          "sha256": "3a3dfc02c39e9a8a7d4c4fd92ea11364f834699bb07ad1def74ddd73226eb3e3",
+          "source": "type projected : immutable_data = {\n  domain : Mode_solver_semantics.qf;\n  winning : Mode_solver_semantics.qf;\n}\n"
+        },
+        {
+          "name": "project_guarded",
+          "kind": "val",
+          "start_line": 121,
+          "end_line": 124,
+          "sha256": "4fba9dd17a72e699329fd629e879de7de091f996685e30ee609307f539c4869a",
+          "source": "val project_guarded :\n  Mode_solver_guarded_semantics.quantifier list ->\n  Mode_solver_semantics.qf -> Mode_solver_semantics.qf -> projected @@ total\n"
+        },
+        {
+          "name": "project_guarded_exact",
+          "kind": "val",
+          "start_line": 125,
+          "end_line": 139,
+          "sha256": "df6a74ba8c9c2882fc49f816db183c4ba3f5345ae7fed165a20ce7fa031b54ef",
+          "source": "val project_guarded_exact :\n  (prefix : Mode_solver_guarded_semantics.quantifier list) ->\n  ((env : Mode_solver_semantics.elt list) ->\n   (guard : Mode_solver_semantics.qf) ->\n   (witness : Mode_solver_semantics.qf) ->\n   {u : unit\n     | ((Mode_solver_semantics.eval_qf env\n           (project_guarded prefix guard witness).domain)\n          = (Mode_solver_guarded_semantics.admissible prefix env guard))\n         &&\n         ((Mode_solver_semantics.eval_qf env\n             (project_guarded prefix guard witness).winning)\n            = (Mode_solver_guarded_semantics.game prefix env guard witness))}) @ total\n  stateful @@ total\n"
+        },
+        {
+          "name": "project_admissible",
+          "kind": "val",
+          "start_line": 140,
+          "end_line": 144,
+          "sha256": "072771fcc798649d90d3d78abc4259da66d2c6e1ff1d8b18de81dd358da8e5b9",
+          "source": "val project_admissible :\n  Mode_solver_guarded_semantics.quantifier list ->\n  Mode_solver_semantics.qf ->\n  Mode_solver_semantics.qf -> Mode_solver_semantics.qf @@ total\n"
+        },
+        {
+          "name": "project_admissible_exact",
+          "kind": "val",
+          "start_line": 145,
+          "end_line": 157,
+          "sha256": "b4e220702c6dc0ca91d597caaa0c56342a1c92d179a10b279a49a3b2bf49ce75",
+          "source": "val project_admissible_exact :\n  (prefix : Mode_solver_guarded_semantics.quantifier list) ->\n  ((env : Mode_solver_semantics.elt list) ->\n   (guard : Mode_solver_semantics.qf) ->\n   (witness : Mode_solver_semantics.qf) ->\n   {u : unit\n     | (Mode_solver_semantics.eval_qf env\n          (project_admissible prefix guard witness))\n         =\n         (Mode_solver_guarded_semantics.normalized_game prefix env guard\n            witness)}) @ total\n  stateful @@ total\n"
+        },
+        {
+          "name": "project_scopes_compose",
+          "kind": "val",
+          "start_line": 158,
+          "end_line": 171,
+          "sha256": "daf5bed99921f4c26cd4aa7b1c9b25ddfdc4547bc6c44480ebb03312d933d28b",
+          "source": "val project_scopes_compose :\n  (outer : Mode_solver_guarded_semantics.quantifier list) ->\n  ((inner : Mode_solver_guarded_semantics.quantifier list) ->\n   (guard : Mode_solver_semantics.qf) ->\n   (witness : Mode_solver_semantics.qf) ->\n   {u : unit\n     | (project_guarded\n          (Mode_solver_guarded_semantics.append_prefix outer inner) guard\n          witness)\n         ===\n         (project_guarded outer (project_guarded inner guard witness).domain\n            (project_guarded inner guard witness).winning)}) @ total\n  stateful @@ total\n"
+        },
+        {
+          "name": "project_admissible_scoped",
+          "kind": "val",
+          "start_line": 172,
+          "end_line": 183,
+          "sha256": "c8da571e17547d2c893cd035613af290bcd7ecd2cee0e7b48bac8c576ddb3f25",
+          "source": "val project_admissible_scoped :\n  (prefix : Mode_solver_guarded_semantics.quantifier list) ->\n  ((depth : int) ->\n   (guard : {g : Mode_solver_semantics.qf\n              | Mode_solver_guarded_semantics.scoped_prefix prefix depth g}) ->\n   (witness : {w : Mode_solver_semantics.qf\n                | Mode_solver_guarded_semantics.scoped_prefix prefix depth w}) ->\n   {u : unit\n     | Mode_solver_semantics.scoped_qf depth\n         (project_admissible prefix guard witness)}) @ total\n  stateful @@ total\n"
+        },
+        {
+          "name": "assert_graph_subsumption",
+          "kind": "val",
+          "start_line": 184,
+          "end_line": 188,
+          "sha256": "8fb66bf25b1bca32c442355009ebbdca40f4af7c46e54f2759cf0c3e4170d30c",
+          "source": "val assert_graph_subsumption :\n  Mode_solver_semantics.qf ->\n  Mode_solver_graph_semantics.inequality list ->\n  Mode_solver_graph_semantics.inequality list -> Mode_solver_semantics.qf @@ total\n"
+        },
+        {
+          "name": "assert_graph_subsumption_exact",
+          "kind": "val",
+          "start_line": 189,
+          "end_line": 248,
+          "sha256": "dc7efd8d807d9cf1c3bf3a99f1b2a52b7c8ba45d37ce7ef70cfca6944abc55ff",
+          "source": "val assert_graph_subsumption_exact :\n  (env : Mode_solver_semantics.elt list) ->\n  ((gamma : Mode_solver_semantics.qf) ->\n   (guard : Mode_solver_graph_semantics.graph) ->\n   (obligations : Mode_solver_graph_semantics.graph) ->\n   {u : unit\n     | (Mode_solver_semantics.eval_qf env\n          (assert_graph_subsumption gamma guard obligations))\n         =\n         ((Mode_solver_semantics.eval_qf env gamma) &&\n            (((not\n                 (Mode_solver_graph_semantics.models\n                    (Mode_solver_semantics.Global :: env) guard))\n                ||\n                ((Mode_solver_graph_semantics.models\n                    (Mode_solver_semantics.Global ::\n                    Mode_solver_semantics.Global :: env) obligations)\n                   ||\n                   ((Mode_solver_graph_semantics.models\n                       (Mode_solver_semantics.Regional ::\n                       Mode_solver_semantics.Global :: env) obligations)\n                      ||\n                      (Mode_solver_graph_semantics.models\n                         (Mode_solver_semantics.Local ::\n                         Mode_solver_semantics.Global :: env) obligations))))\n               &&\n               (((not\n                    (Mode_solver_graph_semantics.models\n                       (Mode_solver_semantics.Regional :: env) guard))\n                   ||\n                   ((Mode_solver_graph_semantics.models\n                       (Mode_solver_semantics.Global ::\n                       Mode_solver_semantics.Regional :: env) obligations)\n                      ||\n                      ((Mode_solver_graph_semantics.models\n                          (Mode_solver_semantics.Regional ::\n                          Mode_solver_semantics.Regional :: env) obligations)\n                         ||\n                         (Mode_solver_graph_semantics.models\n                            (Mode_solver_semantics.Local ::\n                            Mode_solver_semantics.Regional :: env)\n                            obligations))))\n                  &&\n                  ((not\n                      (Mode_solver_graph_semantics.models\n                         (Mode_solver_semantics.Local :: env) guard))\n                     ||\n                     ((Mode_solver_graph_semantics.models\n                         (Mode_solver_semantics.Global ::\n                         Mode_solver_semantics.Local :: env) obligations)\n                        ||\n                        ((Mode_solver_graph_semantics.models\n                            (Mode_solver_semantics.Regional ::\n                            Mode_solver_semantics.Local :: env) obligations)\n                           ||\n                           (Mode_solver_graph_semantics.models\n                              (Mode_solver_semantics.Local ::\n                              Mode_solver_semantics.Local :: env) obligations)))))))}) @ total\n  stateful @@ total\n"
+        },
+        {
+          "name": "assert_graph_subsumption_scoped",
+          "kind": "val",
+          "start_line": 249,
+          "end_line": 261,
+          "sha256": "24c700ac0a7e40b6ef53e6261e97092f40690fa63a13c1f8559adb32392e40e8",
+          "source": "val assert_graph_subsumption_scoped :\n  (depth : int) ->\n  ((gamma : {gamma : Mode_solver_semantics.qf\n              | Mode_solver_semantics.scoped_qf depth gamma}) ->\n   (guard : {guard : Mode_solver_graph_semantics.graph\n              | Mode_solver_graph_semantics.scoped_graph (depth + 1) guard}) ->\n   (obligations : {obligations : Mode_solver_graph_semantics.graph\n                    | Mode_solver_graph_semantics.scoped_graph (depth + 2)\n                        obligations}) ->\n   {u : unit\n     | Mode_solver_semantics.scoped_qf depth\n         (assert_graph_subsumption gamma guard obligations)}) @ total\n  stateful @@ total\n"
+        }
+      ]
+    }
+  ],
+  "assumptions": {
+    "bespoke_assumptions": [],
+    "trusted_primitives": [
+      "OCaml booleans, lists, variants, records and pattern matching",
+      "integer constants, comparisons, addition and subtraction used by rank, lookup and scope",
+      "structural equality and the Vox logical interpretation of ===",
+      "Vox refinement checking, termination checking, ghost erasure, and OCaml compilation/runtime"
+    ],
+    "bridge_status": "No bespoke external primitive or axiom in these sources. A separate proof connecting the compiler logical encodings of the built-in primitives to generated machine execution is not supplied or established by this audit. Compiler/runtime correctness remains trusted."
+  },
+  "excluded": [
+    "Mutable heterogeneous production solver",
+    "BDD/factor tables and caches",
+    "Undo logs and copy lifecycle",
+    "Production level operations",
+    "Compiler and Merlin integration",
+    "Auxiliary fixtures beyond their individually reviewed local definitions/statements"
+  ]
+}

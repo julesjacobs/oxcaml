@@ -317,7 +317,7 @@ type 'a t1 = 'a constraint 'a = [< `A of string | `B of int ]
 Line 2, characters 0-68:
 2 | type 'a t2 : value non_float mod everything with 'a t1 = C of string  (* should be rejected, at least until we sort out closed-but-not-static bestness *)
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t2" is immutable_data
+Error: The kind of type "t2" is logical_data
          because it's a boxed variant type.
        But the kind of type "t2" must be a subkind of
            value mod everything
@@ -337,7 +337,7 @@ type 'a t1 = 'a constraint 'a = [> `A of string | `B of int ]
 Line 2, characters 0-68:
 2 | type 'a t2 : value non_float mod everything with 'a t1 = C of string  (* should be rejected *)
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t2" is immutable_data
+Error: The kind of type "t2" is logical_data
          because it's a boxed variant type.
        But the kind of type "t2" must be a subkind of
            value mod everything
@@ -363,7 +363,7 @@ module M1 : S
 Line 7, characters 0-64:
 7 | type t2 : value non_float mod everything with M1.t = C of string  (* should be rejected, at least until we sort out closed-but-not-static bestness *)
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t2" is immutable_data
+Error: The kind of type "t2" is logical_data
          because it's a boxed variant type.
        But the kind of type "t2" must be a subkind of
            value mod everything non_float with M1.t
@@ -391,7 +391,7 @@ type (_, _) eq = Refl : ('a, 'a) eq
 Line 6, characters 4-68:
 6 |     type t4 : value non_float mod everything with M1.t = C of string  (* not sure what will happen, but we should eventually accept *)
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t4" is immutable_data
+Error: The kind of type "t4" is logical_data
          because it's a boxed variant type.
        But the kind of type "t4" must be a subkind of
            value mod everything non_float with M1.t
@@ -411,7 +411,7 @@ module M1 : S
 Line 7, characters 0-64:
 7 | type t2 : value non_float mod everything with M1.t = C of string  (* should be rejected *)
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t2" is immutable_data
+Error: The kind of type "t2" is logical_data
          because it's a boxed variant type.
        But the kind of type "t2" must be a subkind of
            value mod everything non_float with M1.t
@@ -490,7 +490,7 @@ let sneaky (x : (M1.t, [ `A of string | `B of int ]) eq) = match x with
 Line 3, characters 4-68:
 3 |     type t4 : value non_float mod everything with M1.t = C of string  (* not sure what will happen, but we should eventually accept *)
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t4" is immutable_data
+Error: The kind of type "t4" is logical_data
          because it's a boxed variant type.
        But the kind of type "t4" must be a subkind of
            value mod everything non_float with M1.t

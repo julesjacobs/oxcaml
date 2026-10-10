@@ -1,0 +1,11 @@
+- 'A'
+- 'B'
+  'C'
++ 'B'
+  'A'
+  'B'
+- 'B'
+  'A'
++ 'C'
+Minimum insertions + deletions: 5
+Patched: "CBABAC"

@@ -1,0 +1,2 @@
+Two workers filled one buffer: OK
+Both ownership tokens returned; buffer freed.

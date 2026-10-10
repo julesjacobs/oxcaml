@@ -449,7 +449,7 @@ module Tick = struct
       (* It would be better for this to be a decent min-heap, but there is not
          one around that is convenient to use (and see above note about this
          not being tight-loop). *)
-      include Map.MakePortable (Int)
+      include CamlinternalMap.MakePortable (Int)
 
       external magic_empty_stateless
         : ('a t[@local_opt])

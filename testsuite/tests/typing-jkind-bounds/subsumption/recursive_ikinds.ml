@@ -8,9 +8,9 @@ type 'a my_list : immutable_data with 'a = Nil | Cons of 'a * 'a my_list
 type 'a my_list = Nil | Cons of 'a * 'a my_list
 |}]
 
-type 'a my_list : immutable_data with 'a = 'a list = [] | ( :: ) of 'a * 'a my_list
+type 'a my_list : immutable_data with 'a = 'a list = [] | ( :: ) of 'a * 'a my_list [@@inductive]
 [%%expect {|
-type 'a my_list = 'a list = [] | (::) of 'a * 'a my_list
+type 'a my_list = 'a list = [] | (::) of 'a * 'a my_list [@@inductive]
 |}]
 
 type 'a my_list : immutable_data with 'a = Nil | Cons of 'a * 'a foo
@@ -70,10 +70,9 @@ end = My_list
 Line 2, characters 2-70:
 2 |   type 'a t : immutable_data with 'a = Nil | Cons of 'a * 'a My_list.t
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is immutable_data with 'a with 'a My_list.t
-         because it's a boxed variant type.
-       But the kind of type "t" must be a subkind of immutable_data with 'a
-         because of the annotation on the declaration of the type t.
+Error: This type definition does not satisfy its kind annotation
+         immutable_data with 'a,
+       because My_list.t is not mod forkable unyielding many total immutable.
 |}]
 
 module rec My_list : sig

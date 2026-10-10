@@ -32,10 +32,11 @@
 
 (** {1 Exceptions} *)
 
-external raise : ('a : value_or_null). exn -> 'a @ portable unique = "%reraise"
+external[@layout_poly] raise :
+  ('a : any). exn -> 'a @ portable unique = "%reraise"
 (** Raise the given exception value *)
 
-external raise_notrace : ('a : value_or_null). exn -> 'a @ portable unique
+external[@layout_poly] raise_notrace : ('a : any). exn -> 'a @ portable unique
   = "%raise_notrace"
 (** A faster version [raise] which does not record the backtrace.
     @since 4.02
@@ -186,17 +187,19 @@ external ( != ) :
 
 (** {1 Boolean operations} *)
 
-external not : (bool[@local_opt]) -> bool = "%boolnot"
+external not : (bool[@local_opt]) -> bool @@ total = "%boolnot"
 (** The boolean negation. *)
 
-external ( && ) : (bool[@local_opt]) -> (bool[@local_opt]) -> bool = "%sequand"
+external ( && ) : (bool[@local_opt]) -> (bool[@local_opt]) -> bool @@ total
+  = "%sequand"
 (** The boolean 'and'. Evaluation is sequential, left-to-right:
    in [e1 && e2], [e1] is evaluated first, and if it returns [false],
    [e2] is not evaluated at all.
    Right-associative operator,  see {!Ocaml_operators} for more information.
 *)
 
-external ( || ) : (bool[@local_opt]) -> (bool[@local_opt]) -> bool = "%sequor"
+external ( || ) : (bool[@local_opt]) -> (bool[@local_opt]) -> bool @@ total
+  = "%sequor"
 (** The boolean 'or'. Evaluation is sequential, left-to-right:
    in [e1 || e2], [e1] is evaluated first, and if it returns [true],
    [e2] is not evaluated at all.
@@ -294,35 +297,38 @@ external ( @@ ) : ('a : value_or_null) ('b : value_or_null)
     All operations are taken modulo 2{^[Sys.int_size]}.
     They do not fail on overflow. *)
 
-external ( ~- ) : (int[@local_opt]) -> int = "%negint"
+external ( ~- ) : (int[@local_opt]) -> int @@ total = "%negint"
 (** Unary negation. You can also write [- e] instead of [~- e].
     Unary operator, see {!Ocaml_operators} for more information.
 *)
 
 
-external ( ~+ ) : (int[@local_opt]) -> int = "%identity"
+external ( ~+ ) : (int[@local_opt]) -> int @@ total = "%identity"
 (** Unary addition. You can also write [+ e] instead of [~+ e].
     Unary operator, see {!Ocaml_operators} for more information.
     @since 3.12
 *)
 
-external succ : (int[@local_opt]) -> int = "%succint"
+external succ : (int[@local_opt]) -> int @@ total = "%succint"
 (** [succ x] is [x + 1]. *)
 
-external pred : (int[@local_opt]) -> int = "%predint"
+external pred : (int[@local_opt]) -> int @@ total = "%predint"
 (** [pred x] is [x - 1]. *)
 
-external ( + ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%addint"
+external ( + ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%addint"
 (** Integer addition.
     Left-associative operator, see {!Ocaml_operators} for more information.
 *)
 
-external ( - ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%subint"
+external ( - ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%subint"
 (** Integer subtraction.
     Left-associative operator, , see {!Ocaml_operators} for more information.
 *)
 
-external ( * ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%mulint"
+external ( * ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%mulint"
 (** Integer multiplication.
     Left-associative operator, see {!Ocaml_operators} for more information.
 *)
@@ -350,7 +356,7 @@ external ( mod ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%modint"
    @raise Division_by_zero if [y] is zero.
 *)
 
-val abs : int -> int
+val abs : int -> int @@ total
 (** [abs x] is the absolute value of [x]. On [min_int] this
    is [min_int] itself and thus remains negative. *)
 
@@ -363,17 +369,20 @@ val min_int : int
 
 (** {2 Bitwise operations} *)
 
-external ( land ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%andint"
+external ( land ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%andint"
 (** Bitwise logical and.
     Left-associative operator, see {!Ocaml_operators} for more information.
 *)
 
-external ( lor ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%orint"
+external ( lor ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%orint"
 (** Bitwise logical or.
     Left-associative operator, see {!Ocaml_operators} for more information.
 *)
 
-external ( lxor ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%xorint"
+external ( lxor ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%xorint"
 (** Bitwise logical exclusive or.
     Left-associative operator, see {!Ocaml_operators} for more information.
 *)
@@ -383,7 +392,9 @@ val lnot : int -> int
 
 external ( lsl ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%lslint"
 (** [n lsl m] shifts [n] to the left by [m] bits.
-    The result is unspecified if [m < 0] or [m > Sys.int_size].
+    The result is unspecified if [m < 0] or [m > Sys.int_size], and it can
+    differ between evaluations, so the shift is not total.
+    {!Int.Refined} has total shifts whose count is proved in range.
     Right-associative operator, see {!Ocaml_operators} for more information.
 *)
 
@@ -391,14 +402,18 @@ external ( lsr ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%lsrint"
 (** [n lsr m] shifts [n] to the right by [m] bits.
     This is a logical shift: zeroes are inserted regardless of
     the sign of [n].
-    The result is unspecified if [m < 0] or [m > Sys.int_size].
+    The result is unspecified if [m < 0] or [m > Sys.int_size], and it can
+    differ between evaluations, so the shift is not total.
+    {!Int.Refined} has total shifts whose count is proved in range.
     Right-associative operator, see {!Ocaml_operators} for more information.
 *)
 
 external ( asr ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%asrint"
 (** [n asr m] shifts [n] to the right by [m] bits.
     This is an arithmetic shift: the sign bit of [n] is replicated.
-    The result is unspecified if [m < 0] or [m > Sys.int_size].
+    The result is unspecified if [m < 0] or [m > Sys.int_size], and it can
+    differ between evaluations, so the shift is not total.
+    {!Int.Refined} has total shifts whose count is proved in range.
     Right-associative operator, see {!Ocaml_operators} for more information.
 *)
 
@@ -691,7 +706,7 @@ val char_of_int : int -> char
 
 (** {1 Unit operations} *)
 
-external ignore : ('a : value_or_null) . 'a -> unit = "%ignore"
+external ignore : ('a : value_or_null) . 'a -> unit @@ total = "%ignore"
 (** Discard the value of its argument and return [()].
    For instance, [ignore(f x)] discards the result of
    the side-effecting function [f].  It is equivalent to
@@ -699,8 +714,8 @@ external ignore : ('a : value_or_null) . 'a -> unit = "%ignore"
    compiler warning; writing [ignore(f x)] instead
    avoids the warning. *)
 
-external ignore_contended : ('a : value_or_null) . 'a @ contended local once -> unit
-  = "%ignore"
+external ignore_contended : ('a : value_or_null) .
+  'a @ contended local once -> unit @@ total = "%ignore"
 (** Like {!ignore}, but takes a [contended local once] value. This is technically strictly
     stronger than [ignore], but changing [ignore] in place causes backwards compatibility
     issues due to type inference. *)
@@ -799,7 +814,7 @@ external snd : ('a * 'b[@local_opt]) -> ('b[@local_opt]) = "%field1_immut"
    More list operations are provided in module {!List}.
 *)
 
-val ( @ ) : ('a : value_or_null) . 'a list -> 'a list -> 'a list
+val ( @ ) : ('a : value_or_null) . 'a list -> 'a list -> 'a list @@ total
 (** [l0 @ l1] appends [l1] to [l0]. Same function as {!List.append}.
   Right-associative operator, see {!Ocaml_operators} for more information.
   @since 5.1 this function is tail-recursive.
@@ -1201,7 +1216,8 @@ type ('a : value_or_null) ref = { mutable contents : 'a }
 (** The type of references (mutable indirection cells) containing
    a value of type ['a]. *)
 
-external ref : ('a : value_or_null) . 'a -> ('a ref[@local_opt]) = "%makemutable"
+external ref : ('a : value_or_null) . 'a -> ('a ref[@local_opt])
+  = "%makemutable"
 (** Return a fresh reference containing the given value. *)
 
 external ( ! ) : ('a : value_or_null) . ('a ref[@local_opt]) -> 'a = "%field0"
@@ -1390,6 +1406,7 @@ module ArrayLabels    = ArrayLabels
 module Atomic         = Atomic
 module Backoff        = Backoff
 module Bigarray       = Bigarray
+module Bigint         = Bigint
 module Bool           = Bool
 module Buffer         = Buffer
 module Bytes          = Bytes
@@ -1404,6 +1421,7 @@ module Domain         = Domain
 [@@alert unstable
     "The Domain interface may change in incompatible ways in the future."
 ]
+module Dynamic        = Dynamic
 module Dynarray       = Dynarray
 module Pqueue         = Pqueue
 module Effect         = Effect
@@ -1418,6 +1436,7 @@ module Float          = Float
 module Format         = Format
 module Fun            = Fun
 module Gc             = Gc
+module Ghost          = Ghost
 module Hashtbl        = Hashtbl
 module Iarray         = Iarray
 module In_channel     = In_channel

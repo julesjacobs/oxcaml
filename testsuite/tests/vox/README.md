@@ -1,0 +1,498 @@
+# Vox demos
+
+For a first tour, use `bounded_clamp.ml`, then `checked_windows.ml`, then
+`queue_client.ml`. They introduce static contracts, runtime validation, and
+abstract verified data structures. `clamp.ml` remains a separate regression
+fixture for explicit equations, opacity, and additional laws.
+
+`connectivity.ml` is a client of the sealed `Vox_connectivity` interface. It
+inserts five elements, which crosses several capacity epochs (the ghost
+capacity doubles from 1 to 8), then merges components and performs finds,
+including a find of a returned representative. Its ghost snapshots support
+membership and connectivity proofs without exposing forests or heaps,
+including that an isolated vertex stays disconnected after repeated unions
+and finds. From the event each operation appends, it proves that the run
+costs 70 ticks plus four per parent link followed. One caller-owned wallet
+pays for all operations, and conservation proves the charged-prefix bound.
+This client uses a finite budget; the online data structure requires no
+advance population limit. The lower-level accounting regressions remain in
+`union_find_online.ml`.
+
+Each proof test compiles once, as bytecode: refinement checking does not
+depend on the backend, and bytecode is the fastest to build. Public clients
+(the evidence cited by the demo pages), tests that inspect runtime
+representations, and tests of runtime or layout behaviour run in both
+bytecode and native code. The LZ4 tests run natively because their inputs
+are large. `./dev test` lists proofs that exceed the solver resource warning
+threshold at the end of the run (resource counts differ between platforms,
+so they are not part of test output).
+
+To investigate a rejected refinement, compile with `-dvc`. The diagnostic
+includes the encoded goal, assumptions, available signed model values and
+opaque function names. Opaque models describe the verifier's assumptions;
+they need not be executable counterexamples.
+
+An executable tour of the PR stack, not a replacement for detailed regression
+tests. Each PR adds its demos; run every demo present at the current checkout:
+
+```sh
+./dev test vox/
+```
+
+When switching stack stages, rerun `./dev init` if requested: changes to the
+serialized type representation invalidate installed interfaces.
+
+Expect files show types, results, and nearby rejected programs. Definitions
+whose modes matter live inside modules to avoid the interactive toplevel's
+legacy-mode defaults.
+
+A rejection test against library units compiles them as real units, then
+runs the expect file against them:
+
+```
+ all_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa.mli vox_rsa.ml";
+ compile_only = "true";
+ {
+   setup-ocamlc.opt-build-env;
+   ocamlc.opt;
+   binary_modules = "vox_rsa_spec vox_rsa";
+   run-expect;
+   check-program-output;
+ }
+```
+
+`compile_only` compiles `all_modules` but loads nothing into the toplevel:
+the type checker sees the units, but an accepted phrase that calls them
+fails at run time. `binary_modules`, set after the compilation step (the
+compiler would otherwise receive the objects too) and listed in dependency
+order, loads their `.cmo` files before the script, as `#load` would. Keep an
+accepted phrase in each rejection test as a positive control.
+
+The boundary tests (`*_boundary.ml`, `rsa_public_client.ml`,
+`structures_erasure.ml`, `library_build.ml`) check a demo's public surface
+with ordinary ocamltest actions, which `./dev test` runs: the library is
+compiled in one build directory, `copy` puts only the public `.cmi` files
+(and, for native code, the `.cmx` files) into a second one made by another
+`setup-*-build-env` with a `compiler_directory_suffix`, and the client is
+compiled there and linked with the library's objects through
+`binary_modules`. Rejections are expect phrases run in that directory, so
+each pins its whole error. Emitted code is dumped by setting
+`compiler_output2` before a compile with `-dlambda` or `-dcmm`; a small
+checker program built on `emitted_code.ml` reads the dumps, prints one line
+per check and exits with status 1 after a failed check, so a failure cannot
+be promoted away. Name its reference so that it does not collide with a
+compiler's default reference (`<test>.byte.reference`,
+`<test>.native.reference`), and set `stdout` and `stderr` with `output`
+for every `run` after the first. A test stops at its first failing action,
+so a test with several new outputs may need several `--promote` runs.
+
+| Stage | Files | What is established |
+| --- | --- | --- |
+| Dev loop | `smoke.ml` | The expect-test workflow runs. |
+| Totality | `totality.ml` | Totality constrains function values, not effects producing integers. |
+| Refinements | `refinements.ml`, `principal.ml` | Wrappers and scope checking work. |
+| Dependent functions | `dependent.ml` | Results and recursive callback domains can depend on arguments. |
+| Assume | `assume.ml`, `assume_runtime.ml` | Predicates are checked at runtime, including under `-noassert`. |
+| SMT interface | `smt.ml`, `smt_solver.ml` | Queries serialize and the solver can prove or refute them. |
+| VC generation | `verification.ml`, `unchecked.ml` | Branches and successful runtime checks prove introductions; false claims and wraparound are rejected. |
+| Checked windows | `checked_windows.ml` | Runtime validation establishes ordered bounds; subtraction and a client budget are proved safe. |
+| Logical equality | `equality.ml` | `===` is logical equality in predicates and a checked equality in `assume_`. |
+| Definition lemmas | `definitions.ml` | Explicit unfolding proves calls; ignored lemmas do not expose equations. |
+| Clamp laws | `clamp.ml` | Explicit equations prove interval bounds, identity, and idempotence. |
+| Recursive closures | `closure_termination.ml`, `scoped_termination.ml` | Named and returned callbacks retain structural or numerical descent obligations. |
+| Structural recursion | `structural.ml` | Checked inductive values support terminating recursive traversals. |
+| Expression evaluation | `expressions.ml` | Structural recursion establishes termination; induction proves constant folding preserves wrapping-integer evaluation. |
+| Numerical recursion | `numerical.ml`, `fibonacci.ml` | Decreasing measures establish totality; tail-recursive and fast-doubling results equal naive Fibonacci. |
+| SMT encoding | `verification.ml`, `equality.ml` | Source types map consistently to scalar and opaque SMT sorts. |
+| Bigints | `bigints.ml`, `bigint_fibonacci.ml` | Unbounded arithmetic, nonnegative decreasing measures, and Fibonacci proofs beyond machine bounds. |
+| SMT datatypes | `datatypes.ml` | Native datatype reasoning covers tuples, records, variants, patterns, and recursive trees. |
+| Dependent records | `dependent_records.ml`, `dependent_records_rejected.ml` | Later field refinements refer to earlier fields; ghost proof fields carry guarantees through interfaces. |
+| Dependent constructors | `dependent_constructors.ml`, `dependent_constructors_rejected.ml` | Inline constructor fields carry dependencies through GADT matches and interfaces, including erased proofs. |
+| Int-list proofs | `int_lists.ml` | Structural induction proves append identities, associativity, and length and sum homomorphisms. |
+| Int-set proofs | `int_set_intf.mli`, `list_int_set.mli`, `int_sets.ml` | A canonical list set exposes verified membership, size, and `===` extensionality through an abstract interface. |
+| AVL-set proofs | `avl_sets.mli`, `avl_set_client.ml` | A valid AVL set exposes semantic `equal`; the demo distinguishes it from representation `=`. |
+| Immutable arrays | `iarrays.ml`, `iarrays_ordinary.ml` | Immutable-array literals expose exact lengths and elements; safe reads expose normal-return bounds. |
+| Bounded search | `array_search.ml` | A decreasing interval establishes termination and safe reads; `Some` is the first match, and `None` proves absence throughout the interval. |
+| Sorted arrays | `sorted_arrays.ml`, `sorted_array.mli`, `sorted_array_client.ml` | Total binary search gives equal ranges and membership; insertion and removal preserve sortedness and every copied element. |
+| Standard lists | `standard_lists.ml` | Polymorphic lists support structural total functions, logical equality, refined partial operations, and total higher-order operations. |
+| Functional queue | `functional_queue.mli`, `queue_client.ml`, `queue_rejected.ml` | An abstract polymorphic two-list queue over `immutable_data` elements implements a sequence model; a separate client proves generic FIFO behavior and rejects empty dequeue. |
+| Standard sets | `sets.ml` | Total comparators enable total operations; refined constructors and lookup expose membership facts while preserving element access. |
+| Standard maps | `maps.ml` | Total comparators enable total operations; refined updates and lookup expose membership and value facts while preserving key and value access. |
+| Persistent environments | `environments.ml` | Binding shadows its comparator class and preserves observations in a distinct class; retaining the outer environment restores scope. |
+| Standard-set model | `avl_stdlib_set.ml` | Pointwise refinement relates the verified AVL implementation to `Set.MakeTotal`, with comparator compatibility explicit. |
+| Sparse arrays | `sparse_overlay.mli`, `sparse_overlay_client.ml` | An abstract overlay of updates over an immutable base array proves read-after-write, last write wins, commutation of updates at distinct indices, and that `clear` restores the base value; `get` takes an index refined against the base length. `sparse_iarrays.ml` is an older, separate fixture over `Map.MakeTotal`. |
+| Regex matching | `regex.ml` | Derivative matching and a total DFA construction are sound and complete for an independent membership-derivation spec. |
+| Scoped borrows | `borrow_demo.ml`, `borrow_ranges.ml`, `borrow_rejected.ml` | Exact updates, split/reborrow reconstruction, preserved frames, snapshots, and ownership/proof rejections. |
+| Runtime slice validation | `borrow_validation.ml` | `assume_` checks a real snapshot and exports its sortedness through the borrow. |
+| Parallel slices | `borrow_parallel.ml` | Disjoint callbacks, sequential fallback, and joining before exception propagation. |
+| Loans are not total | `borrow_partial.ml` | Creating and ending a loan are rejected in erased code, in lemmas and in total functions; total owned-array operations are accepted there. |
+| Quicksort | `quicksort.mli`, `quicksort_client.ml` | Sequential and parallel in-place sorting establish sortedness and multiplicity-preserving permutation on normal return; the sorts borrow, so none is total. |
+| Ghost code | `ghost*.ml` | Total proof computations erase; ghost values remain usable in static predicates and cannot be read by runtime checks. |
+| Time credits | `time_credits.ml`, `time_credits_rejected.ml`, `merge_sort.ml`, `merge_sort_rejected.ml` | Unique ghost credits split and merge; generic merge sort preserves full-element multiplicities and uses at most `n * ceil(log2 n)` comparison calls. |
+
+`unchecked.ml`, accepted at the refinement-former stage, now demonstrates
+rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
+skip when it is absent; the default Linux CI job installs pinned Z3.
+
+`comparator_laws.ml` rejects Set/Map comparators without checked ordering
+witnesses, and rejects false reflexivity, sign antisymmetry and transitivity.
+`atomic_layout.ml` checks load/CAS, partial application and native allocation
+counts with void invariant keys and unboxed results. `raw_memory_demo.ml`
+exercises explicit allocation and freeing.
+
+`principal.ml` checks mode crossing for ordinary polymorphic comparisons in
+refinement predicates under `-principal`.
+
+`dependent.ml` checks a client against a proposed well-founded recursion
+combinator's signature. It supplies no implementation of that combinator and
+does not establish termination through unchecked refinement introductions.
+
+## Verification idiom
+
+Follow [Verification programming in Vox](../../../design-docs/verification-programming.md):
+expose guarantees in result refinements, write reusable total refined-unit
+lemmas, and erase correctness-only work with `ghost_`. Grouped proof blocks
+export explicit refined-unit conclusions. Keep runtime validation, executable
+evidence, and comparison oracles executable.
+
+## Solver demo
+
+At the SMT stage, `smt.ml` runs without Z3 and shows the actual serialization.
+The real-solver demo uses the existing Dune libraries, rather than pretending
+that the compiler already checks refinement VCs:
+
+```sh
+VOX_TEST_Z3=true dune runtest --workspace=duneconf/main.ws verification/tests
+```
+
+This runs `smt_solver.ml` against Z3 and compares its output with
+`smt_solver.reference`, alongside the solver regression tests. Install Z3
+4.16.0 explicitly; the test does not download it. Run this command separately
+from `./dev`, since both use the worktree's Dune lock.
+
+## RSA demo
+
+`rsa.ml` verifies repeated squaring against integer powers and tests textbook
+RSA encryption and decryption. The roundtrip theorem covers arbitrary distinct primes,
+arbitrary positive valid exponents, and every message below `pq`, including
+non-coprime messages. All arithmetic uses `Bigint`; proof calls
+erase. `rsa_rejected.ml` checks invalid uses and hidden proof exports.
+`rsa_public_client.ml` derives composition and CRT equivalence through the
+sealed public interface; the test compiles it with only the two public CMIs
+available, then links and runs it with both compilers. See the
+[specification and proof boundaries](../../../verification/library/vox_rsa.md).
+
+## Arithmetic proof boundaries
+
+`fibonacci.ml` combines static unfolding with runtime-checked arithmetic
+identities and ordinary wrapping arithmetic. Both
+implementations accept indices 0 through 90 and raise outside that range.
+At 90, fast doubling's unused second component wraps; its result still fits.
+The inductive proof helper still runs at runtime because its checked arithmetic
+identities use `assume_`; ghost expressions require total computations.
+
+`bigint_fibonacci.ml` gives both indices and results type `Bigint.t`, maps
+negative inputs to zero, and computes Fibonacci 100 without overflow guards.
+Its inductive proof erases at the fast-doubling operation boundary.
+
+Total elimination requires the checked datatype guarantee.
+`negative_totality.ml` checks that negative variants, recursive records, and
+alias-hidden negative types cannot bypass it; the partial versions remain legal.
+These regressions are not a mechanized soundness proof of Vox.
+
+## Additional demos
+
+`checked_windows.ml` checks input bounds with `assume_`, catches invalid
+input, and derives the width with `refine_`.
+
+`clamp.ml` proves bounds, identity, and idempotence for arbitrary inputs using
+explicit definition lemmas.
+
+`expressions.ml` now proves constant folding preserves evaluation for every
+expression and input. Both evaluations use machine-integer wrapping semantics.
+`expression_folding.mli` is the same folder behind an interface:
+`folding_semantics_client.ml` uses it, and `expression_folding_rejected.ml`
+rejects a wrong folding rule and a `total` evaluator that does not descend,
+both against that interface.
+
+`array_search.ml` proves first-match correctness within the requested interval
+and absence throughout that interval on `None`. Its total `at` observer returns
+zero outside the array; the result contract separately establishes bounds.
+
+`sorted_arrays.ml` follows [Binary Search a Little Simpler & More Generic](https://julesjacobs.com/notes/binarysearch/binarysearch.pdf).
+Its generic search returns adjacent false/true endpoints and evaluates the
+predicate strictly inside the original interval. Monotonicity is unnecessary.
+A refined midpoint interface supports binary, forward, and backward search.
+The integer interval starts at or above -1 and has positive, non-wrapping
+machine-integer distance. Division uses a local total primitive declaration
+whose refined divisor excludes zero; the existing integer encoding supplies
+its arithmetic meaning.
+
+The array instance uses sentinels -1 and length. A separate sortedness lemma
+proves the global partition at an arbitrary valid index, and a client derives
+inequalities about actual reads. Correctness-only proofs and premise arguments
+are erased. The examples validate sorted inputs at runtime and compare both
+bounds against linear search on 126 sorted arrays, including empty arrays,
+singletons, and duplicates. They also exercise extreme integers and reject
+midpoints at an endpoint, premature termination, and division by zero.
+
+The algorithms and internal proofs are shared in `sorted_array_proofs.ml`.
+`sorted_array.mli` exposes an abstract sorted-array type implemented by
+`sorted_array.ml`. Construction starts from `empty`; insertion and removal
+preserve the hidden sortedness invariant. `insert` raises `Invalid_argument`
+if the result would be longer than an array can be; `remove_at` takes a
+bounds proof. Callers never supply a sortedness proof. The interface exposes
+membership, range, and element-edit observations with lemmas for individual
+indices. Its total `at` observer returns zero outside the array.
+
+`sorted_array_client.ml` compiles against that interface and proves membership
+after insertion, ordering, and pointwise restoration after insertion followed
+by removal. It also checks the public API against list operations on all 121
+sequences of length at most four over three values. `sorted_array_rejected.ml`
+rejects a forged representation, removal from an empty array, and membership
+claimed after a failed search.
+
+`equal_range` combines the boundaries into a half-open interval `[first, past)`.
+The `range_at` lemma proves, for an arbitrary valid index, that values before
+this interval are smaller, values inside equal the target, and values after
+are larger. An independent recursive `occurs` specification connects interval
+nonemptiness to membership. `find_first` and `find_last` prove both the matching
+value and absence of earlier or later matches; `None` proves whole-array
+absence, and `mem` returns the specified membership Boolean. These operations
+reuse equal-range, and their correctness proofs are erased. The array oracle
+checks every operation and rejects false absence, non-first matches, and
+non-last matches.
+
+`insert` returns the insertion index and array; `remove_at` removes a valid
+index, and `remove_one` uses first-match search and returns `None` for absence.
+The recursive `edited` specification describes every output element, and
+`edited_at` exposes that relation at an arbitrary index. Both copying operations
+prove the exact length and preserve sortedness using `Iarray.sub` and
+`Iarray.append`. Their correctness proofs are total and erased; allocation
+remains partial. The clients prove that insertion makes membership true and
+that insertion followed by removal at its returned index restores every source
+element. The runtime oracle checks insertion, first-match removal, and the
+round trip against lists, including duplicates and integer extrema.
+
+The queue proves its tail-recursive reversal against an explicit
+append/reverse model. Its representation stays behind a `.mli`. Operations
+erase their proof calls and proof-only model traversals with `ghost_`.
+
+`environments.ml` checks comparator-class distinction at the example boundary,
+then statically proves preservation of optional lookup results. It restores
+scope using the saved outer map; removing an inner binding does not restore a
+shadowed value.
+
+`Sparse_overlay.get` accepts an overlay and an index refined against its
+`length` (the length of the base array) and returns the element itself, so
+mutable elements stay writable; `sparse_overlay_client.ml` writes through one.
+The total `lookup` observer returns an option for every integer index (`None`
+outside the base), so the laws in `Sparse_overlay.Laws` compare overlays
+without constructing refined arguments inside predicates. The client functor
+proves last write wins, commutation of updates at distinct indices and
+restoration of the base value by `clear` for every index, including
+out-of-range ones, and read-after-write for in-range indices; it is
+instantiated at `int` and at a record type, and its proof calls are erased
+with `ghost_`. `sparse_iarrays.ml` is an older fixture with a public record
+type over `Map.MakeTotal`; it also checks bounds and comparator-class
+distinction at runtime.
+
+`regex.ml` specifies membership by finite derivations: `Membership.valid r p`
+checks the regex rules, and `Membership.word p` gives the derived word. Thus
+membership of `s` in `r` means that some `p` is valid for `r` and has word `s`.
+The spec contains no derivatives and permits empty repetitions in star.
+
+The checked `sound` theorem constructs such a derivation whenever `matches`
+returns true. The checked `complete` theorem proves acceptance for every valid
+derivation, so rejection also excludes every derivation. Their derivative
+lemmas construct derivations in both directions; contraction skips empty star
+repetitions by structural recursion on the derivation.
+
+`matches` runs the Boolean derivative algorithm without proof calls.
+`recognize` additionally constructs a checked membership derivation on success.
+`alt` flattens alternative trees, sorts their nonempty alternatives by a
+structural order, and removes duplicates across the whole collection. It
+rebuilds a canonical right-associated tree, implementing associativity,
+commutativity, and idempotence (ACI) of alternatives. Concatenation still
+eliminates `Empty` and `Epsilon` operands.
+
+The checked normalization proof preserves membership of each alternative.
+Selecting and reinserting an alternative then transfers regex membership
+derivations in both directions. The separate finiteness theorem for
+ACI-normalized derivatives is not formalized in this demo.
+
+`Dfa.compile` constructs a finite transition table by checked total functions.
+Its carrier uses partial derivatives: each transition produces a list of
+residual regexes whose languages are unioned. A structurally computed
+`support r` contains every partial derivative of `r` and is closed under
+further partial derivatives. DFA states are subsets of `r :: support r`,
+represented by sublists; filtering this universe puts each transition target
+in the enumerated powerset. The universe may contain duplicate regexes, so
+the enumeration may contain duplicate states.
+
+Construction enumerates the full powerset, including unreachable states. Each
+row contains transitions for the finitely many symbol occurrences in the
+universe; all other integers go to the empty state. Both enumerations use
+structural recursion, without fuel or a failure result. Construction is
+exponential in the universe length. Rows and states use association lists;
+this is a total construction proof, not an optimized DFA representation.
+
+`Dfa.run` executes only table lookups. The checked `Dfa.correct` theorem proves
+`Dfa.run (Dfa.compile r) s === matches r s` for every regex and word.
+`Dfa.sound` and `Dfa.complete` connect this equality to the independent
+membership derivations. These proof functions are separate from compilation
+and table execution.
+
+The demo uses integer symbols and makes no complexity claim. Executable checks
+compare all 3,244 regexes of depth at most two over symbols 0 and 1 against an
+independent split-based matcher on all 15 words of length at most three.
+Additional checks exercise ACI laws, the formerly growing `a*` followed by
+`a*`, and complete derivative closures. The small regexes have at most six
+states; a fifth-from-last-symbol example has 33. Closure exploration includes a
+symbol outside the regex alphabet. Rejection fixtures exercise the soundness
+and completeness contracts.
+
+The DFA checks reuse one compiled table per regex on the same 15 words plus
+five words containing other integers. They also cover nullable and nested
+stars, the extreme integer symbols, and the fifth-from-last-symbol example.
+A rejection fixture checks that DFA completeness cannot prove rejection of a
+valid membership derivation.
+
+`ghost_refinements.ml` demonstrates a client that obtains a required fact
+from an erased lemma; omitting the lemma is rejected. Erased expressions
+and ghost field values must be total. Static predicates may refer to ghost
+values; `assume_` checks runtime predicates at real mode. Physical identity
+cannot establish logical equality when the type may contain erased data.
+
+`ghost_erasure.ml` prints the generated Lambda code: the client contains no
+call to its recursive proof helper. `Dfa_client.verified` in `regex.ml` runs
+one compiled DFA and erases the correctness proof, while exposing equivalence
+to regex matching in its result type. Evidence-producing APIs remain ordinary
+functions for clients that want to inspect the derivation at runtime.
+
+## Borrow library
+
+The canonical sources are in `verification/library`; test headers use
+`source_directories` to compile those sources against their sealed interfaces.
+`make vox-library` installs a separately usable verified bytecode/native library.
+The actual-domain test requires a compiler configured with
+`--enable-poll-insertion --enable-multidomain`. The quicksort client also works
+with a single-domain runtime, where its domain budget selects sequential work.
+See [Borrows and slices](../../../design-docs/borrows-and-slices.md) for the API,
+proof boundary, and current termination scope.
+
+The shared `Vox_sequence` and `Vox_int_sequence` libraries provide the sequence,
+range, and permutation mathematics used by quicksort and `collection_theory.ml`.
+The latter verifies rotation and observes preserved multiplicities through an
+abstract multiset interface. `collection_rejected.ml` checks representation
+abstraction and the premises required by the count laws.
+
+## Permission refs
+
+`pref.mli` exposes an erased unique `'a Pref.token` and its finite-map
+observation `Pref.own : 'a Pref.token -> 'a Pref.heap`. Reads borrow the token; writes consume it and return its successor.
+The current map determines both permission and value. Saved ghost maps remain
+historical observations after writes. Native code omits token fields and
+arguments. Bytecode retains the existing `void` unit placeholders; neither
+backend stores an ownership map. `pref_layout.ml` checks the wrapper layouts.
+
+Pref identities have kind `immutable_data`; they carry no ownership themselves.
+Payloads can include recursive records and immutable function fields. Executable
+reads and writes are partial. Total projection and pattern matching reject
+recursive dependencies through heap payloads, preventing a higher-order store
+from hiding recursion in total code. Passive handle parameters do not introduce
+such dependencies. Ghost map observations and split/join remain total. See
+[Typed heaps](../../../design-docs/typed-heaps.md).
+
+`Pref.split selection token` returns two erased token fields, dividing ownership
+by the domain of `selection`. `Pref.join left right` consumes both tokens and
+returns their disjoint union. Both tokens have the same payload type; different
+payload types use separate tokens. Each live token occurrence owns a disjoint fragment;
+uniqueness prevents joining a token with itself. Maps are observations and cannot
+be converted into tokens.
+
+`prefs.ml` checks updates, frames, old snapshots, and stable runtime identity.
+`pref_swap.ml` verifies a swap against a whole-map postcondition;
+`pref_payloads.ml` exercises the GC write barrier with a list payload.
+`pref_staging.ml` checks that partial application does not execute an erased-token
+write early. `pref_rejected.ml` rejects missing permission, stale ownership,
+ghost writes, and false map claims. `pref_modes.ml` exercises zero-layout
+uniqueness and the payload-kind boundary.
+
+`pref_records.ml` checks recursive and higher-order payloads. `pref_split.ml`
+checks split/write/join and historical observations. `pref_tree.ml` (public
+interface `pref_tree.mli`) verifies a partial binary-tree mirror against a total
+inductive model, including validity, exact heap contents, and preservation of an
+unrelated frame. `pref_list.ml` (interface `pref_list.mli`) verifies in-place
+linked-list reversal with separate ownership for the remaining list and reversed
+prefix; its contract gives the exact reversed node model and preserves an
+unrelated frame. Both modules offer borrowed observers and an `Owned` facade
+whose unboxed handle carries the pointer, the ghost model and the token, with
+`adopt`/`release` bridges to the raw API. `pref_list_client.ml` and
+`pref_tree_client.ml` use only the interfaces: the frame passed through
+`reverse`/`mirror_with_frame` is an unrelated `node option` cell, and an
+unrelated `int` cell lives in a separate `int Pref.token`, since a typed token
+owns cells of one payload type. The list client compares node identities before
+and after reversal for empty, singleton, repeated-value and 1,000-node lists;
+reversing twice restores the original order. `pref_owned_client.ml` exercises
+the `Owned` facades. `pref_list_rejected.ml` and `pref_tree_rejected.ml` reject
+false reversal/mirror claims, a dropped node and a shared subtree, lookups of
+private helpers, and reuse of consumed handles or raw tokens.
+`Vox_pref_semantics` states the pointwise map laws used by these proofs.
+
+The `pref_ring_*_demo.ml` tests exercise circular doubly linked lists with a
+sentinel. Both link cells appear in the same ownership map. The examples check
+empty and singleton cycles, insertion, removal with split/join of the detached
+node's ownership, a cross-ring range splice, reversal, and traversal in both
+directions. An unrelated `int` cell lives in a separate `int Pref.token` and is
+checked afterwards.
+
+Local mutation contracts specify exact map updates; the concrete examples
+establish the resulting whole-cycle predicates. The raw splice contract checks
+boundary links, so callers remain responsible for range validity and destination
+placement. Reversal collects an auxiliary list of node handles, includes the
+sentinel, and swaps each node's links. The supporting proof modules use the
+existing Pref laws without additional trusted declarations.
+`pref_ring.mli`, `pref_ring_splice.mli` and `pref_ring_reverse.mli` are the
+public interfaces; `pref_ring_public_client.ml` and
+`pref_ring_examples_client.ml` use only them.
+
+`pref_ring_general.ml` reverses a separated ring of any length, with the exact
+physical-node reverse and flipped heap. `pref_ring_splice_general.ml` moves any
+nonempty contiguous range between two separated rings at arbitrary source and
+destination positions; both resulting node lists, both ring invariants,
+combined separation and the exact six-write heap are checked. Each has an
+unboxed `Owned` facade over one token with `adopt`/`release` bridges;
+`pref_ring_general_client.ml`, `pref_ring_splice_general_client.ml` and the
+`_demo` tests use them.
+`pref_ring_rejected.ml` rejects sentinel removal, a missing backward-link update,
+a no-op claimed to reverse a list and a hidden helper lookup.
+`pref_ring_general_rejected.ml` rejects reversal without separation, a wrong
+range endpoint, a wrong destination placement, reuse of consumed handles and
+released raw tokens, and lookups of private proofs.
+
+Under `-principal` the rejection tests fail earlier, with a kind error on
+`node option Pref.token`; their `Principal{|...|}` blocks record this.
+
+The recursive payload examples currently require ordinary inference;
+`-principal` cannot establish their recursive `immutable_data` bounds.
+
+The solver supplies ground empty/update/lookup, union, restriction, exclusion,
+and disjointness laws over a common location sort. Generic finite-map laws in
+`Pref.Heap` are trusted specifications; the tree functions and proofs are checked.
+Different payload sorts do not imply distinct locations. The encoding is
+conservative across typed views; it does not supply general heap extensionality.
+
+## Myers diff
+
+`diff.ml` exercises the directly verified Myers frontier algorithm and its
+public correctness, minimum-edit-cost, and inverse-patch contracts.
+`diff_rejected.ml` rejects forged optimality and a wrong patch result.
+The executable compares all binary inputs through length five with an
+independent distance oracle and covers ties, repeated elements, empty inputs,
+long common prefixes, and the input-size boundary. See
+[`vox_diff.md`](../../../verification/library/vox_diff.md) for the proof,
+resource bounds, byte-string demo, and generated-code erasure audit.
+The review surface is the pure definitions in `vox_diff_spec.ml` and the
+contracts in `vox_diff.mli`. `diff_public_client.ml` checks the generic API;
+the erasure audit compiles it using only public interfaces.

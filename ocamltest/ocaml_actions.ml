@@ -18,6 +18,8 @@
 open Ocamltest_stdlib
 open Actions
 
+let make_no_artifact = Actions.make ~incremental_requirement:No_artifact
+
 (* Extracting information from environment *)
 
 let no_native_compilers _log env =
@@ -43,7 +45,12 @@ let directories env =
 
 let directory_flags env =
   let f dir = ("-I " ^ dir) in
-  let l = List.map f (directories env) in
+  let prebuilt =
+    match Actions_helpers.prebuilt_modules env with
+    | [] -> []
+    | _ -> [Actions_helpers.prebuilt_view_directory env]
+  in
+  let l = List.map f (prebuilt @ directories env) in
   String.concat " " l
 
 let flags env = Environments.safe_lookup Ocaml_variables.flags env
@@ -227,15 +234,26 @@ let compile_program (compiler : Ocaml_compilers.compiler) log env =
     if has_c_file then Ocaml_flags.c_includes else "" in
   let expected_exit_status =
     Ocaml_tools.expected_exit_status env (module Compiler : Ocaml_tools.Tool) in
+  let compile_only =
+    Environments.lookup_as_bool Ocaml_variables.compile_only env = Some true
+  in
+  let prebuilt_objects =
+    if compile_only then []
+    else
+      let extension = Ocaml_backends.module_extension Compiler.target in
+      List.map
+        (fun basename ->
+          Filename.concat (Actions_helpers.prebuilt_view_directory env)
+            (Filename.make_filename basename extension))
+        (Actions_helpers.prebuilt_implementations env)
+  in
   let module_names =
+    String.concat " " prebuilt_objects ^ " " ^
     (binary_modules Compiler.target env) ^ " " ^
     (String.concat " " (List.map Ocaml_filetypes.make_filename modules)) in
   let what = Printf.sprintf "Compiling program %s from modules %s"
     program_file module_names in
   Printf.fprintf log "%s\n%!" what;
-  let compile_only =
-    Environments.lookup_as_bool Ocaml_variables.compile_only env = Some true
-  in
   let compile_flags =
     if compile_only then " -c " else ""
   in
@@ -367,7 +385,7 @@ let find_source_modules log env =
     (String.concat " " (List.map Ocaml_filetypes.make_filename source_modules))
     env
 
-let setup_tool_build_env (tool : Ocaml_tools.tool) log env =
+let setup_tool_build_env ?native (tool : Ocaml_tools.tool) log env =
   let (module Tool) = tool in
   let source_directory = Actions_helpers.test_source_directory env in
   let testfile = Actions_helpers.testfile env in
@@ -408,12 +426,13 @@ let setup_tool_build_env (tool : Ocaml_tools.tool) log env =
   Sys.force_remove tool_output_file;
   let env =
     Environments.add Builtin_variables.test_build_directory build_dir env in
-  Actions_helpers.setup_build_env false source_modules log env
+  Actions_helpers.setup_build_env ?native false source_modules log env
 
 let setup_compiler_build_env (compiler : Ocaml_compilers.compiler) log env =
   let (module Compiler) = compiler in
   let (r, env) =
-    setup_tool_build_env (module Compiler : Ocaml_tools.Tool) log env
+    setup_tool_build_env ~native:(Compiler.target = Ocaml_backends.Native)
+      (module Compiler : Ocaml_tools.Tool) log env
   in
   if Result.is_pass r then
   begin
@@ -433,15 +452,17 @@ let setup_compiler_build_env (compiler : Ocaml_compilers.compiler) log env =
 
 let setup_toplevel_build_env (toplevel : Ocaml_toplevels.toplevel) log env =
   let (module Toplevel) = toplevel in
-  setup_tool_build_env (module Toplevel : Ocaml_tools.Tool) log env
+  setup_tool_build_env ~native:(Toplevel.backend = Ocaml_backends.Native)
+    (module Toplevel : Ocaml_tools.Tool) log env
 
 let mk_compiler_env_setup name (compiler : Ocaml_compilers.compiler) =
-  Actions.make ~name ~description:(Printf.sprintf "Setup build env (%s)" name)
+  make_no_artifact ~name
+    ~description:(Printf.sprintf "Setup build env (%s)" name)
     ~does_something:false
     (setup_compiler_build_env compiler)
 
 let mk_toplevel_env_setup name (toplevel : Ocaml_toplevels.toplevel) =
-  Actions.make ~name
+  make_no_artifact ~name
     ~description:(Printf.sprintf "Setup toplevel env (%s)" name)
     ~does_something:false
     (setup_toplevel_build_env toplevel)
@@ -517,6 +538,7 @@ let compile (compiler : Ocaml_compilers.compiler) log env =
 
 let ocamlc_byte =
   Actions.make
+    ~incremental_requirement:(Requirement "ocamlc.byte")
     ~name:"ocamlc.byte"
     ~description:"Compile the program using ocamlc.byte"
     ~does_something:true
@@ -525,6 +547,7 @@ let ocamlc_byte =
 let ocamlc_opt =
   native_action
     (Actions.make
+      ~incremental_requirement:(Requirement "ocamlc.opt")
       ~name:"ocamlc.opt"
       ~description:"Compile the program using ocamlc.opt"
       ~does_something:true
@@ -533,6 +556,7 @@ let ocamlc_opt =
 let ocamlopt_byte =
   native_action
     (Actions.make
+      ~incremental_requirement:(Requirement "ocamlopt.byte")
       ~name:"ocamlopt.byte"
       ~description:"Compile the program using ocamlopt.byte"
       ~does_something:true
@@ -541,6 +565,7 @@ let ocamlopt_byte =
 let ocamlopt_opt =
   native_action
     (Actions.make
+      ~incremental_requirement:(Requirement "ocamlopt.opt")
       ~name:"ocamlopt.opt"
       ~description:"Compile the program using ocamlopt.opt"
       ~does_something:true
@@ -657,6 +682,7 @@ let run_fexpr log env =
   let commandline =
   [
     Ocaml_commands.fexprc;
+    backend_default_flags env Ocaml_backends.Native;
     backend_flags env Ocaml_backends.Native;
     testfile
   ] in
@@ -693,7 +719,11 @@ let run_fexpr_check log env =
   in
   let test_build_dir = Actions_helpers.test_build_directory env in
   let test_source_dir = Actions_helpers.test_source_directory env in
-  let test_name = Filename.chop_extension (Actions_helpers.testfile env) in
+  let test_name =
+    match Environments.lookup Ocaml_variables.module_ env with
+    | Some module_ -> module_
+    | None -> Actions_helpers.testfile env in
+  let test_name = Filename.chop_extension test_name in
   List.fold_left (fun (res, env) pass_sfx ->
       let pass_dump_file = Filename.make_filename test_name pass_sfx in
       let pass_ref_file =
@@ -887,6 +917,7 @@ let run_expect_once input_file principal log env ~backend =
     command;
     expect_flags;
     Ocaml_flags.toplevel_default_flags;
+    backend_default_flags env backend;
     backend_flags env backend;
     Ocaml_flags.stdlib;
     directory_flags env;
@@ -901,22 +932,30 @@ let run_expect_once input_file principal log env ~backend =
   let exit_status =
     Actions_helpers.run_cmd ~environment:default_ocaml_env log env commandline
   in
-  if exit_status=0 then (Result.pass, env)
+  if exit_status=0 then (Result.pass, env, ~needs_principal:false)
+  else if exit_status=3 then (Result.pass, env, ~needs_principal:true)
   else begin
     let reason = (Actions_helpers.mkreason
       "expect" (String.concat " " commandline) exit_status) in
-    (Result.fail_with_reason reason, env)
+    (Result.fail_with_reason reason, env, ~needs_principal:false)
   end
 
 let run_expect_twice input_file log env ~backend =
   let corrected filename = Filename.make_filename filename "corrected" in
-  let (result1, env1) = run_expect_once input_file false log env ~backend in
+  let (result1, env1, ~needs_principal) =
+    run_expect_once input_file false log env ~backend
+  in
   if Result.is_pass result1 then begin
     let intermediate_file = corrected input_file in
-    let (result2, env2) =
-      run_expect_once intermediate_file true log env1 ~backend in
+    let (result2, env2, output_file) =
+      if needs_principal then
+        let (result2, env2, ..) =
+          run_expect_once intermediate_file true log env1 ~backend
+        in
+        (result2, env2, corrected intermediate_file)
+      else (result1, env1, intermediate_file)
+    in
     if Result.is_pass result2 then begin
-      let output_file = corrected intermediate_file in
       let output_env = Environments.add_bindings
       [
         Builtin_variables.reference, input_file;
@@ -931,17 +970,19 @@ let run_expect_with ~backend log env =
   run_expect_twice input_file log env ~backend
 
 let run_expect =
-  Actions.make ~name:"run-expect" ~description:"Run expect test"
+  Actions.make ~incremental_requirement:(Requirement "expect")
+    ~name:"run-expect" ~description:"Run expect test"
     ~does_something:true
     (run_expect_with ~backend:Bytecode)
 
 let run_expectnat =
-  Actions.make ~name:"run-expectnat"
+  Actions.make ~incremental_requirement:(Requirement "expectnat")
+    ~name:"run-expectnat"
     ~description:"Run expect test (native code)"
     ~does_something:true
     (run_expect_with ~backend:Native)
 
-let make_check_tool_output name tool = Actions.make
+let make_check_tool_output name tool = make_no_artifact
   ~name
   ~description:(Printf.sprintf "Check tool output (%s)" name)
   ~does_something:true
@@ -1210,7 +1251,7 @@ let run_test_program_in_toplevel (toplevel : Ocaml_toplevels.toplevel) log env =
         end
       end else (result, env)
 
-let ocaml = Actions.make
+let ocaml = Actions.make ~incremental_requirement:(Requirement "toplevel")
   ~name:"ocaml"
   ~description:"Run the test program in the toplevel"
   ~does_something:true
@@ -1238,6 +1279,7 @@ let config_variables _log env =
     Ocaml_variables.arch, Ocamltest_config.arch;
     Ocaml_variables.ocamlrun, Ocaml_files.ocamlrun;
     Ocaml_variables.ocamlc_byte, Ocaml_files.ocamlc;
+    Ocaml_variables.ocamlc_opt, Ocaml_files.ocamlc_dot_opt;
     Ocaml_variables.ocamlopt_byte, Ocaml_files.ocamlopt;
     Ocaml_variables.bytecc_libs, Ocamltest_config.bytecc_libs;
     Ocaml_variables.nativecc_libs, Ocamltest_config.nativecc_libs;
@@ -1264,7 +1306,7 @@ let config_variables _log env =
     Ocaml_variables.os_type, Sys.os_type
   ] env
 
-let flat_float_array = Actions.make
+let flat_float_array = make_no_artifact
   ~name:"flat-float-array"
   ~description:"Passes if the compiler is configured with \
     --enable-flat-float-array"
@@ -1273,7 +1315,7 @@ let flat_float_array = Actions.make
     "compiler configured with --enable-flat-float-array"
     "compiler configured with --disable-flat-float-array")
 
-let no_flat_float_array = make
+let no_flat_float_array = make_no_artifact
   ~name:"no-flat-float-array"
   ~description:"Passes if the compiler is configured with \
     --disable-flat-float-array"
@@ -1282,7 +1324,7 @@ let no_flat_float_array = make
     "compiler configured with --disable-flat-float-array"
     "compiler configured with --enable-flat-float-array")
 
-let flambda = Actions.make
+let flambda = make_no_artifact
   ~name:"flambda"
   ~description:"Passes if the compiler is configured with flambda or flambda2 enabled"
   ~does_something:false
@@ -1291,7 +1333,7 @@ let flambda = Actions.make
     "support for flambda enabled"
     "support for flambda disabled")
 
-let no_flambda = make
+let no_flambda = make_no_artifact
   ~name:"no-flambda"
   ~description:"Passes if the compiler is NOT configured with flambda or flambda2 enabled"
   ~does_something:false
@@ -1300,7 +1342,7 @@ let no_flambda = make
     "support for flambda disabled"
     "support for flambda enabled")
 
-let flambda2 = Actions.make
+let flambda2 = make_no_artifact
   ~name:"flambda2"
   ~description:"Passes if the compiler is configured with flambda2 enabled"
   ~does_something:false
@@ -1308,7 +1350,7 @@ let flambda2 = Actions.make
     "support for flambda2 enabled"
     "support for flambda2 disabled")
 
-let no_flambda2 = make
+let no_flambda2 = make_no_artifact
   ~name:"no-flambda2"
   ~description:"Passes if the compiler is NOT configured with flambda2 enabled"
   ~does_something:false
@@ -1316,7 +1358,7 @@ let no_flambda2 = make
     "support for flambda2 disabled"
     "support for flambda2 enabled")
 
-let shared_libraries = Actions.make
+let shared_libraries = make_no_artifact
   ~name:"shared-libraries"
   ~description:"Passes if shared libraries are supported"
   ~does_something:false
@@ -1324,7 +1366,7 @@ let shared_libraries = Actions.make
     "Shared libraries are supported."
     "Shared libraries are not supported.")
 
-let no_shared_libraries = Actions.make
+let no_shared_libraries = make_no_artifact
   ~name:"no-shared-libraries"
   ~description:"Passes if shared libraries are NOT supported"
   ~does_something:false
@@ -1332,7 +1374,7 @@ let no_shared_libraries = Actions.make
     "Shared libraries are not supported."
     "Shared libraries are supported.")
 
-let native_compiler = Actions.make
+let native_compiler = make_no_artifact
   ~name:"native-compiler"
   ~description:"Passes if the native compiler is available"
   ~does_something:false
@@ -1340,7 +1382,7 @@ let native_compiler = Actions.make
     "native compiler available"
     "native compiler not available")
 
-let native_dynlink = Actions.make
+let native_dynlink = make_no_artifact
   ~name:"native-dynlink"
   ~description:"Passes if native dynlink support is available"
   ~does_something:false
@@ -1348,7 +1390,7 @@ let native_dynlink = Actions.make
     "native dynlink support available"
     "native dynlink support not available")
 
-let debugger = Actions.make
+let debugger = make_no_artifact
   ~name:"debugger"
   ~description:"Passes if the debugger is available"
   ~does_something:false
@@ -1356,7 +1398,7 @@ let debugger = Actions.make
      "debugger available"
      "debugger not available")
 
-let instrumented_runtime = make
+let instrumented_runtime = make_no_artifact
   ~name:"instrumented-runtime"
   ~description:"Passes if the instrumented runtime is available"
   ~does_something:false
@@ -1364,7 +1406,7 @@ let instrumented_runtime = make
     "instrumented runtime available"
     "instrumented runtime not available")
 
-let csharp_compiler = Actions.make
+let csharp_compiler = make_no_artifact
   ~name:"csharp-compiler"
   ~description:"Passes if the C# compiler is available"
   ~does_something:false
@@ -1372,7 +1414,7 @@ let csharp_compiler = Actions.make
     "C# compiler available"
     "C# compiler not available")
 
-let windows_unicode = Actions.make
+let windows_unicode = make_no_artifact
   ~name:"windows-unicode"
   ~description:"Passes if Windows unicode support is available"
   ~does_something:false
@@ -1380,7 +1422,7 @@ let windows_unicode = Actions.make
     "Windows Unicode support available"
     "Windows Unicode support not available")
 
-let afl_instrument = Actions.make
+let afl_instrument = make_no_artifact
   ~name:"afl-instrument"
   ~description:"Passes if AFL instrumentation is enabled"
   ~does_something:false
@@ -1388,7 +1430,7 @@ let afl_instrument = Actions.make
     "AFL instrumentation enabled"
     "AFL instrumentation disabled")
 
-let no_afl_instrument = Actions.make
+let no_afl_instrument = make_no_artifact
   ~name:"no-afl-instrument"
   ~description:"Passes if AFL instrumentation is NOT enabled"
   ~does_something:false
@@ -1396,7 +1438,7 @@ let no_afl_instrument = Actions.make
     "AFL instrumentation disabled"
     "AFL instrumentation enabled")
 
-let stack_allocation = Actions.make
+let stack_allocation = make_no_artifact
   ~name:"stack-allocation"
   ~description:"Passes if stack allocation is enabled"
   ~does_something:false
@@ -1404,7 +1446,7 @@ let stack_allocation = Actions.make
     "Stack allocation enabled"
     "Stack allocation disabled")
 
-let no_stack_allocation = Actions.make
+let no_stack_allocation = make_no_artifact
   ~name:"no-stack-allocation"
   ~description:"Passes if stack allocation is disabled"
   ~does_something:false
@@ -1412,7 +1454,7 @@ let no_stack_allocation = Actions.make
     "Stack allocation disabled"
     "Stack allocation enabled")
 
-let poll_insertion = Actions.make
+let poll_insertion = make_no_artifact
   ~name:"poll-insertion"
   ~description:"Passes if poll insertion is enabled"
   ~does_something:false
@@ -1420,7 +1462,7 @@ let poll_insertion = Actions.make
     "Poll insertion enabled"
     "Poll insertion disabled")
 
-let no_poll_insertion = Actions.make
+let no_poll_insertion = make_no_artifact
   ~name:"no-poll-insertion"
   ~description:"Passes if poll insertion is disabled"
   ~does_something:false
@@ -1428,7 +1470,7 @@ let no_poll_insertion = Actions.make
     "Poll insertion disabled"
     "Poll insertion enabled")
 
-let stack_checks = Actions.make
+let stack_checks = make_no_artifact
   ~name:"stack-checks"
   ~description:"Passes if stack checks are enabled"
   ~does_something:false
@@ -1436,7 +1478,7 @@ let stack_checks = Actions.make
     "Stack checks enabled"
     "Stack checks disabled")
 
-let no_stack_checks = Actions.make
+let no_stack_checks = make_no_artifact
   ~name:"no-stack-checks"
   ~description:"Passes if stack checks are enabled"
   ~does_something:false
@@ -1446,7 +1488,7 @@ let no_stack_checks = Actions.make
 
 (* CR ttebbi: We should also protect against non-default register allocation
     options. *)
-let only_default_codegen = Actions.make
+let only_default_codegen = make_no_artifact
   ~name:"only-default-codegen"
   ~description:"Passes if all the codegen options are at the current default, \
                 useful for [%%expect_asm]"
@@ -1458,6 +1500,22 @@ let only_default_codegen = Actions.make
       && not Config.with_frame_pointers)
     "default codegen"
     "non-default codegen")
+
+(* Like [only_default_codegen] but requires stack checks to be enabled. Used by
+   [%%expect_asm] tests that check the code emitted for stack checks (e.g. the
+   stack-realloc handler), which only exists when stack checks are on. *)
+let only_stack_checks_codegen = make_no_artifact
+  ~name:"only-stack-checks-codegen"
+  ~description:"Passes if codegen options are at the default except that stack \
+                checks are enabled"
+  ~does_something:false
+  (Actions_helpers.predicate
+    (not Config.no_stack_checks
+      && not Config.poll_insertion
+      && not Config.with_address_sanitizer
+      && not Config.with_frame_pointers)
+    "stack-checks codegen"
+    "non-stack-checks codegen")
 
 let ocamldoc = Ocaml_tools.ocamldoc
 module Ocamldoc = (val ocamldoc)
@@ -1679,5 +1737,6 @@ let init () =
     ocamlobjinfo;
     stack_checks;
     no_stack_checks;
-    only_default_codegen
+    only_default_codegen;
+    only_stack_checks_codegen
   ]

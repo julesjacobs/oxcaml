@@ -1,0 +1,6 @@
+File "queue_rejected.ml", line 18, characters 41-63:
+18 |   let _result = Functional_queue.dequeue Functional_queue.empty in
+                                              ^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+File "functional_queue.mli", line 16, characters 19-42:
+  The refinement is stated here.

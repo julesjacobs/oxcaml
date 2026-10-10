@@ -1,0 +1,9 @@
+type nat = Z | S of nat
+[@@inductive]
+val add : nat -> nat -> nat @@ total
+val add_def :
+  (m : nat) ->
+  (n : nat) ->
+  {u : unit | (add m n) === (match m with | Z -> n | S m' -> S (add m' n))}
+  @@ total
+val add_zero : (m : nat) -> {u : unit | (add m Z) === m} @@ total

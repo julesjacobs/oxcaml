@@ -62,6 +62,17 @@ module type OrderedType =
   end
 (** Input signature of the functor {!Make}. *)
 
+module type TotalOrderedType =
+  sig
+    type t
+    val compare : t -> t -> int @@ total
+  end
+(** Input signature of {!MakeTotal}. [compare] must implement the total
+    ordering specified by {!OrderedType} and have [total] mode. Throughout
+    verified use, the sign of [compare x y] must remain stable for every pair:
+    [compare] may depend only on state that remains immutable. {!MakeTotal}
+    trusts this contract. *)
+
 module type S =
   sig
 
@@ -364,6 +375,82 @@ module type S =
   end
 (** Output signature of the functor {!Make}. *)
 
+module type TotalS =
+  sig
+    include S
+
+    val empty: 'a t @@ total
+    val add: key:key -> data:'a -> 'a t -> 'a t @@ total
+    val add_to_list: key:key -> data:'a -> 'a list t -> 'a list t @@ total
+    val update:
+      key:key -> f:('a option -> 'a option) -> 'a t -> 'a t @@ total
+    val singleton: key -> 'a -> 'a t @@ total
+    val remove: key -> 'a t -> 'a t @@ total
+    val merge:
+      f:(key -> 'a option -> 'b option -> 'c option) ->
+      'a t -> 'b t -> 'c t @@ total
+    val union:
+      f:(key -> 'a -> 'a -> 'a option) -> 'a t -> 'a t -> 'a t @@ total
+    val cardinal: 'a t -> int @@ total
+    val bindings: 'a t -> (key * 'a) list @@ total
+    val min_binding_opt: 'a t -> (key * 'a) option @@ total
+    val max_binding_opt: 'a t -> (key * 'a) option @@ total
+    val choose_opt: 'a t -> (key * 'a) option @@ total
+    val find_opt: key -> 'a t -> 'a option @@ total
+    val find_first_opt: f:(key -> bool) -> 'a t -> (key * 'a) option @@ total
+    val find_last_opt: f:(key -> bool) -> 'a t -> (key * 'a) option @@ total
+    val iter: f:(key:key -> data:'a -> unit) -> 'a t -> unit @@ total
+    val fold:
+      f:(key:key -> data:'a -> 'acc -> 'acc) ->
+      'a t -> init:'acc -> 'acc @@ total
+    val map: f:('a -> 'b) -> 'a t -> 'b t @@ total
+    val mapi: f:(key -> 'a -> 'b) -> 'a t -> 'b t @@ total
+    val filter: f:(key -> 'a -> bool) -> 'a t -> 'a t @@ total
+    val filter_map: f:(key -> 'a -> 'b option) -> 'a t -> 'b t @@ total
+    val partition: f:(key -> 'a -> bool) -> 'a t -> 'a t * 'a t @@ total
+    val split: key -> 'a t -> 'a t * 'a option * 'a t @@ total
+    val is_empty: 'a t -> bool @@ total
+    val mem: key @ immutable -> 'a t @ immutable -> bool @@ total
+    val equal: cmp:('a -> 'a -> bool) -> 'a t -> 'a t -> bool @@ total
+    val compare: cmp:('a -> 'a -> int) -> 'a t -> 'a t -> int @@ total
+    val for_all: f:(key -> 'a -> bool) -> 'a t -> bool @@ total
+    val exists: f:(key -> 'a -> bool) -> 'a t -> bool @@ total
+    val to_list: 'a t -> (key * 'a) list @@ total
+    val of_list: (key * 'a) list -> 'a t @@ total
+    val to_seq: 'a t -> (key * 'a) Seq.t @@ total
+    val to_rev_seq: 'a t -> (key * 'a) Seq.t @@ total
+    val to_seq_from: key -> 'a t -> (key * 'a) Seq.t @@ total
+
+    module Refined : sig
+      (** Operations whose modes or domains permit their use in refinement
+          predicates. Constructors retain only total keys and values. All
+          operations preserve ordinary visibility and contention, so mutable
+          keys and values remain writable. Ordinary constructors also accept
+          values containing partial functions. The query passed to [remove]
+          is not retained. [empty ()] instantiates its value type at ordinary
+          access. *)
+
+      val empty: unit -> 'a t @ total @@ total
+      val singleton:
+        key @ total ->
+        'a @ total ->
+        'a t @ total @@ total
+      val add:
+        key:key @ total -> data:'a @ total ->
+        'a t @ total -> 'a t @ total @@ total
+      val remove:
+        key ->
+        'a t @ total ->
+        'a t @ total @@ total
+      val find:
+        ('a : value mod separable).
+        (map : 'a t) ->
+        {key : key | mem key map} -> 'a @ total @@ total
+      (** [find m k] returns the value associated with [k] in [m]. *)
+    end
+  end
+(** Map operations with total comparison and totality modes. *)
+
 module Make (Ord : OrderedType) : S with type key = Ord.t
 (** Functor building an implementation of the map structure
    given a totally ordered type. *)
@@ -372,3 +459,7 @@ module MakePortable (Ord : sig @@ portable include OrderedType end)
   : sig @@ portable include S with type key = Ord.t end
 (** Like {!Make}, but takes a portable [compare] function to
     portable [Map] operations. *)
+
+module MakeTotal (Ord : TotalOrderedType) : TotalS with type key = Ord.t
+(** Like {!Make}, with a total comparison and totality modes on operations
+    that cannot raise on their own. *)

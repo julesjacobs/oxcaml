@@ -1,5 +1,5 @@
 (* TEST
- flags += "-extension comprehensions -extension layouts_beta";
+ flags += "-extension comprehensions -extension layouts_beta -w -181";
  expect;
 *)
 
@@ -430,6 +430,8 @@ Error: Signature mismatch:
          because of the definition of t at line 1, characters 18-44.
        But the layout of the first must be a sublayout of bits64
          because of the definition of t at line 1, characters 56-71.
+       The first is not logical:
+       X.t is abstract and its kind does not say mod logical.
 |}]
 
 (* The meet of [any mod separable] and [value_or_null] is [value] *)

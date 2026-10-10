@@ -1,0 +1,24 @@
+## refinements.ml
+exit 0
+## counterexample.ml
+File "counterexample.ml", line 10, characters 51-56:
+10 | let (succ @ total) (x : int) : {r : int | r > x} = x + 1
+                                                        ^^^^^
+Error: Refinement could not be proved (counterexample: x = 4611686018427387903)
+File "counterexample.ml", line 10, characters 42-47:
+10 | let (succ @ total) (x : int) : {r : int | r > x} = x + 1
+                                               ^^^^^
+  The refinement is stated here.
+exit 2
+## lemma.ml
+exit 0
+## ghost_token.ml
+File "ghost_token.ml", line 30, characters 14-20:
+30 |   Launch.fire permit "Mars"
+                   ^^^^^^
+Error: This value is used here, but it has already been used as unique at:
+File "ghost_token.ml", line 29, characters 14-20:
+29 |   Launch.fire permit "the moon";
+                   ^^^^^^
+  
+exit 2

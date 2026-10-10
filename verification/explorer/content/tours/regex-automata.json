@@ -1,0 +1,97 @@
+{
+  "_about": "Demo tour of the regex matcher and its lowering to DFA tables. Sources: verification/catalogue/pages/regex-automata.md (its sources: list is the backbone), research/mastery-20260927/demos-algorithms.md section 3.5 and the sub-agent experiments in research/mastery-20260927/scratch/demos-algorithms/dfa-regex/ (r1_lower_some.ml, r2_evidence_runtime.ml); every claim re-checked against the code at 8479634adc.",
+  "id": "regex-automata",
+  "title": "Regular expressions and automata",
+  "kind": "demo",
+  "demo": "regex-automata",
+  "order": 5,
+  "summary": [
+    "`Regex_language.matches` decides regular-expression membership with Brzozowski derivatives and is proved sound and complete against an inductive derivation relation. `lower` converts a regex to a table of the [DFA demo](tour:dfa-equivalence), and a table it returns is proved valid and to accept the same words. The tour reads the interface and its clients, then the derivative proofs, the powerset automaton and the conversion, including the fact the interface does not promise: that `lower` returns `Some`.",
+    "The [catalogue page](demo:regex-automata) states the claim, the row counts and the open question about the sizes of in-memory data."
+  ],
+  "stops": [
+    {
+      "title": "The interface",
+      "path": "testsuite/tests/vox/regex_language.mli",
+      "from": "module Regex_language : sig",
+      "text": "`matches` is total and opaque to clients. `sound` returns an erased derivation (`Membership.evidence Ghost.t`) of `word` from `root` whenever `matches` is true, and `complete` shows that `matches` is true whenever a valid derivation exists; together they say that `matches` decides the membership relation of the next stop. `lower` returns a table in the format of `Dfa_semantics`, or `None`. `lower_matches` and `lower_valid` hold only on `Some`, so `fun _ -> None` also satisfies this interface. `lower` takes its argument at mode `total` (`t @ total`) because the construction inside it is total code that consumes the regex.",
+      "span": 17
+    },
+    {
+      "title": "Membership as derivation data",
+      "path": "testsuite/tests/vox/regex_semantics.ml",
+      "from": "type t = Empty | Epsilon | Symbol of int",
+      "to": [
+        "| Star_step (p, q) ->",
+        "valid a p && valid r q"
+      ],
+      "text": "Symbols are `int`s, and the syntax has six constructors. The specification is a datatype of derivations: `evidence` has one constructor per membership rule, `word` computes the word a derivation derives, and `valid r p` checks that `p` follows the shape of `r`; `Star_step` splits a starred match into one iteration and the rest, which is checked against `r` itself. `[@@inductive]` lets the checker reason about these types by cases and induction, and `let[@def]` gives each function a definition lemma such as `valid_def`. To prove `matches Epsilon []`, a client builds `Epsilon_match` and calls `complete`, as `epsilon_matches` does in the public client."
+    },
+    {
+      "title": "A client that composes the two demos",
+      "path": "testsuite/tests/vox/regex_public_client.ml",
+      "from": "let (minimized_regex @ total)",
+      "to": "  ()",
+      "text": "`minimized_regex` combines the regex and DFA interfaces: if `lower` gives a table and `Dfa_equivalence.reduce` minimizes it, the minimized table accepts exactly the words that `matches` accepts. The proof is two ghost calls, `lower_matches` for the regex and `reduce_preserves` for the table. Like both contracts, the theorem says nothing when either step returns `None`, and `reduce` returns `None` for every lowered table of more than 64 rows. The next function, `lowered_reduction_finishes`, uses `lower_valid` to discharge the validity premise of `reduce_complete`."
+    },
+    {
+      "title": "Allowed representations with the same meaning",
+      "path": "testsuite/tests/vox/regex_public_client.ml",
+      "from": "open Dfa_semantics",
+      "text": "`Symbol 7` and `Alt (Symbol 7, Symbol 7)` are unequal syntax trees with equal language. The public client checks empty, matching, nonmatching and repeated-symbol words; lowering may choose any valid table with the specified language.",
+      "span": 97
+    },
+    {
+      "title": "A rejected client: lowering may fail",
+      "path": "testsuite/tests/vox/dfa_boundary.ml",
+      "from": "(* Lowering a regex to a DFA may fail. *)",
+      "to": "|}]",
+      "text": "`dfa_boundary.ml` checks this claim against the public interfaces and requires it to fail: nothing in `regex_language.mli` says that `lower` returns `Some`. Inside the implementation the bridge proves that the raw table is always built (`compiled_lower_raw_complete`); nothing proves that it passes the validity check, and in Vox's logic the check does fail for large enough regexes (stop 8). Against the implementation, [`regex.ml`](src:testsuite/tests/vox/regex.ml) rejects three false claims, among them `fabricated_evidence`, which offers `Epsilon_match` as the derivation for every match."
+    },
+    {
+      "title": "The matcher: Brzozowski derivatives",
+      "path": "testsuite/tests/vox/regex_core.ml",
+      "from": "let[@def] rec nullable r =",
+      "to": "c :: rest -> matches (derive c r) rest",
+      "text": "`derive c r` denotes the words `w` such that `c :: w` matches `r`; `matches` derives by each symbol of the word and asks `nullable` at the end. `alt` and `seq`, above, are smart constructors: `alt` flattens, sorts and deduplicates alternatives and drops `Empty`, and `seq` simplifies around `Empty` and `Epsilon`, so repeated derivatives stay small. Every definition is structurally recursive over the regex or the word, which is how totality is checked. `Regex_language.matches` is defined as `Regex.matches`, and this is the code that runs."
+    },
+    {
+      "title": "Soundness and completeness through the derivatives",
+      "path": "testsuite/tests/vox/regex_core.ml",
+      "from": "let rec (sound @ total) : (r : t) -> (s : int list) ->",
+      "to": "complete derivative rest q;",
+      "text": "`sound` builds a derivation by recursion on the word: at the end, `epsilon` builds one for a nullable regex, and at each symbol `expand` turns a derivation for `derive c r` into one for `r` with `c` prepended. `complete` runs the other way, with `contract` taking a derivation for `r` of `c :: w` apart into one for `derive c r` of `w`. Both must carry derivations through the smart constructors, which is what `alt_expand`, `alt_contract`, `seq_expand` and `seq_contract` do. The public `Regex_language.sound` calls this function inside `ghost_` and returns its result as a `Ghost.t`, so running `matches` never builds a derivation."
+    },
+    {
+      "title": "The powerset automaton",
+      "path": "testsuite/tests/vox/regex_core.ml",
+      "from": "let (correct @ total) (root @ total) (s : int list) :",
+      "to": [
+        "accepts_def nil s;",
+        "()"
+      ],
+      "text": "`Regex.Dfa` is a second construction, used for lowering. `partial c r` computes Antimirov partial derivatives, and `support r` the terms they can reach; `compile` takes as states every subset of `root :: support root`, built by `powerset`, with the initial state `[root]`, and steps a set by joining the partial derivatives of its members. `correct` proves, through `execute_correct` by induction on the word, that the compiled automaton agrees with `matches` on every word. The powerset is complete, reachable or not, so if `root :: support root` has `u` elements the automaton has `2^u` states; the list depends on the syntax, and a literal of `n` symbols gives `u = n + 1`."
+    },
+    {
+      "title": "Lowering to a table, and the validity check",
+      "path": "testsuite/tests/vox/regex_dfa_bridge_core.ml",
+      "from": "let[@def] lower_raw dfa =",
+      "to": [
+        "let (compiled_lower_raw_complete @ total)",
+        "lower_raw_complete dfa;",
+        "()"
+      ],
+      "text": [
+        "`lower_raw` lists the states as `initial dfa :: [] :: states dfa` and `build_table` numbers them 0, 1, 2, … with `id + 1`, one row each, which gives `2^u + 2` rows (`abcd` gives 34), and `compiled_lower_raw_complete` proves that this always produces a table. `lower`, further down, then passes the table through `Dfa_proof.of_raw`, which returns it only if `Dfa_semantics.valid` holds; `of_raw` lives in the module that declares the DFA demo's three trusted `external` comparisons.",
+        "Validity needs distinct row ids, and in Vox's logic `id + 1` wraps at `max_int`, so for `u` of at least 63 the ids repeat and `lower` returns `None`. No such table fits in memory, but ghost code can build lists of any length, so the checker cannot bound a list's length by the memory it would need. The catalogue page discusses this as an open design question."
+      ]
+    },
+    {
+      "title": "Tests: agreement with a naive matcher",
+      "path": "testsuite/tests/vox/regex.ml",
+      "from": "let atoms = [Empty; Epsilon; Symbol 0; Symbol 1] in",
+      "to": "(List.length regexes) (List.length dfa_inputs);",
+      "text": "Besides checking the proofs, `regex.ml` runs `matches`, `recognize` and the compiled automaton on 3,244 regexes built in two layers from `Empty`, `Epsilon`, `Symbol 0` and `Symbol 1`, against `member`, a separate matcher that tries every split of the word; the automaton also sees words with symbols outside the regex, `min_int` and `max_int`. [`regex_dfa_bridge.ml`](src:testsuite/tests/vox/regex_dfa_bridge.ml) checks the conversion proof. `dfa_boundary.ml` is the only test that compiles `regex_language.mli`, its implementation and the public client, and its Lambda check requires that `sound`, `complete`, `lower_matches` and `lower_valid` make no calls ([DFA tour, last stop](tour:dfa-equivalence/10)). Lowering is slow for long literals, and running time is not proved."
+    }
+  ]
+}

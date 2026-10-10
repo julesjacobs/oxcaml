@@ -50,7 +50,7 @@ Line 1, characters 14-15:
 1 | type t_test = t require_global
                   ^
 Error: This type "t" should be an instance of type "('a : value mod global)"
-       The kind of t is immutable_data
+       The kind of t is logical_data
          because of the definition of t at line 2, characters 0-35.
        But the kind of t must be a subkind of value mod global
          because of the definition of require_global at line 7, characters 0-43.
@@ -88,7 +88,7 @@ Line 1, characters 14-15:
 1 | type t_test = t require_aliased
                   ^
 Error: This type "t" should be an instance of type "('a : value mod aliased)"
-       The kind of t is immutable_data
+       The kind of t is logical_data
          because of the definition of t at line 2, characters 0-18.
        But the kind of t must be a subkind of value mod aliased
          because of the definition of require_aliased at line 8, characters 0-45.
@@ -182,7 +182,7 @@ Line 1, characters 13-20:
 1 | let foo (t : int ref t @ contended) = use_uncontended t
                  ^^^^^^^
 Error: This type "int ref" should be an instance of type "('a : immutable_data)"
-       The kind of int ref is mutable_data.
+       The kind of int ref is mutable_data mod logical.
        But the kind of int ref must be a subkind of immutable_data
          because of the definition of t at line 1, characters 0-46.
 |}, Principal{|
@@ -191,7 +191,7 @@ Line 1, characters 13-20:
                  ^^^^^^^
 Error: This type "int ref" should be an instance of type "('a : immutable_data)"
        The kind of int ref is
-           mutable_data with int @@ forkable unyielding many.
+           mutable_data mod logical with int @@ forkable unyielding many.
        But the kind of int ref must be a subkind of immutable_data
          because of the definition of t at line 1, characters 0-46.
 
@@ -200,6 +200,7 @@ Error: This type "int ref" should be an instance of type "('a : immutable_data)"
          portability: mod portable with int ≰ mod portable
          statefulness: mod stateless with int ≰ mod stateless
          visibility: mod read_write ≰ mod immutable
+         totality: mod total with int ≰ mod total
 |}]
 
 let foo (t : int t @ local) = use_global t [@nontail]
@@ -335,7 +336,7 @@ Line 1, characters 13-20:
 1 | let foo (t : int ref t @ contended) = use_uncontended t
                  ^^^^^^^
 Error: This type "int ref" should be an instance of type "('a : immutable_data)"
-       The kind of int ref is mutable_data.
+       The kind of int ref is mutable_data mod logical.
        But the kind of int ref must be a subkind of immutable_data
          because of the definition of t at line 1, characters 0-73.
 |}, Principal{|
@@ -344,7 +345,7 @@ Line 1, characters 13-20:
                  ^^^^^^^
 Error: This type "int ref" should be an instance of type "('a : immutable_data)"
        The kind of int ref is
-           mutable_data with int @@ forkable unyielding many.
+           mutable_data mod logical with int @@ forkable unyielding many.
        But the kind of int ref must be a subkind of immutable_data
          because of the definition of t at line 1, characters 0-73.
 
@@ -353,6 +354,7 @@ Error: This type "int ref" should be an instance of type "('a : immutable_data)"
          portability: mod portable with int ≰ mod portable
          statefulness: mod stateless with int ≰ mod stateless
          visibility: mod read_write ≰ mod immutable
+         totality: mod total with int ≰ mod total
 |}]
 
 let foo (t : int t @ aliased) = use_unique t
@@ -531,7 +533,7 @@ Line 1, characters 0-149:
 Error: The kind of type "int list list list list list list list list list list
                         list list list list list list list list list list
                         list list list list" is
-           immutable_data
+           logical_data
              with int list list list list list list list list list list list list list list
                   list list list list list list list list list
          because it's a boxed variant type.

@@ -76,6 +76,7 @@ exception Moregen  of moregen_error
 exception Subtype  of Subtype.error
 
 exception Escape of type_expr escape
+exception Refinement_scope_escape of Ident.t
 
 (* For local use: throw the appropriate exception.  Can be passed into local
    functions as a parameter *)
@@ -174,6 +175,95 @@ let nongen_level = s_ref 0
 let global_level = s_ref 0
 let saved_level = s_ref []
 
+let refinement_value_scopes = s_table Hashtbl.create 17
+module Refinement_scope_dependencies =
+  Ephemeron.K1.Make (Types.TransientTypeOps)
+
+let refinement_scope_dependencies =
+  s_table Refinement_scope_dependencies.create 251
+
+let in_refinement_predicate = s_ref false
+
+(* A refinement node has two independent scope contributions.  The ordinary
+   type/GADT contribution is stored in [ref_structural_scope].  This table
+   caches the greatest free term dependency in its predicate.  Predicate
+   substitution can lower the latter, so it must be recomputed instead of
+   folded into the monotone structural contribution. *)
+
+let refinement_scopes_enabled () =
+  may_have_refinement_types ()
+  || Language_extension.is_enabled Refinement_types
+
+let may_track_refinement_scopes () =
+  refinement_scopes_enabled () && not !in_refinement_predicate
+
+let with_refinement_predicate_scope f =
+  let previous = !in_refinement_predicate in
+  in_refinement_predicate := true;
+  Fun.protect f ~finally:(fun () -> in_refinement_predicate := previous)
+
+let register_refinement_value_scope ~level ids =
+  if refinement_scopes_enabled () then begin
+    let level =
+      if !in_refinement_predicate then Ident.lowest_scope else level
+    in
+    List.iter (fun id -> Hashtbl.replace !refinement_value_scopes id level) ids
+  end
+
+let () =
+  Subst.register_refinement_field_binders := (fun ids ->
+    List.iter (fun id ->
+      Hashtbl.replace !refinement_value_scopes id Ident.lowest_scope) ids)
+
+let direct_refinement_scope_dependency ty =
+  let ty = Transient_expr.repr ty in
+  match
+    Refinement_scope_dependencies.find !refinement_scope_dependencies
+      ty
+  with
+  | dependency -> Some dependency
+  | exception Not_found -> None
+
+let refresh_refinement_scope ty
+    { ref_structural_scope; ref_binder; ref_payload = _; ref_pred } =
+  let locally_bound =
+    Ident.Set.add ref_binder (Refinement_predicate.bound_idents ref_pred)
+  in
+  register_refinement_value_scope ~level:Ident.lowest_scope
+    (Ident.Set.elements locally_bound);
+  let dependency = ref None in
+  let note id =
+    let scope =
+      match Hashtbl.find_opt !refinement_value_scopes id with
+      | Some scope -> scope
+      | None -> Ident.scope id
+    in
+    match !dependency with
+    | Some (_, previous_scope) when previous_scope >= scope -> ()
+    | None | Some _ -> dependency := Some (id, scope)
+  in
+  Refinement_predicate.iter_scoped_dependencies
+    ~bound:(Ident.Set.singleton ref_binder)
+    ~ident:note ~type_expr:(fun ~bound:_ _ -> ()) ref_pred;
+  let ty = Transient_expr.type_expr ty in
+  begin match !dependency with
+  | None ->
+      Refinement_scope_dependencies.remove !refinement_scope_dependencies
+        (Transient_expr.coerce ty);
+      set_scope ty ref_structural_scope
+  | Some ((_, scope) as dependency) ->
+      Refinement_scope_dependencies.replace !refinement_scope_dependencies
+        (Transient_expr.coerce ty) dependency;
+      set_scope ty (Int.max ref_structural_scope scope)
+  end
+
+let () =
+  Types.set_type_desc_observer (fun ty ->
+    match Transient_expr.get_desc ty with
+    | Trefine refinement -> refresh_refinement_scope ty refinement
+    | _ ->
+        Refinement_scope_dependencies.remove !refinement_scope_dependencies ty)
+
 let get_current_level () = !current_level
 let init_def level = current_level := level; nongen_level := level
 let begin_def () =
@@ -196,11 +286,11 @@ let create_scope () =
 
 let wrap_end_def f = Misc.try_finally f ~always:end_def
 
-let mark_toplevel_in_quotations env =
+let mark_persistent_in_quotations env =
   let scope = !current_level in
   (* Create a new scope to make sure we only capture what came before *)
   let _ = create_scope () in
-  Env.mark_toplevel_in_quotations ~scope env
+  Env.mark_persistent_in_quotations ~scope env
 
 (* [with_local_level_gen] handles both the scoping structure of levels
    and automatic generalization through pools (cf. btype.ml) *)
@@ -479,7 +569,7 @@ let without_assume_injective uenv f =
   | Pattern r -> f (Pattern { r with assume_injective = false })
 
 (* In type checking, we only use [decr_stage] when we observe a spliced type.
-   [Env.enter_splice] only fails when the splice would be top-level. Hence,
+   [Env.enter_splice] only fails when the splice would be initial-stage. Hence,
    no legitimate errors will ever be raised there and we can omit the [loc].
 
    For sanity, we have an extra assertion here. It fails when we [decr_stage]
@@ -493,7 +583,7 @@ let decr_stage env =
   Env.enter_splice ~loc:Location.none env
 
 let incr_stage env =
-  Env.enter_quotation env
+  Env.enter_quote env
 
 let iter_type_expr_with_stages f env ty =
   match get_desc ty with
@@ -515,7 +605,7 @@ let iter_type_expr_with_stages f env ty =
    The right way to address this is to track the stage in errors. With that
    done, this function can be removed, and some GADT-related errors improve.
    This is tracked by ticket 6726. *)
-let contains_toplevel_splice stage ty =
+let contains_initial_stage_splice stage ty =
   let visited = ref TypeSet.empty in
   let rec loop acc ty =
     if TypeSet.mem ty !visited then false else begin
@@ -738,7 +828,7 @@ let remove_mode_and_jkind_variables ty =
       match get_desc ty with
       | Tvar { jkind } -> Jkind.default_to_scannable jkind
       | Tunivar { jkind } -> Jkind.default_to_scannable jkind
-      | Tarrow ((_,marg,mret),targ,tret,_) ->
+      | Tarrow ((_,marg,mret,_),targ,tret,_) ->
          let _ = Alloc.zap_to_legacy marg in
          let _ = Alloc.zap_to_legacy mret in
          go targ; go tret
@@ -1006,6 +1096,11 @@ let rec generalize stage_offset ty =
     | Tconstr (_, _, abbrev) ->
         iter_abbrev (generalize stage_offset) !abbrev;
         iter_type_expr (generalize stage_offset) ty
+    | Trefine { ref_payload; ref_pred; _ } ->
+        generalize stage_offset ref_payload;
+        ignore
+          (Refinement_predicate.fold_types
+             (fun () ty -> generalize stage_offset ty) () ref_pred)
     | _ ->
         iter_type_expr (generalize stage_offset) ty
     end;
@@ -1017,8 +1112,8 @@ let generalize ty =
 
 (*
    Build a copy of a type in which nodes reachable through a path composed
-   only of Tarrow, Tpoly, Ttuple, Trepr, Tpackage and Tconstr, and whose level
-   was no lower than [!current_level], are at [generic_level].
+   only of Tarrow, Tmod, Tpoly, Ttuple, Trepr, Tpackage and Tconstr, and whose
+   level was no lower than [!current_level], are at [generic_level].
    This is different from [with_local_level_gen], which generalizes in place,
    and only nodes with a level higher than [!current_level].
    This is used for typing classes, to indicate which types have been
@@ -1042,7 +1137,7 @@ let rec copy_spine copy_scope ty =
   | Tof_kind _
   | Tbox _ -> ty
   | ( Tarrow _ | Tpoly _ | Trepr _ | Ttuple _ | Tunboxed_tuple _ | Tpackage _
-    | Tconstr _ ) as desc ->
+    | Tconstr _ | Tmod _ | Trefine _ ) as desc ->
       let level = get_level ty in
       if level < !current_level || level = generic_level then ty else
       let t =
@@ -1066,6 +1161,15 @@ let rec copy_spine copy_scope ty =
           Tpackage {pack_path; pack_cstrs = fl}
       | Tconstr (path, tyl, _) ->
           Tconstr (path, List.map copy_rec tyl, ref Mnil)
+      | Tmod (ty, mod_bounds) ->
+          Tmod (copy_rec ty, mod_bounds)
+      | Trefine refinement ->
+          Trefine
+            { refinement with
+              ref_payload = copy_rec refinement.ref_payload;
+              ref_pred =
+                Refinement_predicate.map ~type_expr:copy_rec
+                  refinement.ref_pred }
       | _ -> assert false
       in
       Transient_expr.set_stub_desc t desc';
@@ -1098,6 +1202,13 @@ let rec normalize_package_path env p =
           normalize_package_path env (Path.Pdot (p1', s))
       | _ -> p
 
+let iter_type_expr_with_refinement_types f ty =
+  iter_type_expr f ty;
+  match get_desc ty with
+  | Trefine { ref_pred; _ } ->
+      ignore (Refinement_predicate.fold_types (fun () ty -> f ty) () ref_pred)
+  | _ -> ()
+
 let rec check_scope_escape mark env level ty =
   let orig_level = get_level ty in
   if try_mark_node mark ty then begin
@@ -1118,8 +1229,14 @@ let rec check_scope_escape mark env level ty =
           (newty2 ~level:orig_level
             (Tpackage {pack with pack_path = p'}))
     | _ ->
-        iter_type_expr_with_stages
-          (fun env -> check_scope_escape mark env level) env ty
+        begin match get_desc ty with
+        | Trefine _ ->
+            iter_type_expr_with_refinement_types
+              (check_scope_escape mark env level) ty
+        | _ ->
+            iter_type_expr_with_stages
+              (fun env -> check_scope_escape mark env level) env ty
+        end
     end;
   end
 
@@ -1130,12 +1247,28 @@ let check_scope_escape env level ty =
     raise (Escape { e with context = Some ty })
   end
 
+let structural_scope ty =
+  match get_desc ty with
+  | Trefine { ref_structural_scope; _ } -> ref_structural_scope
+  | _ -> get_scope ty
+
 let rec update_scope scope ty =
-  if get_scope ty < scope then begin
+  let needs_update =
+    match get_desc ty with
+    | Trefine { ref_structural_scope; _ } -> ref_structural_scope < scope
+    | _ -> get_scope ty < scope
+  in
+  if needs_update then begin
     if get_level ty < scope then raise_scope_escape_exn ty;
-    set_scope ty scope;
+    begin match get_desc ty with
+    | Trefine refinement ->
+        set_type_desc ty
+          (Trefine { refinement with ref_structural_scope = scope })
+    | _ -> set_scope ty scope
+    end;
     (* Only recurse in principal mode as this is not necessary for soundness *)
-    if !Clflags.principal then iter_type_expr (update_scope scope) ty
+    if !Clflags.principal then
+      iter_type_expr_with_refinement_types (update_scope scope) ty
   end
 
 let update_scope_for tr_exn scope ty =
@@ -1154,7 +1287,12 @@ let update_scope_for tr_exn scope ty =
 let rec update_level env level expand ty =
   let ty_level = get_level ty in
   if ty_level > level then begin
-    if level < get_scope ty then raise_scope_escape_exn ty;
+    if level < get_scope ty then begin
+      match direct_refinement_scope_dependency ty with
+      | Some (id, dependency_scope) when level < dependency_scope ->
+          raise (Refinement_scope_escape id)
+      | _ -> raise_scope_escape_exn ty
+    end;
     let set_level () =
       set_level ty level;
       if ty_level = generic_level then
@@ -1212,8 +1350,53 @@ let rec update_level env level expand ty =
     | _ ->
         set_level ();
         (* XXX what about abbreviations in Tconstr ? *)
-        iter_type_expr_with_stages
-          (fun env -> update_level env level expand) env ty
+        begin match get_desc ty with
+        | Trefine _ ->
+            iter_type_expr_with_refinement_types
+              (update_level env level expand) ty
+        | _ ->
+            iter_type_expr_with_stages
+              (fun env -> update_level env level expand) env ty
+        end
+  end
+
+let check_refinement_level_escape_in level visit_root =
+  let visited = Hashtbl.create 17 in
+  let rec visit ty =
+    if get_level ty > level then begin
+      let key = get_id ty in
+      if not (Hashtbl.mem visited key) then begin
+        Hashtbl.add visited key ();
+        begin match direct_refinement_scope_dependency ty with
+        | Some (id, dependency_scope) when level < dependency_scope ->
+            raise (Refinement_scope_escape id)
+        | None | Some _ -> ()
+        end;
+        match get_desc ty with
+        | Trefine _ -> iter_type_expr_with_refinement_types visit ty
+        | _ -> iter_type_expr visit ty
+      end
+    end
+  in
+  visit_root visit
+
+let check_refinement_class_level_escape level cty =
+  if may_have_refinement_types () then begin
+    let rec visit_class_type visit = function
+      | Cty_constr (_, args, cty) ->
+          List.iter visit args;
+          visit_class_type visit cty
+      | Cty_signature sign ->
+          visit sign.csig_self;
+          visit sign.csig_self_row;
+          Vars.iter (fun _ (_, _, ty) -> visit ty) sign.csig_vars;
+          Meths.iter (fun _ (_, _, ty) -> visit ty) sign.csig_meths
+      | Cty_arrow (_, arg, cty) ->
+          visit arg;
+          visit_class_type visit cty
+    in
+    check_refinement_level_escape_in level
+      (fun visit -> visit_class_type visit cty)
   end
 
 (* First try without expanding, then expand everything,
@@ -1223,9 +1406,17 @@ let update_level env level ty =
     let snap = snapshot () in
     try
       update_level env level false ty
-    with Escape _ ->
-      backtrack snap;
-      update_level env level true ty
+    with
+    | Refinement_scope_escape _ as exn ->
+        backtrack snap;
+        raise exn
+    | Escape _ ->
+        backtrack snap;
+        begin try update_level env level true ty with
+        | Refinement_scope_escape _ as exn ->
+            backtrack snap;
+            raise exn
+        end
   end
 
 let update_level_for tr_exn env level ty =
@@ -1278,6 +1469,13 @@ let rec lower_contravariant env var_level visited contra ty =
     | Tarrow (_, t1, t2, _) ->
         lower_rec true t1;
         lower_rec contra t2
+    | Trefine { ref_payload; ref_pred; _ } ->
+        (* Types in the predicate are invariant, as in
+           [Typedecl_variance.compute_variance]. *)
+        lower_rec contra ref_payload;
+        ignore
+          (Refinement_predicate.fold_types
+             (fun () ty -> lower_rec true ty) () ref_pred)
     | _ ->
         iter_type_expr_with_stages
           (fun env -> lower_contravariant env var_level visited contra) env ty
@@ -1364,7 +1562,7 @@ let rec inv_type hash pty ty =
   with Not_found ->
     let inv = { inv_type = ty; inv_parents = pty } in
     TypeHash.add hash ty inv;
-    iter_type_expr (inv_type hash [inv]) ty
+    iter_type_expr_with_refinement_types (inv_type hash [inv]) ty
 
 let compute_univars ty =
   let inverted = TypeHash.create 17 in
@@ -1608,6 +1806,7 @@ let new_local_type ?(loc = Location.none) ?manifest_and_scope origin jkind =
     type_loc = loc;
     type_attributes = [];
     type_unboxed_default = false;
+    type_inductive = false;
     type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
     type_unboxed_version = None;
   }
@@ -2029,7 +2228,7 @@ let curry_mode alloc arg : Alloc.Const.t =
 
 let rec instance_prim_locals locals mvar_l mvar_y macc (loc, yld) ty =
   match locals, get_desc ty with
-  | l :: locals, Tarrow ((lbl,marg,mret),arg,ret,commu) ->
+  | l :: locals, Tarrow ((lbl,marg,mret,binder),arg,ret,commu) ->
      let marg = with_locality_and_forkable_yielding
       (prim_mode' (Some (mvar_l, mvar_y)) l) marg
      in
@@ -2048,7 +2247,8 @@ let rec instance_prim_locals locals mvar_l mvar_y macc (loc, yld) ty =
           mret'
      in
      let ret = instance_prim_locals locals mvar_l mvar_y macc (loc, yld) ret in
-     newty2 ~level:(get_level ty) (Tarrow ((lbl,marg,mret),arg,ret, commu))
+     newty2 ~level:(get_level ty)
+       (Tarrow ((lbl,marg,mret,binder),arg,ret, commu))
   | _ :: _, _ -> assert false
   | [], _ ->
      ty
@@ -2073,7 +2273,8 @@ let rec instance_prim_locals locals mvar_l mvar_y macc (loc, yld) ty =
    type of an external declaration. However, the code is written without
    relaying this assumption. *)
 let instance_prim_layout env (desc : Primitive.description) ty =
-  if not desc.prim_is_layout_poly
+  (* Executable predicates are retyped after refinement instantiation. *)
+  if not desc.prim_is_layout_poly || !in_refinement_predicate
   then ty, None
   else
   let new_sort = ref None in
@@ -2321,7 +2522,7 @@ let expand_abbrev_gen kind find_type_expansion env ty =
           (* For gadts, remember type as non exportable *)
           (* The ambiguous level registered for ty' should be the highest *)
           (* if !trace_gadt_instances then begin *)
-          let scope = Int.max lv (get_scope ty) in
+          let scope = Int.max lv (structural_scope ty) in
           update_scope scope ty;
           update_scope scope ty';
           ty'
@@ -2419,11 +2620,11 @@ let try_expand_safe env ty =
    [t = <[t' qeval^n]>^m] for natural [n], integer [m] and type expression [t'].
    If [n > 0], then [t'] is irreducible, and has to be one of the following:
    * Type variable,
-   * Type constructor that is not top-level,
+   * Type constructor that is not persistent,
    * Quote-kinded type. *)
 
 (* Perform one of the following head-position beta reductions via rewrites:
-   * Reduce a quoted-eval through a concrete (top-level) type constructor.
+   * Reduce a quoted-eval through a concrete (persistent) type constructor.
    * Cancel a quote-splice pair.
    * Simplify a [Tbox] over a type with a unboxed version. *)
 let rec try_reduce_once env t =
@@ -2455,13 +2656,15 @@ let rec try_reduce_once env t =
   | _ -> raise Cannot_expand
 
 and try_reduce_quote_eval env t =
-  let path_must_be_toplevel env path =
-    if not (Env.path_is_toplevel_in_quotations env path) then
+  let path_must_be_persistent env path =
+    if not (Env.path_is_persistent_in_quotations env path) then
       raise Cannot_expand
   in
   let try_reduce_poly env t = if is_Tpoly t then try_reduce_once env t else t in
   match get_desc t with
   | Tvar _ | Tunivar _ -> raise Cannot_expand
+  (* Refinements are rigid; quoted refined types do not reduce further. *)
+  | Trefine _ -> raise Cannot_expand
   (* [<[t1 -> t2]> eval]  ==>  [<[t1]> eval -> <[t2]> eval] *)
   | Tarrow (a, t1, t2, c) ->
     (* Reduce the parameter type's [Tpoly] immediately *)
@@ -2479,8 +2682,10 @@ and try_reduce_quote_eval env t =
     Tunboxed_tuple (List.map (fun (l, t) -> (l, new_quote_eval_ty t)) tl)
   (* [<[(t1, t2) typ]> eval]  ==>  [(<[t1]> eval, <[t2]> eval) typ] *)
   | Tconstr (p, tl, a) ->
-    path_must_be_toplevel env p;
+    path_must_be_persistent env p;
     Tconstr (p, List.map new_quote_eval_ty tl, a)
+  | Tmod (ty, mod_bounds) ->
+    Tmod (new_quote_eval_ty ty, mod_bounds)
   (* [<[ < .. > ]> eval]  ==>  [< <[..]> eval >] *)
   | Tobject (t, ct) ->
     (* Attempt to reduce the field list immediately:
@@ -2488,7 +2693,7 @@ and try_reduce_quote_eval env t =
          will [raise Cannot_expand]. [Cannot_expand] propagates to here
          so the [Tobject] does not reduce at all.
          Alternatively, the object type has a private row type given by
-         a [Tconstr], in which case we will reduce if it is top-level.
+         a [Tconstr], in which case we will reduce if it is persistent.
        - If the object type is closed, its final element is a [Tnil] and
          the entire [Tobject] will reduce just fine. *)
     (* CR metaprogramming jbachurski: As for [Tvariant], it would be nicer
@@ -2498,7 +2703,7 @@ and try_reduce_quote_eval env t =
       ref (
         Option.map
           (fun (p, tl) ->
-            path_must_be_toplevel env p;
+            path_must_be_persistent env p;
             p, List.map new_quote_eval_ty tl)
           !ct))
   (* [<[ < a: t, .. > ]> eval] ==> [<a : <[t]> eval, <[..]> eval >] *)
@@ -2549,7 +2754,7 @@ and try_reduce_quote_eval env t =
   (*  [<[ module S with type typ = t ]> eval]
       ==> [module S with type typ = <[t]> eval] *)
   | Tpackage { pack_path; pack_cstrs } ->
-    path_must_be_toplevel env pack_path;
+    path_must_be_persistent env pack_path;
     Tpackage { pack_path;
                pack_cstrs =
                  List.map (fun (n, t) -> n, new_quote_eval_ty t) pack_cstrs }
@@ -2623,6 +2828,13 @@ let expand_head env ty =
   try try_expand_head try_expand_safe env ty
   with Cannot_expand -> ty
 
+let rec is_inductive env ty =
+  match get_desc (expand_head env ty) with
+  | Trefine r -> is_inductive env r.ref_payload
+  | Tconstr (path, _, _) ->
+      (try (Env.find_type path env).type_inductive with Not_found -> false)
+  | _ -> false
+
 let _ = forward_try_expand_safe := try_expand_safe
 
 
@@ -2654,13 +2866,15 @@ let rec extract_concrete_typedecl env ty =
           end
       end
   | Tpoly(ty, _) -> extract_concrete_typedecl env ty
+  | Tmod _ ->
+    Misc.fatal_error "Ctype.extract_concrete_typedecl: unexpected Tmod"
   | Trepr _ -> Has_no_typedecl
   | Tquote ty -> extract_concrete_typedecl (incr_stage env) ty
   | Tsplice ty -> extract_concrete_typedecl (decr_stage env) ty
   | Tquote_eval ty -> extract_concrete_typedecl (incr_stage env) ty
   | Tbox ty -> extract_concrete_typedecl env ty
   | Tarrow _ | Ttuple _ | Tunboxed_tuple _ | Tobject _ | Tfield _ | Tnil
-  | Tvariant _ | Tpackage _ | Tof_kind _ -> Has_no_typedecl
+  | Tvariant _ | Tpackage _ | Tof_kind _ | Trefine _ -> Has_no_typedecl
   | Tvar _ | Tunivar _ -> May_have_typedecl
   | Tlink _ | Tsubst _ -> assert false
 
@@ -2691,6 +2905,22 @@ let try_expand_safe_opt env ty =
 
 let expand_head_opt env ty =
   try try_expand_head try_expand_safe_opt env ty with Cannot_expand -> ty
+
+let prim_params_yielding env ty ~arity =
+  let rec arg_yieldings acc ty n =
+    if n <= 0 then Some acc
+    else
+      match get_desc (expand_head_opt env ty) with
+      | Tarrow ((_, marg, _, _), _, ret, _) ->
+        let yielding =
+          Yielding.disallow_right (Alloc.proj_comonadic Yielding marg)
+        in
+        arg_yieldings (yielding :: acc) ret (n - 1)
+      | _ -> None
+  in
+  match arg_yieldings [] ty arity with
+  | None | Some [] -> Yielding.disallow_right Yielding.max
+  | Some (_ :: _ as yieldings) -> Yielding.join yieldings
 
 let is_principal ty =
   not !Clflags.principal || get_level ty = generic_level
@@ -2768,6 +2998,10 @@ let unbox_once env ty =
         in
         Stepped { ty = apply ty2 ~extra_substs; modality; or_null = None }
       | None -> begin match decl.type_kind with
+        | Type_record_unboxed_product ([{ ld_ghost = true; _ }], _, _) ->
+          (* A record of one ghost field has no slot: its declared kind
+             (void) is the result. *)
+          Final_result
         | Type_record_unboxed_product ([_], _, _) ->
           (* [find_unboxed_type] would have returned [Some] *)
           Misc.fatal_error "Ctype.unbox_once"
@@ -2801,21 +3035,49 @@ let unbox_once env ty =
       { ty = instance_poly_for_jkind univars ty
       ; modality = Mode.Modality.Const.id
       ; or_null = None }
+  | Tmod (ty, _) ->
+    Stepped { ty; modality = Mode.Modality.Const.id; or_null = None }
   | _ -> Final_result
 
 let contained_without_boxing env ty =
   match get_desc ty with
-  | Tconstr _ ->
-    begin match unbox_once env (mk_unwrapped_type_expr ty) with
-    | Stepped { ty; modality = _; or_null = _ } -> [ty]
-    | Stepped_record_unboxed_product tys ->
-      List.map (fun { ty; _ } -> ty) tys
-    | Final_result | Missing _ -> []
+  | Tconstr (p, args, _) ->
+    begin match Env.find_type p env with
+    | { type_kind = Type_variant (cstrs, Variant_with_null, _);
+        type_params; _ } ->
+      (* Both constructors' arguments are contained without boxing. We
+         don't step to the payload with [unbox_once] here: which
+         constructor is the null constructor is only known once
+         [update_decl_jkind] has filled in the argument sorts, and the
+         callers of this function run before that on the current
+         recursive group. Returning the arguments of both constructors
+         does not depend on constructor order or sorts. *)
+      List.concat_map
+        (fun (cstr : constructor_declaration) ->
+           match cstr.cd_args with
+           | Cstr_tuple cargs ->
+             List.map
+               (fun (carg : constructor_argument) ->
+                  apply env type_params carg.ca_type args)
+               cargs
+           | Cstr_record _ -> [])
+        cstrs
+    | _ | exception Not_found ->
+      begin match unbox_once env (mk_unwrapped_type_expr ty) with
+      | Stepped { ty; modality = _; or_null = _ } -> [ty]
+      | Stepped_record_unboxed_product tys ->
+        List.map (fun { ty; _ } -> ty) tys
+      | Final_result | Missing _ -> []
+      end
     end
   | Tunboxed_tuple labeled_tys ->
     List.map snd labeled_tys
   | Tpoly (ty, _) -> [ty]
+  | Tmod (ty, _) -> [ty]
   | Trepr (_, _) ->  Misc.fatal_error "Ctype.contained_without_boxing: repr"
+  | Trefine { ref_payload; _ } ->
+    (* The payload determines the runtime representation. *)
+    [ref_payload]
   | Tvar _ | Tarrow _ | Ttuple _ | Tobject _ | Tfield _ | Tnil | Tlink _
   | Tsubst _ | Tvariant _ | Tunivar _ | Tpackage _ | Tof_kind _ | Tbox _
   | Tquote _ | Tsplice _ | Tquote_eval _ -> []
@@ -2824,6 +3086,16 @@ let contained_without_boxing env ty =
    allowing us to return a type for which a definition was found even if
    we eventually bottom out at a missing cmi file, or otherwise. *)
 let rec get_unboxed_type_representation ~modality ~or_null env ty_prev ty fuel =
+  match get_desc ty with
+  | Tmod (ty, _) ->
+    (* Mode bounds do not affect the runtime representation, so [Tmod]
+       wrappers are transparent here, at no fuel cost. In particular a [Tmod]
+       must never be returned from this function: it carries no definition, so
+       it may not become [ty_prev] (the missing-cmi fallback, whose kind could
+       then only be estimated as [any]), and representation-oriented consumers
+       such as [Typeopt.classify] expect never to see one. *)
+    get_unboxed_type_representation ~modality ~or_null env ty_prev ty fuel
+  | _ ->
   if fuel < 0 then Error { ty; modality; or_null }
   else
     (* We use expand_head_opt version of expand_head to get access
@@ -2991,7 +3263,8 @@ and estimate_type_jkind ~expand_components ~ignore_mod_bounds env ty =
       let type_decl = Env.find_type p env in
       let jkind =
         match type_decl.type_kind with
-        | Type_record_unboxed_product (lbls, Record_unboxed_product_variable, _)
+        | Type_record_unboxed_product
+            (lbls, Record_unboxed_product_undetermined, _)
           when expand_components ->
           (* This is an unboxed product with at least one [any] field, so we
              need to recompute the jkind if we want it to be precise *)
@@ -3034,6 +3307,20 @@ and estimate_type_jkind ~expand_components ~ignore_mod_bounds env ty =
        a [Missing_cmi]. Internal ticket 5109. *)
     | Cannot_subst | Not_found -> Jkind.Builtin.any ~why:(Missing_cmi p)
     end
+  | Tmod (ty, mod_bounds) ->
+    let jkind =
+      estimate_type_jkind ~expand_components ~ignore_mod_bounds env ty
+    in
+    if ignore_mod_bounds
+    then jkind
+    else
+      { jkind with
+        jkind =
+          { jkind.jkind with
+            mod_bounds =
+              Jkind0.Mod_bounds.meet jkind.jkind.mod_bounds mod_bounds
+          }
+      }
   | Tobject _ -> Jkind.for_object
   | Tfield _ -> Jkind.Builtin.value ~why:Tfield
    (* CR quoted-kinds jbachurski: These quote/splice the jkind. *)
@@ -3064,6 +3351,9 @@ and estimate_type_jkind ~expand_components ~ignore_mod_bounds env ty =
     |> estimate_type_jkind ~expand_components ~ignore_mod_bounds env
   | Trepr (ty, _sort_vars) ->
     estimate_type_jkind ~expand_components ~ignore_mod_bounds env ty
+  | Trefine { ref_payload; _ } ->
+    estimate_type_jkind ~expand_components ~ignore_mod_bounds env ref_payload
+    |> Ikind.enforce_refinement_crossings
   | Tof_kind jkind ->
     (* A [Tof_kind] is substitued for existential [Tvar]s or [Tunivar]s bound in
        a [Tpoly] that would escape their scope. In both cases, we can never
@@ -3555,6 +3845,344 @@ let is_always_gc_ignorable env ty =
   check_type_externality env ty
     (Jkind_axis.Externality.upper_bound_if_is_always_gc_ignorable ())
   || type_is_gc_ignorable_scannable env ty
+
+(* Totality of pattern matching.
+
+   Total code may eliminate a value of a nominal type (match a constructor,
+   project a field) only if the type is logical: its values form a set in
+   the mathematical sense. Otherwise the elimination can tie a knot without
+   syntactic recursion: [type t = Roll of (t -> int)] gives
+   [delta (Roll delta)], and no set [t] can be in bijection with
+   [t -> int] (Cantor).
+
+   Logicality is an axis of the kind (see [Jkind_axis.Logicality] and Note
+   [Logicality of recursive types] in ikind.ml). It is inferred for a
+   variant or record from its fields: a base type, a tuple, record, variant
+   or function type built from logical types is logical, and any recursion
+   makes the type [Maybe_logical] unless it is [[@@inductive]]. An abstract
+   type is logical only if its declared kind says so, which inclusion checks
+   against the implementation like any other kind bound. So the T9 knot
+   through an abstract [type u] with a hidden manifest [u = t -> int] is
+   refused at the client ([u]'s kind does not say it is logical, so [t] is
+   not logical) or at the implementation (the kind of [t -> int] is not
+   logical, because [t] and [u] are mutually recursive).
+
+   The check is on the matched type's constructor only: [(t -> int) option]
+   may be matched even though [t] may not, because eliminating the option
+   does not eliminate a [t]. It asks whether the constructor is logical when
+   its parameters are ([Ikind.declaration_is_logical]).
+
+   An existential variable of a directly matched constructor is also
+   rejected if it can be a pointer: a GADT witness in the same value can
+   retype it to [root -> _] after the match. The jkind guard below says when
+   a hidden type cannot be a pointer.
+
+   [immutable_data] is NOT enough on either count: a record whose field
+   modality caps a [total] arrow across every axis (e.g.
+   [f : t -> unit @@ many portable forkable unyielding stateless total]) is
+   [immutable_data], so an [immutable_data] existential can hold a callable
+   function. *)
+let jkind_cannot_be_pointer env jkind =
+  (* A closure, and any boxed nominal type, is a heap pointer. We read the
+     layout off the jkind's own description, which keeps a declared layout
+     (e.g. [void mod total]) even for an abstract type, where
+     [Jkind.get_layout] would expand it to [None]. *)
+  let non_pointer_axes ({ separability; _ } : Jkind_types.Scannable_axes.t) =
+    match separability with
+    | Non_pointer | Non_pointer64 -> true
+    | Non_float | Separable | Maybe_separable -> false
+  in
+  let rec layout_has_no_pointer : Jkind.Sort.Flat.t Jkind.Layout.t -> bool =
+    function
+    | Sort (Base Scannable, axes) | Any axes -> non_pointer_axes axes
+    | Sort (Base (Void | Untagged_immediate | Float64 | Float32 | Word | Bits8
+                 | Bits16 | Bits32 | Bits64 | Vec128 | Vec256 | Vec512 | Mask),
+            _) -> true
+    | Sort ((Var _ | Genvar _ | Univar _), _) -> false
+    | Product layouts -> List.for_all layout_has_no_pointer layouts
+  in
+  (match (Jkind.get jkind).base with
+   | Layout layout -> layout_has_no_pointer layout
+   | Kconstr _ -> false)
+  ||
+  let context = mk_jkind_context_always_principal env in
+  match Jkind.get_externality_upper_bound ~context env jkind with
+  | External | External64 -> true
+  | Internal -> false
+
+(* A hidden type -- a negatively reached abstract/open type, or an
+   existential -- is dangerous unless its jkind rules out pointers. *)
+let type_may_be_matched_type env ty =
+  let jkind =
+    match get_desc ty with
+    | Tvar { jkind; _ } -> Jkind.disallow_right jkind
+    | _ -> type_jkind_purely env ty
+  in
+  not (jkind_cannot_be_pointer env jkind)
+
+let is_predef_path = function
+  | Path.Pident id -> Ident.is_predef id
+  | Path.Pdot _ | Path.Papply _ | Path.Pextra_ty _ -> false
+
+(* Whether the walk cannot see [decl]'s representation, so a value of it could
+   be, or contain, any type: an abstract type with no manifest (a predefined
+   one such as [string] excepted; it cannot be a user type), or an open type
+   (a later extension constructor could carry anything). *)
+let declaration_is_hidden path decl =
+  match decl.type_kind with
+  | Type_abstract _ ->
+    Option.is_none decl.type_manifest && not (is_predef_path path)
+  | Type_open -> true
+  | Type_variant _ | Type_record _ | Type_record_unboxed_product _ -> false
+
+
+(* Whether total code may look inside a value of type constructor [path]: its
+   declaration shows a representation, the constructor is logical when its
+   parameters are, and a directly matched constructor has no existential
+   that could be a pointer. *)
+let declaration_can_pattern_match_total env path decl =
+  let existentials_are_safe (constructor : constructor_declaration) =
+    let _, existentials =
+      Datarepr.constructor_existentials constructor.cd_args constructor.cd_res
+    in
+    not (List.exists (type_may_be_matched_type env) existentials)
+  in
+  (match decl.type_kind with
+   | Type_variant (constructors, _, _) ->
+     List.for_all existentials_are_safe constructors
+   | Type_record _ | Type_record_unboxed_product _ -> true
+   | Type_abstract _ | Type_open -> false)
+  && Ikind.declaration_is_logical ~env ~path
+
+let can_pattern_match_total env ty =
+  let rec check seen ty =
+    match get_desc ty with
+    | Tconstr (path, _, _) ->
+        if Path.Set.mem path seen then false
+        else begin
+          match Env.find_type path env with
+          | decl ->
+              let expanded = expand_head env ty in
+              if not (eq_type expanded ty) then
+                check (Path.Set.add path seen) expanded
+              else declaration_can_pattern_match_total env path decl
+          | exception Not_found -> false
+        end
+    | Tpoly (ty, _) -> check seen ty
+    | _ -> false
+  in
+  check Path.Set.empty ty
+
+(* Why total code may not look inside a value of type [ty], for error
+   messages: [None] when it may. The reason names the first culprit found by
+   walking the type's representation: a recursion without [@@inductive], an
+   abstract type whose kind does not say [mod logical], an existential, and so
+   on. It mirrors the checks above but is not relied on for soundness. *)
+let not_logical_reason ?(component = false) env ty =
+  let name p = Format_doc.asprintf "%a" Misc.Style.inline_code (Path.name p) in
+  let mod_logical =
+    Format_doc.asprintf "%a" Misc.Style.inline_code "mod logical"
+  in
+  let inductive = "[@@inductive]" in
+  let exception Found of string in
+  let found fmt = Printf.ksprintf (fun s -> raise_notrace (Found s)) fmt in
+  let rec visit ~visiting ~existentials ~in_progress ty =
+    let visit_ty = visit ~visiting ~existentials ~in_progress in
+    if not (TypeSet.mem ty in_progress) then begin
+      let in_progress = TypeSet.add ty in_progress in
+      let visit_in = visit ~visiting ~existentials ~in_progress in
+      match get_desc ty with
+      | Tconstr (q, args, _) ->
+        if List.exists (Path.same q) visiting then begin
+          match Env.find_type q env with
+          | { type_inductive = true; _ } -> List.iter visit_in args
+          | _ | exception Not_found ->
+            found "%s is recursive but not %s" (name q) inductive
+        end else begin
+          match Env.find_type q env with
+          | exception Not_found -> found "%s is not known" (name q)
+          | decl ->
+            let expanded = expand_head env ty in
+            if not (eq_type expanded ty) then visit_in expanded
+            else begin
+              let bearing =
+                match Ikind.declaration_logicality ~env ~path:q with
+                | _, bearing
+                  when List.compare_lengths bearing args = 0 -> bearing
+                | _ -> List.map (fun _ -> true) args
+              in
+              let visit_args () =
+                List.iter2 (fun arg bears -> if bears then visit_in arg)
+                  args bearing
+              in
+              match decl.type_kind with
+              | Type_open ->
+                found "%s is an extensible type, which is never logical"
+                  (name q)
+              | Type_abstract _ ->
+                if Ikind.declaration_is_logical ~env ~path:q then visit_args ()
+                else
+                  found "%s is abstract and its kind does not say %s" (name q)
+                    mod_logical
+              | Type_variant _ | Type_record _ | Type_record_unboxed_product _
+                ->
+                if not (Ikind.declaration_is_logical ~env ~path:q) then
+                  visit_declaration ~visiting:(q :: visiting) q decl;
+                visit_args ()
+            end
+        end
+      | Tvar _ | Tunivar _ ->
+        if List.exists (eq_type ty) existentials then
+          found "a constructor has an existential type, which could be the \
+                 matched type itself"
+      | Tpoly (body, (_ :: _)) ->
+        ignore body;
+        found "a field has a polymorphic type"
+      | Tobject _ -> found "an object type occurs in it"
+      | Tpackage _ -> found "a first-class module type occurs in it"
+      | Tvariant _ ->
+        (* A row re-entered while in progress is caught by [in_progress]
+           below; iterate the arguments. *)
+        Btype.iter_type_expr visit_in ty
+      | _ -> Btype.iter_type_expr visit_in ty
+    end else begin
+      match get_desc ty with
+      | Tvariant _ -> found "a recursive polymorphic variant occurs in it"
+      | Tconstr _ | Tarrow _ | Ttuple _ | Tobject _ | Tpoly _ ->
+        found "a recursive type expression occurs in it"
+      | _ -> ignore visit_ty
+    end
+  and visit_declaration ~visiting path decl =
+    ignore path;
+    let visit_field ~existentials ty =
+      visit ~visiting ~existentials ~in_progress:TypeSet.empty ty
+    in
+    Option.iter (visit_field ~existentials:[]) decl.type_manifest;
+    match decl.type_kind with
+    | Type_variant (constructors, _, _) ->
+      List.iter
+        (fun (c : constructor_declaration) ->
+          let _, existentials =
+            Datarepr.constructor_existentials c.cd_args c.cd_res
+          in
+          match c.cd_args with
+          | Cstr_tuple args ->
+            List.iter (fun (a : constructor_argument) ->
+              visit_field ~existentials a.ca_type) args
+          | Cstr_record labels ->
+            List.iter (fun (l : label_declaration) ->
+              if not (Types.is_mutable l.ld_mutable) then
+                visit_field ~existentials l.ld_type) labels)
+        constructors
+    | Type_record (labels, _, _) | Type_record_unboxed_product (labels, _, _) ->
+      List.iter (fun (l : label_declaration) ->
+        if not (Types.is_mutable l.ld_mutable) then
+          visit_field ~existentials:[] l.ld_type) labels
+    | Type_abstract _ | Type_open -> ()
+  in
+  let rec head seen ty =
+    match get_desc ty with
+    | Tconstr (path, _, _) ->
+      begin match Env.find_type path env with
+      | exception Not_found ->
+        Some (Printf.sprintf "%s is not known" (name path))
+      | decl ->
+        let expanded = expand_head env ty in
+        if not (eq_type expanded ty) && not (Path.Set.mem path seen) then
+          head (Path.Set.add path seen) expanded
+        else if declaration_can_pattern_match_total env path decl then None
+        else
+          match decl.type_kind with
+          | Type_abstract _ ->
+            Some (Printf.sprintf "%s is abstract" (name path))
+          | Type_open ->
+            Some (Printf.sprintf "%s is an extensible type" (name path))
+          | Type_variant _ | Type_record _ | Type_record_unboxed_product _ ->
+            if Ikind.declaration_is_logical ~env ~path then
+              Some (Printf.sprintf
+                "a constructor of %s has an existential type that could be \
+                 a function" (name path))
+            else
+              match visit_declaration ~visiting:[path] path decl with
+              | () -> Some (Printf.sprintf "%s is not logical" (name path))
+              | exception Found reason -> Some reason
+      end
+    | Tpoly (ty, _) -> head seen ty
+    | Tvariant _ -> Some "it is a polymorphic variant"
+    | _ -> Some "its type is not a variant or record"
+  in
+  if component then
+    match visit ~visiting:[] ~existentials:[] ~in_progress:TypeSet.empty ty with
+    | () -> None
+    | exception Found reason -> Some reason
+  else head Path.Set.empty ty
+
+(* Whether values of a jkind are run-time scalars: never pointers, and not
+   [void] (a void value can have ghost content). *)
+let jkind_is_scalar env jkind =
+  jkind_cannot_be_pointer env jkind
+  && (match (Jkind.get jkind).base with
+      | Layout layout ->
+        let rec has_void : Jkind.Sort.Flat.t Jkind.Layout.t -> bool = function
+          | Sort (Base Void, _) -> true
+          | Sort _ | Any _ -> false
+          | Product layouts -> List.exists has_void layouts
+        in
+        not (has_void layout)
+      | Kconstr _ -> false)
+
+(* Whether an abstract type's declared kind makes it logical. *)
+let abstract_declaration_is_logical env path _decl =
+  Ikind.declaration_is_logical ~env ~path
+
+(* Unpacking a first-class module is like matching a constructor with
+   existentials: the abstract types of its signature are fresh hidden types,
+   and a value in the module can consume one of them. With logicality in the
+   kind, a hidden type that is not declared logical cannot be a component of a
+   type total code matches, so unpacking alone cannot tie a knot; we still
+   require every abstract type the package leaves open to be declared logical
+   (or to rule out pointers), which keeps the check independent of how the
+   module's types are used. Types fixed by the package's constraints
+   ([with type ...]) are not hidden; nested modules and functor results are
+   included; abstract module types are hidden. *)
+let can_unpack_total env ty =
+  let rec module_type_hides env ~constrained ~prefix = function
+    | Mty_ident path ->
+      begin match Env.find_modtype_expansion path env with
+      | mty -> module_type_hides env ~constrained ~prefix mty
+      | exception Not_found -> true
+      end
+    | Mty_signature sg ->
+      let env = Env.add_signature sg env in
+      List.exists (signature_item_hides env ~constrained ~prefix) sg
+    | Mty_functor (_, result, _) ->
+      module_type_hides env ~constrained:[] ~prefix result
+    | Mty_alias _ | Mty_strengthen _ ->
+      (* The types are those of an existing module. *)
+      false
+  and signature_item_hides env ~constrained ~prefix = function
+    | Sig_type (id, decl, _, _) ->
+      declaration_is_hidden (Path.Pident id) decl
+      && not (List.mem (prefix @ [Ident.name id]) constrained)
+      && not (abstract_declaration_is_logical env (Path.Pident id) decl)
+    | Sig_module (id, _, md, _, _) ->
+      module_type_hides env ~constrained
+        ~prefix:(prefix @ [Ident.name id]) md.md_type
+    | Sig_value _ | Sig_typext _ | Sig_modtype _ | Sig_class _
+    | Sig_class_type _ | Sig_jkind _ -> false
+  in
+  match get_desc (expand_head env ty) with
+  | Tpackage { pack_path; pack_cstrs } ->
+    let constrained = List.map fst pack_cstrs in
+    begin match Env.find_modtype_expansion pack_path env with
+    | mty -> not (module_type_hides env ~constrained ~prefix:[] mty)
+    | exception Not_found -> false
+    end
+  (* [let (module M) = e in ...] leaves the package type an unresolved variable
+     at this point (unlike a [match] scrutinee or a [(module M : S)] parameter,
+     whose type is known), so it cannot be shown safe and is conservatively
+     rejected. *)
+  | _ -> false
 
 let check_type_jkind_exn env texn ty jkind =
   match check_type_jkind env ty jkind with
@@ -4052,12 +4680,12 @@ let rec has_cached_expansion p abbrev =
    but still might be nice. *)
 
 let expand_type env ty =
-  (* If the type contains top-level splices, then we enter some far-away future
-     stage where all splices are valid. *)
-  (* CR metaprogramming jbachurski: Remove [contains_toplevel_splice] and
+  (* If the type contains initial-stage splices, then we enter some future stage
+     where all splices are valid. *)
+  (* CR metaprogramming jbachurski: Remove [contains_initial_stage_splice] and
      track the stage in errors so we don't need this. *)
   let env =
-    if contains_toplevel_splice (Env.stage env :> int) ty
+    if contains_initial_stage_splice (Env.stage env :> int) ty
     then Env.enter_future env
     else env
   in
@@ -4303,6 +4931,18 @@ let may_have_jkind_intersection_tk env ty jkind =
    and that both their objects and variants are closed
  *)
 
+let align_arrow_codomains binder1 codomain1 binder2 codomain2 =
+  match binder1, binder2 with
+  | None, None -> Some (codomain1, codomain2)
+  | Some binder1, Some binder2 ->
+      let codomain1 =
+        Subst.type_expr
+          (Subst.add_bound_value binder1 binder2 Subst.identity)
+          codomain1
+      in
+      Some (codomain1, codomain2)
+  | None, Some _ | Some _, None -> None
+
 let rec mcomp type_pairs env t1 t2 =
   let check_jkinds ty jkind =
     if not (may_have_jkind_intersection_tk env ty
@@ -4369,10 +5009,19 @@ let rec mcomp type_pairs env t1 t2 =
             with Not_found -> ()
             end
         (* Rigid cases -- neither side is flexible nor aliasable *)
-        | (Tarrow ((l1,_,_), t1, u1, _), Tarrow ((l2,_,_), t2, u2, _), _, _)
+        | (Tarrow ((l1,_,_,binder1), t1, u1, _),
+           Tarrow ((l2,_,_,binder2), t2, u2, _), _, _)
           when compatible_labels ~in_pattern_mode:true l1 l2 ->
             mcomp type_pairs env t1 t2;
-            mcomp type_pairs env u1 u2;
+            begin match align_arrow_codomains binder1 u1 binder2 u2 with
+            | Some (u1, u2) -> mcomp type_pairs env u1 u2
+            | None -> raise Incompatible
+            end;
+        | (Trefine r1, Trefine r2, _, _) ->
+            (* Only the payloads are compared: returning without raising
+               means "possibly compatible", which is always sound, and the
+               predicates carry no head structure to refute. *)
+            mcomp type_pairs env r1.ref_payload r2.ref_payload
         | (Ttuple tl1, Ttuple tl2, _, _) ->
             mcomp_labeled_list type_pairs env tl1 tl2
         (*
@@ -4598,6 +5247,7 @@ and mcomp_record_description type_pairs env =
         mcomp type_pairs env l1.ld_type l2.ld_type;
         if Ident.name l1.ld_id = Ident.name l2.ld_id &&
            l1.ld_mutable = l2.ld_mutable &&
+           l1.ld_ghost = l2.ld_ghost &&
            l1.ld_modalities = l2.ld_modalities
         then iter xs ys
         else raise Incompatible
@@ -4850,7 +5500,7 @@ let unify1_var uenv t1 t2 =
       begin
         try
           update_level env (get_level t1) t2;
-          update_scope (get_scope t1) t2;
+          update_scope (structural_scope t1) t2;
         with Escape e ->
           raise_for Unify (Escape e)
       end;
@@ -4897,6 +5547,122 @@ let unify3_var uenv jkind1 t1' t2 t2' =
         end;
         record_equation uenv t1' t2'
       end
+
+let normalize_owner_type_path env owner =
+  let owner = Env.normalize_type_path None env owner in
+  match Env.find_type_expansion owner env with
+  | _, manifest, _ -> begin
+      match get_desc (expand_head env manifest) with
+      | Tconstr (path, _, _) -> Env.normalize_type_path None env path
+      | _ -> owner
+    end
+  | exception Not_found -> owner
+
+let normalize_refinement_predicate env =
+  let constructor_path = function
+    | Path.Pextra_ty (owner, Path.Pcstr_ty name) ->
+      let owner = normalize_owner_type_path env owner in
+      Path.Pextra_ty (owner, Path.Pcstr_ty name)
+    | path -> Env.normalize_value_path None env path
+  in
+  Refinement_predicate.map
+    ~value_path:(Env.normalize_value_path None env)
+    ~constructor_path
+    ~type_path:(normalize_owner_type_path env)
+
+(* Alpha-equal predicates, with the types of their corresponding nodes.  The
+   predicates are equal only when these types are also related, by the
+   relation at hand: a law about [int t] is not a law about [bool t]. *)
+let refinement_predicate_types env ~pairs pred1 pred2 =
+  Refinement_predicate.equal_with_types ~pairs
+    (normalize_refinement_predicate env pred1)
+    (normalize_refinement_predicate env pred2)
+
+(* The types of corresponding predicate nodes are related by their
+   skeletons: the verifier encodes a predicate by sorts, which ignore
+   refinements and modes, so only the instantiation of the types matters (a
+   law about [int t] is not a law about [bool t]).  [relate] is applied where
+   the skeletons stop, in particular at type variables.  An [exposed] type's
+   refinements are assumed by the verifier, so they are compared too: two
+   refinements must have alpha-equal predicates whose own types are related
+   in the same way, and any other refinement is left to [relate], which
+   compares refinements exactly.  Arrow modes are ignored throughout. *)
+let rec relate_predicate_type env relate ~exposed ~binders ty1 ty2 =
+  let in_scope univar =
+    List.exists
+      (fun (cl1, cl2) ->
+        List.exists (fun (t, _) -> eq_type t univar) cl1
+        || List.exists (fun (t, _) -> eq_type t univar) cl2)
+      !univar_pairs
+  in
+  let visited = TypePairs.create 7 in
+  (* [binders] pairs the binders of the arrows around the current types, which
+     their refinements may mention. *)
+  let rec skeleton ?(binders = []) ty1 ty2 =
+    let ty1 = expand_head env ty1 and ty2 = expand_head env ty2 in
+    if eq_type ty1 ty2 || TypePairs.mem visited (ty1, ty2) then () else begin
+      TypePairs.add visited (ty1, ty2);
+      match get_desc ty1, get_desc ty2 with
+      | Trefine r1, Trefine r2 when exposed -> (
+          match
+            refinement_predicate_types env
+              ~pairs:((r1.ref_binder, r2.ref_binder) :: binders)
+              r1.ref_pred r2.ref_pred
+          with
+          | Some types ->
+              skeleton ~binders r1.ref_payload r2.ref_payload;
+              relate_predicate_types env relate types
+          | None -> relate ty1 ty2)
+      | (Trefine _, _ | _, Trefine _) when exposed -> relate ty1 ty2
+      | Trefine r, _ -> skeleton ~binders r.ref_payload ty2
+      | _, Trefine r -> skeleton ~binders ty1 r.ref_payload
+      | Tarrow ((l1, _, _, b1), a1, r1, _), Tarrow ((l2, _, _, b2), a2, r2, _)
+        when l1 = l2 ->
+          skeleton ~binders a1 a2;
+          let binders =
+            match b1, b2 with
+            | Some b1, Some b2 -> (b1, b2) :: binders
+            | _ -> binders
+          in
+          skeleton ~binders r1 r2
+      | Tpoly (t1, []), Tpoly (t2, []) -> skeleton ~binders t1 t2
+      | Ttuple c1, Ttuple c2
+        when List.equal (fun (l1, _) (l2, _) -> Option.equal String.equal l1 l2)
+               c1 c2 ->
+          List.iter2 (fun (_, t1) (_, t2) -> skeleton ~binders t1 t2) c1 c2
+      | Tconstr (p1, a1, _), Tconstr (p2, a2, _)
+        when Path.same p1 p2 && List.compare_lengths a1 a2 = 0 ->
+          List.iter2 (skeleton ~binders) a1 a2
+      | Tunivar _, (Tvar _ | Tunivar _) when not (in_scope ty1) -> ()
+      | (Tvar _ | Tunivar _), Tunivar _ when not (in_scope ty2) -> ()
+          (* A type variable that occurs only in a predicate is not
+             quantified with the others (item 1 of
+             polymorphism-definitions.md), so a universal variable there may
+             be out of the scope of this comparison.  Against another
+             variable it is then left unrelated, as before predicates were
+             compared with their types.  A universal variable in scope, or
+             one against any other type, is related as usual. *)
+      | _ -> relate ty1 ty2
+    end
+  in
+  skeleton ~binders ty1 ty2
+
+and relate_predicate_types env relate types =
+  List.iter
+    (fun { Refinement_predicate.left; right; exposed; binders } ->
+      relate_predicate_type env relate ~exposed ~binders left right)
+    types
+
+(* Set while comparing two type declarations (see [Includecore]), with their
+   parameters, which are shared by the two declarations at that point. *)
+let predicate_variable_renaming = ref None
+
+let with_predicate_variable_renaming ~params f =
+  let saved = !predicate_variable_renaming in
+  (* Every variable of the parameters, including those of a constraint. *)
+  predicate_variable_renaming := Some (free_variables_list params);
+  Fun.protect ~finally:(fun () -> predicate_variable_renaming := saved) f
+
 
 (*
    1. When unifying two non-abbreviated types, one type is made a link
@@ -4949,7 +5715,7 @@ let rec unify uenv t1 t2 =
     | (Tunivar { jkind = k1 }, Tunivar { jkind = k2 }) ->
         unify_univar_for Unify (get_env uenv) t1 t2 k1 k2 !univar_pairs;
         update_level_for Unify (get_env uenv) (get_level t1) t2;
-        update_scope_for Unify (get_scope t1) t2;
+        update_scope_for Unify (structural_scope t1) t2;
         link_type t1 t2
     | (Tconstr (p1, [], a1), Tconstr (p2, [], a2))
           when Path.same p1 p2
@@ -4959,7 +5725,7 @@ let rec unify uenv t1 t2 =
             && not (has_cached_expansion p1 !a1
                  || has_cached_expansion p2 !a2) ->
         update_level_for Unify (get_env uenv) (get_level t1) t2;
-        update_scope_for Unify (get_scope t1) t2;
+        update_scope_for Unify (structural_scope t1) t2;
         link_type t1 t2
     | (Tconstr _, Tconstr _) when Env.has_local_constraints (get_env uenv) ->
         unify2_rec uenv t1 t1 t2 t2
@@ -4967,9 +5733,13 @@ let rec unify uenv t1 t2 =
         unify2 uenv t1 t2
     end;
     reset_trace_gadt_instances reset_tracing;
-  with Unify_trace trace ->
-    reset_trace_gadt_instances reset_tracing;
-    raise_trace_for Unify (Diff {got = t1; expected = t2} :: trace)
+  with
+  | Unify_trace trace ->
+      reset_trace_gadt_instances reset_tracing;
+      raise_trace_for Unify (Diff {got = t1; expected = t2} :: trace)
+  | Refinement_scope_escape _ as exn ->
+      reset_trace_gadt_instances reset_tracing;
+      raise exn
 
 and unify2 uenv t1 t2 = unify2_expand uenv t1 t1 t2 t2
 
@@ -4981,7 +5751,7 @@ and unify2_rec uenv t10 t1 t20 t2 =
       && not (has_cached_expansion p1 !a1 || has_cached_expansion p2 !a2)
       then begin
         update_level_for Unify (get_env uenv) (get_level t1) t2;
-        update_scope_for Unify (get_scope t1) t2;
+        update_scope_for Unify (structural_scope t1) t2;
         link_type t1 t2
       end else
         let env = get_env uenv in
@@ -5002,7 +5772,7 @@ and unify2_expand uenv t1 t1' t2 t2' =
   let t1' = expand_head_unif env t1' in
   let t2' = expand_head_unif env t2' in
   let lv = Int.min (get_level t1') (get_level t2') in
-  let scope = Int.max (get_scope t1') (get_scope t2') in
+  let scope = Int.max (structural_scope t1') (structural_scope t2') in
   update_level_for Unify env lv t2;
   update_level_for Unify env lv t1;
   update_scope_for Unify scope t2;
@@ -5070,16 +5840,35 @@ and unify3 uenv t1 t1' t2 t2' =
     end;
     try
       begin match (d1, d2) with
-        (Tarrow ((l1,a1,r1), t1, u1, c1), Tarrow ((l2,a2,r2), t2, u2, c2)) ->
+        (Tarrow ((l1,a1,r1,binder1), t1, u1, c1),
+         Tarrow ((l2,a2,r2,binder2), t2, u2, c2)) ->
           eq_labels Unify ~in_pattern_mode:(in_pattern_mode uenv) l1 l2;
           unify_alloc_mode_for Unify a1 a2;
           unify_alloc_mode_for Unify r1 r2;
-          unify uenv t1 t2; unify uenv u1 u2;
+          unify uenv t1 t2;
+          begin match align_arrow_codomains binder1 u1 binder2 u2 with
+          | Some (u1, u2) -> unify uenv u1 u2
+          | None -> raise_unexplained_for Unify
+          end;
           begin match is_commu_ok c1, is_commu_ok c2 with
           | false, true -> set_commu_ok c1
           | true, false -> set_commu_ok c2
           | false, false -> link_commu ~inside:c1 c2
           | true, true -> ()
+          end
+      | (Trefine r1, Trefine r2) ->
+          (* Refinements are rigid: payloads unify, predicates must be
+             syntactically alpha-equivalent.  One-sided refinement falls
+             into the mismatch case below. *)
+          unify uenv r1.ref_payload r2.ref_payload;
+          begin match
+            refinement_predicate_types (get_env uenv)
+              ~pairs:[r1.ref_binder, r2.ref_binder]
+              r1.ref_pred r2.ref_pred
+          with
+          | None -> raise_unexplained_for Unify
+          | Some types ->
+              relate_predicate_types (get_env uenv) (unify uenv) types
           end
       | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
           unify_labeled_list uenv labeled_tl1 labeled_tl2
@@ -5322,7 +6111,7 @@ and unify_fields uenv ty1 ty2 =          (* Optimization *)
           if !trace_gadt_instances && not (in_subst_mode uenv) then begin
             (* in_subst_mode: see PR#11771 *)
             update_level_for Unify (get_env uenv) (get_level va) t1;
-            update_scope_for Unify (get_scope va) t1
+            update_scope_for Unify (structural_scope va) t1
           end;
           unify uenv t1 t2
         with Unify_trace trace ->
@@ -5426,7 +6215,7 @@ and unify_row uenv row1 row2 =
                     (create_row ~fields:rest ~more ~closed ~fixed ~name))
       in
       update_level_for Unify (get_env uenv) (get_level rm) ty;
-      update_scope_for Unify (get_scope rm) ty;
+      update_scope_for Unify (structural_scope rm) ty;
       link_type rm ty
   in
   let tm1 = Transient_expr.repr rm1 and tm2 = Transient_expr.repr rm2 in
@@ -5508,7 +6297,7 @@ and unify_row_field uenv fixed1 fixed2 rm1 rm2 l f1 f2 =
         List.iter
           (fun ty ->
             update_level_for Unify env (get_level rm) ty;
-            update_scope_for Unify (get_scope rm) ty)
+            update_scope_for Unify (structural_scope rm) ty)
       in
       update_levels rm2 tl1';
       update_levels rm1 tl2';
@@ -5525,7 +6314,7 @@ and unify_row_field uenv fixed1 fixed2 rm1 rm2 l f1 f2 =
           let s = snapshot () in
           link_row_field_ext ~inside:f1 f2;
           update_level_for Unify (get_env uenv) (get_level rm1) t2;
-          update_scope_for Unify (get_scope rm1) t2;
+          update_scope_for Unify (structural_scope rm1) t2;
           (try List.iter (fun t1 -> unify uenv t1 t2) tl
            with exn -> undo_first_change_after s; raise exn)
         )
@@ -5534,7 +6323,7 @@ and unify_row_field uenv fixed1 fixed2 rm1 rm2 l f1 f2 =
           let s = snapshot () in
           link_row_field_ext ~inside:f2 f1;
           update_level_for Unify (get_env uenv) (get_level rm2) t1;
-          update_scope_for Unify (get_scope rm2) t1;
+          update_scope_for Unify (structural_scope rm2) t1;
           (try List.iter (unify uenv t1) tl
            with exn -> undo_first_change_after s; raise exn)
         )
@@ -5605,7 +6394,7 @@ let unify_var uenv t1 t2 =
       begin try
         occur_for Unify uenv t1 t2;
         update_level_for Unify env (get_level t1) t2;
-        update_scope_for Unify (get_scope t1) t2;
+        update_scope_for Unify (structural_scope t1) t2;
         unification_jkind_check uenv t2 (Jkind.disallow_left jkind);
         link_type t1 t2;
         reset_trace_gadt_instances reset_tracing;
@@ -5671,7 +6460,8 @@ type filtered_arrow =
   { ty_arg : type_expr;
     arg_mode : Mode.Alloc.lr;
     ty_ret : type_expr;
-    ret_mode : Mode.Alloc.lr
+    ret_mode : Mode.Alloc.lr;
+    binder : Ident.t option
   }
 
 let filter_arrow env t l ~force_tpoly =
@@ -5703,9 +6493,10 @@ let filter_arrow env t l ~force_tpoly =
     let arg_mode = Alloc.newvar () in
     let ret_mode = Alloc.newvar () in
     let t' =
-      newty2 ~level (Tarrow ((l, arg_mode, ret_mode), ty_arg, ty_ret, commu_ok))
+      newty2 ~level
+        (Tarrow ((l, arg_mode, ret_mode, None), ty_arg, ty_ret, commu_ok))
     in
-    t', { ty_arg; arg_mode; ty_ret; ret_mode }
+    t', { ty_arg; arg_mode; ty_ret; ret_mode; binder = None }
   in
   let t =
     try expand_head_trace env t
@@ -5731,11 +6522,11 @@ let filter_arrow env t l ~force_tpoly =
       end;
       link_type t t';
       arrow_desc
-  | Tarrow((l', arg_mode, ret_mode), ty_arg, ty_ret, _) ->
+  | Tarrow((l', arg_mode, ret_mode, binder), ty_arg, ty_ret, _) ->
       if l = l' || !Clflags.classic && l = Nolabel &&
         equivalent_with_nolabels l l'
       then
-        { ty_arg; arg_mode; ty_ret; ret_mode }
+        { ty_arg; arg_mode; ty_ret; ret_mode; binder }
       else raise (Filter_arrow_failed
                     (Label_mismatch
                        { got = l; expected = l'; expected_type = t }))
@@ -6208,8 +6999,10 @@ let mode_crossing_structure_memaddr =
     ~portability:true
     ~forkable:true
     ~yielding:true
+    ~totality:true
     ~statefulness:true
     ~staticity:false
+    ~ghostliness:false
 
 (** The mode crossing of a functor. *)
 let mode_crossing_functor =
@@ -6222,8 +7015,10 @@ let mode_crossing_functor =
     ~portability:false
     ~forkable:false
     ~yielding:false
+    ~totality:false
     ~statefulness:false
     ~staticity:false
+    ~ghostliness:false
 
 (** The mode crossing of any module. *)
 let mode_crossing_module = Mode.Crossing.max
@@ -6287,18 +7082,27 @@ let cross_right_alloc env ?modalities ty mode =
   let crossing = crossing_of_ty env ?modalities ty in
   mode |> Alloc.disallow_left |> Crossing.apply_right_alloc crossing
 
+(* The locality axis of the return mode of an arrow cannot cross modes,
+   because a local-returning function might allocate in the caller's region,
+   and this info must be preserved. The [_ret] variants below cross modes on
+   all axes except locality and are to be used on return modes. *)
+
+let cross_left_alloc_ret env ?modalities ty mode =
+  let mode' = cross_left_alloc env ?modalities ty mode in
+  Alloc.join
+    [mode';
+     Alloc.min_with_comonadic Areality (Alloc.proj_comonadic Areality mode)]
+
+let cross_right_alloc_ret env ?modalities ty mode =
+  let mode' = cross_right_alloc env ?modalities ty mode in
+  Alloc.meet
+    [mode';
+     Alloc.max_with_comonadic Areality (Alloc.proj_comonadic Areality mode)]
+
 let submode_with_cross env ~is_ret ty l r =
-  let r' = cross_right_alloc env ty r in
   let r' =
-    if is_ret then
-      (* the locality axis of the return mode cannot cross modes, because a
-         local-returning function might allocate in the caller's region, and
-         this info must be preserved. *)
-      Alloc.meet
-        [r';
-         Alloc.max_with_comonadic Areality (Alloc.proj_comonadic Areality r)]
-    else
-      r'
+    if is_ret then cross_right_alloc_ret env ty r
+    else cross_right_alloc env ty r
   in
   Alloc.submode l r'
 
@@ -6321,7 +7125,127 @@ let may_instantiate inst_nongen t1 =
   if inst_nongen then level <> subject_level
                  else level =  generic_level
 
-let rec moregen inst_nongen variance type_pairs env t1 t2 =
+(* Refinement subsumption.  Refinements are erased, so a refined type can be
+   compared with an unrefined one by its payload, provided the refinement is
+   only forgotten, or is proved by the verifier.  [refinement_pos] says what
+   may happen to a refinement at a position:
+   - [Forget]: equal refinements, or dropping one in the direction of flow
+     (covariantly from the first type, contravariantly from the second);
+   - [Syntactic]: equal refinements only (rows, objects, package constraints
+     and quotes, where the verifier does not look);
+   - [Proof]: also refinements that must be proved; [needs_proof] records
+     that the verifier has to walk the pair.  [mode] is the mode of the
+     flowing value when it is known, for the mode condition below. *)
+type refinement_deferral = { mutable needs_proof : bool }
+
+type refinement_pos =
+  | Forget
+  | Syntactic
+  | Proof of
+      { deferral : refinement_deferral;
+        mode : Value.l option;
+        depth : int }
+
+let refinement_operand_mode () =
+  Value.of_const
+    { Value.Const.max with
+      totality = Totality.Const.Total;
+      statefulness = Statefulness.Const.Stateless;
+      portability = Portability.Const.Portable }
+
+(* Refined types cross portability, totality and statefulness, so a value
+   that enters one must have these modes: at [mode] when it is known, and by
+   the crossing of its type otherwise.  Returns the failing axis. *)
+let refinement_mode_violation env ty mode =
+  let mode =
+    match mode with
+    | Some mode -> mode
+    | None -> Value.disallow_right Value.max
+  in
+  let mode = cross_left env ty mode in
+  List.find_map
+    (fun (violation, required) ->
+      match Value.submode mode (Value.of_const required) with
+      | Ok () -> None
+      | Error _ -> Some violation)
+    [ "partial", { Value.Const.max with totality = Totality.Const.Total };
+      "stateful",
+      { Value.Const.max with statefulness = Statefulness.Const.Stateless };
+      "nonportable",
+      { Value.Const.max with portability = Portability.Const.Portable } ]
+
+let is_refined ty = match get_desc ty with Trefine _ -> true | _ -> false
+
+let refinement_payload ty =
+  match get_desc ty with Trefine r -> r.ref_payload | _ -> ty
+
+let is_syntactic = function Syntactic -> true | Forget | Proof _ -> false
+
+let proof_mode = function
+  | Proof p -> p.mode
+  | Forget | Syntactic -> None
+
+(* Modes are known at the root and at arrows, and inherited by the
+   components of a tuple.  Values of type parameters have unknown modes.
+   Positions with a known mode are not memoised, so on cyclic types deep
+   positions forget the mode and use the memo table again. *)
+let refinement_child pos ~mode =
+  match pos with
+  | Forget | Syntactic -> pos
+  | Proof p ->
+      let mode = if p.depth >= 64 then None else mode in
+      Proof { p with mode; depth = p.depth + 1 }
+
+(* A value enters a refined type: check the mode condition.  This happens
+   before memoisation, since the memo tables do not record modes. *)
+let check_refinement_add env ~instantiable variance pos t1 t2 =
+  match pos with
+  | Proof { mode; _ } ->
+      let enters source target =
+        if is_refined target && not (is_refined source) then
+          match refinement_mode_violation env source mode with
+          | None -> ()
+          | Some violation ->
+              raise_for Moregen (Refinement (Refinement_modes (target, violation)))
+      in
+      begin match variance with
+      | Covariant ->
+          (* An implementation variable is instantiated, not added to. *)
+          if not (is_Tvar t1 && instantiable t1) then enters t1 t2
+      | Contravariant -> enters t2 t1
+      | Invariant | Bivariant -> ()
+      end
+  | Forget | Syntactic -> ()
+
+type moregen_memo =
+  { forget_pairs : moregen_pairs;
+    syntactic_pairs : moregen_pairs;
+    proof_pairs : moregen_pairs }
+
+let fresh_moregen_memo () =
+  { forget_pairs = fresh_moregen_pairs ();
+    syntactic_pairs = fresh_moregen_pairs ();
+    proof_pairs = fresh_moregen_pairs () }
+
+(* A pair visited with a known mode is not memoised: its subtree may contain
+   additions whose mode condition depends on that mode. *)
+let memo_pairs memo pos variance =
+  match pos with
+  | Forget -> Some (relevant_pairs memo.forget_pairs variance)
+  | Syntactic -> Some (relevant_pairs memo.syntactic_pairs variance)
+  | Proof { mode = None; _ } -> Some (relevant_pairs memo.proof_pairs variance)
+  | Proof { mode = Some _; _ } -> None
+
+let blame_refinement blame f =
+  try f () with Moregen_trace trace ->
+    raise (Moregen_trace
+      (List.map
+         (function
+           | Refinement (Invariant_refinement None) -> Refinement blame
+           | elt -> elt)
+         trace))
+
+let rec moregen inst_nongen variance pos type_pairs env t1 t2 =
   if eq_type t1 t2 then () else
 
   try
@@ -6329,7 +7253,7 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
       (Tvar { jkind }, _) when may_instantiate inst_nongen t1
                             && not (deep_occur t1 t2) ->
         moregen_occur env (get_level t1) t2;
-        update_scope_for Moregen (get_scope t1) t2;
+        update_scope_for Moregen (structural_scope t1) t2;
         (* use [check], not [constrain], here because [constrain] would be like
         instantiating [t2], which we do not wish to do *)
         check_type_jkind_exn env Moregen t2 (Jkind.disallow_left jkind);
@@ -6340,24 +7264,53 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
         let t1' = expand_head env t1 in
         let t2' = expand_head env t2 in
         (* Expansion may have changed the representative of the types... *)
-        if eq_type t1' t2' then () else
-        let pairs = relevant_pairs type_pairs variance in
-        if not (TypePairs.mem pairs (t1', t2')) then begin
-          TypePairs.add pairs (t1', t2');
+        if eq_type t1' t2' then () else begin
+        check_refinement_add env ~instantiable:(may_instantiate inst_nongen)
+          variance pos t1' t2';
+        let pairs = memo_pairs type_pairs pos variance in
+        let visited =
+          match pairs with
+          | Some pairs -> TypePairs.mem pairs (t1', t2')
+          | None -> false
+        in
+        if not visited then begin
+          Option.iter (fun pairs -> TypePairs.add pairs (t1', t2')) pairs;
+          let same = refinement_child pos ~mode:(proof_mode pos) in
           match (get_desc t1', get_desc t2') with
             (Tvar { jkind }, _) when may_instantiate inst_nongen t1' ->
               let t2 = reduce_head ~expand_reducible_abbrevs:false env t2 in
               moregen_occur env (get_level t1') t2;
-              update_scope_for Moregen (get_scope t1') t2;
+              update_scope_for Moregen (structural_scope t1') t2;
               (* use [check], not [constrain], here because [constrain] would be like
               instantiating [t2], which we do not wish to do *)
               check_type_jkind_exn env Moregen t2 (Jkind.disallow_left jkind);
               link_type t1' t2
-          | (Tarrow ((l1,a1,r1), t1, u1, _),
-             Tarrow ((l2,a2,r2), t2, u2, _)) ->
+          | (Tarrow ((l1,a1,r1,binder1), t1, u1, _),
+             Tarrow ((l2,a2,r2,binder2), t2, u2, _)) ->
               eq_labels Moregen ~in_pattern_mode:false l1 l2;
-              moregen inst_nongen (neg_variance variance) type_pairs env t1 t2;
-              moregen inst_nongen variance type_pairs env u1 u2;
+              (* Arguments flow at the caller's parameter mode, results at
+                 the returning side's result mode. *)
+              let param_mode, result_mode =
+                match variance with
+                | Contravariant -> a1, r2
+                | Covariant | Invariant | Bivariant -> a2, r1
+              in
+              let as_value mode =
+                Some (Value.disallow_right (alloc_as_value mode))
+              in
+              moregen inst_nongen (neg_variance variance)
+                (refinement_child pos ~mode:(as_value param_mode))
+                type_pairs env t1 t2;
+              (* A binder on one side only cannot occur on the other side, so
+                 the codomains are compared as they are. *)
+              let u1, u2 =
+                match align_arrow_codomains binder1 u1 binder2 u2 with
+                | Some codomains -> codomains
+                | None -> u1, u2
+              in
+              moregen inst_nongen variance
+                (refinement_child pos ~mode:(as_value result_mode))
+                type_pairs env u1 u2;
               (* [t2] and [u2] is the user-written interface, which we deem as
                  more "principal" and used for mode crossing. See
                  [typing-modes/crossing.ml]. *)
@@ -6365,24 +7318,56 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
               crossing. Similar for [u1] and [u2]. *)
               moregen_alloc_mode env t2 ~is_ret:false (neg_variance variance) a1 a2;
               moregen_alloc_mode env u2 ~is_ret:true variance r1 r2
+          | (Trefine r1, Trefine r2) ->
+              moregen inst_nongen variance same type_pairs env
+                r1.ref_payload r2.ref_payload;
+              moregen_predicates inst_nongen variance pos env r1 r2
+          | (Trefine r1, _)
+            when not (is_syntactic pos)
+                 && (variance = Covariant || variance = Bivariant) ->
+              moregen inst_nongen variance same type_pairs env
+                r1.ref_payload t2'
+          | (_, Trefine r2)
+            when not (is_syntactic pos)
+                 && (variance = Contravariant || variance = Bivariant) ->
+              moregen inst_nongen variance same type_pairs env
+                t1' r2.ref_payload
+          | (Trefine _, _) | (_, Trefine _) ->
+              (* An addition, or a refinement in an invariant position.  Its
+                 mode was checked above. *)
+              moregen inst_nongen variance same type_pairs env
+                (refinement_payload t1') (refinement_payload t2');
+              begin match variance, pos with
+              | (Covariant | Contravariant), Proof p ->
+                  p.deferral.needs_proof <- true
+              | (Invariant | Bivariant), _ | _, Syntactic ->
+                  raise_for Moregen (Refinement (Invariant_refinement None))
+              | (Covariant | Contravariant), Forget ->
+                  raise_for Moregen (Refinement Refinement_needs_proof)
+              end
           | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
-              moregen_labeled_list inst_nongen variance type_pairs env
+              moregen_labeled_list inst_nongen variance same type_pairs env
                 labeled_tl1 labeled_tl2
           | (Tunboxed_tuple labeled_tl1, Tunboxed_tuple labeled_tl2) ->
-              moregen_labeled_list inst_nongen variance type_pairs env
+              moregen_labeled_list inst_nongen variance same type_pairs env
                 labeled_tl1 labeled_tl2
           | (Tconstr (p1, tl1, _), Tconstr (p2, tl2, _))
                 when Path.same p1 p2 -> begin
               match variance with
               | Invariant | Bivariant ->
-                  moregen_list inst_nongen variance type_pairs env tl1 tl2
+                  moregen_list inst_nongen variance
+                    (refinement_child pos ~mode:None) type_pairs env tl1 tl2
               | _ ->
                 match Env.find_type p1 env with
                 | decl ->
-                    moregen_param_list inst_nongen variance type_pairs env
-                      decl.type_variance tl1 tl2
+                    moregen_param_list inst_nongen variance pos type_pairs env
+                      p1 decl.type_variance tl1 tl2
                 | exception Not_found ->
-                    moregen_list inst_nongen Invariant type_pairs env tl1 tl2
+                    blame_refinement (Invariant_refinement (Some p1))
+                      (fun () ->
+                        moregen_list inst_nongen Invariant
+                          (refinement_child pos ~mode:None) type_pairs env
+                          tl1 tl2)
             end
           | (Tpackage pack1, Tpackage pack2) ->
               moregen_package inst_nongen variance type_pairs env
@@ -6399,10 +7384,10 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
           | (Tnil, Tnil) ->
               ()
           | (Tpoly (t1, []), Tpoly (t2, [])) ->
-              moregen inst_nongen variance type_pairs env t1 t2
+              moregen inst_nongen variance same type_pairs env t1 t2
           | (Tpoly (t1, tl1), Tpoly (t2, tl2)) ->
               enter_poly_for Moregen env t1 tl1 t2 tl2
-                (moregen inst_nongen variance type_pairs env)
+                (moregen inst_nongen variance same type_pairs env)
           | (Trepr (t1, sort_vars1), Trepr (t2, sort_vars2)) ->
               (* For layout-polymorphic types, establish correspondence
                  between sort variables positionally, then check moregen on
@@ -6410,40 +7395,75 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
               (try
                 let pairs = List.combine sort_vars1 sort_vars2 in
                 Jkind_types.Sort.enter_repr pairs (fun () ->
-                    moregen inst_nongen variance type_pairs env t1 t2)
+                    moregen inst_nongen variance same type_pairs env t1 t2)
               with Invalid_argument _ -> raise_unexplained_for Moregen)
           | (Tunivar {jkind=k1}, Tunivar {jkind=k2}) ->
               unify_univar_for Moregen env t1' t2' k1 k2 !univar_pairs
           | (Tquote t1, _) ->
-              moregen inst_nongen variance type_pairs
+              moregen inst_nongen variance Syntactic type_pairs
                 (incr_stage env) t1 (new_splice_ty t2)
           | (Tsplice t1, _) ->
-              moregen inst_nongen variance type_pairs
+              moregen inst_nongen variance Syntactic type_pairs
                 (decr_stage env) t1 (new_quote_ty t2)
           | (Tquote_eval t1, Tquote_eval t2) ->
-              moregen inst_nongen variance type_pairs
+              moregen inst_nongen variance Syntactic type_pairs
                 (incr_stage env) t1 t2
           | (Tbox t1, Tbox t2) ->
-              moregen inst_nongen variance type_pairs env t1 t2
+              moregen inst_nongen variance same type_pairs env t1 t2
           | (Tbox t, _) when is_unboxable_ty env t2' ->
-              moregen inst_nongen variance type_pairs
+              moregen inst_nongen variance same type_pairs
                 env t (unbox_ty_exn env t2')
           | (_, Tbox t) when is_unboxable_ty env t1' ->
-              moregen inst_nongen variance type_pairs
+              moregen inst_nongen variance same type_pairs
                 env (unbox_ty_exn env t1') t
           | (_, _) ->
               raise_unexplained_for Moregen
         end
+        end
   with Moregen_trace trace ->
     raise_trace_for Moregen (Diff {got = t1; expected = t2} :: trace)
 
+(* The predicates of two refinements whose payloads are compared.  Alpha-equal
+   predicates are equal when the types of their corresponding nodes are
+   (implementation variables may be instantiated); otherwise the refinements
+   differ, which needs a proof. *)
+and moregen_predicates inst_nongen variance pos env r1 r2 =
+  let differ () =
+    match variance, pos with
+    | (Covariant | Contravariant), Proof p -> p.deferral.needs_proof <- true
+    | (Covariant | Contravariant), Forget ->
+        raise_for Moregen (Refinement Refinement_needs_proof)
+    | (Invariant | Bivariant), _ | _, Syntactic ->
+        raise_for Moregen (Refinement (Invariant_refinement None))
+  in
+  if variance = Bivariant then () else
+  match
+    refinement_predicate_types env ~pairs:[r1.ref_binder, r2.ref_binder]
+      r1.ref_pred r2.ref_pred
+  with
+  | None -> differ ()
+  | Some types ->
+      (* A failed attempt is undone, including its memo entries. *)
+      let relate () =
+        let memo = fresh_moregen_memo () in
+        relate_predicate_types env
+          (moregen inst_nongen Invariant Syntactic memo env) types
+      in
+      match pos, variance with
+      | Proof _, (Covariant | Contravariant) ->
+          let snap = snapshot () in
+          begin try relate () with Moregen_trace _ ->
+            backtrack snap;
+            differ ()
+          end
+      | _ -> relate ()
 
-and moregen_list inst_nongen variance type_pairs env tl1 tl2 =
+and moregen_list inst_nongen variance pos type_pairs env tl1 tl2 =
   if List.length tl1 <> List.length tl2 then
     raise_unexplained_for Moregen;
-  List.iter2 (moregen inst_nongen variance type_pairs env) tl1 tl2
+  List.iter2 (moregen inst_nongen variance pos type_pairs env) tl1 tl2
 
-and moregen_labeled_list inst_nongen variance type_pairs env labeled_tl1
+and moregen_labeled_list inst_nongen variance pos type_pairs env labeled_tl1
     labeled_tl2 =
   if 0 <> List.compare_lengths labeled_tl1 labeled_tl2 then
     raise_unexplained_for Moregen;
@@ -6451,22 +7471,36 @@ and moregen_labeled_list inst_nongen variance type_pairs env labeled_tl1
     (fun (label1, ty1) (label2, ty2) ->
       if not (Option.equal String.equal label1 label2) then
         raise_unexplained_for Moregen;
-      moregen inst_nongen variance type_pairs env ty1 ty2)
+      moregen inst_nongen variance pos type_pairs env ty1 ty2)
     labeled_tl1 labeled_tl2
 
-and moregen_param_list inst_nongen variance type_pairs env vl tl1 tl2 =
+(* [variance] is [Covariant] or [Contravariant].  A parameter that the
+   constructor makes invariant has equal refinements, and the error names the
+   constructor.  The values of a parameter have unknown modes: a covariant
+   parameter need not be a component of the value (it can be the result of a
+   function inside it). *)
+and moregen_param_list inst_nongen variance pos type_pairs env path vl tl1 tl2 =
   match vl, tl1, tl2 with
   | [], [], [] -> ()
   | v :: vl, t1 :: tl1, t2 :: tl2 ->
     let param_variance = compose_variance variance v in
-    moregen inst_nongen param_variance type_pairs env t1 t2;
-    moregen_param_list inst_nongen variance type_pairs env vl tl1 tl2
+    let compare () =
+      moregen inst_nongen param_variance (refinement_child pos ~mode:None)
+        type_pairs env t1 t2
+    in
+    if param_variance = Invariant
+    then blame_refinement (Invariant_refinement (Some path)) compare
+    else compare ();
+    moregen_param_list inst_nongen variance pos type_pairs env path vl tl1 tl2
   | _, _, _ -> raise_unexplained_for Moregen
 
+(* Package constraints are type equations. *)
 and moregen_package inst_nongen variance type_pairs env lvl1 pack1 lvl2 pack2 =
   match
-    compare_package env (moregen_list inst_nongen variance type_pairs env)
-      lvl1 pack1 lvl2 pack2
+    blame_refinement Package_refinement (fun () ->
+      compare_package env
+        (moregen_list inst_nongen variance Syntactic type_pairs env)
+        lvl1 pack1 lvl2 pack2)
   with
   | Ok () -> ()
   | Error fme -> raise_for Moregen (First_class_module fme)
@@ -6481,13 +7515,13 @@ and moregen_fields inst_nongen variance type_pairs env ty1 ty2 =
     | (n, _, _) :: _ -> raise_for Moregen (Obj (Missing_field (Second, n)))
     | [] -> ()
   end;
-  moregen inst_nongen variance type_pairs env rest1
+  moregen inst_nongen variance Syntactic type_pairs env rest1
     (build_fields (get_level ty2) miss2 rest2);
   List.iter
     (fun (name, k1, t1, k2, t2) ->
        (* The below call should never throw [Public_method_to_private_method] *)
        moregen_kind k1 k2;
-       try moregen inst_nongen variance type_pairs env t1 t2 with Moregen_trace trace ->
+       try moregen inst_nongen variance Syntactic type_pairs env t1 t2 with Moregen_trace trace ->
          raise_trace_for Moregen
            (incompatible_fields ~name ~got:t1 ~expected:t2 :: trace)
     )
@@ -6537,11 +7571,11 @@ and moregen_row inst_nongen variance type_pairs env row1 row2 =
                        ~fixed:row2_fixed ~closed:row2_closed))
       in
       moregen_occur env (get_level rm1) ext;
-      update_scope_for Moregen (get_scope rm1) ext;
+      update_scope_for Moregen (structural_scope rm1) ext;
       (* This [link_type] has to be undone if the rest of the function fails *)
       link_type rm1 ext
   | Tconstr _, Tconstr _ ->
-      moregen inst_nongen variance type_pairs env rm1 rm2
+      moregen inst_nongen variance Syntactic type_pairs env rm1 rm2
   | _ -> raise_unexplained_for Moregen
   end;
   try
@@ -6552,7 +7586,7 @@ and moregen_row inst_nongen variance type_pairs env row1 row2 =
          (* Both matching [Rpresent]s *)
          | Rpresent(Some t1), Rpresent(Some t2) -> begin
              try
-               moregen inst_nongen variance type_pairs env t1 t2
+               moregen inst_nongen variance Syntactic type_pairs env t1 t2
              with Moregen_trace trace ->
                raise_trace_for Moregen
                  (Variant (Incompatible_types_for l) :: trace)
@@ -6567,11 +7601,11 @@ and moregen_row inst_nongen variance type_pairs env row1 row2 =
                    rf_either [] ~use_ext_of:f2 ~no_arg:c2 ~matched:m2 in
                  link_row_field_ext ~inside:f1 f2';
                  if List.length tl1 = List.length tl2 then
-                   List.iter2 (moregen inst_nongen variance type_pairs env) tl1 tl2
+                   List.iter2 (moregen inst_nongen variance Syntactic type_pairs env) tl1 tl2
                  else match tl2 with
                    | t2 :: _ ->
                      List.iter
-                       (fun t1 -> moregen inst_nongen variance type_pairs env t1 t2)
+                       (fun t1 -> moregen inst_nongen variance Syntactic type_pairs env t1 t2)
                        tl1
                    | [] -> if tl1 <> [] then raise_unexplained_for Moregen
                end
@@ -6584,7 +7618,7 @@ and moregen_row inst_nongen variance type_pairs env row1 row2 =
              try
                link_row_field_ext ~inside:f1 f2;
                List.iter
-                 (fun t1 -> moregen inst_nongen variance type_pairs env t1 t2)
+                 (fun t1 -> moregen inst_nongen variance Syntactic type_pairs env t1 t2)
                  tl1
              with Moregen_trace trace ->
                raise_trace_for Moregen
@@ -6625,7 +7659,12 @@ and moregen_row inst_nongen variance type_pairs env row1 row2 =
    Usually, the subject is given by the user, and the pattern
    is unimportant.  So, no need to propagate abbreviations.
 *)
-let moregeneral env inst_nongen pat_sort_vars subj_sort_vars pat_sch subj_sch =
+type refinement_inclusion =
+  { root_mode : Value.l option;
+    mutable instantiated : (type_expr * type_expr) option }
+
+let moregeneral ?refinements env inst_nongen pat_sort_vars subj_sort_vars
+    pat_sch subj_sch =
   (* Moregen splits the generic level into two finer levels:
      [generic_level] and [subject_level = generic_level - 1].
      In order to properly detect and print weak variables when
@@ -6659,8 +7698,15 @@ let moregeneral env inst_nongen pat_sort_vars subj_sort_vars pat_sch subj_sch =
       in
       try
         with_univar_pairs [] begin fun () ->
-          let type_pairs = fresh_moregen_pairs () in
-          moregen inst_nongen Covariant type_pairs env patt subj;
+          let type_pairs = fresh_moregen_memo () in
+          let deferral = { needs_proof = false } in
+          let pos =
+            match refinements with
+            | None -> Forget
+            | Some { root_mode; _ } ->
+                Proof { deferral; mode = root_mode; depth = 0 }
+          in
+          moregen inst_nongen Covariant pos type_pairs env patt subj;
           (* After [moregen], [pat_sorts] have been set to [subj_sorts].
              [subj_sorts] are ephemeral rigid vars created by [instance_with] to
              stand for [subj_sort_vars] during moregen.  Replace them back with
@@ -6678,7 +7724,12 @@ let moregeneral env inst_nongen pat_sort_vars subj_sort_vars pat_sch subj_sch =
                  |> Option.map (Jkind_types.Sort.subst subst_map))
               pat_sorts
           in
-          subj_inst, Ok sorts
+          let pair =
+            if deferral.needs_proof
+            then Some (newty (Ttuple [None, patt; None, subj]))
+            else None
+          in
+          subj_inst, Ok (sorts, pair)
         end
       with Moregen_trace trace -> subj_inst, Error trace
     end
@@ -6686,7 +7737,16 @@ let moregeneral env inst_nongen pat_sort_vars subj_sort_vars pat_sch subj_sch =
         ignore
           (Jkind_types.Sort.generalize_with (fun () -> generalize subj_inst)))
     with
-    | _, Ok sorts -> sorts
+    | _, Ok (sorts, pair) ->
+        (* The verifier needs the instantiated pair: copy it whole, so that it
+           keeps its shared variables and survives backtracking. *)
+        Option.iter (fun pair ->
+            match refinements, get_desc (generic_instance pair) with
+            | Some request, Ttuple [_, patt; _, subj] ->
+                request.instantiated <- Some (patt, subj)
+            | _ -> assert false)
+          pair;
+        sorts
     | _, Error trace -> raise (Moregen (expand_to_moregen_error env trace))
   end
 
@@ -6878,13 +7938,45 @@ let rec eqtype rename type_pairs subst env ~do_jkind_check t1 t2 =
           match (get_desc t1', get_desc t2') with
             (Tvar { jkind = k1 }, Tvar { jkind = k2 }) when rename ->
               eqtype_subst env type_pairs subst t1' k1 t2' k2 ~do_jkind_check
-          | (Tarrow ((l1,a1,r1), t1, u1, _),
-             Tarrow ((l2,a2,r2), t2, u2, _)) ->
+          | (Tarrow ((l1,a1,r1,binder1), t1, u1, _),
+             Tarrow ((l2,a2,r2,binder2), t2, u2, _)) ->
               eq_labels Equality ~in_pattern_mode:false l1 l2;
               eqtype rename type_pairs subst env t1 t2 ~do_jkind_check:true;
-              eqtype rename type_pairs subst env u1 u2 ~do_jkind_check:true;
+              begin match align_arrow_codomains binder1 u1 binder2 u2 with
+              | Some (u1, u2) ->
+                  eqtype rename type_pairs subst env u1 u2
+                    ~do_jkind_check:true
+              | None -> raise_unexplained_for Equality
+              end;
               eqtype_alloc_mode a1 a2;
               eqtype_alloc_mode r1 r2
+          | (Trefine r1, Trefine r2) ->
+              eqtype rename type_pairs subst env
+                r1.ref_payload r2.ref_payload ~do_jkind_check:true;
+              begin match
+                refinement_predicate_types env
+                  ~pairs:[r1.ref_binder, r2.ref_binder]
+                  r1.ref_pred r2.ref_pred
+              with
+              | None -> raise_unexplained_for Equality
+              | Some types ->
+                  (* The kinds of variables do not matter to a predicate.
+                     Between two declarations, the variables local to their
+                     predicates may be renamed, not their parameters. *)
+                  let local ty =
+                    match !predicate_variable_renaming with
+                    | None -> false
+                    | Some params ->
+                        is_Tvar ty
+                        && not (List.exists (fun p -> eq_type p ty) params)
+                  in
+                  relate_predicate_types env
+                    (fun ty1 ty2 ->
+                      let rename = rename || (local ty1 && local ty2) in
+                      eqtype rename type_pairs subst env ty1 ty2
+                        ~do_jkind_check:false)
+                    types
+              end
           | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
               eqtype_labeled_list rename type_pairs subst env labeled_tl1
                 labeled_tl2
@@ -7227,7 +8319,7 @@ let rec moregen_clty ~arrow_index trace type_pairs env cty1 cty2 =
     | Cty_arrow (l1, ty1, cty1'), Cty_arrow (l2, ty2, cty2') when l1 = l2 ->
         let arrow_index = arrow_index + 1 in
         begin
-          try moregen true Covariant type_pairs env ty1 ty2 with Moregen_trace trace ->
+          try moregen true Covariant Syntactic type_pairs env ty1 ty2 with Moregen_trace trace ->
             raise (Failure [
                 CM_Parameter_mismatch
                   (arrow_index, env, expand_to_moregen_error env trace)])
@@ -7242,7 +8334,7 @@ let rec moregen_clty ~arrow_index trace type_pairs env cty1 cty2 =
                   all methods in sign2 are present in sign1. *)
                assert false
              | (_, _, ty') ->
-                 match moregen true Covariant type_pairs env ty' ty with
+                 match moregen true Covariant Syntactic type_pairs env ty' ty with
                  | () -> ()
                  | exception Moregen_trace trace ->
                      raise (Failure [
@@ -7260,7 +8352,7 @@ let rec moregen_clty ~arrow_index trace type_pairs env cty1 cty2 =
                   all instance variables in sign2 are present in sign1. *)
                assert false
              | (_, _, ty') ->
-                 match moregen true Covariant type_pairs env ty' ty with
+                 match moregen true Covariant Syntactic type_pairs env ty' ty with
                  | () -> ()
                  | exception Moregen_trace trace ->
                      raise (Failure [
@@ -7312,16 +8404,17 @@ let match_class_types ?(trace=true) env pat_sch subj_sch =
           let (_, patt) =
             with_level ~level:generic_level
               (fun () -> instance_class [] pat_sch) in
-          let type_pairs = fresh_moregen_pairs () in
+          let type_pairs = fresh_moregen_memo () in
           let sign1 = signature_of_class_type patt in
           let sign2 = signature_of_class_type subj in
           let self1 = sign1.csig_self in
           let self2 = sign2.csig_self in
           let row1 = sign1.csig_self_row in
           let row2 = sign2.csig_self_row in
-          TypePairs.add type_pairs.invariant_pairs (self1, self2);
+          TypePairs.add type_pairs.syntactic_pairs.invariant_pairs
+            (self1, self2);
           (* Always succeeds *)
-          moregen true Covariant type_pairs env row1 row2;
+          moregen true Covariant Syntactic type_pairs env row1 row2;
           (* May fail *)
           try moregen_clty trace type_pairs env patt subj; []
           with Failure res -> res
@@ -7472,10 +8565,6 @@ let build_submode_neg m =
   let c = if changed then Changed else Unchanged in
   m', c
 
-let build_submode posi m =
-  if posi then build_submode_pos (Alloc.allow_left m)
-  else build_submode_neg (Alloc.allow_right m)
-
 let rec build_subtype env (visited : transient_expr list)
     (loops : (int * type_expr) list) posi level t =
   match get_desc t with
@@ -7489,7 +8578,10 @@ let rec build_subtype env (visited : transient_expr list)
           (t, Unchanged)
       else
         (t, Unchanged)
-  | Tarrow((l,a,r), t1, t2, _) ->
+  | Trefine _ ->
+      (* Subtyping rules for refinements belong to a later piece. *)
+      (t, Unchanged)
+  | Tarrow((l,a,r,binder), t1, t2, _) ->
       let tt = Transient_expr.repr t in
       if memq_warn tt visited then (t, Unchanged) else
       let visited = tt :: visited in
@@ -7513,11 +8605,20 @@ let rec build_subtype env (visited : transient_expr list)
         end else a, Unchanged
       in
       let (r', c4) =
-        if level > 2 then build_submode posi r else r, Unchanged
+        if level > 2 then begin
+          (* As for the argument mode above, pick the smaller type. *)
+          if posi then begin
+            let r = cross_right_alloc_ret env t2' r in
+            build_submode_pos r
+          end else begin
+            let r = cross_left_alloc_ret env t2 r in
+            build_submode_neg r
+          end
+        end else r, Unchanged
       in
       let c = max_change c1 (max_change c2 (max_change c3 c4)) in
       if c > Unchanged
-      then (newty (Tarrow((l,a',r'), t1', t2', commu_ok)), c)
+      then (newty (Tarrow((l,a',r',binder), t1', t2', commu_ok)), c)
       else (t, Unchanged)
   | Ttuple labeled_tlist ->
       build_subtype_tuple env visited loops posi level t labeled_tlist
@@ -7525,6 +8626,10 @@ let rec build_subtype env (visited : transient_expr list)
   | Tunboxed_tuple labeled_tlist ->
       build_subtype_tuple env visited loops posi level t labeled_tlist
         (fun x -> Tunboxed_tuple x)
+  | Tmod (ty, mod_bounds) ->
+      let ty', c = build_subtype env visited loops posi level ty in
+      if c > Unchanged then (newty (Tmod (ty', mod_bounds)), c)
+      else (t, Unchanged)
   | Tconstr(p, tl, abbrev)
     when level > 0 && generic_abbrev env p && safe_abbrev env t
     && not (has_constr_row' env t) ->
@@ -7731,6 +8836,11 @@ let enlarge_type env ty =
 *)
 
 let subtypes = TypePairs.create 17
+(* Pairs compared where refinements must be equal, and pairs compared where a
+   refinement may be proved.  Each needs its own table: a pair accepted in one
+   kind of position may be rejected in another. *)
+let syntactic_subtypes = TypePairs.create 17
+let proof_subtypes = TypePairs.create 17
 
 let subtype_error ~env ~trace ~unification_trace =
   raise (Subtype (Subtype.error
@@ -7742,48 +8852,120 @@ let subtype_alloc_mode env trace a1 a2 =
   | Ok () -> ()
   | Error _ -> subtype_error ~env ~trace ~unification_trace:[]
 
-let rec subtype_rec env trace t1 t2 cstrs =
-  if eq_type t1 t2 then cstrs else
+let subtype_memo = function
+  | Forget -> Some subtypes
+  | Syntactic -> Some syntactic_subtypes
+  | Proof { mode = None; _ } -> Some proof_subtypes
+  | Proof { mode = Some _; _ } -> None
 
-  if TypePairs.mem subtypes (t1, t2) then
+(* Values flow from [t1] to [t2].  A value entering a refined type must have
+   the modes the refinement guarantees (see [check_refinement_add]). *)
+let subtype_refinement_add env trace pos t1 t2 =
+  match pos with
+  | Proof { mode; _ } ->
+      let t1' = expand_head env t1 and t2' = expand_head env t2 in
+      if is_refined t2' && not (is_refined t1') && not (is_Tvar t1') then
+        begin match refinement_mode_violation env t1' mode with
+        | None -> ()
+        | Some violation ->
+            subtype_error ~env ~trace
+              ~unification_trace:
+                [Refinement (Refinement_modes (t2', violation))]
+        end
+  | Forget | Syntactic -> ()
+
+let rec subtype_rec env trace pos t1 t2 cstrs =
+  if eq_type t1 t2 then cstrs else begin
+  subtype_refinement_add env trace pos t1 t2;
+  let memo = subtype_memo pos in
+  let visited =
+    match memo with
+    | Some memo -> TypePairs.mem memo (t1, t2)
+    | None -> false
+  in
+  if visited then
     cstrs
   else begin
-    TypePairs.add subtypes (t1, t2);
+    Option.iter (fun memo -> TypePairs.add memo (t1, t2)) memo;
+    let same = refinement_child pos ~mode:(proof_mode pos) in
     match (get_desc t1, get_desc t2) with
       (Tvar _, _) | (_, Tvar _) ->
         (trace, t1, t2, !univar_pairs)::cstrs
-    | (Tarrow((l1,a1,r1), t1, u1, _),
-       Tarrow((l2,a2,r2), t2, u2, _))
+    | (Tarrow((l1,a1,r1,binder1), t1, u1, _),
+       Tarrow((l2,a2,r2,binder2), t2, u2, _))
       when compatible_labels ~in_pattern_mode:false l1 l2 ->
+        (* A binder on one side only cannot occur on the other side. *)
+        let u1, u2 =
+          match align_arrow_codomains binder1 u1 binder2 u2 with
+          | Some codomains -> codomains
+          | None -> u1, u2
+        in
+        let as_value mode = Some (Value.disallow_right (alloc_as_value mode)) in
         let cstrs =
           subtype_rec
             env
             (Subtype.Diff {got = t2; expected = t1} :: trace)
+            (refinement_child pos ~mode:(as_value a2))
             t2 t1
             cstrs
         in
         let a2 = cross_left_alloc env t2 a2 in
-         subtype_alloc_mode env trace a2 a1;
-        (* RHS mode of arrow types indicates allocation in the parent region
-           and is not subject to mode crossing *)
+        subtype_alloc_mode env trace a2 a1;
+        let r2 = cross_right_alloc_ret env u2 r2 in
         subtype_alloc_mode env trace r1 r2;
+        (* [r2] was crossed with the target's result type; when that type is
+           refined, the source's result mode [r1] is checked when the result
+           enters the refinement. *)
         subtype_rec
           env
           (Subtype.Diff {got = u1; expected = u2} :: trace)
+          (refinement_child pos ~mode:(as_value r1))
           u1 u2
           cstrs
     | (Ttuple tl1, Ttuple tl2) ->
-        subtype_labeled_list env trace tl1 tl2 cstrs
+        subtype_labeled_list env trace same tl1 tl2 cstrs
     | (Tunboxed_tuple tl1, Tunboxed_tuple tl2) ->
-        subtype_labeled_list env trace tl1 tl2 cstrs
+        subtype_labeled_list env trace same tl1 tl2 cstrs
     | (Tconstr(p1, [], _), Tconstr(p2, [], _)) when Path.same p1 p2 ->
         cstrs
     | (Tconstr(p1, _tl1, _abbrev1), _)
       when generic_abbrev env p1 && safe_abbrev env t1 ->
-        subtype_rec env trace (expand_abbrev env t1) t2 cstrs
+        subtype_rec env trace pos (expand_abbrev env t1) t2 cstrs
     | (_, Tconstr(p2, _tl2, _abbrev2))
       when generic_abbrev env p2 && safe_abbrev env t2 ->
-        subtype_rec env trace t1 (expand_abbrev env t2) cstrs
+        subtype_rec env trace pos t1 (expand_abbrev env t2) cstrs
+    | (Trefine r1, Trefine r2) ->
+        begin match
+          refinement_predicate_types env ~pairs:[r1.ref_binder, r2.ref_binder]
+            r1.ref_pred r2.ref_pred
+        with
+        | Some types ->
+            (* Equal predicates, provided their types unify. *)
+            let cstrs = ref cstrs in
+            relate_predicate_types env
+              (fun ty1 ty2 ->
+                cstrs := (trace, ty1, ty2, !univar_pairs) :: !cstrs)
+              types;
+            subtype_rec env trace same r1.ref_payload r2.ref_payload !cstrs
+        | None ->
+            begin match pos with
+            | Proof p ->
+                p.deferral.needs_proof <- true;
+                subtype_rec env trace same r1.ref_payload r2.ref_payload
+                  cstrs
+            | Forget | Syntactic -> (trace, t1, t2, !univar_pairs)::cstrs
+            end
+        end
+    | (Trefine r1, _) when not (is_syntactic pos) ->
+        subtype_rec env trace same r1.ref_payload t2 cstrs
+    | (_, Trefine r2) ->
+        begin match pos with
+        | Proof p ->
+            (* The mode of the entering value was checked above. *)
+            p.deferral.needs_proof <- true;
+            subtype_rec env trace same t1 r2.ref_payload cstrs
+        | Forget | Syntactic -> (trace, t1, t2, !univar_pairs)::cstrs
+        end
     | (Tconstr(p1, tl1, _), Tconstr(p2, tl2, _)) when Path.same p1 p2 ->
         begin try
           let decl = Env.find_type p1 env in
@@ -7800,6 +8982,7 @@ let rec subtype_rec env trace t1 t2 cstrs =
                   subtype_rec
                     env
                     (Subtype.Diff {got = t1; expected = t2} :: trace)
+                    (refinement_child pos ~mode:None)
                     t1 t2
                     cstrs
               else
@@ -7808,6 +8991,7 @@ let rec subtype_rec env trace t1 t2 cstrs =
                   subtype_rec
                     env
                     (Subtype.Diff {got = t2; expected = t1} :: trace)
+                    (refinement_child pos ~mode:None)
                     t2 t1
                     cstrs
                 else cstrs)
@@ -7817,7 +9001,7 @@ let rec subtype_rec env trace t1 t2 cstrs =
         end
     | (Tconstr(p1, _, _), _)
       when generic_private_abbrev env p1 && safe_abbrev_opt env t1 ->
-        subtype_rec env trace (expand_abbrev_opt env t1) t2 cstrs
+        subtype_rec env trace pos (expand_abbrev_opt env t1) t2 cstrs
 (*  | (_, Tconstr(p2, _, _)) when generic_private_abbrev false env p2 ->
         subtype_rec env trace t1 (expand_abbrev_opt env t2) cstrs *)
     | (Tobject (f1, _), Tobject (f2, _))
@@ -7833,14 +9017,14 @@ let rec subtype_rec env trace t1 t2 cstrs =
           (trace, t1, t2, !univar_pairs)::cstrs
         end
     | (Tpoly (u1, []), Tpoly (u2, [])) ->
-        subtype_rec env trace u1 u2 cstrs
+        subtype_rec env trace same u1 u2 cstrs
     | (Tpoly (u1, tl1), Tpoly (u2, [])) ->
         let u1' = instance_poly tl1 u1 in
-        subtype_rec env trace u1' u2 cstrs
+        subtype_rec env trace same u1' u2 cstrs
     | (Tpoly (u1, tl1), Tpoly (u2,tl2)) ->
         begin try
           enter_poly env u1 tl1 u2 tl2
-            (fun t1 t2 -> subtype_rec env trace t1 t2 cstrs)
+            (fun t1 t2 -> subtype_rec env trace same t1 t2 cstrs)
         with Escape _ ->
           (trace, t1, t2, !univar_pairs)::cstrs
         end
@@ -7850,28 +9034,30 @@ let rec subtype_rec env trace t1 t2 cstrs =
         (try
           let pairs = List.combine sort_vars1 sort_vars2 in
           Jkind_types.Sort.enter_repr pairs
-            (fun () -> subtype_rec env trace u1 u2 cstrs)
+            (fun () -> subtype_rec env trace same u1 u2 cstrs)
         with Invalid_argument _ -> (trace, t1, t2, !univar_pairs)::cstrs)
     | (Tpackage pack1, Tpackage pack2) ->
         subtype_package env trace (get_level t1) pack1
           (get_level t2) pack2 cstrs
     | (Tquote t1, Tquote t2) ->
-         subtype_rec (incr_stage env) trace t1 t2 cstrs
+         subtype_rec (incr_stage env) trace Syntactic t1 t2 cstrs
     | (Tsplice t1, Tsplice t2) ->
-         subtype_rec (decr_stage env) trace t1 t2 cstrs
+         subtype_rec (decr_stage env) trace Syntactic t1 t2 cstrs
     | (Tquote_eval t1, Tquote_eval t2) ->
-         subtype_rec (incr_stage env) trace t1 t2 cstrs
+         subtype_rec (incr_stage env) trace Syntactic t1 t2 cstrs
     | (Tbox t1, Tbox t2) ->
          subtype_rec
            env
            (Subtype.Diff {got = t1; expected = t2} :: trace)
+           same
            t1 t2
            cstrs
     | (_, _) ->
         (trace, t1, t2, !univar_pairs)::cstrs
   end
+  end
 
-and subtype_labeled_list env trace labeled_tl1 labeled_tl2 cstrs =
+and subtype_labeled_list env trace pos labeled_tl1 labeled_tl2 cstrs =
   if 0 <> List.compare_lengths labeled_tl1 labeled_tl2 then
     subtype_error ~env ~trace ~unification_trace:[];
   List.fold_left2
@@ -7881,6 +9067,7 @@ and subtype_labeled_list env trace labeled_tl1 labeled_tl2 cstrs =
       subtype_rec
         env
         (Subtype.Diff { got = ty1; expected = ty2 } :: trace)
+        pos
         ty1 ty2
         cstrs)
     cstrs labeled_tl1 labeled_tl2
@@ -7921,6 +9108,7 @@ and subtype_fields env trace ty1 ty2 cstrs =
       subtype_rec
         env
         (Subtype.Diff {got = rest1; expected = rest2} :: trace)
+        Syntactic
         rest1 rest2
         cstrs
     else
@@ -7939,6 +9127,7 @@ and subtype_fields env trace ty1 ty2 cstrs =
        subtype_rec
          env
          (Subtype.Diff {got = t1; expected = t2} :: trace)
+         Syntactic
          t1 t2
          cstrs)
     cstrs pairs
@@ -7957,6 +9146,7 @@ and subtype_row env trace row1 row2 cstrs =
       subtype_rec
         env
         (Subtype.Diff {got = more1; expected = more2} :: trace)
+        Syntactic
         more1 more2
         cstrs
   | (Tvar _|Tconstr _|Tnil), (Tvar _|Tconstr _|Tnil)
@@ -7970,12 +9160,14 @@ and subtype_row env trace row1 row2 cstrs =
               subtype_rec
                 env
                 (Subtype.Diff {got = t1; expected = t2} :: trace)
+                Syntactic
                 t1 t2
                 cstrs
           | Reither(false, t1::_, _), Rpresent(Some t2) ->
               subtype_rec
                 env
                 (Subtype.Diff {got = t1; expected = t2} :: trace)
+                Syntactic
                 t1 t2
                 cstrs
           | Rabsent, _ -> cstrs
@@ -7992,6 +9184,7 @@ and subtype_row env trace row1 row2 cstrs =
         subtype_rec
           env
           (Subtype.Diff {got = more1; expected = more2} :: trace)
+          Syntactic
           more1 more2
           cstrs
       in
@@ -8007,6 +9200,7 @@ and subtype_row env trace row1 row2 cstrs =
               subtype_rec
                 env
                 (Subtype.Diff {got = t1; expected = t2} :: trace)
+                Syntactic
                 t1 t2
                 cstrs
           | _ -> raise Exit)
@@ -8014,14 +9208,29 @@ and subtype_row env trace row1 row2 cstrs =
   | _ ->
       raise Exit
 
-let subtype env ty1 ty2 =
-  TypePairs.clear subtypes;
+let subtype ?refinements env ty1 ty2 =
+  let clear () =
+    TypePairs.clear subtypes;
+    TypePairs.clear syntactic_subtypes;
+    TypePairs.clear proof_subtypes
+  in
+  clear ();
   with_univar_pairs [] (fun () ->
+    let deferral = { needs_proof = false } in
+    let pos =
+      match refinements with
+      | None -> Forget
+      | Some { root_mode; _ } -> Proof { deferral; mode = root_mode; depth = 0 }
+    in
     (* Build constraint set. *)
     let cstrs =
-      subtype_rec env [Subtype.Diff {got = ty1; expected = ty2}] ty1 ty2 []
+      subtype_rec env [Subtype.Diff {got = ty1; expected = ty2}] pos ty1 ty2 []
     in
-    TypePairs.clear subtypes;
+    clear ();
+    Option.iter
+      (fun request ->
+        if deferral.needs_proof then request.instantiated <- Some (ty1, ty2))
+      refinements;
     (* Enforce constraints. *)
     function () ->
       List.iter
@@ -8344,6 +9553,44 @@ let rec nondep_type_rec ?(expand_private=false) env ids ty =
                *)
             with Cannot_expand -> raise exn
           end
+      | Tarrow ((label, arg_mode, ret_mode, binder), arg, ret, commu) ->
+          let arg = nondep_type_rec env ids arg in
+          let binder, ret =
+            match binder with
+            | None -> None, nondep_type_rec env ids ret
+            | Some binder ->
+                let binder' =
+                  Ident.create_scoped ~scope:(Ident.scope binder)
+                    (Ident.name binder)
+                in
+                let ret =
+                  Subst.type_expr
+                    (Subst.add_bound_value binder binder' Subst.identity)
+                    ret
+                in
+                Some binder', nondep_type_rec env ids ret
+          in
+          Tarrow ((label, arg_mode, ret_mode, binder), arg, ret, commu)
+      | Trefine
+          { ref_structural_scope; ref_binder; ref_payload; ref_pred } -> begin
+          let ref_pred = normalize_refinement_predicate env ref_pred in
+          let ref_pred =
+            Refinement_predicate.map
+              ~type_expr:(nondep_type_rec env ids) ref_pred
+          in
+          match
+            Refinement_predicate.find_dependency_path
+              (Path.find_free_opt ids) ref_pred
+          with
+          | Some id -> raise (Nondep_cannot_erase id)
+          | None ->
+              Trefine
+                { ref_structural_scope;
+                  ref_binder;
+                  ref_payload = nondep_type_rec env ids ref_payload;
+                  ref_pred
+                }
+        end
       | Tpackage pack when Path.exists_free ids pack.pack_path ->
           let p' = normalize_package_path env pack.pack_path in
           begin match Path.find_free_opt ids p' with
@@ -8385,6 +9632,11 @@ let rec nondep_type_rec ?(expand_private=false) env ids ty =
                 Tvariant (set_row_name row None)
             | _ -> Tvariant row
           end
+      | Tof_kind jk ->
+          let jk = nondep_jkind_base env ids jk in
+          (* CR layouts v2.8: This should be done with a proper nondep_jkind.
+             Internal ticket 5113. *)
+          Tof_kind (Jkind.map_type_expr (nondep_type_rec env ids) jk)
       | desc -> copy_type_desc (nondep_type_rec env ids) desc
     with
     | desc ->
@@ -8402,6 +9654,79 @@ let nondep_type env id ty =
   with Nondep_cannot_erase _ as exn ->
     clear_hash ();
     raise exn
+
+let refinement_scope_escape_in ids visit_root =
+  let exception Found of Ident.t in
+  let visit_ident id =
+    let visited = TypeHash.create 17 in
+    let ids = Ident.Set.singleton id in
+    let rec visit ty =
+      if not (TypeHash.mem visited ty) then begin
+        TypeHash.add visited ty ();
+        match get_desc ty with
+        | Tarrow ((_, _, _, binder), arg, ret, _) ->
+            visit arg;
+            if not
+                (match binder with
+                 | Some binder -> Ident.same id binder
+                 | None -> false)
+            then visit ret
+        | Trefine { ref_binder; ref_payload; ref_pred; _ } ->
+            visit ref_payload;
+            if not (Ident.same id ref_binder) then begin
+              Option.iter (fun id -> raise (Found id))
+                (Refinement_predicate.find_ident ids ref_pred);
+              ignore
+                (Refinement_predicate.fold_types
+                   (fun () ty -> visit ty) () ref_pred
+                 : unit)
+            end
+        | _ -> iter_type_expr visit ty
+      end
+    in
+    visit_root visit
+  in
+  match Ident.Set.iter visit_ident ids with
+  | () -> None
+  | exception Found id -> Some id
+
+let refinement_ident_occurs id ty =
+  Option.is_some
+    (refinement_scope_escape_in
+       (Ident.Set.singleton id) (fun visit -> visit ty))
+
+let substitute_refinement_ident id replacement ty =
+  Subst.type_expr
+    (Subst.add_bound_value id replacement Subst.identity)
+    ty
+
+let substitute_refinement_expression binder replacement ty =
+  let ty = Subst.type_expr Subst.identity ty in
+  let seen = ref TypeSet.empty in
+  let rec visit ty =
+    if not (TypeSet.mem ty !seen) then begin
+      seen := TypeSet.add ty !seen;
+      match get_desc ty with
+      | Trefine refinement ->
+          let predicate = Refinement_predicate.map
+              ~expression:(fun e -> match e.rexp_desc with
+                | Rexp_var id | Rexp_ident (Path.Pident id)
+                    when Ident.same id binder -> replacement
+                | _ -> e) refinement.ref_pred in
+          set_type_desc ty (Trefine {refinement with ref_pred = predicate});
+          visit refinement.ref_payload;
+          ignore (Refinement_predicate.fold_types (fun () ty -> visit ty)
+            () predicate : unit)
+      | _ -> Btype.iter_type_expr visit ty
+    end
+  in
+  visit ty;
+  ty
+
+let apply_dependent_type binder argument ty =
+  Subst.type_expr
+    (Subst.add_value binder (Path.Pident argument) Subst.identity)
+    ty
 
 let () = nondep_type' := nondep_type
 
@@ -8432,7 +9757,9 @@ let rec nondep_type_decl env mid is_covariant decl =
         let context = mk_jkind_context_check_principal env in
         match Jkind.round_up ~context env jkind with
         | None -> raise err
-        | Some jkind -> jkind |> Jkind.disallow_right
+        | Some rounded ->
+          Jkind.set_logicality (Ikind.logicality_of_jkind env jkind) rounded
+          |> Jkind.disallow_right
     in
     clear_hash ();
     let priv =
@@ -8458,6 +9785,7 @@ let rec nondep_type_decl env mid is_covariant decl =
       type_loc = decl.type_loc;
       type_attributes = decl.type_attributes;
       type_unboxed_default = decl.type_unboxed_default;
+      type_inductive = decl.type_inductive;
       type_uid = decl.type_uid;
       type_unboxed_version;
     }
@@ -8669,8 +9997,12 @@ let check_decl_jkind env decl jkind =
     | Type_record (
         [{ ld_type = inner_ty; ld_modalities = modality }],
         Record_unboxed, None), _
+    (* A ghost field has no slot, so a record of one ghost field is not an
+       abbreviation of the field's type: its layout is void. It uses its
+       declared kind. *)
     | Type_record_unboxed_product ([{ ld_type = inner_ty;
-                                      ld_modalities = modality }], _, None), _
+                                      ld_modalities = modality;
+                                      ld_ghost = false }], _, None), _
     | Type_variant (
         [{ cd_args =
              (Cstr_tuple [{ ca_type = inner_ty;
@@ -8721,11 +10053,13 @@ let constrain_decl_jkind env decl jkind =
       Ikind.sub_or_error ~type_equal ~context env
         decl.type_jkind jkind
     with
-    | Ok () as ok -> ok
-    | Error _ as err ->
+    | Ok () -> Ok ()
+    | Error err ->
         match decl.type_manifest with
-        | None -> err
-        | Some ty -> constrain_type_jkind env ty jkind
+        | None -> Error (Ikind.Jkind_error err)
+        | Some ty ->
+          constrain_type_jkind env ty jkind
+          |> Result.map_error (fun err -> Ikind.Jkind_error err)
 
 let exn_constructor_crossing env lid ~args locks =
   let vmode =

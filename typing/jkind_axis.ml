@@ -124,9 +124,38 @@ module Separability = struct
     else Non_pointer
 end
 
+(* Whether the values of a type form a set in the mathematical sense: see
+   [Logicality] in jkind_axis.mli. *)
+module Logicality = struct
+  type t =
+    | Logical
+    | Maybe_logical
+
+  include Mode.Lattices.Total (struct
+    type nonrec t = t
+
+    let min = Logical
+
+    let max = Maybe_logical
+
+    let ord = function Logical -> 0 | Maybe_logical -> 1
+  end)
+
+  let less_or_equal s1 s2 : Misc.Le_result.t =
+    if equal s1 s2 then Equal else if le s1 s2 then Less else Not_le
+
+  let to_string = function
+    | Logical -> "logical"
+    | Maybe_logical -> "maybe_logical"
+
+  let print ppf t = Fmt.fprintf ppf "%s" (to_string t)
+end
+
 module Axis = struct
   module Nonmodal = struct
-    type 'a t = Externality : Externality.t t
+    type 'a t =
+      | Externality : Externality.t t
+      | Logicality : Logicality.t t
   end
 
   type 'a t =
@@ -146,8 +175,24 @@ module Axis = struct
       Pack (Modal (Comonadic Statefulness));
       Pack (Modal (Monadic Visibility));
       Pack (Modal (Monadic Staticity));
+      Pack (Modal (Comonadic Totality));
+      Pack (Modal (Comonadic Ghostliness));
       (* CR-soon zqian: call [Mode.Crossing.Axis.all] for modal axes *)
-      Pack (Nonmodal Externality) ]
+      Pack (Nonmodal Externality);
+      Pack (Nonmodal Logicality) ]
+
+  let equal (Pack axis1) (Pack axis2) =
+    match axis1, axis2 with
+    | Modal axis1, Modal axis2 ->
+      let axis1 = Mode.Crossing.Axis.to_modality (Mode.Crossing.Axis.P axis1) in
+      let axis2 = Mode.Crossing.Axis.to_modality (Mode.Crossing.Axis.P axis2) in
+      Int.equal (Mode.Modality.Axis.compare axis1 axis2) 0
+    | Nonmodal Externality, Nonmodal Externality -> true
+    | Nonmodal Logicality, Nonmodal Logicality -> true
+    | Nonmodal Externality, Nonmodal Logicality
+    | Nonmodal Logicality, Nonmodal Externality ->
+      false
+    | Modal _, Nonmodal _ | Nonmodal _, Modal _ -> false
 
   let name (type a) : a t -> string = function
     | Modal ax ->
@@ -156,6 +201,7 @@ module Axis = struct
       in
       Fmt.asprintf "%a" Mode.Value.Axis.print ax
     | Nonmodal Externality -> "externality"
+    | Nonmodal Logicality -> "logicality"
 end
 
 module Per_axis = struct
@@ -164,30 +210,55 @@ module Per_axis = struct
   module Nonmodal = struct
     open Axis.Nonmodal
 
-    let min : type a. a t -> a = function Externality -> Externality.min
+    let min : type a. a t -> a = function
+      | Externality -> Externality.min
+      | Logicality -> Logicality.min
 
-    let max : type a. a t -> a = function Externality -> Externality.max
+    let max : type a. a t -> a = function
+      | Externality -> Externality.max
+      | Logicality -> Logicality.max
 
     let le : type a. a t -> a -> a -> bool =
-     fun ax a b -> match ax with Externality -> Externality.le a b
+     fun ax a b ->
+      match ax with
+      | Externality -> Externality.le a b
+      | Logicality -> Logicality.le a b
 
     let equal : type a. a t -> a -> a -> bool =
-     fun ax a b -> match ax with Externality -> Externality.equal a b
+     fun ax a b ->
+      match ax with
+      | Externality -> Externality.equal a b
+      | Logicality -> Logicality.equal a b
 
     let meet : type a. a t -> a -> a -> a =
-     fun ax a b -> match ax with Externality -> Externality.meet a b
+     fun ax a b ->
+      match ax with
+      | Externality -> Externality.meet a b
+      | Logicality -> Logicality.meet a b
 
     let join : type a. a t -> a -> a -> a =
-     fun ax a b -> match ax with Externality -> Externality.join a b
+     fun ax a b ->
+      match ax with
+      | Externality -> Externality.join a b
+      | Logicality -> Logicality.join a b
 
     let print : type a. a t -> Fmt.formatter -> a -> unit = function
       | Externality -> Externality.print
+      | Logicality -> Logicality.print
+
+    let index : type a. a t -> int = function
+      | Externality -> 0
+      | Logicality -> 1
 
     let compare_obj : type a b. a t -> b t -> int =
-     fun a b -> match a, b with Externality, Externality -> 0
+     fun a b -> Int.compare (index a) (index b)
 
     let equal_obj : type a b. a t -> b t -> (a, b) Misc.is_eq =
-     fun a b -> match a, b with Externality, Externality -> Misc.Is_eq
+     fun a b ->
+      match a, b with
+      | Externality, Externality -> Misc.Is_eq
+      | Logicality, Logicality -> Misc.Is_eq
+      | Externality, Logicality | Logicality, Externality -> Misc.Is_not_eq
   end
 
   let min : type a. a t -> a = function[@inline available]
@@ -264,8 +335,11 @@ module Axis_set = struct
     | Modal (Comonadic Statefulness) -> 7
     | Modal (Monadic Visibility) -> 8
     | Modal (Monadic Staticity) -> 9
+    | Modal (Comonadic Totality) -> 10
+    | Modal (Comonadic Ghostliness) -> 11
     (* CR-soon zqian: call [Mode.Crossing.Axis.index] for modal axes *)
-    | Nonmodal Externality -> 10
+    | Nonmodal Externality -> 12
+    | Nonmodal Logicality -> 13
 
   let[@inline] axis_mask ax = 1 lsl axis_index ax
 
@@ -295,7 +369,10 @@ module Axis_set = struct
     |> set_axis (Modal (Comonadic Statefulness))
     |> set_axis (Modal (Monadic Visibility))
     |> set_axis (Modal (Monadic Staticity))
+    |> set_axis (Modal (Comonadic Totality))
+    |> set_axis (Modal (Comonadic Ghostliness))
     |> set_axis (Nonmodal Externality)
+    |> set_axis (Nonmodal Logicality)
 
   let all = create ~f:(fun ~axis:_ -> true)
 

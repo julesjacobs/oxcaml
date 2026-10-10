@@ -13,36 +13,42 @@
   > type t = int
   > EOF
   Verbosity 0: immediate
-  Verbosity 1: value non_pointer mod global many stateless immutable external_
+  Verbosity 1: value non_pointer mod global many total immutable external_ logical
   Verbosity 2: value non_pointer non_null
     mod global
         many
-        stateless
+        total
         immutable
         forkable
         unyielding
         aliased
+        stateless
         portable
         contended
         external_
+        logical
         static
+        ghost
 
   $ run 1:17 <<EOF
   > type 'a t = 'a option
   > EOF
-  Verbosity 0: immutable_data with 'a
-  Verbosity 1: value non_float mod forkable unyielding many stateless immutable with 'a
+  Verbosity 0: logical_data with 'a
+  Verbosity 1: value non_float mod forkable unyielding many total immutable logical with 'a
   Verbosity 2: value non_float non_null
     mod forkable
         unyielding
         many
-        stateless
+        total
         immutable
+        stateless
         portable
         contended
+        logical
         local
         unique
         static
+        ghost
         internal
     with 'a
 
@@ -50,19 +56,24 @@
   > type 'a t1
   > type t2 = Foo of int t1
   > EOF
-  Verbosity 0: immutable_data with int t1
-  Verbosity 1: value non_float mod forkable unyielding many stateless immutable with int t1
+  Verbosity 0: logical_data with int t1
+  Verbosity 1: value non_float
+    mod forkable unyielding many total immutable logical
+    with int t1
   Verbosity 2: value non_float non_null
     mod forkable
         unyielding
         many
-        stateless
+        total
         immutable
+        stateless
         portable
         contended
+        logical
         local
         unique
         static
+        ghost
         internal
     with int t1
 
@@ -76,24 +87,30 @@
         unforkable
         yielding
         once
-        stateful
         unique
+        partial
+        stateful
         read_write
         uncontended
         static
+        ghost
         internal
+        maybe_logical
   Verbosity 2: value separable non_null
     mod portable
         local
         unforkable
         yielding
         once
-        stateful
         unique
+        partial
+        stateful
         read_write
         uncontended
         static
+        ghost
         internal
+        maybe_logical
 
   $ run 1:5 <<EOF
   > type t : value mod stateless
@@ -107,10 +124,13 @@
         yielding
         once
         unique
+        partial
         read_write
         uncontended
         static
+        ghost
         internal
+        maybe_logical
   Verbosity 2: value separable non_null
     mod stateless
         portable
@@ -119,7 +139,10 @@
         yielding
         once
         unique
+        partial
         read_write
         uncontended
         static
+        ghost
         internal
+        maybe_logical

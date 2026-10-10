@@ -117,7 +117,7 @@ type 'a u
 Line 2, characters 0-66:
 2 | type t : immutable_data with (type : value) u = { foo : 'a. 'a u }
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is immutable_data with 'a. 'a u
+Error: The kind of type "t" is logical_data with 'a. 'a u
          because it's a boxed record type.
        But the kind of type "t" must be a subkind of
            immutable_data with (type : value) u

@@ -29,6 +29,24 @@ external sub : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%sub
 external mul : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%mulint"
 external div : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%divint"
 external rem : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%modint"
+module Refined = struct
+  external ( / ) : int -> {d : int | d <> 0} -> int @@ portable total = "%divint"
+  external ( mod ) : int -> {d : int | d <> 0} -> int @@ portable total = "%modint"
+  external div : int -> {d : int | d <> 0} -> int @@ portable total = "%divint"
+  external rem : int -> {d : int | d <> 0} -> int @@ portable total = "%modint"
+  external ( lsl ) : int -> {n : int | 0 <= n && n <= 63} -> int
+    @@ portable total = "%lslint"
+  external ( lsr ) : int -> {n : int | 0 <= n && n <= 63} -> int
+    @@ portable total = "%lsrint"
+  external ( asr ) : int -> {n : int | 0 <= n && n <= 63} -> int
+    @@ portable total = "%asrint"
+  external shift_left : int -> {n : int | 0 <= n && n <= 63} -> int
+    @@ portable total = "%lslint"
+  external shift_right : int -> {n : int | 0 <= n && n <= 63} -> int
+    @@ portable total = "%asrint"
+  external shift_right_logical : int -> {n : int | 0 <= n && n <= 63} -> int
+    @@ portable total = "%lsrint"
+end
 external succ : (int[@local_opt]) -> int @@ portable = "%succint"
 external pred : (int[@local_opt]) -> int @@ portable = "%predint"
 let abs x = if x >= 0 then x else -x

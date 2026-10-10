@@ -50,6 +50,7 @@ type binary_annots =
   | Interface of signature
   | Partial_implementation of binary_part array
   | Partial_interface of binary_part array
+  | Functorize
 
 and binary_part =
   | Partial_structure of structure
@@ -98,7 +99,7 @@ let iter_on_parts (it : Tast_iterator.iterator) = function
 let iter_on_annots (it : Tast_iterator.iterator) = function
   | Implementation s -> it.structure it s
   | Interface s -> it.signature it s
-  | Packed _ -> ()
+  | Packed _ | Functorize -> ()
   | Partial_implementation array -> Array.iter (iter_on_parts it) array
   | Partial_interface array -> Array.iter (iter_on_parts it) array
 
@@ -153,7 +154,7 @@ let clear_env binary_annots =
     match binary_annots with
     | Implementation s -> Implementation (cenv.structure cenv s)
     | Interface s -> Interface (cenv.signature cenv s)
-    | Packed _ -> binary_annots
+    | Packed _ | Functorize -> binary_annots
     | Partial_implementation array ->
         Partial_implementation (Array.map clear_part array)
     | Partial_interface array ->
@@ -250,7 +251,7 @@ let iter_on_occurrences
       | Texp_idx (ba, uas) ->
           iter_block_access exp_env ba;
           List.iter ~f:(iter_unboxed_access exp_env) uas
-      | Texp_atomic_loc (_, _, lid, label_desc, _) ->
+      | Texp_atomic_loc { lid; label = label_desc; _ } ->
           add_label ~namespace:Label exp_env lid label_desc
       | Texp_new (path, lid, _, _) ->
           f ~namespace:Class exp_env path lid
@@ -277,7 +278,8 @@ let iter_on_occurrences
       | Texp_unboxed_bool _ | Texp_tuple _ | Texp_unboxed_tuple _
       | Texp_variant _ | Texp_array _ | Texp_ifthenelse _ | Texp_sequence _
       | Texp_while _ | Texp_for _ | Texp_send _
-      | Texp_letmodule _ | Texp_letexception _ | Texp_assert _ | Texp_lazy _
+      | Texp_letmodule _ | Texp_letexception _
+      | Texp_assert _ | Texp_assume _ | Texp_logical_equal _ | Texp_lazy _
       | Texp_object _ | Texp_pack _ | Texp_letop _ | Texp_unreachable
       | Texp_list_comprehension _ | Texp_array_comprehension _ | Texp_probe _
       | Texp_probe_is_enabled _ | Texp_exclave _
@@ -285,7 +287,7 @@ let iter_on_occurrences
       (* CR-someday let_mutable: maybe iterate on mutvar? *)
       | Texp_mutvar _ | Texp_setmutvar _
       | Texp_open _ | Texp_src_pos | Texp_overwrite _
-      | Texp_hole _  | Texp_quotation _ | Texp_antiquotation _ -> ());
+      | Texp_hole _  | Texp_quote _ | Texp_splice _ -> ());
       default_iterator.expr sub e);
 
   (* Remark: some types get iterated over twice due to how constraints are
@@ -307,7 +309,7 @@ let iter_on_occurrences
       | Ttyp_unboxed_tuple _
       | Ttyp_quote _ | Ttyp_splice _ | Ttyp_of_kind _
       | Ttyp_alias _ | Ttyp_variant _ | Ttyp_poly _ | Ttyp_call_pos
-      | Ttyp_repr _ | Ttyp_newlayout _ -> ());
+      | Ttyp_repr _ | Ttyp_newlayout _ | Ttyp_refine _ -> ());
       default_iterator.typ sub ct);
 
   pat =
@@ -316,9 +318,9 @@ let iter_on_occurrences
       (match pat_desc with
       | Tpat_construct (lid, constr_desc, _, _, _) ->
           add_constructor_description pat_env lid constr_desc
-      | Tpat_record (fields, _, _, _) ->
+      | Tpat_record (fields, _, _) ->
         iter_field_pats ~namespace:Label pat_env fields
-      | Tpat_record_unboxed_product (fields, _, _, _) ->
+      | Tpat_record_unboxed_product (fields, _, _) ->
         iter_field_pats ~namespace:Unboxed_label pat_env fields
       | Tpat_any | Tpat_var _ | Tpat_alias _ | Tpat_constant _ | Tpat_tuple _
       | Tpat_fun_layout _
@@ -331,7 +333,8 @@ let iter_on_occurrences
             f ~namespace:Module pat_env path lid
         | Tpat_type (path, lid) ->
             f ~namespace:Type pat_env path lid
-        | Tpat_constraint _ | Tpat_unpack | Tpat_inspected_type _ -> ())
+        | Tpat_constraint _ | Tpat_unpack | Tpat_refinement _
+        | Tpat_inspected_type _ -> ())
         pat_extra;
       default_iterator.pat sub pat);
 

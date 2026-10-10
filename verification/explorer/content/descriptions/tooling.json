@@ -1,0 +1,751 @@
+{
+ "_about": "Files of the verification tooling (playground, catalogue, benchmarks, verifier unit tests, site, demo programs, runtime glue, Wasm differential runner) and the design documents. The directories themselves are described in verification.json and top-level.json, so this file describes their files and the subdirectories those files do not cover. All of this is Vox-only, so entries have `what` only. American spelling.",
+ "_sources": "The code at HEAD 5c5e606aaf (outside verification/explorer and verification/site identical to trunk a0b99ddfeb): each file's header comment and body, verification/playground/README.md, verification/catalogue/README.md, the catalogue pages' headers, research/mastery-20260927/INDEX.md Part C for the soundness history. Git history for the design documents' staleness (design-docs/ghost.md was not updated by the ghost-field-locality merge a0b99ddfeb).",
+ "verification/playground/README.md": {
+  "what": {
+   "short": "How to build, serve and host the playground, how the checker reaches Z3 in the browser, and the limits of the JavaScript build.",
+   "long": [
+    "The build runs only `make boot-compiler runtime-stdlib`: the checker is built in Dune's boot context, whose compiler is the opam switch's, so the switch's js_of_ocaml 6.3.2 accepts the bytecode.",
+    "The limitations section is the one to read before trusting a verdict: 32-bit host integers (literals outside [-2^31, 2^31) are declined), single files only with no `-principal` and no `.mli`, a 34 MB Z3 binary that needs cross-origin isolation, and the JavaScript stack."
+   ]
+  }
+ },
+ "verification/playground/vox_playground.ml": {
+  "what": {
+   "short": "The browser driver: voxCheck does what ocamlc -extension refinement_types -c does up to Lambda, on an in-memory file, and returns status, messages and message locations.",
+   "long": [
+    "Status 0 is accepted, 2 rejected and 3 not checked: a limitation of the JavaScript build (a literal the 32-bit host reads differently, or a JavaScript stack overflow) is reported as a limitation of the browser build, with no verdict. With `lambda` set it also returns the erased program as `-dlambda -dcanonical-ids` prints it.",
+    "Each check runs in a fresh `Local_store` and resets warnings and the location printer, so a result does not depend on earlier checks."
+   ]
+  },
+  "notes": [
+   {
+    "title": "Integer literals on a 32-bit host",
+    "from": "let target_int literal =",
+    "span": 29,
+    "text": "`target_int` computes a literal's value on the 64-bit target, following `parse_intnat` in `runtime/ints.c`. `check_literal` below compares it with what the host's `int_of_string` gives; where they differ, the file is not checked. The verifier itself models `int` with `Int64` and is unaffected."
+   },
+   {
+    "title": "Where each location is printed",
+    "from": "let capture_locations () =",
+    "to": "pp_submsg_loc = tagged Sub printer.pp_submsg_loc",
+    "text": "The report printer is wrapped so that every location it prints is inside a semantic tag; the tag's marking functions record the byte offset in the captured stderr. The page uses these offsets to turn every location in a message into a link to its range."
+   },
+   {
+    "title": "The erased program",
+    "from": "let lambda_of info (typed : Typedtree.implementation) =",
+    "to": "(fun () -> Format.asprintf",
+    "text": "Translation, `Slambda.eval` and `Simplif.simplify_lambda_for_bytecode`, printed with canonical identifiers so that the numbering does not depend on identifiers created by earlier checks."
+   }
+  ]
+ },
+ "verification/playground/vox_smt_solver.ml": {
+  "what": {
+   "short": "The browser implementation of the native Vox_smt_solver interface: SMT-LIB text goes to Z3 WebAssembly through globalThis.voxZ3Eval, synchronously, so the verifier runs unchanged.",
+   "long": "Z3's own `:timeout` option stands in for the native runner's wall-clock deadline. The response protocol is shared with the native runner through `Vox_smt_response`."
+  },
+  "notes": [
+   {
+    "title": "One context or many",
+    "from": "(* The browser implementation of [Vox_smt_solver]: the same interface as the",
+    "span": 6,
+    "kind": "what",
+    "text": "This comment says the page runs every query in one persistent Z3 context. `web/checker.js` in fact deletes the context and creates a new one whenever a query starts with `(reset)`, because an API context keeps counting resources across resets; so each query gets a fresh context and resource limits mean what they mean natively."
+   }
+  ]
+ },
+ "verification/playground/build.sh": {
+  "what": {
+   "short": "Builds the playground as static files in _build/playground/site: boot compiler and stdlib interfaces, js_of_ocaml, npm packages, examples and optionally the verified library's interfaces.",
+   "long": "`--library-prefix` ships the verified library's 125 interfaces (19 MB) so that programs can use `Vox_sequence` and the rest; the examples do not need them. `--catalogue-url` and `--home-url` set the page's links when it is part of the public site."
+  }
+ },
+ "verification/playground/serve.py": {
+  "what": {
+   "short": "Serves the built playground on port 8769 with the cross-origin isolation headers that Z3's threaded WebAssembly build requires."
+  }
+ },
+ "verification/playground/runtime.js": {
+  "what": {
+   "short": "The file js_of_ocaml links for C primitives it does not provide; at HEAD it holds only its explanatory comment."
+  }
+ },
+ "verification/playground/package.json": {
+  "what": {
+   "short": "The npm packages the playground ships: z3-solver 4.16.0 (the Z3 version native Vox uses), CodeMirror 5.65.21 and coi-serviceworker 0.1.7; package-lock.json pins them."
+  }
+ },
+ "verification/playground/web/checker.js": {
+  "what": {
+   "short": "Loads Z3 and the checker into one scope and returns a synchronous check function; shared by the browser worker and the Node differential runner.",
+   "long": "It starts Z3's timer threads before any check (a worker cannot start one while synchronous code runs) and unpacks the shipped interfaces into js_of_ocaml's file system from one bundle."
+  },
+  "notes": [
+   {
+    "title": "A fresh Z3 context per query",
+    "from": "globalThis.voxZ3Eval = (text) => {",
+    "span": 12,
+    "kind": "what",
+    "text": "Every query starts with `(reset)`. A Z3 process restarts its resource count there, but an API context does not, so the context is replaced at each `(reset)`. This keeps the native resource limits meaningful in the browser."
+   }
+  ]
+ },
+ "verification/playground/web/worker.js": {
+  "what": {
+   "short": "The Web Worker that runs Z3 and the checker, so a long check does not block the page; it reports the Z3 version, revision and load time once ready."
+  }
+ },
+ "verification/playground/web/app.js": {
+  "what": {
+   "short": "The playground page: CodeMirror 5 editor, example picker, verdict, diagnostics marked in the editor, links from message locations to source ranges, and the erased Lambda view."
+  }
+ },
+ "verification/playground/differential/run.py": {
+  "what": {
+   "short": "Compares the built playground (run in Node) with an installed native compiler: same status, same complete output, same erased Lambda for accepted examples, and valid printed locations.",
+   "long": [
+    "Inputs are the examples, the integer boundary cases in `cases/`, and every phrase of the expect tests listed in `sample.txt`, each phrase compiled with the earlier phrases its test accepts. A file the browser declines (status 3) is listed as NOT CHECKED; any other difference is a DISAGREE and fails the run.",
+    "`--only-native` and `--compare-with` let the native side run on another machine; `--browser-bundle` writes `browser.html` to repeat the comparison in a real browser."
+   ]
+  },
+  "notes": [
+   {
+    "title": "Expect tests split into files",
+    "from": "def split_test(path, directory):",
+    "to": "def native(prefix, file, lambda_=False):",
+    "text": "Each `[%%expect]` phrase becomes one file consisting of that phrase and the earlier phrases the test expects to be accepted, since the playground checks single files."
+   },
+   {
+    "title": "Checking the reported locations",
+    "from": "def location_problems(result, source, name, site):",
+    "span": 24,
+    "text": "Every location the browser reports must be printed at the offsets it claims and denote a valid range in the source, or in an interface source the site ships; and every location line in the output must be one of the reported locations."
+   }
+  ]
+ },
+ "verification/playground/differential/check-node.js": {
+  "what": {
+   "short": "Runs the playground's checker in Node on the same code path as the browser worker, printing each result or JSON lines."
+  }
+ },
+ "verification/playground/differential/sample.txt": {
+  "what": {
+   "short": "The expect tests the differential check replays phrase by phrase: tests from typing-refinement-types/ and vox/ that need only -extension refinement_types and no other unit."
+  }
+ },
+ "verification/playground/differential/browser.html": {
+  "what": {
+   "short": "A page that repeats the differential comparison in a real browser, from a bundle that run.py --browser-bundle writes into the site."
+  }
+ },
+ "verification/playground/differential/cases/": {
+  "what": {
+   "short": "One-line boundary programs for the differential check: int literals near 2^31 and 2^62, hexadecimal and nativeint literals, overflow at max_int and min_int, and shift counts.",
+   "long": "These are the inputs where a 32-bit JavaScript host and a 64-bit target can disagree; the browser build must either give the native verdict or decline to check."
+  }
+ },
+ "verification/playground/examples/index.json": {
+  "what": {
+   "short": "The order, titles and one-line summaries of the eight playground examples shown in the example picker."
+  }
+ },
+ "verification/playground/examples/refinements.ml": {
+  "what": {
+   "short": "The first playground example: clamp with a dependent upper bound, a caller relying on its result refinement, and division through Int.Refined."
+  }
+ },
+ "verification/playground/examples/counterexample.ml": {
+  "what": {
+   "short": "x + 1 > x is rejected at max_int because int is a 63-bit machine integer; the variant with x < max_int is accepted."
+  }
+ },
+ "verification/playground/examples/division.ml": {
+  "what": {
+   "short": "Int.Refined.( / ) requires a provably nonzero divisor; a divisor that may be 0 is rejected, with a note pointing at the violated refinement in the standard library."
+  }
+ },
+ "verification/playground/examples/lemma.ml": {
+  "what": {
+   "short": "[@def] equations and an inductive lemma about length and append, called inside ghost_ so that the proof is checked and erased."
+  }
+ },
+ "verification/playground/examples/termination.ml": {
+  "what": {
+   "short": "[@@decreases] measures for Euclid's algorithm and a binary search; the Collatz iteration with measure n is rejected."
+  }
+ },
+ "verification/playground/examples/ghost_erasure.ml": {
+  "what": {
+   "short": "A summary record with a ghost list field; the erased Lambda shows that the [@@ ghost] field and the sum_def calls are gone."
+  }
+ },
+ "verification/playground/examples/ghost_token.ml": {
+  "what": {
+   "short": "An affine ghost permit: firing it once is accepted, firing it twice is a uniqueness error."
+  }
+ },
+ "verification/playground/examples/unreachable.ml": {
+  "what": {
+   "short": "unreachable_ () must be proved: accepted for the [] case of a list refined to be nonempty and in an exhaustive sign test, rejected after List.rev of an arbitrary list."
+  }
+ },
+ "verification/catalogue/README.md": {
+  "what": {
+   "short": "How to build the catalogue, what each file does, how to write a page, and what the page statuses mean.",
+   "long": "Status `owner-review` means two independent reviews found no false claim and the page states every gap they found; `reviewed` means the owner checked it after that. At HEAD every page is `owner-review`."
+  }
+ },
+ "verification/catalogue/build.py": {
+  "what": {
+   "short": "Builds the catalogue site from the pages, quoting files with git show at one revision, computing line counts, and failing on any broken local link or anchor.",
+   "long": "Besides one page per demo it writes the trust page, a presentation guide (a 20-minute route through four demos, `ROUTE`) and the line-count pages."
+  },
+  "notes": [
+   {
+    "title": "Every link must resolve",
+    "from": "def check(output, partial=False):",
+    "to": "assert not errors, errors[:20]",
+    "text": "After writing the site, every local link and fragment of every page must resolve; a partial build (`--pages`) may link to demo pages it did not build."
+   }
+  ]
+ },
+ "verification/catalogue/pages.py": {
+  "what": {
+   "short": "The page format: a key: value header, a small Markdown subset, and the @code, @text and @performance directives that quote the repository at the built commit."
+  },
+  "notes": [
+   {
+    "title": "The quoting directives",
+    "from": "@code PATH \"from\" \"to\"  from the line containing `from` to the next line",
+    "span": 9,
+    "text": "A quote names its range by patterns, so that edits elsewhere in the file do not break it and a quote whose pattern stops matching fails the build. The explorer's `from`/`to` ranges follow the same convention."
+   }
+  ]
+ },
+ "verification/catalogue/catalogue.json": {
+  "what": {
+   "short": "The demo order, the language mechanisms, each demo's root and owned modules for the line counts (census), and the functions with a refined unit result that run at run time."
+  }
+ },
+ "verification/catalogue/line_stats.py": {
+  "what": {
+   "short": "Spec, Implementation, Model, Proof and Not reached physical-line counts per demo, over the dependency closure of its root modules."
+  },
+  "notes": [
+   {
+    "title": "What counts as proof",
+    "from": "- Proof: the proof regions,",
+    "text": "Proof counts follow explicit ghost expressions, ghost values and refinements, together with total declarations whose result is refined unit. The surrounding docstring distinguishes the specification quoted by the page, run-time implementation, transitive model definitions and code reached by none of them.",
+    "span": 9
+   }
+  ]
+ },
+ "verification/catalogue/source_inventory.ml": {
+  "what": {
+   "short": "A compiler-libs program that prints, as JSON, a source file's module dependencies, aliases, includes, explicit proof spans and top-level declarations; line_stats.py uses it."
+  }
+ },
+ "verification/catalogue/highlight_code.py": {
+  "what": {
+   "short": "A small lossless OCaml highlighter for quoted code, which knows Vox's mode words (ghost, total and the others) and attributes."
+  }
+ },
+ "verification/catalogue/compiler-demo.js": {
+  "what": {
+   "short": "Runs the HM-to-Wasm compiler's example module in the browser on the presentation page and compares the result and final memory with the saved model run."
+  }
+ },
+ "verification/catalogue/style.css": {
+  "what": {
+   "short": "The catalogue's stylesheet, also copied next to the site's landing page."
+  }
+ },
+ "verification/catalogue/pages/_trust.md": {
+  "what": {
+   "short": "What every demo trusts: the checker, the built-in meanings, the library's declared contracts and runtime code, the standard library's totality casts and the toolchain.",
+   "long": [
+    "Each demo page lists only what it trusts beyond this page. It names `-vox-audit`, which prints what a unit and every unit it depends on trust, and warning 228 for trusted externals outside the library.",
+    "The built-in meanings section says that a C primitive's meaning applies only to the library's own declaration of it, and states the shift-count rule, `===`, the ghost heap laws (four proved, six assumed) and the borrowed-slice transitions. The page's status is owner-review."
+   ]
+  }
+ },
+ "verification/catalogue/pages/flat-hash-table.performance.json": {
+  "what": {
+   "short": "Selects the rows and columns of benchmarks/flat_hashtbl_results.csv that the flat hash table page shows: Verified against Base.Hashtbl and Stdlib.Hashtbl for build, hit and miss."
+  }
+ },
+ "verification/catalogue/pages/avl-sets.md": {
+  "what": {
+   "short": "The catalogue page: persistent AVL sets of integers proved to act as sets, with an equal that holds exactly when two sets have the same members.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:avl-sets). The built page is [avl-sets](demo:avl-sets)."
+  }
+ },
+ "verification/catalogue/pages/binary-search.md": {
+  "what": {
+   "short": "The catalogue page: a persistent sorted integer array whose searches, insertion and removal are proved against its elements.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:binary-search). The built page is [binary-search](demo:binary-search)."
+  }
+ },
+ "verification/catalogue/pages/constant-folding.md": {
+  "what": {
+   "short": "The catalogue page: a constant folder for integer expressions proved to preserve evaluation with wrapping int addition.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:constant-folding). The built page is [constant-folding](demo:constant-folding)."
+  }
+ },
+ "verification/catalogue/pages/dfa-equivalence.md": {
+  "what": {
+   "short": "The catalogue page: DFA table equivalence with an erased counterexample word, and minimization of tables of at most 64 rows.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:dfa-equivalence). The built page is [dfa-equivalence](demo:dfa-equivalence)."
+  }
+ },
+ "verification/catalogue/pages/egraphs.md": {
+  "what": {
+   "short": "The catalogue page: an e-graph whose Equal answers carry derivations from the caller's rules and whose Fixed_point result is closed under the rules and congruence.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:egraphs). The built page is [egraphs](demo:egraphs)."
+  }
+ },
+ "verification/catalogue/pages/flat-hash-table.md": {
+  "what": {
+   "short": "The catalogue page: a mutable SIMD-probed hash table proved to act as a finite map.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:flat-hash-table). The built page is [flat-hash-table](demo:flat-hash-table)."
+  }
+ },
+ "verification/catalogue/pages/functional-queue.md": {
+  "what": {
+   "short": "The catalogue page: a persistent two-list queue proved to act on the list of its elements.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:functional-queue). The built page is [functional-queue](demo:functional-queue)."
+  }
+ },
+ "verification/catalogue/pages/hindley-milner.md": {
+  "what": {
+   "short": "The catalogue page: type inference for a small ML with let-polymorphism, proved sound and principal against a declarative typing relation.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:hindley-milner). The built page is [hindley-milner](demo:hindley-milner)."
+  }
+ },
+ "verification/catalogue/pages/hm-wasm-compiler.md": {
+  "what": {
+   "short": "The catalogue page: a compiler from the HM language to WebAssembly bytes, proved against a WebAssembly model for every input passed at run time.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:hm-wasm-compiler). The built page is [hm-wasm-compiler](demo:hm-wasm-compiler)."
+  }
+ },
+ "verification/catalogue/pages/http.md": {
+  "what": {
+   "short": "The catalogue page: a total, chunk-by-chunk HTTP/1.1 request parser proved sound and complete for a specified request grammar.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:http). The built page is [http](demo:http)."
+  }
+ },
+ "verification/catalogue/pages/lists-trees.md": {
+  "what": {
+   "short": "The catalogue page: in-place list reversal and tree mirroring over mutable cells, proved against erased models of the nodes and the cells they own.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:lists-trees). The built page is [lists-trees](demo:lists-trees)."
+  }
+ },
+ "verification/catalogue/pages/lz4.md": {
+  "what": {
+   "short": "The catalogue page: LZ4 block compression and decoding whose outputs are proved equal to a scanner model and a decoder model, with a round-trip theorem.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:lz4). The built page is [lz4](demo:lz4)."
+  }
+ },
+ "verification/catalogue/pages/merge-sort.md": {
+  "what": {
+   "short": "The catalogue page: generic merge sort proved to return a sorted permutation while spending at most n⌈log₂ n⌉ erased comparison credits.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:merge-sort). The built page is [merge-sort](demo:merge-sort)."
+  }
+ },
+ "verification/catalogue/pages/mode-solver.md": {
+  "what": {
+   "short": "The catalogue page: quantifier elimination over Global < Regional < Local, proved to preserve meaning; it is separate from OxCaml's mode solver.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:mode-solver). The built page is [mode-solver](demo:mode-solver)."
+  }
+ },
+ "verification/catalogue/pages/myers-diff.md": {
+  "what": {
+   "short": "The catalogue page: an edit script between two integer lists, proved correct and of minimum size.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:myers-diff). The built page is [myers-diff](demo:myers-diff)."
+  }
+ },
+ "verification/catalogue/pages/one-shot-channels.md": {
+  "what": {
+   "short": "The catalogue page: a single-use channel between domains whose receiver takes the payload only after the sender has put it.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:one-shot-channels). The built page is [one-shot-channels](demo:one-shot-channels)."
+  }
+ },
+ "verification/catalogue/pages/online-union-find.md": {
+  "what": {
+   "short": "The catalogue page: union by rank with path compression, proved to maintain a partition within inverse-Ackermann amortized fees.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:online-union-find). The built page is [online-union-find](demo:online-union-find)."
+  }
+ },
+ "verification/catalogue/pages/quicksort.md": {
+  "what": {
+   "short": "The catalogue page: in-place quicksort on int arrays, sequential and parallel, proved to sort and to permute.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:quicksort). The built page is [quicksort](demo:quicksort)."
+  }
+ },
+ "verification/catalogue/pages/reference-locks.md": {
+  "what": {
+   "short": "The catalogue page: two spin locks whose acquire and release hand out and take back exactly the ownership of the guarded cell.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:reference-locks). The built page is [reference-locks](demo:reference-locks)."
+  }
+ },
+ "verification/catalogue/pages/regex-automata.md": {
+  "what": {
+   "short": "The catalogue page: a regex matcher proved against membership derivations, and a conversion to DFA tables with the same language.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:regex-automata). The built page is [regex-automata](demo:regex-automata)."
+  }
+ },
+ "verification/catalogue/pages/register-allocation.md": {
+  "what": {
+   "short": "The catalogue page: a liveness-based register allocator proved to preserve every finite run of each program it allocates.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:register-allocation). The built page is [register-allocation](demo:register-allocation)."
+  }
+ },
+ "verification/catalogue/pages/rings.md": {
+  "what": {
+   "short": "The catalogue page: circular doubly linked lists with a sentinel over mutable cells: insertion, removal, reversal and moving a range between rings.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:rings). The built page is [rings](demo:rings)."
+  }
+ },
+ "verification/catalogue/pages/rsa.md": {
+  "what": {
+   "short": "The catalogue page: modular exponentiation on Bigint and the textbook RSA round trip for any two distinct primes.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:rsa). The built page is [rsa](demo:rsa)."
+  }
+ },
+ "verification/catalogue/pages/sat-solver.md": {
+  "what": {
+   "short": "The catalogue page: a CDCL SAT solver proved to terminate within its size limits, whose Unsat means no assignment satisfies the formula.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:sat-solver). The built page is [sat-solver](demo:sat-solver)."
+  }
+ },
+ "verification/catalogue/pages/sparse-arrays.md": {
+  "what": {
+   "short": "The catalogue page: a persistent array made of an immutable base and overriding writes, with laws for the value read at every index.",
+   "long": "Its `sources:` header lists the files the page quotes and is the backbone of [the demo tour](tour:sparse-arrays). The built page is [sparse-arrays](demo:sparse-arrays)."
+  }
+ },
+ "verification/catalogue/compiler-example/run-examples.sh": {
+  "what": {
+   "short": "Builds testsuite/tests/vox/hmc_compilation_examples.ml with -smt-assume-verified, writes the modules it compiles with their model memories, and runs them in Node."
+  }
+ },
+ "verification/catalogue/compiler-example/run-examples-node.js": {
+  "what": {
+   "short": "Runs the example modules in Node's WebAssembly engine as the model's host does (set payload, call run) and compares status, result word and final memory with the model."
+  }
+ },
+ "verification/catalogue/compiler-example/original_run_smoke.ml": {
+  "what": {
+   "short": "Produces program.wasm and the final memories for the inputs 4 and 8 that the presentation page runs, by compiling the design example and running it in the model."
+  }
+ },
+ "verification/catalogue/compiler-example/program.wasm": {
+  "what": {
+   "short": "The WebAssembly module the HM-to-Wasm compiler emits for its design example, as run on the presentation page; input-4.memory.bin and input-8.memory.bin are its model memories."
+  }
+ },
+ "verification/benchmarks/flat_hashtbl.py": {
+  "what": {
+   "short": "Benchmarks the verified flat hash table against Base.Hashtbl v0.17.3 and Stdlib.Hashtbl at -O3 with an installed compiler: build, hit and miss at several sizes.",
+   "long": "`--prepare-base` fetches released Base with opam and adapts only its build to OxCaml. The results file records the machine, compiler, flags, Base build and a hash of every source involved."
+  }
+ },
+ "verification/benchmarks/verified_flat_hashtbl.ml": {
+  "what": {
+   "short": "The benchmark program: an int key module with its equality and hash laws, the table functor applied to it, and the timing loops."
+  }
+ },
+ "verification/benchmarks/flat_hashtbl_results.csv": {
+  "what": {
+   "short": "The measurements the flat hash table page's performance table shows: Apple M4 Max, -O3, work factor 10, shuffled queries, with the provenance header described in flat_hashtbl.py."
+  }
+ },
+ "verification/benchmarks/flat_hashtbl_program_paired.csv": {
+  "what": {
+   "short": "Paired runs of program variants of the table: nanoseconds and bytes per operation for each pair, variant, implementation, payload, size and operation."
+  }
+ },
+ "verification/benchmarks/flat_hashtbl_followup_results.csv": {
+  "what": {
+   "short": "Rejected follow-up variants of the table with median, minimum and maximum paired speedups; ratios above 1 favor the variant."
+  }
+ },
+ "verification/benchmarks/borrow_reads.py": {
+  "what": {
+   "short": "Times borrowed slice reads against the older result-pair primitives, compiled from runtime/borrow.c at a baseline commit under renamed symbols."
+  }
+ },
+ "verification/benchmarks/callback_demos.py": {
+  "what": {
+   "short": "Compares compile time, SMT query count and SMT-LIB size of callback proof styles in the borrow, sorted-array and quicksort demos, at a baseline commit and at the checkout."
+  }
+ },
+ "verification/benchmarks/collection_demos.py": {
+  "what": {
+   "short": "The same comparison for the extraction of the collection mathematics into Vox_sequence and Vox_int_sequence, per source set and per client."
+  }
+ },
+ "verification/benchmarks/sequence_demos.py": {
+  "what": {
+   "short": "Measures complete compilation of the borrow, sorted-array and quicksort demos at a baseline commit and at the checkout, with source line counts."
+  }
+ },
+ "verification/benchmarks/sequence_models.py": {
+  "what": {
+   "short": "Writes standalone SMT-LIB queries that compare Z3 sequences with arrays for sequence observations after writes; it does not measure induction proofs."
+  }
+ },
+ "verification/benchmarks/hof_idioms.py": {
+  "what": {
+   "short": "Reproduces the higher-order specification idiom study of design-docs/hof-idioms.md with an installed compiler, writing to _build/hof-study."
+  }
+ },
+ "verification/benchmarks/quicksort_runtime.py": {
+  "what": {
+   "short": "Compares the run time and allocation of the sequential verified quicksort at the checkout and at a baseline commit, checking each result against List.sort."
+  }
+ },
+ "verification/benchmarks/lz4_interop.py": {
+  "what": {
+   "short": "Cross-checks raw LZ4 blocks in both directions against liblz4 1.x: Vox's blocks must decode with liblz4, and liblz4's with Vox."
+  }
+ },
+ "verification/benchmarks/lz4_interop_cli.ml": {
+  "what": {
+   "short": "The command-line codec lz4_interop.py drives: encode or decode standard input with Vox_lz4."
+  }
+ },
+ "verification/benchmarks/lz4_throughput.ml": {
+  "what": {
+   "short": "Measures compression and decompression throughput of the verified public codec against the unverified baseline codec, after asserting that both produce the same bytes."
+  }
+ },
+ "verification/benchmarks/vox_cdcl_compare.ml": {
+  "what": {
+   "short": "Runs the bounded and the complete verified CDCL solver on random 3-CNF formulas (50/218 and 100/430, seed 42) and checks that their answers agree."
+  }
+ },
+ "verification/tests/dune": {
+  "what": {
+   "short": "Declares the verifier's unit tests in the main build context; the ones that need Z3 run only with VOX_TEST_Z3=true, and smt_solver.ml is copied from testsuite/tests/vox."
+  }
+ },
+ "verification/tests/fake_solver.ml": {
+  "what": {
+   "short": "A stand-in for z3 -in -smt2 that misbehaves on request: hangs, crashes, kills itself, floods stdout, answers garbage or duplicate statuses, or returns malformed models."
+  },
+  "notes": [
+   {
+    "title": "The failure modes",
+    "from": "| \"hang\" -> hang ()",
+    "span": 20,
+    "text": "`test_smt` runs the solver runner against each mode and checks that every one ends in a reported failure. Only `unsat` counts as a proof, so the modes that print `unsat` followed by junk or a second status are the important ones."
+   }
+  ]
+ },
+ "verification/tests/test_smt.ml": {
+  "what": {
+   "short": "Tests the SMT IR, its SMT-LIB printer and the process runner against fake_solver: serialization of 63-bit arithmetic, cancellation, timeouts and every malformed response."
+  }
+ },
+ "verification/tests/test_z3.ml": {
+  "what": {
+   "short": "Tests the SMT IR against real Z3: valid and invalid goals in 63-bit arithmetic, with and without bitvectors, datatypes and uninterpreted functions."
+  }
+ },
+ "verification/tests/test_encoding.ml": {
+  "what": {
+   "short": "Tests Vox_encoding directly: which OCaml types get an SMT sort or datatype, iarray sorts, and the constructors of the list datatype."
+  }
+ },
+ "verification/tests/test_vc.ml": {
+  "what": {
+   "short": "Types small programs with the real front end and checks the queries Vox_vc generates, and their answers from Z3, including retries and cancellation."
+  }
+ },
+ "verification/site/build-site.sh": {
+  "what": {
+   "short": "Builds the public site into _build/site/vox: landing page, catalogue, source explorer and playground, all describing one pushed commit on the vox branch."
+  },
+  "notes": [
+   {
+    "title": "One commit for the whole site",
+    "from": "if ! git diff --quiet \"$revision\" -- . ':(exclude)verification/site'; then",
+    "span": 5,
+    "text": "The catalogue and the explorer quote the revision with `git show`, but the playground is built from the checkout, so the build refuses a checkout that differs from the revision outside `verification/site`."
+   }
+  ]
+ },
+ "verification/site/deploy.sh": {
+  "what": {
+   "short": "Publishes the built site at lab.julesjacobs.com/vox by copying it to a staging directory on the host and swapping it in with one rename (mv --exchange); the old site is kept for rollback."
+  }
+ },
+ "verification/site/landing.py": {
+  "what": {
+   "short": "Fills index.html with the demo count and the playground's clamp example (both read with git show at the revision), the playground's download size and the compiler's size from the explorer data."
+  }
+ },
+ "verification/site/index.html": {
+  "what": {
+   "short": "The landing page template: what Vox is in one paragraph, a quoted example, the trust statement, and links to the catalogue, playground and source explorer."
+  }
+ },
+ "verification/demos/diff_demo.ml": {
+  "what": {
+   "short": "A command-line diff of two strings as byte lists through Vox_diff.diff, printing kept, deleted and inserted characters; scripts/run-diff-demo runs it."
+  }
+ },
+ "verification/demos/http_stream.ml": {
+  "what": {
+   "short": "Feeds two pipelined HTTP requests to Vox_http in awkward chunks and prints the parsed requests; http_stream_demo.ml checks its output."
+  }
+ },
+ "verification/runtime/dune": {
+  "what": {
+   "short": "Builds the vox_verify library, choosing vox_verify.enabled.ml when vox_smt_solver, vox_vc and unix are available and vox_verify.disabled.ml otherwise, and installs it with compiler-libs."
+  },
+  "notes": [
+   {
+    "title": "Enabled or disabled",
+    "from": "(select vox_verify.ml from",
+    "span": 3,
+    "text": "Dune's `select` picks the implementation. The library is compiled with `-opaque` so that edits to the verifier do not force a rebuild of the native optimizer."
+   }
+  ]
+ },
+ "verification/runtime/vox_verify.mli": {
+  "what": {
+   "short": "The whole interface of the glue: val install : unit -> unit."
+  }
+ },
+ "verification/wasm-differential/run.sh": {
+  "what": {
+   "short": "Builds testsuite/tests/vox/wasm_differential.ml with an installed compiler and runs it against Node, either the fixed test configuration or a custom range split across jobs."
+  },
+  "notes": [
+   {
+    "title": "Parallel runs",
+    "from": "# Parallel: split the id range, then add up the tallies.",
+    "span": 12,
+    "text": "With `--jobs N`, the case ids `[from, from + count)` are split into N ranges run in parallel, and the per-range tallies of agreements and disagreements are added."
+   }
+  ]
+ },
+ "design-docs/ghost.md": {
+  "what": {
+   "short": "The design of ghost code: the ghostliness mode axis, ghost_ e, @ ghost values, @@ ghost record fields, how erasure compiles, and the decisions taken during implementation.",
+   "long": [
+    "It covers the information-flow rule (an ambient ghost flag checked at the submode funnel), closures, arrow variance, mode crossing, `Stdlib.Ghost`, and how the refinement checker uses ghost values.",
+    "One point is stale at HEAD; see the note."
+   ]
+  },
+  "notes": [
+   {
+    "title": "Stale: the mode of a ghost-field read",
+    "from": "- **Modes.** Reading a ghost field produces Ghost on the ghostliness axis",
+    "span": 3,
+    "kind": "what",
+    "text": "The document says a ghost-field read gets the minimum on every axis but ghostliness. At HEAD a read inherits the record's uniqueness, linearity, visibility, contention and locality, and is ghost and total (`ghost_field_crossing` in [typecore.ml](src:typing/typecore.ml)); the ghost-field locality fix did not update this file. [ghost_field_ownership.ml](src:testsuite/tests/vox/ghost_field_ownership.ml) is the regression test."
+   }
+  ]
+ },
+ "design-docs/typed-heaps.md": {
+  "what": {
+   "short": "Why heaps are indexed by payload type: 'a Pref.heap and 'a Pref.token own cells of one type, with no universal payload type, the redesign that closed the knot through one untyped heap.",
+   "long": "It also states the totality consequences: projection and matching on types whose abstract constructors may hide recursion through heap payloads are partial, recursive initialization is restricted, and handle parameters are passive."
+  }
+ },
+ "design-docs/borrows-and-slices.md": {
+  "what": {
+   "short": "The design of Borrow: owned arrays, exclusive callback-scoped slice loans with prophecies, parallel callbacks, the sequence model, and the verification boundary in runtime/borrow.c and vox_vc.ml.",
+   "long": "The second half records design experiments (shared sequence model, callback predicates, collection theory, borrowed reads, callback termination, separate list and iarray specifications) with their verdicts; the benchmark scripts in `verification/benchmarks/` reproduce several of them."
+  }
+ },
+ "design-docs/total-recursion-closures.md": {
+  "what": {
+   "short": "The change that let direct recursive calls appear inside named and returned closures, keeping the structural and measure descent obligations."
+  }
+ },
+ "design-docs/verification-programming.md": {
+  "what": {
+   "short": "The house style for verified code: guarantees in result refinements, total refined-unit lemmas, ghost_ proof blocks, callback predicates, transparent and inductive definitions, and budgets."
+  }
+ },
+ "design-docs/vox-v1.md": {
+  "what": {
+   "short": "A draft capability contract and readiness review for a Vox v1, reviewed against the stack of 7 September 2026, with the higher-order contract inventory.",
+   "long": "It predates the typed-heap redesign (14 to 21 September) and the soundness fixes of late September; read it as a record of intent."
+  }
+ },
+ "design-docs/hof-idioms.md": {
+  "what": {
+   "short": "A study of higher-order specification idioms (total model, step relation, IH relation, separate preservation proof, ghost evidence) with Vox experiments and a recommendation."
+  }
+ },
+ "design-docs/vox-proof-ergonomics.md": {
+  "what": {
+   "short": "Proof-ergonomics changes: recursive totality at the toplevel, dependent result annotations, checked eta-adaptation of function refinements, dependent arguments and unboxed ghost fields."
+  }
+ },
+ "design-docs/vox-improvements-checklist.md": {
+  "what": {
+   "short": "A completed checklist of the language improvements stacked under the mutable unifier work, pointing to vox-proof-ergonomics.md for the rules."
+  }
+ },
+ "design-docs/flat-hashtable-checklist.txt": {
+  "what": {
+   "short": "The flat hash table work plan of 19 September 2026: the table's design (triangular probing in 16-byte groups, tombstones, 7/8 occupancy) and a checklist of proofs."
+  }
+ },
+ "design-docs/mutable-unifier.md": {
+  "what": {
+   "short": "The first executable stage of the HM development: a mutable first-order unifier on Pref cells, with its guarantee and its review files unifier*.ml."
+  }
+ },
+ "design-docs/unifier-finite-readback.md": {
+  "what": {
+   "short": "Finite unfolding witnesses and acyclicity proofs layered over the mutable unifier, without changing its executable code."
+  }
+ },
+ "design-docs/unifier-mgu.md": {
+  "what": {
+   "short": "The most-general-unifier contract for the mutable unifier: handle-indexed readback and a ghost substitution built from the successful run."
+  }
+ },
+ "design-docs/stlc-inference.md": {
+  "what": {
+   "short": "Principal inference for closed simply typed terms, the stage before let-polymorphism: constraint generation, solving and the principality proofs."
+  }
+ },
+ "design-docs/scheme-instantiation.md": {
+  "what": {
+   "short": "Exact scheme instantiation by copying a shared mutable type graph, with in-node memos keyed by a fresh session handle."
+  }
+ },
+ "design-docs/level-generalization.md": {
+  "what": {
+   "short": "Levels, lowering, pool generalization and the richer-node unifier shared by the later HM stages, with what is proved and what is not (runtime termination)."
+  }
+ },
+ "design-docs/unifier-pr-sequence.md": {
+  "what": {
+   "short": "The stacked sequence of changes and the proof ladder that led to the current HM inference, with the entry point Hm_routed_infer.closed_hm."
+  }
+ },
+ "design-docs/unifier-vox-findings.md": {
+  "what": {
+   "short": "Language findings from the mutable unifier work: improvements applied to Vox (#137, #139, #140) and remaining limits, recorded at the branch state when met."
+  }
+ },
+ "design-docs/hm-simplification-inventory.md": {
+  "what": {
+   "short": "An inventory of possible simplifications of the HM development, separating source cleanup, library contracts and proposed Vox changes; it names branches and worktrees of the time."
+  }
+ },
+ "design-docs/hm-interpreter-pro.txt": {
+  "what": {
+   "short": "Notes from an external design consultation on a typed HM interpreter with value and environment certificates; the file marks it as a proposal that was never checked."
+  }
+ }
+}

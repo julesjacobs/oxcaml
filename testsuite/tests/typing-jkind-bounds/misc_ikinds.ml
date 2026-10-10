@@ -1,4 +1,5 @@
 (* TEST
+   flags = "-w -181";
    expect;
 *)
 
@@ -24,7 +25,7 @@ Line 2, characters 13-21:
 2 | type 'a u = ('a * int) t
                  ^^^^^^^^
 Error: This type "'a * int" should be an instance of type "('b : immutable_data)"
-       The kind of 'a * int is immutable_data with 'a
+       The kind of 'a * int is logical_data with 'a
          because it's a tuple type.
        But the kind of 'a * int must be a subkind of immutable_data
          because of the definition of t at line 1, characters 0-28.
@@ -34,7 +35,7 @@ Line 2, characters 13-21:
 2 | type 'a u = ('a * int) t
                  ^^^^^^^^
 Error: This type "'a * int" should be an instance of type "('b : immutable_data)"
-       The kind of 'a * int is immutable_data with 'a with int
+       The kind of 'a * int is logical_data with 'a with int
          because it's a tuple type.
        But the kind of 'a * int must be a subkind of immutable_data
          because of the definition of t at line 1, characters 0-28.

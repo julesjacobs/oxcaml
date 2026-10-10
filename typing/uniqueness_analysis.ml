@@ -2126,14 +2126,14 @@ and pattern_match_single pat paths : Ienv.Extension.t * UF.t =
         let paths = Paths.variant_field lbl paths in
         pattern_match_single arg paths
       | None -> Ienv.Extension.empty, UF.unused)
-    | Tpat_record (pats, _, _, _) ->
+    | Tpat_record (pats, _, _) ->
       List.map
         (fun (_, l, pat) ->
           let paths = Paths.record_field l.lbl_modalities l.lbl_name paths in
           pattern_match_single pat paths)
         pats
       |> conjuncts_pattern_match
-    | Tpat_record_unboxed_product (pats, _, _, _) ->
+    | Tpat_record_unboxed_product (pats, _, _) ->
       List.map
         (fun (_, l, pat) ->
           let paths =
@@ -2364,6 +2364,16 @@ let rec check_uniqueness_exp_desc ~borrows ~overwrite (ienv : Ienv.t) ~loc :
       check_uniqueness_exp ~overwrite:None (Ienv.extend ienv ext) body
     in
     UF.seq uf_vbs uf_body
+  | Texp_assume (vb, predicate, body) ->
+    let ext, uf_vbs = check_uniqueness_value_bindings ienv [vb] in
+    let ienv = Ienv.extend ienv ext in
+    let uf_predicate = check_uniqueness_exp ~overwrite:None ienv predicate in
+    let uf_body = check_uniqueness_exp ~overwrite:None ienv body in
+    UF.seq uf_vbs (UF.seq uf_predicate uf_body)
+  | Texp_logical_equal (left, right) ->
+    UF.pars
+      [ check_uniqueness_exp ~overwrite:None ienv left;
+        check_uniqueness_exp ~overwrite:None ienv right ]
   | Texp_function { params; body; _ } ->
     let ienv, uf_params =
       List.fold_left_map
@@ -2405,7 +2415,7 @@ let rec check_uniqueness_exp_desc ~borrows ~overwrite (ienv : Ienv.t) ~loc :
     (* we are constructing a closure here, and therefore any implicit
        borrowing of free variables in the closure is in fact using aliased. *)
     lift_implicit_borrowing uf
-  | Texp_apply (fn, args, _, _, _) ->
+  | Texp_apply (fn, args, _, _, _, _) ->
     let uf_fn = check_uniqueness_exp ~overwrite:None ienv fn in
     let uf_args =
       List.map
@@ -2547,7 +2557,7 @@ let rec check_uniqueness_exp_desc ~borrows ~overwrite (ienv : Ienv.t) ~loc :
     let uf_write = Value.mark_implicit_borrow_memory_address Write value in
     let uf_tag = Value.invalidate_tag value in
     UF.pars [uf_rcd; uf_arg; uf_write; uf_tag]
-  | Texp_atomic_loc (rcd, _, _, _, _) ->
+  | Texp_atomic_loc { record = rcd; _ } ->
     let value, uf_rcd = check_uniqueness_exp_as_value ienv rcd in
     let uf = Value.mark_consumed_memory_address value in
     UF.seq uf_rcd uf
@@ -2674,12 +2684,12 @@ let rec check_uniqueness_exp_desc ~borrows ~overwrite (ienv : Ienv.t) ~loc :
       Paths.mark
         (Usage.maybe_unique use occ)
         Learned_tags.empty Overwrites.empty p)
-  (* CR metaprogramming aivaskovic:
-     it might be reasonable to treat `Texp_quotation e` as `e` *)
-  | Texp_quotation e ->
+  (* CR-someday quoted-modes jbachurski: The uniqueness analysis should be
+     stage-aware for <[once]>/<[unique]> to work when they are added. *)
+  | Texp_quote e ->
     let uf = check_uniqueness_exp ~overwrite:None ienv e in
     UF.quote uf
-  | Texp_antiquotation e ->
+  | Texp_splice e ->
     let uf = check_uniqueness_exp ~overwrite:None ienv e in
     UF.antiquote uf
 

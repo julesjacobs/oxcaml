@@ -1,0 +1,2 @@
+checked heap allocation, stable references, closure captures, and exact bounds passed
+heap object bytes, schemas, bounded code indices, and slot addresses passed

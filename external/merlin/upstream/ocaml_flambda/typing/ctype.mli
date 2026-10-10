@@ -25,6 +25,7 @@ exception Moregen  of Errortrace.moregen_error
 exception Subtype  of Errortrace.Subtype.error
 
 exception Escape of type_expr Errortrace.escape
+exception Refinement_scope_escape of Ident.t
 
 exception Tags of label * label
 exception Cannot_expand
@@ -84,7 +85,15 @@ val restore_global_level: int -> unit
 
 val create_scope : unit -> int
 
-val mark_toplevel_in_quotations : Env.t -> Env.t
+(** Register term identifiers whose refinement dependencies are valid down to
+    the given type-inference level. *)
+val register_refinement_value_scope : level:int -> Ident.t list -> unit
+val with_refinement_predicate_scope : (unit -> 'a) -> 'a
+val may_track_refinement_scopes : unit -> bool
+
+val check_refinement_class_level_escape : int -> class_type -> unit
+
+val mark_persistent_in_quotations : Env.t -> Env.t
 
 val newty: type_desc -> type_expr
 val new_scoped_ty: int -> type_desc -> type_expr
@@ -148,7 +157,7 @@ val merge_row_fields:
 val filter_row_fields:
         bool -> (label * row_field) list -> (label * row_field) list
 
-val contains_toplevel_splice: int -> type_expr -> bool
+val contains_initial_stage_splice: int -> type_expr -> bool
 val iter_type_expr_with_stages:
         (Env.t -> type_expr -> unit) -> Env.t -> type_expr -> unit
 
@@ -273,6 +282,11 @@ val instance_prim:
         Mode.Locality.lr option * (Mode.Forkable.lr * Mode.Yielding.lr) option *
         Jkind.Sort.t option
 
+(** The join of the yielding modes of the first [arity] parameters of a
+    primitive of type [ty]; [Yielding.max] if [ty] has fewer arrows. *)
+val prim_params_yielding:
+        Env.t -> type_expr -> arity:int -> Mode.Yielding.l
+
 (** Given (a @ m1 -> b -> c) @ m0, where [m0] and [m1] are modes expressed by
     user-syntax, [curry_mode m0 m1] gives the mode we implicitly interpret b->c
     to have. *)
@@ -288,16 +302,32 @@ val apply:
            set to true.
            Exception [Cannot_apply] is raised in case of failure. *)
 
-val reduce_head: expand_eval:bool -> Env.t -> type_expr -> type_expr
-(** Exhaustively beta-reduce head-position quotes, splices and quote-evals.
-    If [expand_eval] is true, expands [Predef]'s [eval]s into [Tquote_eval]
-    enabling further reductions. *)
+val reduce_head:
+  expand_reducible_abbrevs:bool -> Env.t -> type_expr -> type_expr
+(** Exhaustively beta-reduce head-position quotes, splices, quote-evals, and
+    boxes. If [expand_reducible_abbrevs] is true, expands [Predef]'s [eval]s and
+    [box]es into [Tquote_eval] and [Tbox], enabling further reductions. *)
 
 val try_expand_once_opt: Env.t -> type_expr -> type_expr
 val try_expand_safe_opt: Env.t -> type_expr -> type_expr
 
 val expand_head_once: Env.t -> type_expr -> type_expr
 val expand_head: Env.t -> type_expr -> type_expr
+val is_inductive: Env.t -> type_expr -> bool
+val can_pattern_match_total: Env.t -> type_expr -> bool
+(* Why total code may not match a value of this type, for error messages;
+   [None] when it may. With [~component:true], why the type is not logical as
+   a component (its kind is not [mod logical]), when a culprit is found. *)
+val not_logical_reason: ?component:bool -> Env.t -> type_expr -> string option
+val can_unpack_total: Env.t -> type_expr -> bool
+(* Whether a jkind rules out heap pointers (so a type of it can be neither a
+   function nor a boxed nominal type). *)
+val jkind_cannot_be_pointer: Env.t -> 'd jkind -> bool
+(* Whether an abstract declaration is declared logical by its kind, or its
+   kind rules out pointers. *)
+val abstract_declaration_is_logical: Env.t -> Path.t -> type_declaration -> bool
+(* Whether values of a jkind are run-time scalars: never pointers, not void. *)
+val jkind_is_scalar: Env.t -> 'd jkind -> bool
 val expand_head_opt: Env.t -> type_expr -> type_expr
 (** The compiler's own version of [expand_head] necessary for type-based
     optimisations. *)
@@ -357,7 +387,8 @@ type filtered_arrow =
   { ty_arg : type_expr;
     arg_mode : Mode.Alloc.lr;
     ty_ret : type_expr;
-    ret_mode : Mode.Alloc.lr
+    ret_mode : Mode.Alloc.lr;
+    binder : Ident.t option
   }
 
 val filter_arrow: Env.t -> type_expr -> arg_label -> force_tpoly:bool ->
@@ -378,7 +409,40 @@ val filter_method: Env.t -> string -> type_expr -> type_expr
         (* A special case of unification (with {m : 'a; 'b}).  Raises
            [Filter_method_failed] instead of [Unify]. *)
 val occur_in: Env.t -> type_expr -> type_expr -> bool
-val moregeneral: Env.t -> bool ->
+
+(* A request for semantic refinement subsumption.  [root_mode] is the mode of
+   the compared value, when known.  After a successful check, [instantiated]
+   is the pair of types whose refinements the verifier must still relate, or
+   [None] when forgetting refinements was enough. *)
+type refinement_inclusion =
+  { root_mode : Mode.Value.l option;
+    mutable instantiated : (type_expr * type_expr) option }
+
+(* The mode refinement operands are checked at: total, stateless and
+   portable. *)
+val refinement_operand_mode : unit -> ('l * 'r) Mode.Value.t
+
+(* Alpha-equal predicates, with the types of their corresponding nodes. *)
+val refinement_predicate_types :
+  Env.t -> pairs:(Ident.t * Ident.t) list ->
+  refinement_expression -> refinement_expression ->
+  Refinement_predicate.type_pair list option
+
+(* While [f] runs, [equal] relates the types of predicate nodes up to a
+   renaming of their type variables other than [params], as for two
+   separately elaborated type declarations whose parameters are shared. *)
+val with_predicate_variable_renaming :
+  params:type_expr list -> (unit -> 'a) -> 'a
+
+(* [relate_predicate_types env relate types] relates the skeletons of those
+   types (ignoring arrow modes, and refinements except in exposed types),
+   applying [relate] where the skeletons stop and to refinements of exposed
+   types that are not alpha-equal. *)
+val relate_predicate_types :
+  Env.t -> (type_expr -> type_expr -> unit) ->
+  Refinement_predicate.type_pair list -> unit
+
+val moregeneral: ?refinements:refinement_inclusion -> Env.t -> bool ->
   Jkind_types.Sort.var list -> Jkind_types.Sort.var list ->
   type_expr -> type_expr -> Jkind_types.Sort.t option list
         (* Check if the first type scheme is more general than the second.
@@ -475,7 +539,9 @@ val match_class_declarations:
 
 val enlarge_type: Env.t -> type_expr -> type_expr * bool
         (* Make a type larger, flag is true if some pruning had to be done *)
-val subtype: Env.t -> type_expr -> type_expr -> unit -> unit
+val subtype:
+  ?refinements:refinement_inclusion ->
+  Env.t -> type_expr -> type_expr -> unit -> unit
         (* [subtype env t1 t2] checks that [t1] is a subtype of [t2].
            It accumulates the constraints the type variables must
            enforce and returns a function that enforces this
@@ -553,6 +619,13 @@ val close_class_signature : Env.t -> class_signature -> bool
 exception Nondep_cannot_erase of Ident.t
 
 val nondep_type: Env.t -> Ident.t list -> type_expr -> type_expr
+val refinement_ident_occurs : Ident.t -> type_expr -> bool
+val substitute_refinement_expression :
+  Ident.t -> Types.refinement_expression -> type_expr -> type_expr
+val apply_dependent_type :
+  Ident.t -> Ident.t -> type_expr -> type_expr
+val substitute_refinement_ident :
+  Ident.t -> Ident.t -> type_expr -> type_expr
         (* Return a type equivalent to the given type but without
            references to any of the given identifiers.
            Raise [Nondep_cannot_erase id] if no such type exists because [id],
@@ -644,10 +717,10 @@ val mcomp : Env.t -> type_expr -> type_expr -> unit
 type unwrapped_type_expr =
   { ty : type_expr
   ; modality : Mode.Modality.Const.t
-  ; or_null : (type_declaration * unwrapped_type_expr) option;
-    (* We store the declaration rather than a bool to avoid re-writing the
-       with-bounds of [or_null], and to be more robust for the future where we
-       have user-defined [or_null]-like types
+  ; or_null : unwrapped_or_null option;
+    (* We store the declaration and arguments rather than a bool to avoid
+       re-writing the with-bounds of [or_null], and to be more robust for the
+       future where we have user-defined [or_null]-like types
 
        Note [unwrapped_type_expr backtracking for or_null]:
 
@@ -668,6 +741,8 @@ type unwrapped_type_expr =
        [estimate_type_jkind] to fix another bug.
     *)
   }
+
+and unwrapped_or_null
 
 val get_unboxed_type_representation :
   Env.t ->
@@ -736,9 +811,9 @@ val type_jkind_and_sort :
    but correct: they are used to implement the module inclusion check, where
    we can be sure that the l-jkind has no undetermined variables. *)
 val check_decl_jkind :
-  Env.t -> type_declaration -> jkind_l -> (unit, Jkind.Violation.t) result
+  Env.t -> type_declaration -> jkind_l -> (unit, Ikind.subjkind_error) result
 val constrain_decl_jkind :
-  Env.t -> type_declaration -> jkind_l -> (unit, Jkind.Violation.t) result
+  Env.t -> type_declaration -> jkind_l -> (unit, Ikind.subjkind_error) result
 
 (* Compare two types for equality, with no renaming. This is useful for
    the [type_equal] function that must be passed to certain jkind functions. *)
@@ -760,8 +835,8 @@ val check_type_externality :
 val is_always_gc_ignorable : Env.t -> type_expr -> bool
 
 (* Check whether a type's nullability is less than some target.
-   Uses get_nullability which is potentially cheaper than calling type_jkind
-   if all with-bounds are irrelevant. *)
+   Potentially cheaper than just calling [type_jkind], because this can stop
+   expansion once it succeeds. *)
 val check_type_nullability :
   Env.t -> type_expr -> Jkind_axis.Nullability.t -> bool
 

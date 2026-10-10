@@ -1,0 +1,104 @@
+{
+  "_about": "Demo tour. Sources: the online-union-find catalogue page, pure Vox_partition_classes definitions and separate derived laws, Vox_connectivity contracts, the private forest projection, and the existing cost implementation. Partition and imperative-contract descriptions updated against working-tree sources on 4 October 2026.",
+  "_checks": "Client arithmetic: create 1 + 5 allocations x 3 + 4 unions x (2 + 2 + 7 + 1) + 3 finds x 2 = 70; Q.budget 8 5 3 4 = 1 + 55 + 44*3 + 132*4 = 716. Only vox_union_find_worker.ml calls C.tick; link charges 7 through charge, allocate ticks 3 times, find ticks 2 per node visited and 2 around each rewrite. Tests connectivity.ml, union_find*.ml and ackermann.ml are { bytecode; } only; no emitted-code check names these units.",
+  "id": "online-union-find",
+  "title": "Online union–find with time credits",
+  "kind": "demo",
+  "demo": "online-union-find",
+  "order": 3,
+  "summary": [
+    "`Vox_partition_classes` gives the pure partition specification. `Vox_connectivity.Make` implements its empty partition, singleton insertion and class merge with union by rank and full path compression; `find` preserves partition observations. Each operation also takes an exact ghost fee. The separate `Cost` observations let clients derive exact charged work and inverse-Ackermann payment bounds. The tour starts with the pure definitions and their imperative contracts, then follows a client and the private forest and accounting proofs.",
+    "The [catalogue page](demo:online-union-find) states the claim, the trusted base and the scope."
+  ],
+  "stops": [
+    {
+      "title": "The pure snapshot specification",
+      "path": "verification/library/vox_partition_classes.ml",
+      "from": "type ('a : logical_data) classes",
+      "to": "merged before after x y r (members after))",
+      "text": "A snapshot is a concrete list of (representative, others) pairs with distinct members, so classes are disjoint and every representative belongs to its class. empty, same, added and joined define the allowed changes. joined merges exactly two classes and preserves every other representative; the new representative may be any member of the merged class. If the arguments are already connected, membership and representatives are preserved. Class order and the order of other members are unconstrained; derived lemmas live in a separate proof module."
+    },
+    {
+      "title": "Imperative operations establish pure relations",
+      "path": "verification/library/vox_connectivity.mli",
+      "from": "val create : (fee",
+      "to": [
+        "val union",
+        "@ unique"
+      ],
+      "text": "model state returns a pure snapshot. create establishes empty; make_set establishes added; find returns the current representative and establishes same; union establishes joined. Each operation consumes the unique state and an exact ghost fee: 1, 11, Cost.find_fee state or Cost.union_fee state. Saved snapshots grant no mutation permission. Cost postconditions separately describe the events and forest snapshot, so compression can change a cost snapshot while preserving every pure observation."
+    },
+    {
+      "title": "Cost observations and inverse-Ackermann fees",
+      "path": "verification/library/vox_connectivity.mli",
+      "from": "module Cost : sig",
+      "to": [
+        "val fee_bounds :",
+        "@ ghost"
+      ],
+      "text": "Cost separates accounting from the pure partition: abstract forest snapshots support depth and compressed, and root_depth connects zero depth to being a class representative. ticks equals the weight of events: Initialize 1, Allocate 3, Find d 4d + 2, Link 7, Union 1. account_bounds proves ticks <= account. fee_bounds proves find_fee <= 4a + 12 and union_fee <= 12a + 36 for a population bound P when iter P a 1 1 >= P and below P a. These equations specify the clamped Ackermann hierarchy and its inverse in Vox_ackermann."
+    },
+    {
+      "title": "A client pays each fee from its wallet",
+      "path": "testsuite/tests/vox/connectivity.ml",
+      "from": "let find : (x : U.elem) @ immutable ->",
+      "to": "let r = #{value; owned} in r",
+      "text": "The public client keeps a ghost `wallet` next to the state in the unboxed record `funded`, and every wrapper conserves its `budget`, the account plus the wallet. `find` requires at most 8 elements and 44 credits in the wallet: the client's `fee_bounds` obtains 44 from `Cost.fee_bounds`'s 4a + 12 with a ≤ 8, the bound that `Vox_ackermann.inverse` gives for a population of 8. The wrapper splits exactly `Cost.find_fee` credits off the wallet with `C.split`, pays them to `U.find`, and packs the new state with the rest of the wallet. Its last conjunct, a cost of 2 + 4·depth ticks, follows from the `Find` event `U.find` appends, `Cost.event_cost` before and after the call, and the definitions of `total` and `weight`."
+    },
+    {
+      "title": "The exact cost of a run",
+      "path": "testsuite/tests/vox/connectivity.ml",
+      "from": "let work = ghost_ (Bigint.add",
+      "to": "Cost.ticks owned.#state <= initial} = () in",
+      "text": "`run` makes five elements, performs four unions and three finds, and before each call names, through `Cost.depth`, the parent links it will follow: `work6` to `work9` for the two finds inside each union, `work10` and `work11` for the first two finds. The third find is of `root0`, the root the first find returned; `Vox_partition_classes_proof.representative_law` shows it is a member and `Cost.root_depth` gives depth 0, so that find costs exactly 2 ticks. From the recorded events the client proves that the run costs 70 ticks plus four per link followed, and that the ticks are covered by the 1,000 credits it minted. A final ghost block records the account after each step as a trace for `Vox_union_find_online_cost.sequence`, which bounds 70 + 4·`work` by the budget paid, 1 + 11·5 + 44·3 + 132·4 = 716."
+    },
+    {
+      "title": "A rejected client: paying 10 for an insertion",
+      "path": "testsuite/tests/vox/connectivity_rejected.ml",
+      "from": "module Underpay_insertion = struct",
+      "to": "The refinement is stated here.",
+      "text": "Paying 10 credits for `make_set` is a type error: the fee must equal 11. Overpaying by one fails too; callers keep surplus in their own wallets. The test also rejects reuse of a consumed state, access to private implementation fields, unproved membership, insertion at the machine limit, an unproved claim that a model is empty, a claimed find event without performing a find, an unjustified cost of 2 ticks for every find, and splitting 11 credits from a wallet of 10."
+    },
+    {
+      "title": "The private proof projects paths to the pure partition",
+      "path": "verification/library/vox_union_find_partition_proof.ml",
+      "from": "let rec (refresh @ total)",
+      "to": [
+        "let (union @ total)",
+        "Q.merge_classes_def"
+      ],
+      "text": "project maps each private path to its head and root, preserving membership, representatives and size. refresh proves exact binding equality after compression using the preserved head and root of each path. join proves that linking projects to redirect; union composes two finds and a link to obtain merge_classes. The grouping proof converts these bindings to the public class-list snapshot, and the equivalence proof transports the transitions to its relations. Heap ownership, path validity and the compression proof stay private."
+    },
+    {
+      "title": "The online layer: a ghost capacity that doubles",
+      "path": "verification/library/vox_union_find_online.ml",
+      "from": "type t = #{core : U.t; savings",
+      "to": "(Bigint.mul 4Z (Bigint.sub s.#epoch 1Z)))",
+      "text": "The public state wraps a unique valid online state and exposes its forest projection through model; Cost separately wraps the accounting observations. The online layer adds two ghost fields: saved credits and an epoch whose minimum with max_int is the analysis capacity. valid keeps epoch at 1 while empty and below twice the size afterwards, and retains at least 8n − 4(E − 1) credits in savings. make_set deposits 8 of its 11 credits and, when full, doubles epoch and pays 4E saved credits to reparameterize the potential. This accounts for public fees 4a + 12 and 12a + 36 rather than the core’s 4α + 8 and 12α + 24."
+    },
+    {
+      "title": "The key invariant: the bank holds exactly 4Φ",
+      "path": "verification/library/vox_union_find.ml",
+      "from": "type t = #{",
+      "to": "W.balance s.#raw = Bigint.mul 4Z",
+      "text": "The core state holds the worker's `void` resource `raw`, which pairs a `Ghost_pref` token for the nodes with a credit `bank`, and ghost fields: one path per element from it to its root (`paths`), the capacity N, `alpha`, the tick counter `spent` and the event list. `valid` makes `spent` the total weight of `events`, bounds the population by `capacity`, requires ranks to increase along every path (`R.all_ordered`), and ties `alpha` to the capacity through `iter` and `below`. Its last conjunct carries the amortization: the bank's balance is exactly four times the potential defined in [`vox_union_find_bank.ml`](src:verification/library/vox_union_find_bank.ml), where a root of rank r is worth α·r and a non-root is worth `node_phi` of its rank and its parent's, the level-and-index potential of the CLRS analysis. `account` is `spent` plus the bank, so `ticks <= account` needs only a nonnegative bank."
+    },
+    {
+      "title": "The core proof: a find pays through the bank",
+      "path": "verification/library/vox_union_find.ml",
+      "from": [
+        "let find : (x : M.elem) @ immutable ->",
+        "let raw = state.#raw in"
+      ],
+      "to": "let result = #{value; state; refund = divided.C.right} in",
+      "text": "Before this code, `prepare_find` proves two facts about the path from `x` to its root: its cost 4d + 2 is at most four times the potential `release`d by compressing it plus `find_fee alpha` (`A.find_bound`), and compression lowers the potential by exactly that `release` (`B.compression_potential`). The operation merges the caller's fee into the bank, lets the worker `find` burn 4d + 2 credits while it follows and rewrites the path, and splits off exactly four times the new potential as the new bank. The rest goes back as `refund`, `spent` grows by the cost, and `Find depth` is recorded. The contract states `account r + refund = account + fee`, so a find that costs more than its fee is paid for by potential stored earlier."
+    },
+    {
+      "title": "Trusted: the charges placed by hand",
+      "path": "verification/library/vox_union_find_worker.ml",
+      "from": "let rec find : (depth : Bigint.t) @ ghost ->",
+      "to": "let bank = C.tick fourth in",
+      "text": "This is the run-time loop, and its calls to `C.tick` define what a tick is: two when it visits a node and two more around each pointer rewrite, so a find that follows d links costs 4d + 2. The contract fixes the charge exactly (`balance r.#state = balance state − cost depth`), so a copy that skips a tick fails to verify; which steps are charged, and how much, is a modeling choice that no check relates to the compiled code. `allocate` charges 3, and `link` charges 7 through `charge`, a `C.split` whose split-off part is dropped. The other trusted pieces are `Ghost_pref.alloc`, an external although `ghost_pref.mli` declares it with `val`, and `Pref.equal`, physical equality assumed to agree with `===`, which `link` uses to detect that both roots are one node. The union-find tests run in bytecode only, and none inspects the emitted code."
+    }
+  ]
+}

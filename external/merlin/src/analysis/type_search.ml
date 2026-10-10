@@ -52,10 +52,10 @@ let sherlodoc_type_of _env typ =
 let make_constructible path desc =
   let holes =
     match Types.get_desc desc with
-    | Types.Tarrow ((l, _, _), _, b, _) ->
+    | Types.Tarrow ((l, _, _, _), _, b, _) ->
       let rec aux acc t =
         match Types.get_desc t with
-        | Types.Tarrow ((l, _, _), _, b, _) -> aux (acc ^ with_label l) b
+        | Types.Tarrow ((l, _, _, _), _, b, _) -> aux (acc ^ with_label l) b
         | _ -> acc
       and with_label l =
         match l with
@@ -72,8 +72,9 @@ let doc_to_option = function
   | `Builtin doc | `Found doc -> Some doc
   | _ -> None
 
-let get_doc ~config ~env ~local_defs ~comments ~pos name =
-  Locate.get_doc ~config ~env ~local_defs ~comments ~pos (`User_input name)
+let get_doc ~buffer_source ~config ~env ~local_defs ~comments ~pos name =
+  Locate.get_doc ~buffer_source ~config ~env ~local_defs ~comments ~pos
+    (`User_input name)
   |> doc_to_option
 
 let compare_result Query_protocol.{ cost = cost_a; name = a; doc = doc_a; _ }

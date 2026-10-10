@@ -93,11 +93,16 @@ let handle_extension ext =
   | _ ->
     ()
 
+(* Forward declaration: refinement predicates [T{P}] are expressions, and
+   [add_type] is defined before [add_expr]. *)
+let add_expr_fwd : (bound_map -> Parsetree.expression -> unit) ref =
+  ref (fun _ _ -> assert false)
+
 let rec add_type bv ty =
   match ty.ptyp_desc with
     Ptyp_any jkind
   | Ptyp_var (_, jkind) -> Option.iter (add_jkind bv) jkind
-  | Ptyp_arrow(_, t1, t2, _, _) -> add_type bv t1; add_type bv t2
+  | Ptyp_arrow(_, t1, t2, _, _, _) -> add_type bv t1; add_type bv t2
   | Ptyp_tuple tl -> List.iter (fun (_, t) -> add_type bv t) tl
   | Ptyp_unboxed_tuple tl -> List.iter (fun (_, t) -> add_type bv t) tl
   | Ptyp_constr(c, tl) -> add bv c; List.iter (add_type bv) tl
@@ -128,6 +133,7 @@ let rec add_type bv ty =
   | Ptyp_of_kind jkind -> add_jkind bv jkind
   | Ptyp_repr(_, t) -> add_type bv t
   | Ptyp_newlayout(_, t) -> add_type bv t
+  | Ptyp_refine(_, t, p) -> add_type bv t; !add_expr_fwd bv p
   | Ptyp_extension e -> handle_extension e
 
 and add_package_type bv ptyp =
@@ -330,6 +336,7 @@ let rec add_expr bv exp =
       end
   | Pexp_extension e -> handle_extension e
   | Pexp_stack e -> add_expr bv e
+  | Pexp_ghost e -> add_expr bv e
   | Pexp_overwrite (e1, e2) -> add_expr bv e1; add_expr bv e2
   | Pexp_quote e -> add_expr bv e
   | Pexp_splice e -> add_expr bv e
@@ -337,6 +344,8 @@ let rec add_expr bv exp =
   | Pexp_unreachable -> ()
   | Pexp_comprehension x -> add_comprehension_expr bv x
   | Pexp_borrow e -> add_expr bv e
+  | Pexp_refine e | Pexp_assume e -> add_expr bv e
+  | Pexp_let_refine (_, bound, body) -> add_expr bv bound; add_expr bv body
 
 and add_comprehension_expr bv = function
   | Pcomp_list_comprehension comp -> add_comprehension bv comp
@@ -765,3 +774,5 @@ and add_class_field bv pcf =
 
 and add_class_declaration bv decl =
   add_class_expr bv decl.pci_expr
+
+let () = add_expr_fwd := add_expr

@@ -43,38 +43,39 @@ open! Stdlib
  *)
 
 type ('a : value_or_null) t = 'a list = [] | (::) of 'a * 'a list (**)
+[@@inductive]
 (** An alias for the type of lists. *)
 
-val length : ('a : value_or_null). 'a list -> int
+val length : ('a : value_or_null). 'a list -> int @@ total
 (** Return the length (number of elements) of the given list. *)
 
 val compare_lengths : ('a : value_or_null) ('b : value_or_null)
-  . 'a list -> 'b list -> int
+  . 'a list -> 'b list -> int @@ total
 (** Compare the lengths of two lists. [compare_lengths l1 l2] is
    equivalent to [compare (length l1) (length l2)], except that
    the computation stops after reaching the end of the shortest list.
    @since 4.05
  *)
 
-val compare_length_with : ('a : value_or_null). 'a list -> int -> int
+val compare_length_with : ('a : value_or_null). 'a list -> int -> int @@ total
 (** Compare the length of a list to an integer. [compare_length_with l len] is
    equivalent to [compare (length l) len], except that the computation stops
    after at most [len] iterations on the list.
    @since 4.05
  *)
 
-val is_empty : ('a : value_or_null). 'a list -> bool
+val is_empty : ('a : value_or_null). 'a list -> bool @@ total
 (** [is_empty l] is true if and only if [l] has no elements. It is equivalent to
     [compare_length_with l 0 = 0].
     @since 5.1
  *)
 
-val cons : ('a : value_or_null). 'a -> 'a list -> 'a list
+val cons : ('a : value_or_null). 'a -> 'a list -> 'a list @@ total
 (** [cons x xs] is [x :: xs]
     @since 4.03 (4.05 in ListLabels)
  *)
 
-val singleton : ('a : value_or_null). 'a -> 'a list
+val singleton : ('a : value_or_null). 'a -> 'a list @@ total
 (** [singleton x] returns the one-element list [[x]].
 
     @since 5.4 *)
@@ -104,7 +105,7 @@ val nth_opt : ('a : value_or_null). 'a list -> int -> 'a option
     @since 4.05
  *)
 
-val rev : ('a : value_or_null). 'a list -> 'a list
+val rev : ('a : value_or_null). 'a list -> 'a list @@ total
 (** List reversal. *)
 
 val init : ('a : value_or_null). int -> (int -> 'a) -> 'a list
@@ -113,25 +114,25 @@ val init : ('a : value_or_null). int -> (int -> 'a) -> 'a list
     @since 4.06
  *)
 
-val append : ('a : value_or_null). 'a list -> 'a list -> 'a list
+val append : ('a : value_or_null). 'a list -> 'a list -> 'a list @@ total
 (** [append l0 l1] appends [l1] to [l0].
      Same function as the infix operator [@].
      @since 5.1 this function is tail-recursive.
  *)
 
-val rev_append : ('a : value_or_null). 'a list -> 'a list -> 'a list
+val rev_append : ('a : value_or_null). 'a list -> 'a list -> 'a list @@ total
 (** [rev_append l1 l2] reverses [l1] and concatenates it with [l2].
    This is equivalent to [(]{!rev}[ l1) @ l2].
  *)
 
-val concat : ('a : value_or_null). 'a list list -> 'a list
+val concat : ('a : value_or_null). 'a list list -> 'a list @@ total
 (** Concatenate a list of lists. The elements of the argument are all
    concatenated together (in the same order) to give the result.
    Not tail-recursive
    (length of the argument + length of the longest sub-list).
  *)
 
-val flatten : ('a : value_or_null). 'a list list -> 'a list
+val flatten : ('a : value_or_null). 'a list list -> 'a list @@ total
 (** Same as {!concat}. Not tail-recursive
    (length of the argument + length of the longest sub-list).
  *)
@@ -140,7 +141,7 @@ val flatten : ('a : value_or_null). 'a list list -> 'a list
 (** {1 Comparison} *)
 
 val equal : ('a : value_or_null).
-  ('a -> 'a -> bool) -> 'a list -> 'a list -> bool
+  ('a -> 'a -> bool) -> 'a list -> 'a list -> bool @@ total
 (** [equal eq [a1; ...; an] [b1; ..; bm]] holds when
     the two input lists have the same length, and for each
     pair of elements [ai], [bi] at the same position we have
@@ -155,7 +156,7 @@ val equal : ('a : value_or_null).
 *)
 
 val compare : ('a : value_or_null).
-  ('a -> 'a -> int) -> 'a list -> 'a list -> int
+  ('a -> 'a -> int) -> 'a list -> 'a list -> int @@ total
 (** [compare cmp [a1; ...; an] [b1; ...; bm]] performs
     a lexicographic comparison of the two input lists,
     using the same ['a -> 'a -> int] interface as {!Stdlib.compare}:
@@ -174,13 +175,14 @@ val compare : ('a : value_or_null).
 (** {1 Iterators} *)
 
 
-val iter : ('a : value_or_null). ('a -> unit) -> 'a list -> unit
+val iter : ('a : value_or_null). ('a -> unit) -> 'a list -> unit @@ total
 (** [iter f [a1; ...; an]] applies function [f] in turn to
    [[a1; ...; an]]. It is equivalent to
    [f a1; f a2; ...; f an].
  *)
 
-val iteri : ('a : value_or_null). (int -> 'a -> unit) -> 'a list -> unit
+val iteri :
+  ('a : value_or_null). (int -> 'a -> unit) -> 'a list -> unit @@ total
 (** Same as {!iter}, but the function is applied to the index of
    the element as first argument (counting from 0), and the element
    itself as second argument.
@@ -188,14 +190,14 @@ val iteri : ('a : value_or_null). (int -> 'a -> unit) -> 'a list -> unit
  *)
 
 val map : ('a : value_or_null) ('b : value_or_null)
-  . ('a -> 'b) -> 'a list -> 'b list
+  . ('a -> 'b) -> 'a list -> 'b list @@ total
 (** [map f [a1; ...; an]] applies function [f] to [a1, ..., an],
    and builds the list [[f a1; ...; f an]]
    with the results returned by [f].
  *)
 
 val mapi : ('a : value_or_null) ('b : value_or_null)
-  . (int -> 'a -> 'b) -> 'a list -> 'b list
+  . (int -> 'a -> 'b) -> 'a list -> 'b list @@ total
 (** Same as {!map}, but the function is applied to the index of
    the element as first argument (counting from 0), and the element
    itself as second argument.
@@ -203,13 +205,13 @@ val mapi : ('a : value_or_null) ('b : value_or_null)
  *)
 
 val rev_map : ('a : value_or_null) ('b : value_or_null)
-  . ('a -> 'b) -> 'a list -> 'b list
+  . ('a -> 'b) -> 'a list -> 'b list @@ total
 (** [rev_map f l] gives the same result as
    {!rev}[ (]{!map}[ f l)], but is more efficient.
  *)
 
 val filter_map : ('a : value_or_null) ('b : value_or_null)
-  . ('a -> 'b option) -> 'a list -> 'b list
+  . ('a -> 'b option) -> 'a list -> 'b list @@ total
 (** [filter_map f l] applies [f] to every element of [l], filters
     out the [None] elements and returns the list of the arguments of
     the [Some] elements.
@@ -217,7 +219,7 @@ val filter_map : ('a : value_or_null) ('b : value_or_null)
  *)
 
 val concat_map : ('a : value_or_null) ('b : value_or_null)
-  . ('a -> 'b list) -> 'a list -> 'b list
+  . ('a -> 'b list) -> 'a list -> 'b list @@ total
 (** [concat_map f l] gives the same result as
     {!concat}[ (]{!map}[ f l)]. Tail-recursive.
     @since 4.10
@@ -225,20 +227,20 @@ val concat_map : ('a : value_or_null) ('b : value_or_null)
 
 val fold_left_map :
    ('a : value_or_null) ('acc : value_or_null) ('b : value_or_null).
-   ('acc -> 'a -> 'acc * 'b) -> 'acc -> 'a list -> 'acc * 'b list
+   ('acc -> 'a -> 'acc * 'b) -> 'acc -> 'a list -> 'acc * 'b list @@ total
 (** [fold_left_map] is  a combination of [fold_left] and [map] that threads an
     accumulator through calls to [f].
     @since 4.11
 *)
 
 val fold_left : ('a : value_or_null) ('acc : value_or_null).
-   ('acc -> 'a -> 'acc) -> 'acc -> 'a list -> 'acc
+   ('acc -> 'a -> 'acc) -> 'acc -> 'a list -> 'acc @@ total
 (** [fold_left f init [b1; ...; bn]] is
    [f (... (f (f init b1) b2) ...) bn].
  *)
 
 val fold_right : ('a : value_or_null) ('acc : value_or_null).
-   ('a -> 'acc -> 'acc) -> 'a list -> 'acc -> 'acc
+   ('a -> 'acc -> 'acc) -> 'a list -> 'acc -> 'acc @@ total
 (** [fold_right f [a1; ...; an] init] is
    [f a1 (f a2 (... (f an init) ...))]. Not tail-recursive.
  *)
@@ -291,14 +293,14 @@ val fold_right2 :
 (** {1 List scanning} *)
 
 
-val for_all : ('a : value_or_null). ('a -> bool) -> 'a list -> bool
+val for_all : ('a : value_or_null). ('a -> bool) -> 'a list -> bool @@ total
 (** [for_all f [a1; ...; an]] checks if all elements of the list
    satisfy the predicate [f]. That is, it returns
    [(f a1) && (f a2) && ... && (f an)] for a non-empty list and
    [true] if the list is empty.
  *)
 
-val exists : ('a : value_or_null). ('a -> bool) -> 'a list -> bool
+val exists : ('a : value_or_null). ('a -> bool) -> 'a list -> bool @@ total
 (** [exists f [a1; ...; an]] checks if at least one element of
    the list satisfies the predicate [f]. That is, it returns
    [(f a1) || (f a2) || ... || (f an)] for a non-empty list and
@@ -340,7 +342,8 @@ val find : ('a : value_or_null). ('a -> bool) -> 'a list -> 'a
    list [l].
  *)
 
-val find_opt : ('a : value_or_null). ('a -> bool) -> 'a list -> 'a option
+val find_opt :
+  ('a : value_or_null). ('a -> bool) -> 'a list -> 'a option @@ total
 (** [find f l] returns the first element of the list [l]
    that satisfies the predicate [f].
    Returns [None] if there is no value that satisfies [f] in the
@@ -348,7 +351,8 @@ val find_opt : ('a : value_or_null). ('a -> bool) -> 'a list -> 'a option
    @since 4.05
  *)
 
-val find_index : ('a : value_or_null). ('a -> bool) -> 'a list -> int option
+val find_index :
+  ('a : value_or_null). ('a -> bool) -> 'a list -> int option @@ total
 (** [find_index f xs] returns [Some i], where [i] is the index of the first
    element of the list [xs] that satisfies [f x], if there is such an element.
 
@@ -357,7 +361,7 @@ val find_index : ('a : value_or_null). ('a -> bool) -> 'a list -> int option
    @since 5.1 *)
 
 val find_map : ('a : value_or_null) ('b : value_or_null)
-  . ('a -> 'b option) -> 'a list -> 'b option
+  . ('a -> 'b option) -> 'a list -> 'b option @@ total
 (** [find_map f l] applies [f] to the elements of [l] in order,
     and returns the first result of the form [Some v], or [None]
     if none exist.
@@ -365,24 +369,25 @@ val find_map : ('a : value_or_null) ('b : value_or_null)
 *)
 
 val find_mapi : ('a : value_or_null) ('b : value_or_null)
-  . (int -> 'a -> 'b option) -> 'a list -> 'b option
+  . (int -> 'a -> 'b option) -> 'a list -> 'b option @@ total
 (** Same as [find_map], but the predicate is applied to the index of
    the element as first argument (counting from 0), and the element
    itself as second argument.
 
    @since 5.1 *)
 
-val filter : ('a : value_or_null). ('a -> bool) -> 'a list -> 'a list
+val filter : ('a : value_or_null). ('a -> bool) -> 'a list -> 'a list @@ total
 (** [filter f l] returns all the elements of the list [l]
    that satisfy the predicate [f]. The order of the elements
    in the input list is preserved.
  *)
 
-val find_all : ('a : value_or_null). ('a -> bool) -> 'a list -> 'a list
+val find_all : ('a : value_or_null). ('a -> bool) -> 'a list -> 'a list @@ total
 (** [find_all] is another name for {!filter}.
  *)
 
-val filteri : ('a : value_or_null). (int -> 'a -> bool) -> 'a list -> 'a list
+val filteri :
+  ('a : value_or_null). (int -> 'a -> bool) -> 'a list -> 'a list @@ total
 (** Same as {!filter}, but the predicate is applied to the index of
    the element as first argument (counting from 0), and the element
    itself as second argument.
@@ -393,7 +398,7 @@ val filteri : ('a : value_or_null). (int -> 'a -> bool) -> 'a list -> 'a list
 (** {1 List manipulation} *)
 
 
-val take : ('a : value_or_null). int -> 'a list -> 'a list
+val take : ('a : value_or_null). int -> 'a list -> 'a list @@ total
 (** [take n l] returns the prefix of [l] of length [n],
     or a copy of [l] if [n > length l]. This is the empty
     list if [n] is negative.
@@ -404,7 +409,7 @@ val take : ('a : value_or_null). int -> 'a list -> 'a list
     @since 5.3
 *)
 
-val drop : ('a : value_or_null). int -> 'a list -> 'a list
+val drop : ('a : value_or_null). int -> 'a list -> 'a list @@ total
 (** [drop n l] returns the suffix of [l] after [n] elements,
     or [[]] if [n > length l]. This is [l] if [n] is negative.
 
@@ -414,14 +419,16 @@ val drop : ('a : value_or_null). int -> 'a list -> 'a list
     @since 5.3
 *)
 
-val take_while : ('a : value_or_null). ('a -> bool) -> 'a list -> 'a list
+val take_while :
+  ('a : value_or_null). ('a -> bool) -> 'a list -> 'a list @@ total
 (** [take_while p l] is the longest (possibly empty) prefix of [l]
     containing only elements that satisfy [p].
 
     @since 5.3
 *)
 
-val drop_while : ('a : value_or_null). ('a -> bool) -> 'a list -> 'a list
+val drop_while :
+  ('a : value_or_null). ('a -> bool) -> 'a list -> 'a list @@ total
 (** [drop_while p l] is the longest (possibly empty) suffix of [l]
     starting at the first element that does not satisfy [p].
 
@@ -429,7 +436,7 @@ val drop_while : ('a : value_or_null). ('a -> bool) -> 'a list -> 'a list
 *)
 
 val partition : ('a : value_or_null).
-  ('a -> bool) -> 'a list -> 'a list * 'a list
+  ('a -> bool) -> 'a list -> 'a list * 'a list @@ total
 (** [partition f l] returns a pair of lists [(l1, l2)], where
    [l1] is the list of all the elements of [l] that
    satisfy the predicate [f], and [l2] is the list of all the
@@ -439,7 +446,7 @@ val partition : ('a : value_or_null).
 
 val partition_map :
   ('a : value_or_null) ('b : value_or_null) ('c : value_or_null)
-  . ('a -> ('b, 'c) Either.t) -> 'a list -> 'b list * 'c list
+  . ('a -> ('b, 'c) Either.t) -> 'a list -> 'b list * 'c list @@ total
 (** [partition_map f l] returns a pair of lists [(l1, l2)] such that,
     for each element [x] of the input list [l]:
     - if [f x] is [Left y1], then [y1] is in [l1], and
@@ -521,7 +528,7 @@ val remove_assq : ('a : value_or_null) ('b : value_or_null).
 
 
 val split : ('a : value_or_null) ('b : value_or_null).
-  ('a * 'b) list -> 'a list * 'b list
+  ('a * 'b) list -> 'a list * 'b list @@ total
 (** Transform a list of pairs into a pair of lists:
    [split [(a1,b1); ...; (an,bn)]] is [([a1; ...; an], [b1; ...; bn])].
    Not tail-recursive.
@@ -540,7 +547,8 @@ val combine : ('a : value_or_null) ('b : value_or_null).
 (** {1 Sorting} *)
 
 
-val sort : ('a : value_or_null). ('a -> 'a -> int) -> 'a list -> 'a list
+val sort :
+  ('a : value_or_null). ('a -> 'a -> int) -> 'a list -> 'a list @@ total
 (** Sort a list in increasing order according to a comparison
    function. The comparison function must return 0 if its arguments
    compare as equal, a positive integer if the first is greater,
@@ -556,7 +564,8 @@ val sort : ('a : value_or_null). ('a -> 'a -> int) -> 'a list -> 'a list
    heap space and logarithmic stack space.
  *)
 
-val stable_sort : ('a : value_or_null). ('a -> 'a -> int) -> 'a list -> 'a list
+val stable_sort :
+  ('a : value_or_null). ('a -> 'a -> int) -> 'a list -> 'a list @@ total
 (** Same as {!sort}, but the sorting algorithm is guaranteed to
    be stable (i.e. elements that compare equal are kept in their
    original order).
@@ -565,12 +574,14 @@ val stable_sort : ('a : value_or_null). ('a -> 'a -> int) -> 'a list -> 'a list
    heap space and logarithmic stack space.
  *)
 
-val fast_sort : ('a : value_or_null). ('a -> 'a -> int) -> 'a list -> 'a list
+val fast_sort :
+  ('a : value_or_null). ('a -> 'a -> int) -> 'a list -> 'a list @@ total
 (** Same as {!sort} or {!stable_sort}, whichever is
     faster on typical input.
  *)
 
-val sort_uniq : ('a : value_or_null). ('a -> 'a -> int) -> 'a list -> 'a list
+val sort_uniq :
+  ('a : value_or_null). ('a -> 'a -> int) -> 'a list -> 'a list @@ total
 (** Same as {!sort}, but also remove duplicates: if multiple elements
     compare equal, keep only the first.
 
@@ -580,7 +591,7 @@ val sort_uniq : ('a : value_or_null). ('a -> 'a -> int) -> 'a list -> 'a list
  *)
 
 val merge : ('a : value_or_null).
-  ('a -> 'a -> int) -> 'a list -> 'a list -> 'a list
+  ('a -> 'a -> int) -> 'a list -> 'a list -> 'a list @@ total
 (** Merge two lists:
     Assuming that [l1] and [l2] are sorted according to the
     comparison function [cmp], [merge cmp l1 l2] will return a
@@ -592,7 +603,7 @@ val merge : ('a : value_or_null).
 
 (** {1 Lists and Sequences} *)
 
-val to_seq : ('a : value_or_null) . 'a list -> 'a Seq.t
+val to_seq : ('a : value_or_null) . 'a list -> 'a Seq.t @@ total
 (** Iterate on the list.
     @since 4.07
  *)
@@ -601,3 +612,15 @@ val of_seq : ('a : value_or_null) . 'a Seq.t -> 'a list
 (** Create a list from a sequence.
     @since 4.07
  *)
+
+module Refined : sig
+  (** Operations whose non-empty domain is expressed in their types. *)
+
+  val hd :
+    ('a : value_or_null).
+    { l : 'a list | (l === []) === false } -> 'a @ total @@ total
+
+  val tl :
+    ('a : value_or_null).
+    { l : 'a list | (l === []) === false } -> 'a list @ total @@ total
+end

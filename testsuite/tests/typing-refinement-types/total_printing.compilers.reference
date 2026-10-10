@@ -1,0 +1,5 @@
+val double : int -> int @@ total
+val ghost_id : int -> int @ ghost @@ total
+val partial_ref : 'a -> 'a ref
+val length : int list -> int @@ total
+module Nested : sig val triple : int -> int @@ total end

@@ -173,11 +173,12 @@ let () =
 let () = check_empty "toplevel binding"
 
 
-let rec foo = 1 :: bar
+type 'a recursive_list = Nil | Cons of 'a * 'a recursive_list
+let rec foo = Cons (1, bar)
 and bar =
   let local_ z = ref 1000 in
   let _ = opaque_identity z in
-  1 :: foo
+  Cons (1, foo)
 let () = check_empty "toplevel rec binding"
 
 

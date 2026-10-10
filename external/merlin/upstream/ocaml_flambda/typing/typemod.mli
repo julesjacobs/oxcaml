@@ -78,11 +78,31 @@ val package_units:
   Env.t -> string list -> Unit_info.Artifact.t -> Compilation_unit.t
   -> Typedtree.module_coercion
 
+(** Type-check a [-functorize] bundle interface ([.cmi] target): build the
+    bundle's signature and save the cmi/cmti/cmsi artifacts.  [params] and
+    [module_sigs] come from the driver's analysis of the bundled units. *)
+val functorize_interface:
+  Env.t ->
+  params:(Global_module.Parameter_name.t * Ident.t) list ->
+  module_sigs:(Ident.t * Types.signature) list ->
+  Unit_info.t -> Compilation_unit.t -> unit
+
+(** Type-check a [-functorize] bundle implementation: build the bundle's
+    signature, check it against the [-cmi-file] interface if one is given, and
+    save the cmi/cmt/cms artifacts.  Returns the coercion into the declared
+    interface ([Tcoerce_none] if there is none). *)
+val functorize_implementation:
+  Env.t ->
+  params:(Global_module.Parameter_name.t * Ident.t) list ->
+  modules:Global_module.t list ->
+  module_sigs:(Ident.t * Types.signature) list ->
+  Unit_info.t -> Compilation_unit.t -> Typedtree.module_coercion
+
 (* Should be in Envaux, but it breaks the build of the debugger *)
 val initial_env:
   loc:Location.t ->
   initially_opened_module:string option ->
-  open_implicit_modules:string list -> Env.t
+  open_implicit_args:Clflags.open_arg list -> Env.t
 
 module Sig_component_kind : sig
   type t =
@@ -157,6 +177,9 @@ type error =
   | Cannot_scrape_alias of Path.t
   | Cannot_scrape_package_type of Path.t
   | Badly_formed_signature of string * Typedecl.error
+  | Inductive_type_in_recursive_module of string
+  | Exposed_total_value_in_recursive_module of string
+  | Dependent_item_in_recursive_module of string
   | Cannot_hide_id of hiding_error
   | Invalid_type_subst_rhs
   | Non_packable_local_modtype_subst of Path.t

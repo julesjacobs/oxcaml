@@ -1,0 +1,1 @@
+16-byte tagged cells preserve words, pointers, suffixes, and canonical tags

@@ -190,6 +190,8 @@ For example, immutable data crosses most modes: a `string @ immutable` can alway
 treated as a `string @ read_write` (because there are no mutable fields to read or write),
 and a `string @ stateful` can always be treated as a `string @ stateless` (because it
 contains no functions closing over mutable data).
+Data values, including mutable data, similarly cross from `partial` to `total`;
+reading or writing mutable data is independently partial.
 
 But beyond concrete types, we have a generic facility for capturing mode crossing, using
 `mod` syntax. This allows us to express behavior such as the following:

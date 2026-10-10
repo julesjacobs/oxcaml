@@ -1,0 +1,7 @@
+physical=3 slots=1
+input=0 equal=true result=0
+input=1 equal=true result=1
+input=2 equal=true result=1
+input=3 equal=true result=4
+input=4 equal=true result=8
+boundaries=passed

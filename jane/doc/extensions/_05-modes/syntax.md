@@ -10,7 +10,7 @@ A mode expression is a space-delimited list of modes.
 
 ```
 mode ::= locality | uniqueness | linearity | portability | contention
-       | yield | statefulness | visibility
+       | yield | totality | statefulness | visibility
 
 (* these are the modal axes: *)
 locality ::= `global` | `local`
@@ -20,6 +20,7 @@ portability ::= `portable` | `corruptible` | `shareable` | `nonportable`
 contention ::= `uncontended` | `shared` | `corrupted` | `contended`
 yield ::= `unyielding` | `yielding`
 fork ::= `forkable` | `unforkable`
+totality ::= `total` | `partial`
 statefulness ::= `stateless` | `writing` | `reading` | `stateful`
 visibility ::= `read_write` | `read` | `write` | `immutable`
 
@@ -69,7 +70,7 @@ axes that are omitted, the so-called *legacy* modes are used instead. The legacy
 modes are as follows:
 
 ```ocaml
-global aliased many nonportable uncontended forkable unyielding stateful read_write
+global aliased many nonportable uncontended forkable unyielding partial stateful read_write
 ```
 
 This means that `t1 -> t2` is actually equivalent to
@@ -183,7 +184,7 @@ as the mode of the record.) For future axes, this would be the top mode; for
 past axes, this would be the bottom mode. These are the identity modalities:
 
 ```ocaml
-local unique once nonportable uncontended unforkable yielding stateless immutable
+local unique once nonportable uncontended unforkable yielding stateful read_write
 ```
 
 Note that a legacy mode might or might not be the same as the identity modality.
@@ -329,6 +330,8 @@ and modalities, according to this table:
 | `local`      | `unforkable`  |
 | `global`     | `unyielding`  |
 | `local`      | `yielding`    |
+| `total`      | `stateless`   |
+| `total`      | `portable`    |
 | `stateless`  | `portable`    |
 | `reading`    | `shareable`   |
 | `writing`    | `corruptible` |

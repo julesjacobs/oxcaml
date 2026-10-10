@@ -1,5 +1,5 @@
 (* TEST
-   flags = "-extension-universe alpha -w -220";
+   flags = "-extension-universe alpha -w -181-220";
    include stdlib_upstream_compatible;
    include stdlib_stable;
    expect;
@@ -170,9 +170,10 @@ type t17b : value & value
 |}]
 
 type ('a : value mod external_ stateless many unyielding non_float) t18 =
-  ('a : value mod immutable global aliased)
+  ('a : value mod immutable global)
 [%%expect{|
-type ('a : value mod everything non_float) t18 = 'a
+type ('a : value non_float mod global many stateless immutable external_) t18 =
+    'a
 |}]
 
 type t = #(int * float#)
@@ -193,7 +194,7 @@ let x () = #( M.Null, M.This "hi" )
 [%%expect{|
 module M :
   sig type 'a t = 'a or_null = Null | This of 'a [@@or_null_reexport] end @@
-  stateless
+  total
 val x : unit -> #('a M.t * string M.t) = <fun>
 |}]
 
@@ -204,7 +205,7 @@ let y () = #( Or_null_names.Nope, Or_null_names.Yep "hi" )
 
 [%%expect{|
 module Or_null_names : sig type 'a t = Nope | Yep of 'a [@@or_null] end @@
-  stateless
+  total
 val y : unit -> #('a Or_null_names.t * string Or_null_names.t) = <fun>
 |}]
 
@@ -512,7 +513,7 @@ type ('a, 'b) labeled_fn =
     a:'a @ local unique portable contended ->
     ?b:'b @ local once portable contended ->
     'a @ local portable contended ->
-    (int -> 'b @ local unique once) @ portable
+    (int -> 'b @ local once unique) @ portable
 type typvar_fn = a:('a. 'a) @ local unique portable contended -> unit
 |}]
 
@@ -675,36 +676,36 @@ module type S = sig end
 module M = struct end
 [%%expect{|
 module type S = sig end
-module M : sig end @@ stateless
+module M : sig end @@ total
 |}]
 
 module F (X : S @ portable) = struct
 end
 [%%expect{|
-module F : functor (X : S @ portable) -> sig end @@ stateless
+module F : functor (X : S @ portable) -> sig end @@ total
 |}]
 
 module F (_ : S @ portable) = struct
 end
 [%%expect{|
-module F : S @ portable -> sig end @@ stateless
+module F : S @ portable -> sig end @@ total
 |}]
 
 module M' = (M : S @ portable)
 [%%expect{|
-module M' : S @@ stateless
+module M' : S @@ total
 |}]
 
 module F (M : S @ portable) : S @ portable = struct
 end
 [%%expect{|
-module F : functor (M : S @ portable) -> S @@ stateless
+module F : functor (M : S @ portable) -> S @@ total
 |}]
 
 module F (M : S @ portable) @ portable = struct
 end
 [%%expect{|
-module F : functor (M : S @ portable) -> sig end @@ stateless
+module F : functor (M : S @ portable) -> sig end @@ total
 |}]
 
 
@@ -713,22 +714,22 @@ module F : functor (M : S @ portable) -> sig end @@ stateless
   be an binary operator *)
 module M' = (M @ portable)
 [%%expect{|
-module M' = M @@ stateless
+module M' = M @@ total
 |}]
 
 module M' = (M : S @ portable)
 [%%expect{|
-module M' : S @@ stateless
+module M' : S @@ total
 |}]
 
 module M @ portable = struct end
 [%%expect{|
-module M : sig end @@ stateless
+module M : sig end @@ total
 |}]
 
 module M : S @ portable = struct end
 [%%expect{|
-module M : S @@ stateless
+module M : S @@ total
 |}]
 
 module type S' = functor () (M : S @ portable) (_ : S @ portable) -> S @ portable
@@ -754,25 +755,26 @@ module type S'' = S @ local -> S -> S
 
 module (F @ portable) () = struct end
 [%%expect{|
-module F : functor () -> sig end @@ stateless
+module F : functor () -> sig end @@ total
 |}]
 
 module (G @ portable) () = F
 
 [%%expect{|
-module G : functor () -> (functor () -> sig end) @ contended @@ portable
+module G : functor () -> (functor () -> sig end) @ contended @@ total
+  stateful
 |}]
 
 module (G @ portable) (F : (S @ unique -> S @ once) @ local) @ contended = struct end
 [%%expect{|
 module G :
   functor (F : (S @ unique -> S @ once) @ local) -> sig end @ contended @@
-  stateless
+  total
 |}]
 
 module (G' @ portable) = F
 [%%expect{|
-module G' = F @@ stateless
+module G' = F @@ total
 |}]
 
 module rec (F @ portable) () = struct end
@@ -891,7 +893,8 @@ let unary_minus_plus () =
 Line 4, characters 17-22:
 4 |   let b = stack_ (-42) in
                      ^^^^^
-Error: This expression is not an allocation site.
+Error: Stack allocating literals is not supported;
+       they are not allocated at runtime.
 |}]
 
 (**********)
@@ -917,9 +920,9 @@ module type S = sig
 end;;
 
 [%%expect{|
-module F_struct : sig end -> sig end @@ stateless
+module F_struct : sig end -> sig end @@ total
 module type F_sig = sig end -> sig end
-module T : sig end @@ stateless
+module T : sig end @@ total
 module type S = sig end
 |}]
 
@@ -958,17 +961,17 @@ exception Odd
 val x : x:int * y:int = (~x:1, ~y:2)
 val x : x:int * y:int = (~x:1, ~y:2)
 - : x:int * int * z:int * punned:int = (~x:5, 2, ~z:4, ~punned:5)
-val x : x:int * y:int @@ stateless = (~x:1, ~y:2)
-val x : x:int * y:int @@ stateless = (~x:1, ~y:2)
+val x : x:int * y:int @@ total = (~x:1, ~y:2)
+val x : x:int * y:int @@ total = (~x:1, ~y:2)
 |}]
 
 let (~x:x0, ~s, ~(y:int), ..) : (x:int * s:string * y:int * string) =
    (~x: 1, ~s: "a", ~y: 2, "ignore me")
 
 [%%expect{|
-val x0 : int @@ stateless = 1
-val s : string @@ stateless = "a"
-val y : int @@ stateless = 2
+val x0 : int @@ total = 1
+val s : string @@ total = "a"
+val y : int @@ total = 2
 |}]
 
 module M : sig
@@ -988,8 +991,8 @@ module M :
   sig
     val f : (x:int * string) -> x:int * string
     val mk : unit -> x:bool * y:string
-  end @@ stateless
-module X_int_int : sig type t = x:int * int end @@ stateless
+  end @@ total
+module X_int_int : sig type t = x:int * int end @@ total
 |}]
 
 let foo xy k_good k_bad =
@@ -1004,9 +1007,9 @@ let f ((~(x:int),y) : (x:int * int)) : int = x + y
 
 [%%expect{|
 val foo : 'a -> (unit -> 'b) -> (unit -> 'b) -> 'b = <fun>
-val x : int @@ stateless = 1
+val x : int @@ total = 1
 val y : int = 2
-val x : int @@ stateless = 1
+val x : int @@ total = 1
 val y : int = 2
 val f : (foo:int * bar:int) -> int = <fun>
 val f : (x:int * int) -> int = <fun>
@@ -1299,6 +1302,28 @@ val idx_r : unit -> ('a r, 'a) idx_imm = <fun>
 val idx_r_r : unit -> ('a r# r, 'a) idx_imm = <fun>
 |}]
 
+(* Block index as block access (index deepening) *)
+type 'a s = { a : 'a; mutable b: 'a; mutable c: 'a [@atomic] }
+
+let idx_a = (.a)
+let idx_b = (.b)
+let idx_c = (.c)
+[%%expect{|
+type 'a s = { a : 'a; mutable b : 'a; mutable c : 'a [@atomic]; }
+val idx_a : ('a s, 'a) idx_imm = <abstr>
+val idx_b : ('a s, 'a) idx_mut = <abstr>
+val idx_c : ('a s, 'a) idx_atomic = <abstr>
+|}]
+
+let idx_a' = (.idx_imm(idx_a).#foo)
+let idx_b' = (.idx_mut(idx_b).#foo)
+let idx_c' = (.idx_atomic(idx_c).#foo)
+[%%expect{|
+val idx_a' : ('a r# s, 'a) idx_imm = <abstr>
+val idx_b' : ('a r# s, 'a) idx_mut = <abstr>
+val idx_c' : ('a r# s, 'a) idx_atomic = <abstr>
+|}]
+
 module Borrow = struct
   let f () =
     let x = "hello" in
@@ -1347,15 +1372,15 @@ type existential_abstract =
 |}]
 
 module M : sig
-  kind_ immediate = value mod global many uncontended
-  kind_ immutable_data = value mod uncontended many
-  kind_ immutable = value mod uncontended
+  kind_ immediate = value mod global many
+  kind_ immutable_data = value mod many
+  kind_ immutable = value
   kind_ data = value mod many
   kind_ abstract
 end = struct
-  kind_ immediate = value mod global many uncontended
-  kind_ immutable_data = value mod uncontended many
-  kind_ immutable = value mod uncontended
+  kind_ immediate = value mod global many
+  kind_ immutable_data = value mod many
+  kind_ immutable = value
   kind_ data = value mod many
   kind_ abstract
 end
@@ -1367,7 +1392,7 @@ module M :
     kind_ immutable = value
     kind_ data = value mod many
     kind_ abstract
-  end @@ stateless
+  end @@ total
 |}]
 
 module type S = sig kind_ k end
@@ -1428,7 +1453,7 @@ module type S2 = S with M
 
 [%%expect{|
 module type S = sig type t1 type t2 type t3 end
-module M : sig type t1 = int type t2 = K of string type t3 end @@ stateless
+module M : sig type t1 = int type t2 = K of string type t3 end @@ total
 module type S2 = sig type t1 = M.t1 type t2 = M.t2 type t3 = M.t3 end
 |}]
 
@@ -1534,14 +1559,13 @@ module _ = Base(Name1)(Value1)(Name2)(Value2(Name2_1)(Value2_1)) [@jane.non_eras
 
 
 [%%expect{|
-module Base : sig end -> sig end -> sig end -> sig end -> sig end @@
-  stateless
-module Name1 : sig end @@ stateless
-module Name2 : sig end @@ stateless
-module Value1 : sig end @@ stateless
-module Value2 : sig end -> sig end -> sig end @@ stateless
-module Name2_1 : sig end @@ stateless
-module Name2_1 : sig end @@ stateless
+module Base : sig end -> sig end -> sig end -> sig end -> sig end @@ total
+module Name1 : sig end @@ total
+module Name2 : sig end @@ total
+module Value1 : sig end @@ total
+module Value2 : sig end -> sig end -> sig end @@ total
+module Name2_1 : sig end @@ total
+module Name2_1 : sig end @@ total
 Line 9, characters 11-95:
 9 | module _ = Base(Name1)(Value1)(Name2)(Value2(Name2_1)(Value2_1)) [@jane.non_erasable.instances]
                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1663,6 +1687,28 @@ type ('a, _[@foo] : any)  t
 type ('a, _ : any) t
 |}]
 
+(**********************************************)
+(* attributes on module aliases in signatures *)
+module Foo = struct end
+module type S = sig
+  module Foo = Foo [@foo] @@ nonportable
+end
+[%%expect{|
+module Foo : sig end @@ total
+module type S = sig module Foo = Foo end
+|}]
+
+(* make sure loc is set correctly *)
+module type S = sig
+  module Bar = Bar [@foo] @@ nonportable
+end
+[%%expect{|
+Line 2, characters 15-18:
+2 |   module Bar = Bar [@foo] @@ nonportable
+                   ^^^
+Error: Unbound module "Bar"
+|}]
+
 (*********************)
 (* quotations syntax *)
 
@@ -1708,9 +1754,7 @@ Error: This binding has no layout variables, so "poly_" has no effect.
 
 let poly_ id = fun x -> x
 [%%expect{|
->> Fatal error: layout: unexpected genvar
-Uncaught exception: Misc.Fatal_error
-
+val poly_ id : 'a -> 'a = <lpoly>
 |}]
 
 let poly_ const : 'a 'b. 'a -> 'b -> 'a = fun x _ -> x
@@ -1737,8 +1781,8 @@ Warning 219: This value description has no layout-polymorphic type variables,
 module type S_poly =
   sig
     val f : 'a -> 'a
-    val g : layout_ l. 'a 'b ('c : l). 'a -> 'b -> 'c -> 'a
-    val h : layout_ l l0. ('a : l) ('b : l0). 'a -> 'b -> 'a
+    val poly_ g : 'a 'b. 'a -> 'b -> 'c -> 'a
+    val poly_ h : 'a -> 'b -> 'a
   end
 |}]
 
@@ -1785,5 +1829,11 @@ module type S = sig
   val f : layout_ x y. ('a : x) ('b : y). 'a -> 'b
 end
 [%%expect{|
-module type S = sig val f : layout_ l l0. ('a : l) ('b : l0). 'a -> 'b end
+module type S = sig val poly_ f : 'a -> 'b end
+|}]
+
+let unreachable_branch b =
+  if b then 1 else if b then unreachable_ () else 2;;
+[%%expect{|
+val unreachable_branch : bool -> int = <fun>
 |}]

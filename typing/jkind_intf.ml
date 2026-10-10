@@ -51,6 +51,7 @@ module type Sort = sig
     | Vec128  (** Unboxed 128-bit simd vectors *)
     | Vec256  (** Unboxed 256-bit simd vectors *)
     | Vec512  (** Unboxed 512-bit simd vectors *)
+    | Mask  (** Unboxed 64-bit AVX512 mask registers *)
 
   (** A sort variable that can be unified during type-checking. *)
   type var
@@ -72,6 +73,19 @@ module type Sort = sig
     val format : Format_doc.formatter -> t -> unit
 
     val all_void : t -> bool
+
+    (** Like [all_void], but a layout variable counts as maybe-void, since it
+        can be instantiated as void.
+
+        CR layout-polymorphism: This function should be deleted once we support
+        layout-poly any-fields *)
+    val maybe_all_void : t -> bool
+
+    (** True if the sort contains no univars or genvars.
+
+        CR layout-polymorphism: This function should be deleted once we support
+        layout-poly any-fields *)
+    val is_concrete : t -> bool
 
     val scannable : t
 
@@ -98,6 +112,8 @@ module type Sort = sig
     val vec256 : t
 
     val vec512 : t
+
+    val mask : t
 
     module Debug_printers : sig
       val t : Format.formatter -> t -> unit
@@ -173,6 +189,9 @@ module type Sort = sig
         saved to a cmi. *)
     val is_cmi_var : var -> bool
 
+    (** Checks whether a [var] is "repr'd" - that is, it has no contents. *)
+    val is_root : var -> bool
+
     (** Extract the unique id for a [var]. Outside of a cmi, equal [id]s imply
         physical equality of [var]s. *)
     val get_id : var -> id
@@ -220,10 +239,12 @@ module type Sort = sig
       variable, it is set to [scannable] first. *)
   val default_to_scannable_and_get : t -> Const.t
 
-  (** Like [default_to_scannable_and_get] but returns a [Some] wrapping. Avoids
-      allocating a fresh [Some] box when the result is one of the known base
-      constants. *)
-  val default_to_scannable_and_get_some : t -> Const.t option
+  (** Like [default_to_scannable_and_get], but returns [None] if the result is
+      not concrete.
+
+      CR layout-polymorphism: This function should be deleted once we support
+      layout-poly any-fields *)
+  val get_concrete_defaulting_to_scannable : t -> Const.t option
 
   (* CR layouts v12: Default this to void. *)
 
@@ -231,6 +252,9 @@ module type Sort = sig
       variable, it is set to [value] first. After we have support for [void],
       this will default to [void] instead. *)
   val default_for_transl_and_get : t -> Const.t
+
+  (** Return a [Const.t] if the sort has no unset variables, or [None] *)
+  val to_const_opt : t -> Const.t option
 
   (** Like [default_to_scannable_and_get] but operates directly on a [var]. *)
   val var_default_to_scannable_and_get : var -> Const.t
@@ -443,7 +467,9 @@ module History = struct
   type scannable_creation_reason = Dummy_jkind
 
   (* CR layouts v5: make new void_creation_reasons *)
-  type void_creation_reason = |
+  type void_creation_reason = Ghost_record
+  (* A record all of whose fields are ghost: nothing exists at run
+           time, so the record itself is void. *)
 
   type any_creation_reason =
     | Missing_cmi of Path.t
@@ -462,7 +488,6 @@ module History = struct
           position : int;
           arity : int
         }
-    | Overapproximation_of_with_bounds
     | Inside_quote
     | Evaluated_quote
     | Old_style_unboxed_type

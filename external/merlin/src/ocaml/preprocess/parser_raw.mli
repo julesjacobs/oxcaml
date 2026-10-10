@@ -7,6 +7,7 @@ type token =
   | WHEN
   | VIRTUAL
   | VAL
+  | UNREACHABLE
   | UNDERSCORE
   | UIDENT of (string)
   | TYPE
@@ -24,6 +25,7 @@ type token =
   | SEMI
   | RPAREN
   | REPR
+  | REFINE
   | REC
   | RBRACKETGREATER
   | RBRACKET
@@ -109,6 +111,7 @@ type token =
   | GREATERDOT
   | GREATER
   | GLOBAL
+  | GHOST
   | FUNCTOR
   | FUNCTION
   | FUN
@@ -154,6 +157,7 @@ type token =
   | BACKQUOTE
   | ATAT
   | AT
+  | ASSUME
   | ASSERT
   | AS
   | ANDOP of (string)
@@ -213,6 +217,7 @@ module MenhirInterpreter : sig
     | T_WHEN : unit terminal
     | T_VIRTUAL : unit terminal
     | T_VAL : unit terminal
+    | T_UNREACHABLE : unit terminal
     | T_UNDERSCORE : unit terminal
     | T_UIDENT : (string) terminal
     | T_TYPE : unit terminal
@@ -230,6 +235,7 @@ module MenhirInterpreter : sig
     | T_SEMI : unit terminal
     | T_RPAREN : unit terminal
     | T_REPR : unit terminal
+    | T_REFINE : unit terminal
     | T_REC : unit terminal
     | T_RBRACKETGREATER : unit terminal
     | T_RBRACKET : unit terminal
@@ -315,6 +321,7 @@ module MenhirInterpreter : sig
     | T_GREATERDOT : unit terminal
     | T_GREATER : unit terminal
     | T_GLOBAL : unit terminal
+    | T_GHOST : unit terminal
     | T_FUNCTOR : unit terminal
     | T_FUNCTION : unit terminal
     | T_FUN : unit terminal
@@ -360,6 +367,7 @@ module MenhirInterpreter : sig
     | T_BACKQUOTE : unit terminal
     | T_ATAT : unit terminal
     | T_AT : unit terminal
+    | T_ASSUME : unit terminal
     | T_ASSERT : unit terminal
     | T_AS : unit terminal
     | T_ANDOP : (string) terminal
@@ -452,6 +460,8 @@ module MenhirInterpreter : sig
     | N_reversed_bar_llist_constructor_declaration_ : (Parsetree.constructor_declaration list) nonterminal
     | N_reverse_product_jkind_gen_jkind_desc_no_with_kinds_ : (Parsetree.jkind_annotation list) nonterminal
     | N_reverse_product_jkind_gen_jkind_desc_ : (Parsetree.jkind_annotation list) nonterminal
+    | N_refinement_type_head : ((Asttypes.mutable_flag * Parsetree.modality Location.loc list) *
+  string Location.loc * Parsetree.core_type) nonterminal
     | N_record_expr_content : (Parsetree.expression option *
   (Longident.t Location.loc * Parsetree.expression) list) nonterminal
     | N_rec_flag : (Asttypes.rec_flag) nonterminal
@@ -535,7 +545,7 @@ module MenhirInterpreter : sig
     | N_mk_longident_mod_ext_longident_type_trailing_no_hash_ : (Longident.t) nonterminal
     | N_mk_longident_mod_ext_longident_type_trailing_hash_ : (Longident.t) nonterminal
     | N_mk_longident_mod_ext_longident_ident_ : (Longident.t) nonterminal
-    | N_mk_longident_mod_ext_longident___anonymous_52_ : (Longident.t) nonterminal
+    | N_mk_longident_mod_ext_longident___anonymous_57_ : (Longident.t) nonterminal
     | N_mk_longident_mod_ext_longident_UIDENT_ : (Longident.t) nonterminal
     | N_mk_longident_mod_ext_longident_LIDENT_ : (Longident.t) nonterminal
     | N_method_ : ((string Location.loc * Asttypes.private_flag * Parsetree.class_field_kind) *

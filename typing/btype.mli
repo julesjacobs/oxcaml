@@ -350,19 +350,25 @@ module Jkind0 : sig
   module Mod_bounds : sig
     module Crossing = Mode.Crossing
     module Externality = Jkind_axis.Externality
+    module Logicality = Jkind_axis.Logicality
 
     type t = mod_bounds =
       { crossing : Mode.Crossing.t;
         externality: Jkind_axis.Externality.t;
+        logicality: Jkind_axis.Logicality.t;
       }
 
-    val create : Crossing.t -> externality:Externality.t -> t
+    (** [logicality] defaults to [Maybe_logical], which promises nothing. *)
+    val create :
+      ?logicality:Logicality.t -> Crossing.t -> externality:Externality.t -> t
 
     val crossing : t -> Crossing.t
     val externality : t -> Externality.t
+    val logicality : t -> Logicality.t
 
     val set_crossing : Crossing.t -> t -> t
     val set_externality : Externality.t -> t -> t
+    val set_logicality : Logicality.t -> t -> t
 
     (** [set_max_in_set bounds axes] sets all the axes in [axes] to their [max]
         within [bounds] *)
@@ -378,6 +384,10 @@ module Jkind0 : sig
     val is_max : t -> bool
 
     val min : t
+
+    (** [min] with ghostliness pinned to no-crossing; see the implementation.
+        Use this, not [min], for bounds stored as an actual kind. *)
+    val min_crossable : t
     val max : t
     val for_arrow : t
 
@@ -390,6 +400,12 @@ module Jkind0 : sig
     val relevant_axes_of_modality :
       modality:Mode.Modality.Const.t -> Jkind_axis.Axis_set.t
 
+    (** The axes on which a field's type bounds its record's kind. For a
+        [ghost] field (default [false]) that excludes externality. *)
+    val relevant_axes_of_field :
+      ?ghost:bool -> modality:Mode.Modality.Const.t -> unit ->
+      Jkind_axis.Axis_set.t
+
     val debug_print : Format.formatter -> t -> unit
   end
 
@@ -399,6 +415,7 @@ module Jkind0 : sig
     include Allow_disallow with type (_, _, 'd) sided = 'd t
 
     val add_modality :
+      ?ghost:bool ->
       modality:Mode.Modality.Const.t ->
       type_expr:type_expr ->
       (allowed * disallowed) t ->
@@ -488,6 +505,10 @@ module Jkind0 : sig
 
       (** Immutable non-float values that don't contain functions. *)
       val immutable_data : t
+
+      (** Vox: [immutable_data mod logical]. Immutable data whose values form
+          a set in the mathematical sense (see [Jkind_axis.Logicality]). *)
+      val logical_data : t
 
       (** Exceptions; crossing portability, contention, statelessness and
           visibility. *)
@@ -580,6 +601,9 @@ module Jkind0 : sig
       (** The jkind of unboxed 256-bit vectors with no mode crossing. *)
       val vec512 : t
 
+      (** The jkind of unboxed 64-bit masks with no mode crossing. *)
+      val mask : t
+
       (** The jkind of unboxed 128-bit vectors with mode crossing. *)
       val kind_of_unboxed_128bit_vectors : t
 
@@ -588,6 +612,9 @@ module Jkind0 : sig
 
       (** The jkind of unboxed 512-bit vectors with mode crossing. *)
       val kind_of_unboxed_512bit_vectors : t
+
+      (** The jkind of unboxed 64-bit masks with mode crossing. *)
+      val kind_of_unboxed_mask : t
 
       (** A list of the core builtin jkinds exposed by predef. *)
       val builtins : t list
@@ -650,6 +677,8 @@ module Jkind0 : sig
     val of_builtin :
       why:Jkind_intf.History.creation_reason ->
       Const.Builtin.t -> ('a * disallowed) jkind
+
+    val set_logicality : Jkind_axis.Logicality.t -> 'd jkind -> 'd jkind
 
     val fresh_jkind :
       (allowed * allowed) jkind_desc ->
@@ -718,6 +747,15 @@ module Jkind0 : sig
       jkind_l ->
       jkind_l
 
+    (** [add_with_bounds] for a record field. A [ghost] field's type bounds
+        every modal axis but not externality, since it has no slot. *)
+    val add_field_with_bounds :
+      ghost:bool ->
+      modality:Mode.Modality.Const.t ->
+      type_expr:type_expr ->
+      jkind_l ->
+      jkind_l
+
     val for_non_float : why:Jkind_intf.History.value_creation_reason -> 'd jkind
 
     val for_boxed_record : label_declaration list -> jkind_l
@@ -752,7 +790,7 @@ module Jkind0 : sig
     val for_or_null_argument : Ident.t -> 'd jkind
     val for_or_null_payload : Path.t -> 'd jkind
     val for_variant_with_null_result :
-      Path.t -> modality:Mode.Modality.Const.t -> type_expr -> jkind_l
+      Path.t -> (Mode.Modality.Const.t * type_expr) list -> jkind_l
 
     val for_effect_arg : Ident.t -> 'd jkind
 

@@ -1,0 +1,400 @@
+{
+  "base": "4446484d2db175a1b8da2041f57063f2f4b56d53",
+  "count_method": "refine_ identifiers outside comments and string/expect-output literals",
+  "removed": 1341,
+  "remaining_in_changed_sources": 0,
+  "files": [
+    {
+      "file": "testsuite/tests/vox/ackermann.ml",
+      "before": 2,
+      "after": 0,
+      "sha256": "07fd223b3b5eec72a9f9a6520c61d7642fc09ae6bb8f628f778db469ccb0f3be"
+    },
+    {
+      "file": "testsuite/tests/vox/array_search.ml",
+      "before": 37,
+      "after": 0,
+      "sha256": "09361b492f48ceee138de23189123902fed45dbc625ea32f5e8d245e0e28b325"
+    },
+    {
+      "file": "testsuite/tests/vox/big_time_credits.ml",
+      "before": 30,
+      "after": 0,
+      "sha256": "c6c73266c90fa4cce125eec6beb36af756fd50f9f5c0a93daa39642831ed63dc"
+    },
+    {
+      "file": "testsuite/tests/vox/big_time_credits_rejected.ml",
+      "before": 6,
+      "after": 0,
+      "sha256": "0dedf1d3d6851743132ef32ce4447a36f270e0ae2cdde24b12b539cf70723d9d"
+    },
+    {
+      "file": "testsuite/tests/vox/bigint_fibonacci.ml",
+      "before": 38,
+      "after": 0,
+      "sha256": "c0b33a0366b91cb5f90f99ecc0a63077d981c4016b4a6b127f05ec809d5ab7d6"
+    },
+    {
+      "file": "testsuite/tests/vox/bigints.ml",
+      "before": 13,
+      "after": 0,
+      "sha256": "3d0052bb1461f14031816ce6ee0c08fe09f2cec7338aabb56774baf0df10ff02"
+    },
+    {
+      "file": "testsuite/tests/vox/borrow_callback.ml",
+      "before": 8,
+      "after": 0,
+      "sha256": "f5bc09d5dcd20de9bbb88c629d61ff6b351beb2e4ec950ef6ca0f2fb095985cd"
+    },
+    {
+      "file": "testsuite/tests/vox/borrow_demo.ml",
+      "before": 14,
+      "after": 0,
+      "sha256": "fb64abe548e517f0ee6eda3657633448aabbdc0d0c6db62ebd142cb40dc1c816"
+    },
+    {
+      "file": "testsuite/tests/vox/borrow_parallel.ml",
+      "before": 25,
+      "after": 0,
+      "sha256": "773dfcc2dd79e1e72e8049dd2762b0631b68f9f185726147058867a46e4ec427"
+    },
+    {
+      "file": "testsuite/tests/vox/borrow_ranges.ml",
+      "before": 29,
+      "after": 0,
+      "sha256": "73abbbd1d3da0ba942969d84df2e7078332104a9f4b34c6ca3a8d9ca5d14cd28"
+    },
+    {
+      "file": "testsuite/tests/vox/borrow_rejected.ml",
+      "before": 39,
+      "after": 0,
+      "sha256": "bf508b1d21a0023aa5cfa3a083e122b892a13e74fbe99e25ce3c26d71e2d6166"
+    },
+    {
+      "file": "testsuite/tests/vox/borrow_validation.ml",
+      "before": 12,
+      "after": 0,
+      "sha256": "7bc95afe71368d7464a61ab445c12b3539072da6db56a945d367161176966379"
+    },
+    {
+      "file": "testsuite/tests/vox/checked_windows.ml",
+      "before": 12,
+      "after": 0,
+      "sha256": "3d1c76f5753d9247036c80d6151fe3c09f84d0ad5df3205bfea1f8c130f90650"
+    },
+    {
+      "file": "testsuite/tests/vox/collection_functions.ml",
+      "before": 48,
+      "after": 0,
+      "sha256": "5fef0a9900acafb3d2f50afc9af5c315351f3cf7f8e3eafb9e8ac66d1edd6237"
+    },
+    {
+      "file": "testsuite/tests/vox/collection_rejected.ml",
+      "before": 5,
+      "after": 0,
+      "sha256": "dfd4f71cc39ed4b2f005c715b3743cb2ea99c11760195742a88a6ecd4585636a"
+    },
+    {
+      "file": "testsuite/tests/vox/collection_surface.ml",
+      "before": 14,
+      "after": 0,
+      "sha256": "1c0b6d6d813613772ada6e66ea7c1f6b6e20900e2a41b6f993e32778ee8cecf2"
+    },
+    {
+      "file": "testsuite/tests/vox/collection_theory.ml",
+      "before": 7,
+      "after": 0,
+      "sha256": "70afa7d941a280dd3b9b1c71f538710e3eb67643ee7a313ef1824e0db8d12443"
+    },
+    {
+      "file": "testsuite/tests/vox/datatypes.ml",
+      "before": 45,
+      "after": 0,
+      "sha256": "53220cf23fdc7dfcc69a3af1edbd257b53d0466bb9fccd52c64ac8e1b8f9d723"
+    },
+    {
+      "file": "testsuite/tests/vox/definitions.ml",
+      "before": 43,
+      "after": 0,
+      "sha256": "0a2082180f5122859a9e25d30fb669be16ffbc3600c042277fb2242c7ea290b7"
+    },
+    {
+      "file": "testsuite/tests/vox/environments.ml",
+      "before": 13,
+      "after": 0,
+      "sha256": "3263dbf3eae4203353397da02958a0b91e9489093fd4173e783ee524e68a1cf8"
+    },
+    {
+      "file": "testsuite/tests/vox/equality.ml",
+      "before": 17,
+      "after": 0,
+      "sha256": "7be8603312d6d254ff199a7b295d767213a7f10ac84942bbd0bf429bc6863410"
+    },
+    {
+      "file": "testsuite/tests/vox/fibonacci.ml",
+      "before": 29,
+      "after": 0,
+      "sha256": "077ab2d4e73bd7c45e596de3b5e7d3e666bc99f81eae97dbeff252316db7eea6"
+    },
+    {
+      "file": "testsuite/tests/vox/hof_array_clients.ml",
+      "before": 7,
+      "after": 0,
+      "sha256": "d7e38ee9924ad1cf1a219b6dc5a71739898cd2083c2ab11542f4059a2f4301bf"
+    },
+    {
+      "file": "testsuite/tests/vox/hof_candidates.ml",
+      "before": 50,
+      "after": 0,
+      "sha256": "2059ac716acd414dede3fcf79accca22807e5da8aa7b1223a392922cd2c15dd4"
+    },
+    {
+      "file": "testsuite/tests/vox/hof_challenges.ml",
+      "before": 72,
+      "after": 0,
+      "sha256": "2b4421c316436c1c38a30054ef419411edfb84746d0a9a741b951123fab5cff2"
+    },
+    {
+      "file": "testsuite/tests/vox/iarray_borrow.ml",
+      "before": 19,
+      "after": 0,
+      "sha256": "aff1dfc6c7e5955ea24f2cb90755db26b03dd1de5c0d7101df601d60d066f278"
+    },
+    {
+      "file": "testsuite/tests/vox/iarray_model_rejected.ml",
+      "before": 12,
+      "after": 0,
+      "sha256": "e8b230ea561d62144932c972518e4a3fdc6f5716a351828fae9b732998114e9b"
+    },
+    {
+      "file": "testsuite/tests/vox/iarrays.ml",
+      "before": 49,
+      "after": 0,
+      "sha256": "5abfe3427abaa290767a250882281aa507b5605ebecf2d58407ec7f7069d93d0"
+    },
+    {
+      "file": "testsuite/tests/vox/int_sets.ml",
+      "before": 1,
+      "after": 0,
+      "sha256": "e7b16abf81900c9250ab0164001277c0fb73d5404f09f52e786f1797e8f43b59"
+    },
+    {
+      "file": "testsuite/tests/vox/list_int_set.ml",
+      "before": 66,
+      "after": 0,
+      "sha256": "940090dbc9913694e675dd0a5af8390315fc73651060b7937a76afe3eb705e69"
+    },
+    {
+      "file": "testsuite/tests/vox/maps.ml",
+      "before": 67,
+      "after": 0,
+      "sha256": "716d304645c41556c82576f0defde02f3fd7a770fda848ccc8b5e35dbe51dc53"
+    },
+    {
+      "file": "testsuite/tests/vox/numerical.ml",
+      "before": 8,
+      "after": 0,
+      "sha256": "c8e4568fade74dbc816be8ecc007009cb52518145eb18e35845a110ab60bd9de"
+    },
+    {
+      "file": "testsuite/tests/vox/polymorphic_list_set.ml",
+      "before": 91,
+      "after": 0,
+      "sha256": "64061132a45046e07fecdb57eda798ca7c67cd792fd32e4487c317a3e8a0301a"
+    },
+    {
+      "file": "testsuite/tests/vox/polymorphic_sets.ml",
+      "before": 4,
+      "after": 0,
+      "sha256": "0535357f6054a479f0325f092350b8db936ba3c44f31886cb1c42450c7dc1c51"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_equal.ml",
+      "before": 14,
+      "after": 0,
+      "sha256": "0fc52132240a4e40e0ae7a7085bcb76dafadaeea85e3a95687e88e934d4d1840"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_equal_rejected.ml",
+      "before": 8,
+      "after": 0,
+      "sha256": "67bdf9405832c86b638baea3067fba6b4adacf9d690f05c9b7422b76a6b4981b"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_heterogeneous.ml",
+      "before": 18,
+      "after": 0,
+      "sha256": "d0c71749fd0341f6bf7002a15d28a784ae0ed28022876592fbddc8d43d47b2c0"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_layout.ml",
+      "before": 2,
+      "after": 0,
+      "sha256": "2933c149ce6dab03f23fcbcecd06e8e034b0036ed6b5ecab73b6112855ccb55c"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_payloads.ml",
+      "before": 18,
+      "after": 0,
+      "sha256": "e90ab086dd967be68024e06e3f15b37bd5f8551dad4f6e0d1c8bc6141e4c77a1"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_records.ml",
+      "before": 10,
+      "after": 0,
+      "sha256": "b3a65d6c3d6cf66677e81cc71586432d090657bd538e079a9339c0b5657cf996"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_rejected.ml",
+      "before": 23,
+      "after": 0,
+      "sha256": "c92b0a97931d394df4be45b13a1d82a04e4deeefdf241afafb83beda03bde298"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_split.ml",
+      "before": 16,
+      "after": 0,
+      "sha256": "e52f7c8a5d5a95d6aa31fc10a02fce0ba4ddb3b2ea084fe51fb07a63ba3a77f1"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_staging.ml",
+      "before": 18,
+      "after": 0,
+      "sha256": "ff3edd2d6892a2b222c53fd6b854d3da68bda777abbbccd3d5656adb72424cef"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_swap.ml",
+      "before": 29,
+      "after": 0,
+      "sha256": "281edd2862e9e13f2972a329dd9134410c91ceddaaa0929336edf0c3597395e0"
+    },
+    {
+      "file": "testsuite/tests/vox/prefs.ml",
+      "before": 18,
+      "after": 0,
+      "sha256": "6b2448f91fc812f4f69825f7a496ffd15cce698c9fbfc049608ff2aa25832bce"
+    },
+    {
+      "file": "testsuite/tests/vox/quicksort_iarray.ml",
+      "before": 71,
+      "after": 0,
+      "sha256": "d34ac4a3a2fee39ffb3bc380c7891191e743e320a1015fb9824b85bbf4c41801"
+    },
+    {
+      "file": "testsuite/tests/vox/quicksort_iarray_client.ml",
+      "before": 6,
+      "after": 0,
+      "sha256": "c4f9fbd76c7ec613819e49b91ce9ed661e323263b19243fb2623ec8a06d17f30"
+    },
+    {
+      "file": "testsuite/tests/vox/quicksort_iarray_model.ml",
+      "before": 7,
+      "after": 0,
+      "sha256": "86a9712d468cb1bd7c177ab70d49bbd9b979753959b8975aa6ada79286224996"
+    },
+    {
+      "file": "testsuite/tests/vox/sets.ml",
+      "before": 35,
+      "after": 0,
+      "sha256": "acd7ffc36ca3634cc4eaaa7da16878dd592655a917cb62ee2311bf732800dacb"
+    },
+    {
+      "file": "testsuite/tests/vox/sets_sharing.ml",
+      "before": 3,
+      "after": 0,
+      "sha256": "81c3f12ec7cdf8add5ca72536f06d7f17f06fcfd91cec7da57c0bdedd599e7b0"
+    },
+    {
+      "file": "testsuite/tests/vox/sparse_iarrays.ml",
+      "before": 26,
+      "after": 0,
+      "sha256": "73a517d9cbda9a4ea5554a6f26db54f890b6b56ec8432389ecd2510079b6b931"
+    },
+    {
+      "file": "testsuite/tests/vox/standard_lists.ml",
+      "before": 9,
+      "after": 0,
+      "sha256": "1258493fddef0751988e67c6c7228edc0f00e8c1e36ffa21a99057adbb0754c6"
+    },
+    {
+      "file": "testsuite/tests/vox/union_find.ml",
+      "before": 66,
+      "after": 0,
+      "sha256": "45b64d8f5b64f946b05d245ae94b20f6a1e49fa13b9e7ee2c1f7480e94e4beaf"
+    },
+    {
+      "file": "testsuite/tests/vox/union_find_rejected.ml",
+      "before": 12,
+      "after": 0,
+      "sha256": "4c8f42922c3726b418992970d20499f1006afd65c30196a6837143c7fe09dc15"
+    }
+  ],
+  "ocamltest_roots": [
+    "ackermann",
+    "array_search",
+    "big_time_credits",
+    "big_time_credits_rejected",
+    "bigint_fibonacci",
+    "bigints",
+    "borrow_callback",
+    "borrow_demo",
+    "borrow_ranges",
+    "borrow_rejected",
+    "borrow_validation",
+    "checked_windows",
+    "collection_functions",
+    "collection_rejected",
+    "collection_surface",
+    "collection_theory",
+    "datatypes",
+    "definitions",
+    "environments",
+    "equality",
+    "fibonacci",
+    "iarray_borrow",
+    "iarray_model_rejected",
+    "iarrays",
+    "int_sets",
+    "maps",
+    "numerical",
+    "polymorphic_sets",
+    "pref_equal",
+    "pref_equal_rejected",
+    "pref_heterogeneous",
+    "pref_layout",
+    "pref_payloads",
+    "pref_rejected",
+    "pref_split",
+    "pref_staging",
+    "pref_swap",
+    "prefs",
+    "quicksort_iarray_client",
+    "sets",
+    "sets_sharing",
+    "sparse_iarrays",
+    "standard_lists",
+    "union_find",
+    "union_find_rejected"
+  ],
+  "dependencies_checked_by_roots": [
+    "hof_array_clients",
+    "hof_candidates",
+    "hof_challenges",
+    "list_int_set",
+    "polymorphic_list_set",
+    "quicksort_iarray",
+    "quicksort_iarray_model"
+  ],
+  "baseline_failure": {
+    "file": "testsuite/tests/vox/pref_records.ml",
+    "reason": "Unsupported refinement predicate in VC generation for callback payload allocation, reproduced with original Pref and fixture sources"
+  },
+  "benchmark_generator_source_removals": {
+    "verification/benchmarks/hof_idioms.py": 4,
+    "verification/benchmarks/quicksort_runtime.py": 3
+  },
+  "multicore_limitation": {
+    "file": "testsuite/tests/vox/borrow_parallel.ml",
+    "status": "compiled in both backends, with and without principal; ocamltest skips its multicore predicate; direct execution cannot allocate a domain"
+  }
+}

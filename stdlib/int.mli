@@ -58,6 +58,32 @@ external div : (int[@local_opt]) -> (int[@local_opt]) -> int = "%divint"
 external rem : (int[@local_opt]) -> (int[@local_opt]) -> int = "%modint"
 (** [rem x y] is the remainder [x mod y]. See {!Stdlib.( mod )} for details. *)
 
+module Refined : sig
+  (** Division whose nonzero divisor is expressed in its type, so that it
+      cannot raise [Division_by_zero] and is total. *)
+
+  external ( / ) : int -> {d : int | d <> 0} -> int @@ total = "%divint"
+  external ( mod ) : int -> {d : int | d <> 0} -> int @@ total = "%modint"
+  external div : int -> {d : int | d <> 0} -> int @@ total = "%divint"
+  external rem : int -> {d : int | d <> 0} -> int @@ total = "%modint"
+
+  (** Shifts whose count is in \[0, 63\], the range in which the result is
+      specified on 64-bit targets, so that they are total. *)
+
+  external ( lsl ) : int -> {n : int | 0 <= n && n <= 63} -> int @@ total
+    = "%lslint"
+  external ( lsr ) : int -> {n : int | 0 <= n && n <= 63} -> int @@ total
+    = "%lsrint"
+  external ( asr ) : int -> {n : int | 0 <= n && n <= 63} -> int @@ total
+    = "%asrint"
+  external shift_left : int -> {n : int | 0 <= n && n <= 63} -> int @@ total
+    = "%lslint"
+  external shift_right : int -> {n : int | 0 <= n && n <= 63} -> int
+    @@ total = "%asrint"
+  external shift_right_logical :
+    int -> {n : int | 0 <= n && n <= 63} -> int @@ total = "%lsrint"
+end
+
 external succ : (int[@local_opt]) -> int = "%succint"
 (** [succ x] is [add x 1]. *)
 

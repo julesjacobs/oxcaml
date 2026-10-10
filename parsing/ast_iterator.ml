@@ -144,9 +144,10 @@ module T = struct
     match desc with
     | Ptyp_any jkind
     | Ptyp_var (_, jkind) -> Option.iter (sub.jkind_annotation sub) jkind
-    | Ptyp_arrow (_lab, t1, t2, m1, m2) ->
+    | Ptyp_arrow (_lab, t1, t2, m1, m2, binder) ->
         sub.typ sub t1; sub.typ sub t2;
-        sub.modes sub m1; sub.modes sub m2
+        sub.modes sub m1; sub.modes sub m2;
+        Option.iter (iter_loc sub) binder
     | Ptyp_tuple tyl -> List.iter (fun (_, e) -> sub.typ sub e) tyl
     | Ptyp_unboxed_tuple tyl -> List.iter (fun (_, e) -> sub.typ sub e) tyl
     | Ptyp_constr (lid, tl) ->
@@ -174,6 +175,7 @@ module T = struct
         sub.jkind_annotation sub jkind
     | Ptyp_repr (_, t) -> sub.typ sub t
     | Ptyp_newlayout (_, t) -> sub.typ sub t
+    | Ptyp_refine (_, t, predicate) -> sub.typ sub t; sub.expr sub predicate
     | Ptyp_extension x -> sub.extension sub x
 
   let iter_type_declaration sub
@@ -576,12 +578,18 @@ module E = struct
     | Pexp_extension x -> sub.extension sub x
     | Pexp_unreachable -> ()
     | Pexp_stack e -> sub.expr sub e
+    | Pexp_ghost e -> sub.expr sub e
     | Pexp_comprehension e -> iter_comp_exp sub e
     | Pexp_overwrite (e1, e2) -> sub.expr sub e1; sub.expr sub e2
     | Pexp_quote e -> sub.expr sub e
     | Pexp_splice e -> sub.expr sub e
     | Pexp_hole -> ()
     | Pexp_borrow e -> sub.expr sub e
+    | Pexp_refine e | Pexp_assume e -> sub.expr sub e
+    | Pexp_let_refine (name, bound, body) ->
+        iter_loc sub name;
+        sub.expr sub bound;
+        sub.expr sub body
 
   let iter_binding_op sub {pbop_op; pbop_pat; pbop_exp; pbop_loc} =
     iter_loc sub pbop_op;

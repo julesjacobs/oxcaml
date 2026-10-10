@@ -26,11 +26,17 @@ val ocamlrun : string
 
 val ocamlc : string
 
+val ocamlc_uses_runtime : bool
+
 val ocaml : string
+
+val ocaml_uses_runtime : bool
 
 val ocamlc_dot_opt : string
 
 val ocamlopt : string
+
+val ocamlopt_uses_runtime : bool
 
 val ocamlopt_dot_opt : string
 

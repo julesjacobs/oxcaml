@@ -33,8 +33,10 @@ val current_zero_alloc_info : unit -> Zero_alloc_info.t
 val current_generic_fns : unit -> generic_fns
         (* Return the generic functions for the unit being compiled. *)
 
-val current_sections : unit -> Oxcaml_utils.File_sections.Builder.t
+val current_sections : unit -> File_sections.Builder.t
         (* Return the file sections builder for the unit being compiled. *)
+
+val get_export_info : unit_infos -> Flambda2_cmx.Flambda_cmx_format.t option
 
 val get_global_export_info : Compilation_unit.t
   -> Flambda2_cmx.Flambda_cmx_format.t option
@@ -44,15 +46,19 @@ val get_global_export_info : Compilation_unit.t
 val get_unit_export_info
   : Compilation_unit.t -> Flambda2_cmx.Flambda_cmx_format.t option
 
+val get_static_data :
+  Compilation_unit.t -> Slambdaeval.CU_data.t option
+        (* Returns [None] if the .cmx file cannot be located. *)
+
 val set_export_info : Flambda2_cmx.Flambda_cmx_format.raw -> unit
         (* Set the export information for the current unit. *)
 
 val need_curry_fun:
   Lambda.function_kind -> Cmm.machtype list -> Cmm.machtype -> unit
 val need_apply_fun:
-  Cmm.machtype list -> Cmm.machtype -> Cmx_format.alloc_mode -> unit
+  Cmm.machtype list -> Cmm.machtype -> Cmx_format.return_mode -> unit
 val need_send_fun:
-  Cmm.machtype list -> Cmm.machtype -> Cmx_format.alloc_mode -> unit
+  Cmm.machtype list -> Cmm.machtype -> Cmx_format.return_mode -> unit
         (* Record the need of a currying (resp. application,
            message sending) function with the given arity *)
 
@@ -66,17 +72,23 @@ val cache_zero_alloc_info : Zero_alloc_info.t -> unit
 val new_const_symbol : unit -> string
 
 val read_unit_info: string -> unit_infos * Digest.t
+
+(* The Vox record of a .cmx file (see [Vox_trust]), if it has one. *)
+val read_vox_record: string -> Cmi_format.vox_unit option
         (* Read infos and MD5 from a [.cmx] file. *)
-val write_unit_info: unit_infos -> string -> unit
+val write_unit_info:
+  ?vox:Cmi_format.vox_unit -> unit_infos -> string -> unit
         (* Save the given infos in the given file *)
 val build_unit_info:
   main_module_block_format:Lambda.main_module_block_format ->
   arg_descr:Lambda.arg_descr option ->
+  static_data:Slambdaeval.CU_data.t ->
   unit_infos
         (* Build the infos for the current unit. *)
 val save_unit_info:
   string -> main_module_block_format:Lambda.main_module_block_format ->
   arg_descr:Lambda.arg_descr option ->
+  static_data:Slambdaeval.CU_data.t ->
   unit
         (* Save the infos for the current unit in the given file *)
 val cache_unit_info: unit_infos -> unit

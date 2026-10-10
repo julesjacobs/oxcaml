@@ -33,6 +33,8 @@ val file : Variables.t
 
 val readonly_files : Variables.t
 
+val source_directories : Variables.t
+
 val make : Variables.t
 
 val ocamltest_response : Variables.t
@@ -40,6 +42,8 @@ val ocamltest_response : Variables.t
 val ocamltest_log : Variables.t
 
 val output : Variables.t
+
+val prebuilt_modules : Variables.t
 
 val program : Variables.t
 val program2 : Variables.t

@@ -1,0 +1,11 @@
+File "producer.ml", line 20, characters 2-70:
+20 |   external accept : { x : int | holds x } -> unit @@ total = "%ignore"
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+File "inferred_consumer.ml", line 3, characters 49-50:
+3 | let distinct (x : Inferred.A.t) : Inferred.B.t = x
+                                                     ^
+Error: Refinement could not be proved (counterexample: x = 0)
+File "inferred.ml", line 12, characters 23-30:
+  The refinement is stated here.

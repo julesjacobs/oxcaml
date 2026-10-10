@@ -1,0 +1,589 @@
+{
+  "_about": "Subdirectories of verification/ (except review/ and explorer/), the verifier's own files, and the main modules of verification/library/. All Vox-only code, so entries have `what` only. Sources: the code at HEAD (a0b99ddfeb), READMEs, research/mastery-20260927 reports re-checked against the code.",
+  "verification/vox_vc.ml": {
+    "what": {
+      "short": "The verification-condition generator: symbolically executes a typed unit once and turns each refinement introduction into an SMT query for Z3.",
+      "long": [
+        "`generate` walks the Typedtree after type checking. Each expression evaluates to an SMT term, or to `None` when it has no logical meaning, in which case its value is a fresh symbol. The state is a list of commands: `Define` (a fresh SSA symbol bound to a term), `Assume`, `Assert` (an obligation), `Choice` for the two sides of a branch, and `Check` (a nested computation proved without exporting its assumptions). Branches are joined, so paths are never enumerated. Each function body becomes one batch of obligations.",
+        "Obligations come from three places: refinement introductions (`introduce`, reached through the `Texp_refinement` marks the type checker inserts), shift counts (`require_shift_count`), and `[@@decreases]` measures (`check_termination`, called from the type checker). Everything else is an assumption: an eliminated refinement, a callee's declared result type, a lemma's conclusion.",
+        "Calls are never unfolded except for ghost lambdas and `[@def transparent]` definitions. A call to a total, stateless function with total, stateless arguments is an uninterpreted function application, so equal calls are equal; otherwise its result is a fresh symbol. Heaps, iarrays, sets, maps and sequences are opaque sorts given meaning by ground rewriting of observations (`pref_observe`, `iarray_get`, `set_mem`, `map_find`) under fixed budgets."
+      ]
+    },
+    "notes": [
+      {
+        "title": "Entry point",
+        "from": "let generate ?(poll = fun () -> ()) ?unused_steps ?interface ~prove str =",
+        "to": "with_warnings warnings (fun () -> verify_steps ctx prove result.code)",
+        "text": "First checks every `external` that declares a shift total (`check_total_shift`). Then a scan looks for an obligation or a proof step; a unit without one never starts the solver. Otherwise the structure is evaluated once, and each function's batch, then the top level, is proved with the warning state in force where it was written."
+      },
+      {
+        "title": "Where the typer's marks become obligations",
+        "from": "and expression_extras ?deferred ctx s e ty = function",
+        "to": "| _ -> s, value)",
+        "text": "The type checker records each coercion into a refined type as a `Texp_refinement { source; target }` extra. The expression is evaluated at `source`; `introduce` then proves `target`'s predicate, or the check is deferred to the end of a branch when the result flows into an enclosing introduction. `Texp_value_name` binds a dependent argument's name to its value."
+      },
+      {
+        "title": "introduce: proving a refinement",
+        "from": "and introduce ctx env s ty value loc =",
+        "to": "expose_outer ctx env s ty value loc",
+        "text": "Only the outer refinement is proved. Each conjunct of a top-level `&&` chain is an obligation of its own, proved under the earlier conjuncts, so a failure names the conjunct. The asserts go into a `Check` block, which is proved but does not add facts to the path, and the refinement is then assumed for the value (`expose_outer`)."
+      },
+      {
+        "title": "Joining branches",
+        "from": "let choose ctx s condition ifso ifnot =",
+        "to": "name ctx s value",
+        "text": "Each side is evaluated under its path condition; a dead side is dropped, and otherwise the two values are joined with an if-then-else on the condition (`join_value`). The commands of both sides go into one `Choice`, so the number of paths is never enumerated."
+      },
+      {
+        "title": "When a call is a function of its arguments",
+        "from": "(* Totality is relative to the arguments: a total, stateless [apply f x = f x]",
+        "to": "(fun () -> Ctype.cross_left e.exp_env e.exp_type mode))",
+        "text": "A total, stateless higher-order function can still run its argument's effects. So a call is congruent only when each argument is total and stateless at the call: its type crosses both axes, it is a function value known to be total, an identifier or immutable field whose use-site mode is, or it fills a dependent parameter. Otherwise the call's result is a fresh symbol."
+      },
+      {
+        "title": "Uninterpreted function instances",
+        "from": "let rec function_call ctx env ty fn args =",
+        "to": "scalar_value (Call (f, args))",
+        "text": "Partial applications are accumulated until saturated, and a choice between two functions becomes a join. A ghost lambda whose body is known is instantiated. Otherwise the call is a `Call` of an SMT function per source function and argument sorts; function-valued arguments select a specialisation, with the function's captured scalars passed as extra arguments."
+      },
+      {
+        "title": "Shift counts",
+        "from": "(* OCaml leaves a shift by a count outside [0, 63] unspecified, and compiled",
+        "to": "branch { s with code = Assert obligation :: s.code } goal",
+        "text": "Every shift the code performs, including a saturated partial application of `lsl`, `lsr` or `asr`, must be proved to have a count in [0, 63], because constant folding and the hardware disagree outside that range. `check_total_shift` makes the same demand syntactically of a shift declared total, since such calls are congruent also in units that are never verified."
+      },
+      {
+        "title": "Checking a function",
+        "from": "and check_function ctx s e params body value =",
+        "to": "fn.lambda",
+        "text": "Assertions of the enclosing code are erased, parameters get fresh symbols and their refinements are assumed, and the body is evaluated. The body's commands become one batch in `ctx.batches`. A `ghost_` function with scalar parameters and result also records its body as a logical lambda, so that ghost calls to it are unfolded."
+      },
+      {
+        "title": "Slicing a query",
+        "from": "let slice_goal ?(rename = Fun.id) ctx query term =",
+        "to": "goal = { label = \"refine_\"; term }",
+        "text": "Keeps only the SSA definitions reachable from the goal and the other facts. Dropping definitions only weakens the premises, so this cannot make an invalid goal provable."
+      },
+      {
+        "title": "Batches, groups and retries",
+        "from": "let verify_batch ?(proved = fun _ -> ()) ctx prove code =",
+        "to": "| [] :: _ -> ()",
+        "text": "All obligations of a batch are first proved as one query. If that fails, each refinement's conjuncts are proved together, and if that fails each conjunct alone, so the error names the smallest failing obligation. `prove` raises `Unproved`, which aborts the compilation at the first failure."
+      },
+      {
+        "title": "Termination measures",
+        "from": "let check_termination ?unused_steps ~poll ~prove ~self ~fn ~measure () =",
+        "to": "ignore (expression ctx entry body)",
+        "text": "Called by the type checker for a `let rec` with `[@@decreases m]`. The measure is an `int`, a `Bigint.t` or a tuple of them (lexicographic), and may not contain a refinement introduction. At each recursive call the measure must decrease: an `int` is bounded by its range, a `Bigint.t` by zero. Introductions in the body are not checked in this pass."
+      },
+      {
+        "title": "Heap extensionality",
+        "from": "(* Extensionality of heaps, instantiated at one location: if [left] and [right]",
+        "span": 5,
+        "text": "Proving `===` between two heaps adds one instance of extensionality: the heaps are equal if they agree at a Skolem location where they would differ. No quantifier reaches the solver."
+      }
+    ]
+  },
+  "verification/vox_vc.mli": {
+    "what": {
+      "short": "Interface of the VC generator: generate for a whole unit, check_termination for one [@@decreases] function, and the Unproved exception."
+    }
+  },
+  "verification/vox_encoding.ml": {
+    "what": {
+      "short": "The encoding of OCaml types and primitives into SMT: which types become which sorts, and the logical meaning of built-in operations.",
+      "long": [
+        "`sort` maps `int` to `Int63`, `bool` to `Bool`, `Bigint.t` to unbounded `Int`, iarrays to an opaque sort, immutable tuples, records and variants to SMT datatypes, and everything else to an opaque sort. A recursive type becomes a datatype only if it is `[@@inductive]`; mutual recursion is rejected.",
+        "`operation` gives meaning to primitives: integer arithmetic, comparison and bitwise operations, `Bigint` arithmetic, `%equal`/`%compare`, iarray access, set and map operations, and `caml_vox_int_ctz`. `primitive` takes the name from the external's declaration. A `%` primitive is implemented by the compiler, so every declaration of it gets its meaning; a C primitive's meaning goes only to the library's own declarations, with the library's native name (`Vox_type.carries_builtin_meaning`). These meanings are part of the trusted base."
+      ]
+    },
+    "notes": [
+      {
+        "title": "Finding a primitive",
+        "from": "let primitive env path =",
+        "to": "with Not_found -> None",
+        "text": "Set and map operations are recognised through the standard `Set.Make`/`Map.Make` results; a few stdlib functions that are not externals (`Iarray.get`, `Iarray.sub`, `abs`, ...) are recognised by their value's uid; anything else uses the external's primitive name, if its declaration carries the meaning."
+      },
+      {
+        "title": "Bigint division by zero",
+        "from": "let bigint_division op =",
+        "span": 11,
+        "text": "SMT-LIB leaves division by zero unspecified, so the encoding states what `runtime/bigint.c` computes: quotient 0 and remainder equal to the dividend."
+      },
+      {
+        "title": "Types to sorts",
+        "from": "let rec classify ctx env stack ty =",
+        "to": "if is_set_type env ty",
+        "text": "Datatypes are built once per type key and cached. A type that cannot be a datatype gets an opaque sort per key, so values of different abstract types never share a sort."
+      }
+    ]
+  },
+  "verification/vox_encoding.mli": {
+    "what": {
+      "short": "Interface of the type and primitive encoding used by both program expressions and predicates."
+    }
+  },
+  "verification/vox_smt.ml": {
+    "what": {
+      "short": "The solver-independent SMT IR (sorts, terms, queries), its sort checker, the bitwise abstraction, and the printer to SMT-LIB.",
+      "long": [
+        "`Int63` terms have exact signed 63-bit semantics: SMT `Int` with range assertions and wrap-around, or `(_ BitVec 63)` for a query that contains a bitwise operation. Multiplication of two non-constant `int`s is a shared uninterpreted function outside bitvector mode. `Int` is unbounded, with Euclidean `div` and `mod`.",
+        "The IR has no binders, so no quantifier can be sent. `to_smtlib` picks the logic (`QF_LIA`, `QF_UFLIA` or `ALL`), sets Z3's deterministic `rlimit`, and with `assumptions` asks for an unsat core."
+      ]
+    },
+    "notes": [
+      {
+        "title": "Abstracting bitwise operations",
+        "from": "let abstract_bitwise q =",
+        "span": 12,
+        "text": "Replaces each bitwise operation by an uninterpreted function plus facts true of the 63-bit operation (signs, ranges, low masks, shifts by constants). The result has weaker premises, so a proof of it proves the original; it is tried first to avoid bit-blasting every integer."
+      },
+      {
+        "title": "Shifts in bitvector mode",
+        "from": "( ((Shift_right_logical | Shift_left | Shift_right_arithmetic) as op),",
+        "to": "add \"))\"",
+        "text": "A shift by a count in [0, 63] is the bitvector shift; outside that range it is an uninterpreted function of value and count. `Vox_vc` requires every performed shift to have its count in range, so the uninterpreted case is never relied on."
+      }
+    ]
+  },
+  "verification/vox_smt.mli": {
+    "what": {
+      "short": "Interface of the SMT IR: sorts, datatypes, symbols, functions, operators, terms, queries, validity results and to_smtlib."
+    }
+  },
+  "verification/vox_smt_solver.ml": {
+    "what": {
+      "short": "Runs Z3 as a child process (z3 -in -smt2, no shell) and checks queries with deadlines, cancellation, output limits and resource counts.",
+      "long": "`with_session` reuses one process for many queries, resetting it before each, so a result and its resource count do not depend on earlier queries. A timeout, cancellation or protocol error kills and reaps the process; the next check starts a new one."
+    },
+    "notes": [
+      {
+        "title": "One check",
+        "from": "let check_impl session ?(config = default_config) ?(dump = fun _ -> ())",
+        "span": 20,
+        "text": "Everything the child holds (pipes, the process) is tracked so that any exit path, including an exception from the caller's cancellation callback, kills and reaps it. Standard error is kept, up to a limit, for every outcome."
+      }
+    ]
+  },
+  "verification/vox_smt_solver.mli": {
+    "what": {
+      "short": "Interface of the Z3 runner: config, result (validity, resources, unsat core, timings), check, with_session and monotonic_time."
+    }
+  },
+  "verification/vox_smt_response.ml": {
+    "what": {
+      "short": "The solver protocol independent of transport: the reset and query text, follow-up requests after sat, unsat or unknown, and parsing the responses.",
+      "long": "Shared by the native runner and the browser playground, which runs Z3 compiled to WebAssembly."
+    },
+    "notes": [
+      {
+        "title": "Follow-up requests",
+        "from": "let followup ?assumptions symbols answer =",
+        "to": "let resource_request",
+        "text": "After `sat` it asks for the values of the query's symbols (a counterexample), after `unknown` for the reason, and after `unsat` for the unsat core when the query was checked with assumptions. The resource count is requested after every query."
+      }
+    ]
+  },
+  "verification/vox_smt_response.mli": {
+    "what": {
+      "short": "Interface of the solver protocol: session_input, followup, resource_request and interpret_response."
+    }
+  },
+  "verification/vox_proof_steps.ml": {
+    "what": {
+      "short": "Warning 227, unused proof steps: after a pass, proves each query again with indicator literals on lemma calls, assume_ and refined parameters, and reads the unsat cores.",
+      "long": "A step is reported when no core contains any of its indicators. Cores may be larger than necessary; each query is proved from its core, so all unreported steps can be removed together. `-smt-unused-steps-precise` also proves each query without each step in its core. The warning is off by default."
+    },
+    "notes": [
+      {
+        "title": "Reading a core",
+        "from": "let check checker loc (query : Vox_smt.query) indicators =",
+        "text": "Only queries that mention a step not yet known to be used are checked. If the query with indicators is not proved, every step it mentions counts as used; otherwise the steps in the core are used. In the precise mode each candidate step is dropped in turn and the smaller core kept when the proof still succeeds.",
+        "to": "List.iter (fun (_, step) -> use step) found"
+      }
+    ]
+  },
+  "verification/monotonic_clock.c": {
+    "what": {
+      "short": "A C stub exposing the runtime's monotonic clock (caml_time_counter) in seconds, used for the verifier's deadlines and budgets."
+    }
+  },
+  "verification/dune": {
+    "what": {
+      "short": "Builds the verifier as three compiler-libs libraries (vox_smt, vox_vc, vox_smt_solver) and installs them next to the compiler's own libraries."
+    }
+  },
+  "verification/runtime/": {
+    "what": {
+      "short": "The glue that installs the verifier into the compiler: Vox_verify.install registers the unit and termination hooks, the solver session, caches and -smt flags.",
+      "long": "Dune selects `vox_verify.enabled.ml` when the verifier libraries are available, which is only in the `main` build context, and otherwise `vox_verify.disabled.ml`, whose `install` registers only the trust flags `-vox-library` and `-vox-audit`. The drivers (`ocamlc`, `ocamlopt`, the toplevels) call `Vox_verify.install` at startup, and the type checker calls the installed hooks through `Verification.run_unit` and `Verification.check_termination`."
+    }
+  },
+  "verification/runtime/vox_verify.enabled.ml": {
+    "what": {
+      "short": "The verifier's driver: one Z3 session per pass, resource limits and warnings, the proof caches, counterexample reporting, and the -smt-* and -dvc flags.",
+      "long": [
+        "Proofs are bounded by Z3's resource count: a batch gets the warning threshold (1,000,000 units by default) and a single obligation the limit (40,000,000); the 60-second wall-clock deadline is only a backstop. Only `unsat` counts as a proof. A query with bitwise operations is first tried with them abstracted.",
+        "With `VOX_VERIFY_CACHE` set there are two caches. A unit is skipped when the compiler executable's digest, the solver's identity, the source, the settings that change typing (`Vox_trust.config`), the imported interfaces' CRCs and the flags are unchanged; an entry counts only if it holds its key's digest, and the unit cache is not used under `-pp`, `-ppx`, `-args` or `-args0`. A query is not sent again when its SMT-LIB text, the solver identity (name, reported version and platform), the source names of its symbols and the kind of attempt are unchanged; since resource limits make outcomes reproducible, failures are cached too. A cache directory that another user owns, or that group or others can write, is ignored. `-smt-assume-verified` skips verification, and the compiled unit records that it did."
+      ]
+    },
+    "notes": [
+      {
+        "title": "Solver identity",
+        "from": "(* The solver's configured name, the version it reports and the platform it",
+        "span": 12,
+        "text": "The platform is part of the key because resource counts differ between builds of one Z3 version, so a cache shared between machines could replay an outcome obtained under other counts. The verifier refuses a solver whose `-version` does not report Z3 4.16.0, or reports nothing, unless `-smt-solver-any-version` is given; the compiled unit then records the version used."
+      },
+      {
+        "title": "Budgets",
+        "from": "let prove poll check ~batch loc query =",
+        "to": "let attempt ~exact ~limit query =",
+        "text": "Verification requires a 63-bit target. A batch is limited to the warning threshold, so a slow batch is abandoned quickly and its obligations retried one at a time with the full limit, where a slow proof is reported at its own location."
+      },
+      {
+        "title": "Cached outcomes",
+        "from": "(* Resource limits make every outcome except a wall-clock timeout or a",
+        "to": "| Failure reason ->",
+        "text": "A recorded outcome is replayed without starting the solver. Otherwise the answer is mapped to an outcome: `unsat` is a proof; `unknown` or a timeout with the resource count at the limit is exhaustion. For a single exact obligation a countermodel is shrunk (`smaller_model`) before it is shown with source names."
+      },
+      {
+        "title": "Abstract first, then exact",
+        "from": "let exact () = attempt ~exact:true ~limit query in",
+        "span": 14,
+        "text": "With bitwise operations, the abstracted query (`Vox_smt.abstract_bitwise`) is tried under the warning threshold; only a proof counts, and any other outcome falls back to the exact bitvector query."
+      },
+      {
+        "title": "Installation",
+        "from": "let install () =",
+        "to": "Clflags.add_arguments __LOC__",
+        "text": "Registers the unit hook, which consults the unit cache and otherwise runs `Vox_vc.generate` in a solver session, and the termination hook, which runs `Vox_vc.check_termination`. `-smt-budget` bounds a whole pass in milliseconds."
+      }
+    ]
+  },
+  "verification/runtime/vox_verify.disabled.ml": {
+    "what": {
+      "short": "The stand-in used when the verifier libraries are not built: install only registers -vox-library and -vox-audit (Vox_trust.add_arguments)."
+    }
+  },
+  "verification/tests/": {
+    "what": {
+      "short": "Unit tests of the verifier's OCaml libraries: the SMT IR and printer, the Z3 runner against a fake solver, the encoding, and VC generation against real Z3.",
+      "long": "`fake_solver.ml` simulates misbehaving solvers (hangs, early exits, floods of output) for `test_smt`. The tests that need Z3 (`test_z3`, `test_vc`, `smt_solver`) run only with `VOX_TEST_Z3=true`. The language-level tests of Vox are in `testsuite/tests/vox/`."
+    }
+  },
+  "verification/library/": {
+    "what": {
+      "short": "The verified Vox library: ownership primitives, sequence and array theories, time credits, and the code of the verified demos.",
+      "long": [
+        "Ownership and storage: `Pref`, `Ghost_pref`, `Borrow`, `Borrow_iarray`, `Raw_memory`, `Unique_cell`, `Verified_atomic`, the locks and `One_shot` channels. Their externals are contracts over the C stubs in `runtime/pref.c` and `runtime/borrow.c`, assumed without proof; everything built on them is verified. Theories: `Vox_sequence`, `Vox_int_sequence`, `Vox_iarray`, `Vox_machine_semantics`. Credits: `Vox_credits`, `Vox_big_credits`.",
+        "The demos' modules are here too: the flat hash table (`vox_table_*`, `Vox_verified_flat_hashtbl`), union-find, SAT and CDCL, LZ4, HTTP, RSA, e-graphs, diff and merge sort. `build.sh` verifies each module it lists with `ocamlc`, compiles it again with `ocamlopt -smt-assume-verified`, which is recorded as verified because the bytecode compilation verified the same program, and installs `vox_borrow.cma`/`.cmxa` under `lib/ocaml/vox`. RSA, diff, the e-graphs, `Vox_machine_semantics` and `Vox_traversal` are not in its list: the tests that compile them are what verifies them. See the [README](src:verification/library/README.md)."
+      ]
+    }
+  },
+  "verification/playground/": {
+    "what": {
+      "short": "The in-browser checker: the compiler's front end and the verifier compiled to JavaScript with js_of_ocaml, and Z3 4.16.0 as WebAssembly.",
+      "long": "`vox_playground.ml` does what `ocamlc -extension refinement_types -c` does up to Lambda, and `vox_smt_solver.ml` implements the solver interface over Z3 in the same worker. See the [README](src:verification/playground/README.md)."
+    }
+  },
+  "verification/playground/web/": {
+    "what": {
+      "short": "The playground page: editor and results (app.js), a worker that loads Z3 and the checker (worker.js), and the shared loader (checker.js)."
+    }
+  },
+  "verification/playground/differential/": {
+    "what": {
+      "short": "Differential check of the playground against the native compiler: same status and same output on each input, with cases for integer literals, overflow and shifts.",
+      "long": "The cases matter because under js_of_ocaml the host's `int` has 32 bits, while the checker must reason about the 63-bit target."
+    }
+  },
+  "verification/playground/examples/": {
+    "what": {
+      "short": "The playground's example programs: refinements, a counterexample, division, lemmas, termination, ghost erasure, an affine ghost token, unreachable code."
+    }
+  },
+  "verification/catalogue/": {
+    "what": {
+      "short": "The demo catalogue: a static site with one page per verified demo, quoting the repository at one commit, built by build.py.",
+      "long": "`pages/` holds the pages, with `_trust.md` for what every demo trusts; `catalogue.json` holds the demo order, the language mechanisms and each demo's root modules for the line counts (`line_stats.py`, `source_inventory.ml`). See the [README](src:verification/catalogue/README.md), and for example [the flat hash table](demo:flat-hash-table)."
+    }
+  },
+  "verification/catalogue/pages/": {
+    "what": {
+      "short": "One Markdown page per demo, plus _trust.md: what is proved and its limits, a client, a rejected program, the interface, the trusted base and how to reproduce."
+    }
+  },
+  "verification/catalogue/compiler-example/": {
+    "what": {
+      "short": "The WebAssembly module the HM-to-Wasm demo compiler emits for its example, its final memories, and scripts that regenerate and run them."
+    }
+  },
+  "verification/benchmarks/": {
+    "what": {
+      "short": "Scripts and results that measure verification and run time of demos with an installed Vox compiler: the flat hash table, quicksort, LZ4, borrow reads, HOF idioms.",
+      "long": "`lz4_interop.py` also cross-checks the verified LZ4 codec against liblz4 in both directions."
+    }
+  },
+  "verification/site/": {
+    "what": {
+      "short": "Build and deploy scripts for the public Vox site: the landing page, the catalogue and the playground, all describing one pushed commit."
+    }
+  },
+  "verification/demos/": {
+    "what": {
+      "short": "Small executable programs that use verified library modules: a diff printer (Vox_diff) and an HTTP streaming parser run (Vox_http)."
+    }
+  },
+  "verification/wasm-differential/": {
+    "what": {
+      "short": "Runs the differential test of the HM-to-Wasm demo's WebAssembly model against Node, sequentially or split across jobs.",
+      "long": "The tester itself is `testsuite/tests/vox/wasm_differential.ml`; without options this runs its fixed configuration and compares with the reference output."
+    }
+  },
+  "verification/clients/": {
+    "what": {
+      "short": "Holds only an .ocamlformat file that disables formatting; the client checks that lived here moved into testsuite/tests/vox/."
+    }
+  },
+  "verification/library/README.md": {
+    "what": {
+      "short": "How to build and use the verified library, and a guide to its sequence, array, ordering and borrow APIs."
+    }
+  },
+  "verification/library/build.sh": {
+    "what": {
+      "short": "Builds and installs the library: ocamlc verifies each listed module, then ocamlopt -smt-assume-verified compiles it; RSA, diff, e-graphs, Vox_machine_semantics and Vox_traversal are unlisted."
+    }
+  },
+  "verification/library/pref.mli": {
+    "what": {
+      "short": "Typed heaps with affine ownership: handles 'a Pref.t, void tokens whose meaning own t is a ghost finite map, and alloc, read and write as heap equations.",
+      "long": [
+        "A token `'a token : void mod total contended` is erased at run time; uniqueness keeps live tokens disjoint and `split`/`join` partition them. Operations state their effect as equations on `own`, for example `own u === Heap.put (own t) p v` for `write`. Reads borrow the token locally.",
+        "The `Heap` operations and six of the heap laws are `external`s, assumed without proof; `put_union_law`, `commute_law`, `exclude_put_law` and `exclude_union_law` are `val`s proved in `pref.ml`. `alloc`, `read` and `write` are partial, so heap code is not `total` even though its state is uniquely owned."
+      ]
+    }
+  },
+  "verification/library/pref.ml": {
+    "what": {
+      "short": "The Pref externals over the C stubs in runtime/pref.c, whose contracts are assumed, and proofs of four heap laws."
+    }
+  },
+  "verification/library/ghost_pref.mli": {
+    "what": {
+      "short": "Pref operations whose tokens are ghost: the same heaps, with tokens passed @ ghost, for ownership that exists only in proofs (locks, atomics, tables)."
+    }
+  },
+  "verification/library/vox_pref_semantics.mli": {
+    "what": {
+      "short": "The pointwise finite-map meaning of Pref heaps (empty, put, union, restrict, exclude) as lemmas, proved from the verifier's built-in heap observations."
+    }
+  },
+  "verification/library/borrow.mli": {
+    "what": {
+      "short": "Owned arrays and exclusive, callback-scoped slices of them, specified by a current model and a prophesied final model as Vox_sequence lists.",
+      "long": "A `Slice.t` is local and unique; `set` changes `current` and keeps `final`, and `finish` resolves the prophecy (`final s === current s`). `split_at`, `with_range` and `parallel` lend sub-slices to callbacks and relate their final models to the parent's. The operations that create or end a loan are not `total`; `get`, `set` and `swap` are. `Owned_array` splits without copying and appends adjacent pieces of one array in place. The design is in [borrows-and-slices.md](src:design-docs/borrows-and-slices.md)."
+    }
+  },
+  "verification/library/borrow.ml": {
+    "what": {
+      "short": "Borrow's implementation: trusted externals over runtime/borrow.c, and the verified wrappers built on them."
+    }
+  },
+  "verification/library/borrow_iarray.mli": {
+    "what": {
+      "short": "The same loans as Borrow, with iarray models and int indices; get_int and set_int are native builtins without bounds checks."
+    }
+  },
+  "verification/library/raw_memory.mli": {
+    "what": {
+      "short": "Explicitly freed byte buffers with per-byte ghost ownership; malloc can fail and returns the token, and a finaliser reclaims unreachable buffers."
+    }
+  },
+  "verification/library/unique_cell.mli": {
+    "what": {
+      "short": "A mutable cell holding a unique payload, with ghost ownership of its contents: create, take, put and replace."
+    }
+  },
+  "verification/library/verified_atomic.mli": {
+    "what": {
+      "short": "Sequentially consistent integer atomics with an invariant: each operation opens it at its event and needs a total ghost transition restoring it.",
+      "long": "The transition receives the invariant's and the caller's disjoint ghost tokens and returns new ones; it is never executed. The external contracts are assumed. Natively, results are bare scalars."
+    }
+  },
+  "verification/library/spin_lock.mli": {
+    "what": {
+      "short": "A spin lock on one atomic flag guarding one cell, built on Verified_atomic and shared by Reference_lock and Unique_lock; normal-return safety only."
+    }
+  },
+  "verification/library/reference_lock.mli": {
+    "what": {
+      "short": "A lock-guarded non-negative integer reference: try_acquire transfers the cell's ownership on success and nothing on failure."
+    }
+  },
+  "verification/library/unique_lock.mli": {
+    "what": {
+      "short": "A shared lock over one unique payload, built on Spin_lock and Unique_cell."
+    }
+  },
+  "verification/library/one_shot.mli": {
+    "what": {
+      "short": "One-shot channels: affine send and receive endpoints for one ownership transfer that preserves the payload's refinement; no progress is claimed."
+    }
+  },
+  "verification/library/channel_buffer.mli": {
+    "what": {
+      "short": "An owned byte, a receipt stating its value, and operations to fill it, dispatch the work, and read the receipt."
+    }
+  },
+  "verification/library/concurrency-boundary.md": {
+    "what": {
+      "short": "The review surface of the channels and reference locks: what is checked, what is trusted, and the interfaces to read in order."
+    }
+  },
+  "verification/library/vox_parallel.mli": {
+    "what": {
+      "short": "fork_join: runs two portable, once thunks in parallel with an ordinary polymorphic type, so refined result types carry each branch's proof across the join."
+    }
+  },
+  "verification/library/vox_credits.mli": {
+    "what": {
+      "short": "Time credits as a library: a void token with a ghost int balance, spent by tick; Make () is generative and only its Budget can mint credits.",
+      "long": "Algorithms take a `Vox_credits.S`, which has no `Budget`, so they can only spend and split credits they are given. Credits count only the events a program charges; they are not a machine-time bound."
+    }
+  },
+  "verification/library/vox_credits.ml": {
+    "what": {
+      "short": "The credit token is a record with a single ghost balance field, so it has void layout and no run-time cost."
+    }
+  },
+  "verification/library/vox_big_credits.mli": {
+    "what": {
+      "short": "Time credits with an unbounded Bigint.t balance, used for amortised bounds such as union-find's inverse-Ackermann analysis."
+    }
+  },
+  "verification/library/vox_sequence.mli": {
+    "what": {
+      "short": "The theory of lists as sequences with Bigint.t indices: length, append, at, take, drop and more, each with its _def equation and laws.",
+      "long": "The checker does not unfold these definitions; each `f_def` states one unfolding and is called explicitly in proofs. `For_all`, `Map` and `Fold` functors lift a named predicate or function over whole lists. `length` is an external (`caml_vox_sequence_length`) with a built-in meaning in the verifier."
+    }
+  },
+  "verification/library/vox_int_sequence.mli": {
+    "what": {
+      "short": "Integer sorting semantics: adjacent nondecreasing order and preservation of every multiplicity, followed by derived bounds and update lemmas."
+    }
+  },
+  "verification/library/vox_iarray.mli": {
+    "what": {
+      "short": "The theory of immutable arrays with int indices: get, at, updated, sub and their laws, plus For_all and ordering over Int."
+    }
+  },
+  "verification/library/vox_string_view.mli": {
+    "what": {
+      "short": "A ghost view of a string as a char iarray, with length and unchecked get specified against it."
+    }
+  },
+  "verification/library/vox_machine_semantics.mli": {
+    "what": {
+      "short": "Relates 63-bit int arithmetic and comparison to Bigint.t arithmetic through signed wrap-around, as lemmas."
+    }
+  },
+  "verification/library/vox_control.mli": {
+    "what": {
+      "short": "A trusted 16-byte control-group match (NEON, SSE2 or scalar) with a bounds-checked wrapper, and verified mask helpers; the flat hash table uses Vox_table_storage.match16 instead."
+    }
+  },
+  "verification/library/vox_table_storage.mli": {
+    "what": {
+      "short": "The flat hash table's trusted storage boundary: externals over runtime/pref.c for slots, control bytes and counts, specified against a ghost table model."
+    }
+  },
+  "verification/library/vox_table_bits.ml": {
+    "what": {
+      "short": "Bit tricks for probing: count trailing zeros as a native builtin, and the first set lane of a 16-bit match mask."
+    }
+  },
+  "verification/library/vox_verified_flat_hashtbl.mli": {
+    "what": {
+      "short": "The public interface of the verified flat hash table: Make (Key) is open addressing with SIMD group probing, specified against an abstract finite map.",
+      "long": "A table has an aliasable handle and an erased permission carrying its current finite map. Reads borrow that permission; mutations return its replacement. Capacity, storage state and heap equations are private. Contracts describe normal return. See [the demo page](demo:flat-hash-table)."
+    }
+  },
+  "verification/library/vox_verified_flat_hashtbl.ml": {
+    "what": {
+      "short": "Assembles the table from the vox_table_* modules and bridges their bindings model to the public finite-map specification."
+    }
+  },
+  "verification/library/vox_merge_sort.mli": {
+    "what": {
+      "short": "Sorting over a total preorder, preserving every multiplicity within a verified credit budget; comparison calls each consume one credit."
+    }
+  },
+  "verification/library/vox_union_find.mli": {
+    "what": {
+      "short": "Union-find core with union by rank and path compression: an event history and potential invariant bounding the charged steps by inverse-Ackermann amortised fees.",
+      "long": "Costs are hand-placed charges in a cost model, paid with `Vox_big_credits`; see [the demo page](demo:online-union-find)."
+    }
+  },
+  "verification/library/vox_union_find_online.mli": {
+    "what": {
+      "short": "Online union-find over a growing set of elements, with private forest snapshots, partition projection laws, and exact cost accounting."
+    }
+  },
+  "verification/library/vox_connectivity.mli": {
+    "what": {
+      "short": "Imperative union-find whose contracts establish the pure snapshot relations empty, added, same and joined.",
+      "long": [
+        "Partition exposes concrete class-list snapshots and relational transitions. model maps an owned state to a snapshot. find returns the representative and preserves all pure observations. Cost separately specifies exact events, credits and inverse-Ackermann fee bounds. Forest paths and rank-based representative choice remain private."
+      ]
+    }
+  },
+  "verification/library/vox_sat.mli": {
+    "what": {
+      "short": "Extends an UNSAT answer to Boolean assignments of any length."
+    }
+  },
+  "verification/library/vox_sat_spec.mli": {
+    "what": {
+      "short": "The specification of the SAT solvers: CNF formulas, evaluation, satisfiability and unsatisfiability, and accepted inputs."
+    }
+  },
+  "verification/library/vox_cdcl_total.mli": {
+    "what": {
+      "short": "A CDCL SAT solver with clause learning and backjumping; learned clauses carry ghost derivations, and solve_complete is total and decides every accepted input."
+    }
+  },
+  "verification/library/vox_lz4.mli": {
+    "what": {
+      "short": "Raw LZ4 block compression and decompression, verified to round-trip, with typed errors for malformed input."
+    }
+  },
+  "verification/library/vox_http.mli": {
+    "what": {
+      "short": "An incremental HTTP/1.1 parser whose state and remaining input follow the exact pure machine in Vox_http_model, independently of chunk boundaries."
+    }
+  },
+  "verification/library/vox_rsa.mli": {
+    "what": {
+      "short": "Modular exponentiation over Bigint.t, and RSA encryption and decryption stated as powers modulo n."
+    }
+  },
+  "verification/library/vox_diff.mli": {
+    "what": {
+      "short": "Generic diff, application, and inversion contracts stated through the pure model.",
+      "long": [
+        "`diff` takes equality and two input lists and returns a diff with the right source and target. Its erased `optimality` field proves that no diff with those endpoints costs less. `apply` succeeds exactly on the source; `invert` swaps source and target and preserves cost. The supplied comparison decides exact element equality. Inputs exceeding 1,000,000 elements raise `Invalid_argument`."
+      ]
+    }
+  },
+  "verification/library/vox_egraph_rule_handle.mli": {
+    "what": {
+      "short": "The public interface of the e-graph: admit, query, saturate and same_class on a unique graph, with erased derivations for proved equalities."
+    }
+  },
+  "verification/library/vox_traversal.mli": {
+    "what": {
+      "short": "Experimental specifications of map and fold with possibly partial callbacks, stated through total relations; not installed."
+    }
+  }
+}

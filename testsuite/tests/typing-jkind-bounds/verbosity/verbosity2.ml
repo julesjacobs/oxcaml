@@ -19,14 +19,17 @@ type t
       mod forkable
           unyielding
           many
-          stateless
+          total
           immutable
+          stateless
           portable
           contended
           local
           unique
           static
+          ghost
           internal
+          maybe_logical
 |}]
 
 type t : immediate
@@ -35,15 +38,18 @@ type t
   : value non_pointer non_null
       mod global
           many
-          stateless
+          total
           immutable
           forkable
           unyielding
           aliased
+          stateless
           portable
           contended
           external_
+          logical
           static
+          ghost
 |}]
 
 type t : float64
@@ -51,16 +57,19 @@ type t : float64
 type t
   : float64
       mod external_
+          logical
           local
           unforkable
           yielding
           once
-          stateful
-          nonportable
           unique
+          partial
+          stateful
           read_write
+          nonportable
           uncontended
           static
+          ghost
 |}]
 
 type t : any
@@ -71,13 +80,16 @@ type t
           unforkable
           yielding
           once
-          stateful
-          nonportable
           unique
+          partial
+          stateful
           read_write
+          nonportable
           uncontended
           static
+          ghost
           internal
+          maybe_logical
 |}]
 
 type t : value mod portable
@@ -89,12 +101,15 @@ type t
           unforkable
           yielding
           once
-          stateful
           unique
+          partial
+          stateful
           read_write
           uncontended
           static
+          ghost
           internal
+          maybe_logical
 |}]
 
 type t : value mod stateless
@@ -108,10 +123,13 @@ type t
           yielding
           once
           unique
+          partial
           read_write
           uncontended
           static
+          ghost
           internal
+          maybe_logical
 |}]
 
 type 'a t : immutable_data with 'a
@@ -121,14 +139,17 @@ type 'a t
       mod forkable
           unyielding
           many
-          stateless
+          total
           immutable
+          stateless
           portable
           contended
           local
           unique
           static
+          ghost
           internal
+          maybe_logical
       with 'a
 |}]
 
@@ -139,14 +160,17 @@ type ('a
          mod forkable
              unyielding
              many
-             stateless
+             total
              immutable
+             stateless
              portable
              contended
              local
              unique
              static
-             internal)
+             ghost
+             internal
+             maybe_logical)
      t
 |}]
 
@@ -161,10 +185,13 @@ type ('a
              yielding
              once
              unique
+             partial
              read_write
              uncontended
              static
-             internal)
+             ghost
+             internal
+             maybe_logical)
      t
 |}]
 
@@ -178,11 +205,14 @@ type 'a t
           unforkable
           yielding
           once
-          stateful
           unique
+          partial
+          stateful
           read_write
           uncontended
           static
+          ghost
+          maybe_logical
       with 'a @@ external_
 |}]
 
@@ -195,12 +225,15 @@ type 'a t
           unforkable
           yielding
           once
-          stateful
-          nonportable
           unique
+          partial
+          stateful
           read_write
+          nonportable
           uncontended
           static
+          ghost
+          maybe_logical
 |}]
 
 type 'a t : immutable_data with 'a @@ external_
@@ -210,13 +243,16 @@ type 'a t
       mod forkable
           unyielding
           many
-          stateless
+          total
           immutable
+          stateless
           portable
           contended
           local
           unique
           static
+          ghost
           internal
+          maybe_logical
       with 'a
 |}]

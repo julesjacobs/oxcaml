@@ -1,0 +1,13 @@
+ok: the generic client is in the dump
+ok: the client reads none of the fields for Model and the ghost observers
+ok: the client calls no logical map operation or lemma and builds no certificate
+ok: permissions have the zero-width native layout
+ok: client.cmm calls no ownership primitive, logical map operation or lemma
+ok: client-O3.cmm calls no ownership primitive, logical map operation or lemma
+ok: the -O3 client makes no generic application
+ok: the -O3 client calls the table's search directly
+ok: scan returns two unboxed scalars
+ok: scan does not allocate
+ok: scan's rank is an unused ghost parameter
+ok: scan raises no exhaustion exception
+ok: scan does not compact

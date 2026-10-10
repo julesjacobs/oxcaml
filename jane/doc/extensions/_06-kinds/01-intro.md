@@ -69,10 +69,10 @@ the bounds:
 
 ```
 value mod global contended portable aliased many forkable unyielding immutable
-          stateless non_float external_
+          total stateless non_float external_
 ```
 
-This kind indicates that `int` mode crosses on all eight of our modal axes. In
+This kind indicates that `int` mode crosses on all modal axes. In
 addition, `int`s are not `float`s and they do not need to be garbage-collected
 (they are `external_` to the garbage collector).
 

@@ -1,0 +1,8 @@
+File "http_body_rejected.ml", line 27, characters 2-4:
+27 |   ()
+       ^^
+Error: Refinement could not be proved (counterexample)
+File "http_body_rejected.ml", lines 24-25, characters 16-59:
+24 | ................match (status (feed (initial ()) input).state) with
+25 |       | Complete request -> request.body === [] | _ -> true...
+  The refinement is stated here.

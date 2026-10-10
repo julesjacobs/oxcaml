@@ -13,7 +13,7 @@ type 'a ast : immutable_data with 'a =
   | Alt : 'a list -> 'a ast
 [@@unsafe_allow_any_mode_crossing]
 [%%expect{|
-type 'a ast : immutable_data with 'a = Alt : 'a list -> 'a ast
+type 'a ast : logical_data with 'a = Alt : 'a list -> 'a ast
 [@@unsafe_allow_any_mode_crossing]
 |}]
 

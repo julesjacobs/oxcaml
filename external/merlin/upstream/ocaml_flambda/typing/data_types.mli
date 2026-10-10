@@ -27,7 +27,7 @@ type constructor_description =
     cstr_arity: int;                    (* Number of arguments *)
     cstr_tag: tag;                      (* Tag for heap blocks *)
     cstr_repr: variant_representation;  (* Repr of the outer variant *)
-    cstr_shape: constructor_representation option;
+    cstr_shape: constructor_representation;
                                         (* Repr of the constructor itself *)
     cstr_constant: bool;                (* True if all args are void *)
     cstr_consts: int;                   (* Number of constant constructors *)
@@ -54,12 +54,15 @@ val may_equal_constr :
 val cstr_res_type_path : constructor_description -> Path.t
 
 type 'a gen_label_description =
-  { lbl_name: string;                   (* Short name *)
+  { lbl_id: Ident.t;                    (* Binder for dependent fields *)
+    lbl_name: string;                   (* Short name *)
     lbl_res: type_expr;                 (* Type of the result *)
     lbl_arg: type_expr;                 (* Type of the argument *)
     lbl_mut: mutability;                (* Is this a mutable field? *)
     lbl_modalities: Mode.Modality.Const.t;
                                         (* Modalities on the field *)
+    lbl_ghost: bool;                   (* Ghost field: no slot; reads
+                                           fabricate a placeholder *)
     lbl_sort: Jkind_types.Sort.Const.t option; (* Sort of the argument *)
     lbl_pos: int;                       (* Position in type *)
     lbl_all: 'a gen_label_description array;   (* All the labels in this type *)

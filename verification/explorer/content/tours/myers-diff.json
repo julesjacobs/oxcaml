@@ -1,0 +1,69 @@
+{
+  "_about": "Myers diff: the pure model, public contracts, clients, and private implementation.",
+  "id": "myers-diff",
+  "title": "Myers diff",
+  "kind": "demo",
+  "demo": "myers-diff",
+  "order": 24,
+  "summary": [
+    "`Vox_diff.diff equal old fresh` computes a generic diff with the right source and target and minimum insertion/deletion cost. Read the pure definitions and operation contracts first; the frontier and its proofs are private."
+  ],
+  "stops": [
+    {
+      "title": "A diff and its meaning",
+      "path": "verification/library/vox_diff_spec.ml",
+      "from": "type ('a : logical_data) operation",
+      "to": "Bigint.add 1Z (cost rest)",
+      "text": "A diff is a list of `Keep`, `Delete`, and `Insert`. `source` collects kept and deleted elements; `target` collects kept and inserted elements. `cost` counts insertions and deletions. These direct definitions are the pure model."
+    },
+    {
+      "title": "The returned optimality proof",
+      "path": "verification/library/vox_diff_spec.ml",
+      "from": "type 'a optimal_diff",
+      "to": "}",
+      "text": "The result pairs `edits` with an erased proof that every diff with the same endpoints costs at least as much. The proof field refers to the earlier `edits` field. No distance recurrence appears in this specification."
+    },
+    {
+      "title": "Operation contracts",
+      "path": "verification/library/vox_diff.mli",
+      "from": "(** The comparison",
+      "to": "&& target inverse === source edits && cost inverse = cost edits}",
+      "text": "`diff` takes equality and two input lists. Its result has the right source and target; the result carries an erased `optimality` proof that no competing diff with those endpoints costs less. `apply` succeeds exactly on the source; `invert` swaps source and target and preserves cost."
+    },
+    {
+      "title": "A generic verified client",
+      "path": "testsuite/tests/vox/diff_public_client.ml",
+      "from": "let verified_client",
+      "to": "  edits",
+      "text": "The client calls `diff` normally and calls the result’s erased `optimality` field to compare against an arbitrary competing diff. It also checks forward and backward application. These proof calls are erased: the boundary test verifies one runtime call to `diff`."
+    },
+    {
+      "title": "A rejected claim",
+      "path": "testsuite/tests/vox/diff_rejected.ml",
+      "from": "let nonminimal () =",
+      "to": "|}]",
+      "text": "Deleting and reinserting the same element costs two; keeping it costs zero. The claimed cost comparison is therefore rejected. The same file rejects a cost comparison without matching endpoints, a wrong patch result, a dishonest element comparison, and private helper access."
+    },
+    {
+      "title": "Inside the implementation",
+      "path": "verification/library/vox_diff.ml",
+      "from": "type 'a entry =",
+      "to": "&& cost e.rev = depth)",
+      "text": "Private frontier entries hold a position, remaining input lists, and a reverse diff. The invariant connects this implementation state to the pure source, target, and cost. It is hidden by `vox_diff.mli`."
+    },
+    {
+      "title": "Termination without a runtime counter",
+      "path": "verification/library/vox_diff.ml",
+      "from": "let rec (search @ total)",
+      "to": "[@@decreases budget]",
+      "text": "The frontier always has a candidate within the remaining ghost budget. An unfinished frontier has positive budget; advancing decreases it. The lower-bound proof later establishes that the returned cost is exactly minimum cost."
+    },
+    {
+      "title": "Proof erasure",
+      "path": "testsuite/tests/vox/diff_boundary_check.ml",
+      "from": "let expected =",
+      "to": "\"diff\", [ \"bounded_length\"; \"search\"; \"snake\" ] ]",
+      "text": "The bytecode and native Lambda audits check the algorithm call graph, including the supplied `equal` callback. Metric and proof computations must be absent. `reverse_into` is the reconstruction routine allowed from the private helper module."
+    }
+  ]
+}

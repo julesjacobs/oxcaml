@@ -57,9 +57,26 @@ module Separability : sig
   val upper_bound_if_is_always_gc_ignorable : unit -> t
 end
 
+(** The jkind axis of logicality. [Logical] means the values of the type form a
+    set in the mathematical sense, so total code may look inside them: base
+    types, and tuples, records, variants and functions built from logical types,
+    where any recursion goes through an [[@@inductive]] declaration.
+    [Maybe_logical] makes no promise: [type t = Roll of (t -> int)] has no set
+    of values (Cantor), a possibly cyclic [type t = A | B of t] has values that
+    are not finite trees, and an abstract type could be either. *)
+module Logicality : sig
+  type t =
+    | Logical
+    | Maybe_logical
+
+  include Axis_ops with type t := t
+end
+
 module Axis : sig
   module Nonmodal : sig
-    type 'a t = Externality : Externality.t t
+    type 'a t =
+      | Externality : Externality.t t
+      | Logicality : Logicality.t t
   end
 
   (** Represents an axis of a jkind *)
@@ -70,6 +87,8 @@ module Axis : sig
   type packed = Pack : 'a t -> packed [@@unboxed]
 
   val all : packed list
+
+  val equal : packed -> packed -> bool
 
   val name : _ t -> string
 end

@@ -28,13 +28,15 @@ val require_portable : ('a : value mod portable). 'a -> unit = <fun>
    more than we use if we ran out previously. *)
 let f (t : int list list list t) = require_portable t
 [%%expect {|
+val f : int list list list t -> unit = <fun>
+|}, Principal{|
 Line 1, characters 52-53:
 1 | let f (t : int list list list t) = require_portable t
                                                         ^
 Error: The value "t" has type "int list list list t"
        but an expression was expected of type "('a : value mod portable)"
        The kind of int list list list t is
-           immutable_data
+           logical_data
              with int list list list
              with int list list list list list list list list list list list list list
                     @@
@@ -62,13 +64,15 @@ val require_portable : ('a : value mod portable). 'a -> unit = <fun>
 |}]
 let f (t : int list list list Foo.t) = require_portable t
 [%%expect {|
+val f : int list list list Foo.t -> unit = <fun>
+|}, Principal{|
 Line 1, characters 56-57:
 1 | let f (t : int list list list Foo.t) = require_portable t
                                                             ^
 Error: The value "t" has type "int list list list Foo.t"
        but an expression was expected of type "('a : value mod portable)"
        The kind of int list list list Foo.t is
-           immutable_data
+           logical_data
              with int list list list
              with int list list list list list list list list list list list list list
                     @@

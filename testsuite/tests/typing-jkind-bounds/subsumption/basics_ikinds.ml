@@ -42,14 +42,14 @@ Lines 3-5, characters 6-3:
 5 | end
 Error: Signature mismatch:
        Modules do not match:
-         sig type t : immutable_data non_pointer end
+         sig type t : logical_data non_pointer end
        is not included in
          sig type t : immediate end
        Type declarations do not match:
-         type t : immutable_data non_pointer
+         type t : logical_data non_pointer
        is not included in
          type t : immediate
-       The kind of the first is immutable_data non_pointer
+       The kind of the first is logical_data non_pointer
          because of the definition of t at line 4, characters 2-32.
        But the kind of the first must be a subkind of immediate
          because of the definition of t at line 2, characters 2-20.
@@ -125,11 +125,9 @@ type ('a, 'b) u : immutable_data with 'a with 'b
 Line 2, characters 0-53:
 2 | type ('a, 'b) t : immutable_data with 'a = ('a, 'b) u
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "('a, 'b) u" is immutable_data with 'a with 'b
-         because of the definition of u at line 1, characters 0-48.
-       But the kind of type "('a, 'b) u" must be a subkind of
-           immutable_data with 'a
-         because of the definition of t at line 2, characters 0-53.
+Error: This type definition does not satisfy its kind annotation
+         immutable_data with 'a,
+       because 'b is not mod forkable unyielding many total immutable.
 |}]
 
 type ('a, 'b) t : immutable_data with 'a with 'b
@@ -473,7 +471,7 @@ Error: Signature mismatch:
          type 'a t = 'a t2 t1 * unit t1
        is not included in
          type 'a t : immutable_data with 'a t1 t2 with unit t2
-       The kind of the first is immutable_data with 'a t2 t1 with unit t1
+       The kind of the first is logical_data with 'a t2 t1 with unit t1
          because it's a tuple type.
        But the kind of the first must be a subkind of
            immutable_data with 'a t1 t2 with unit t2
@@ -586,11 +584,25 @@ type r
 Line 3, characters 0-62:
 3 | type should_fail_too : immutable_data with r = [`A of int ref]
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "[ `A of int ref ]" is mutable_data
-         because it's a polymorphic variant type.
-       But the kind of type "[ `A of int ref ]" must be a subkind of
-           immutable_data with r
-         because of the definition of should_fail_too at line 3, characters 0-62.
+Error: This type definition does not satisfy its kind annotation
+         immutable_data with r,
+       because ref is not mod immutable.
+|}]
+
+module M : sig
+  type r
+  type t : immutable_data with r = int ref
+end = struct
+  type r = int
+  type t = int ref
+end
+[%%expect{|
+Line 3, characters 2-42:
+3 |   type t : immutable_data with r = int ref
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This type definition does not satisfy its kind annotation
+         immutable_data with r,
+       because ref is not mod immutable.
 |}]
 
 type should_likewise_fail : immutable_data = (int ref * (int -> int))
@@ -610,7 +622,8 @@ type and_even_this_should_fail : immutable_data = [`A of [`B of int ref]]
 Line 1, characters 0-73:
 1 | type and_even_this_should_fail : immutable_data = [`A of [`B of int ref]]
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "[ `A of [ `B of int ref ] ]" is mutable_data
+Error: The kind of type "[ `A of [ `B of int ref ] ]" is
+           mutable_data mod logical
          because it's a polymorphic variant type.
        But the kind of type "[ `A of [ `B of int ref ] ]" must be a subkind of
            immutable_data

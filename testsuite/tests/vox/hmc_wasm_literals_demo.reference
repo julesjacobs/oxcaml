@@ -1,0 +1,1 @@
+Compiler literal loads: Boolean, Nil, full-width Word64, PC updates and frame preservation passed

@@ -1,0 +1,21 @@
+vox_cdcl_total_proof.ml, mutant copy:
+< (Bigint.add (Bigint.of_int n) 1Z))
+> 1Z)
+## vox_cdcl_total_proof.ml, real:
+exit 0
+## vox_cdcl_total_proof.ml, mutant:
+File "vox_cdcl_total_proof.ml", line 4187, characters 2-25:
+4187 |   unassigned_bounds after)
+         ^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample: n = 1)
+File "vox_cdcl_total_proof.ml", lines 4174-4181, characters 16-58:
+4174 | ................if Vox_sequence.length after === Bigint.of_int n
+4175 |         && Bigint.compare
+4176 |           (count_absent (clause_universe n (2 * n))
+4177 |             (entry.clause :: database_clauses database))
+4178 |           (count_absent (clause_universe n (2 * n))
+4179 |             (database_clauses database)) < 0 then
+4180 |       Bigint.compare (progress_measure n (entry :: database) after)
+4181 |         (progress_measure n database before) < 0 else true...........
+  The refinement is stated here.
+exit 2

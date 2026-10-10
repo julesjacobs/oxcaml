@@ -51,11 +51,14 @@ let tlambda_to_bytecode i tlambda ~as_arg_for =
        tlambda
        |> print_if i.ppf_dump Clflags.dump_tlambda Printlambda.lambda
        |> Slambda.eval
+            ~cu_static_data:(fun _ ->
+              Misc.fatal_errorf
+                "Cross-module static evaluation not implemented in bytecode")
             (print_if i.ppf_dump Clflags.dump_slambda Printlambda.slambda)
-       |> fun { Slambda.slv_comptime = _; slv_runtime } ->
+       |> fun (_static_data, lambda) ->
           (* CR layout poly: Drop the comptime part until top-level modules can
              be static. *)
-          slv_runtime
+          lambda
        |> print_if i.ppf_dump Clflags.dump_debug_uid_tables
           (fun ppf _ -> Type_shape.print_debug_uid_tables ppf)
        |> print_if i.ppf_dump Clflags.dump_rawlambda Printlambda.lambda
@@ -97,6 +100,11 @@ let emit_bytecode i
          (Emitcode.to_file oc i.module_name cmo ~required_globals
             ~main_module_block_format ~arg_descr);
     )
+
+let emit_lambda_program info program =
+  let bytecode = tlambda_to_bytecode info program ~as_arg_for:None in
+  if not (Clflags.should_stop_after Clflags.Compiler_pass.Lambda)
+  then emit_bytecode info bytecode
 
 type starting_point =
   | Parsing
@@ -156,6 +164,7 @@ let implementation_aux ~start_from ~source_file ~output_prefix
     emit_bytecode info bytecode
 
 let implementation ~start_from ~source_file ~output_prefix ~keep_symbol_tables =
+  Vox_verify.install ();
   let start_from = start_from |> starting_point_of_compiler_pass in
   implementation_aux ~start_from ~source_file ~output_prefix ~keep_symbol_tables
     ~compilation_unit:Inferred_from_output_prefix

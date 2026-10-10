@@ -111,7 +111,7 @@ let typecheck_intf info ast =
   let modes =
     let modalities = tsg.Typedtree.sig_modalities in
     let staticity = Typemod.staticity_of_modalities modalities in
-    let mode = Env.mode_unit ~staticity in
+    let mode = Persistent_env.mode_pers_mod staticity in
     Includecore.Specific ((mode, None), mode)
   in
   ignore (Includemod.signatures info.env ~mark:true ~modes sg sg);
@@ -136,7 +136,16 @@ let emit_signature info alerts tsg =
     let staticity =
       Typemod.staticity_of_modalities tsg.Typedtree.sig_modalities
     in
-    Env.save_signature ~alerts (tsg.Typedtree.sig_type, staticity)
+    let vox =
+      Vox_trust.interface_record
+        ~source_file:(Unit_info.original_source_file info.target) tsg
+    in
+    if !Vox_trust.audit then
+      Vox_audit.print_unit
+        ~source_file:(Unit_info.original_source_file info.target)
+        ~current:(Compilation_unit.name_as_string info.module_name)
+        ~record:vox;
+    Env.save_signature ?vox ~alerts (tsg.Typedtree.sig_type, staticity)
       (Compilation_unit.name info.module_name) kind
       (Unit_info.cmi info.target)
   in
@@ -191,7 +200,14 @@ let implementation ~hook_parse_tree ~hook_typed_tree info ~backend =
     let { ast = parsed; info } : _ Parse_result.t = parse_impl info in
     hook_parse_tree parsed;
     if Clflags.(should_stop_after Compiler_pass.Parsing) then () else begin
+      Vox_trust.reset ();
+      Vox_trust.counterparts := Vox_audit.counterparts info.target;
       let typed = typecheck_impl info parsed in
+      if !Vox_trust.audit then
+        Vox_audit.print_unit
+          ~source_file:(Unit_info.original_source_file info.target)
+          ~current:(Compilation_unit.name_as_string info.module_name)
+          ~record:!Vox_trust.implementation_record;
       hook_typed_tree typed;
       if Clflags.(should_stop_after Compiler_pass.Typing) then () else begin
         backend info typed;

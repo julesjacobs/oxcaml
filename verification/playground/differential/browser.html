@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vox playground: differential check</title>
+<link rel="stylesheet" href="../catalogue.css">
+<style>body{padding:20px 24px;font-size:14px}pre{max-height:none}</style>
+</head>
+<body>
+<!-- Checks every file of bundle.json with the playground's worker, in this
+     browser, and compares the results with the native compiler's, which
+     run.py --browser-bundle recorded there. Open it from a server that sends
+     the COOP/COEP headers (serve.py). -->
+<h1>Differential check in this browser</h1>
+<p id="status">Loading…</p>
+<pre id="report"></pre>
+<script>
+(async () => {
+  const status = document.getElementById('status');
+  const report = document.getElementById('report');
+  const worker = new Worker('../worker.js');
+  const waiting = new Map();
+  await new Promise((ready) => {
+    worker.onmessage = ({ data }) => {
+      if (data.ready) ready();
+      else if (waiting.has(data.id)) waiting.get(data.id)(data);
+    };
+  });
+  const bundle = await (await fetch('bundle.json')).json();
+  const started = performance.now();
+  let agree = 0, notChecked = 0, id = 0;
+  const lines = [];
+  for (const [index, item] of bundle.entries()) {
+    status.textContent = `Checking ${index + 1} of ${bundle.length}: ${item.key}`;
+    const message = await new Promise((done) => {
+      waiting.set(++id, done);
+      worker.postMessage({ id, name: item.key.split('/').pop(), source: item.source });
+    });
+    if (message.error) {
+      lines.push(`FAILED ${item.key}: ${message.error}`);
+    } else if (message.result.status === 3) {
+      notChecked += 1;
+      lines.push(`NOT CHECKED ${item.key} (native status ${item.status})`);
+    } else if (message.result.status === item.status && message.result.output === item.output) {
+      agree += 1;
+    } else {
+      lines.push(`DISAGREE ${item.key}: native status ${item.status}, browser status ${message.result.status}\n` +
+                 `--- native\n${item.output}--- browser\n${message.result.output}`);
+    }
+  }
+  const seconds = ((performance.now() - started) / 1000).toFixed(1);
+  status.textContent = `${agree} of ${bundle.length - notChecked} checked files agree with the native compiler; ` +
+    `${notChecked} not checked in the browser; ${seconds} s.`;
+  status.dataset.agree = agree;
+  status.dataset.checked = bundle.length - notChecked;
+  report.textContent = lines.join('\n');
+})();
+</script>
+</body>
+</html>

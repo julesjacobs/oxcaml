@@ -24,7 +24,7 @@ type 'a t : immutable_data = A of 'a
 Line 1, characters 0-36:
 1 | type 'a t : immutable_data = A of 'a
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is immutable_data with 'a
+Error: The kind of type "t" is logical_data with 'a
          because it's a boxed variant type.
        But the kind of type "t" must be a subkind of immutable_data
          because of the annotation on the declaration of the type t.
@@ -35,7 +35,7 @@ type ('a, 'b) t : immutable_data with 'a = { a : 'a; b : 'b }
 Line 1, characters 0-61:
 1 | type ('a, 'b) t : immutable_data with 'a = { a : 'a; b : 'b }
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is immutable_data with 'a with 'b
+Error: The kind of type "t" is logical_data with 'a with 'b
          because it's a boxed record type.
        But the kind of type "t" must be a subkind of immutable_data with 'a
          because of the annotation on the declaration of the type t.
@@ -46,7 +46,7 @@ type 'a t : immutable_data = Foo of 'a @@ portable
 Line 1, characters 0-50:
 1 | type 'a t : immutable_data = Foo of 'a @@ portable
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is immutable_data with 'a @@ portable
+Error: The kind of type "t" is logical_data with 'a @@ portable
          because it's a boxed variant type.
        But the kind of type "t" must be a subkind of immutable_data
          because of the annotation on the declaration of the type t.
@@ -58,6 +58,7 @@ Error: The kind of type "t" is immutable_data with 'a @@ portable
          yielding: mod unyielding with 'a ≰ mod unyielding
          statefulness: mod stateless with 'a ≰ mod stateless
          visibility: mod immutable with 'a ≰ mod immutable
+         totality: mod total with 'a ≰ mod total
 |}]
 
 module M : sig
@@ -101,7 +102,7 @@ Error: Signature mismatch:
          type 'a t = Foo of 'a @@ many contended
        is not included in
          type 'a t : immutable_data
-       The kind of the first is immutable_data with 'a @@ many contended
+       The kind of the first is logical_data with 'a @@ many contended
          because of the definition of t at line 4, characters 2-41.
        But the kind of the first must be a subkind of immutable_data
          because of the definition of t at line 2, characters 2-28.
@@ -112,6 +113,7 @@ Error: Signature mismatch:
          yielding: mod unyielding with 'a ≰ mod unyielding
          statefulness: mod stateless with 'a ≰ mod stateless
          visibility: mod immutable with 'a ≰ mod immutable
+         totality: mod total with 'a ≰ mod total
 |}]
 
 module M : sig
@@ -136,7 +138,7 @@ Error: Signature mismatch:
          type t = Foo of a | Bar of a @@ contended
        is not included in
          type t : immutable_data with a @@ portable
-       The kind of the first is immutable_data with a
+       The kind of the first is logical_data with a
          because of the definition of t at line 6, characters 4-45.
        But the kind of the first must be a subkind of
            immutable_data with a @@ portable
@@ -175,7 +177,7 @@ Line 3, characters 11-12:
                ^
 Error: This type "a" = "int ref" should be an instance of type
          "('a : immutable_data)"
-       The kind of a is mutable_data.
+       The kind of a is mutable_data mod logical.
        But the kind of a must be a subkind of immutable_data
          because of the definition of t at line 2, characters 0-28.
 |}, Principal{|
@@ -186,7 +188,8 @@ Line 3, characters 11-12:
                ^
 Error: This type "a" = "int ref" should be an instance of type
          "('a : immutable_data)"
-       The kind of a is mutable_data with int @@ forkable unyielding many.
+       The kind of a is
+           mutable_data mod logical with int @@ forkable unyielding many.
        But the kind of a must be a subkind of immutable_data
          because of the definition of t at line 2, characters 0-28.
 
@@ -195,6 +198,7 @@ Error: This type "a" = "int ref" should be an instance of type
          portability: mod portable with int ≰ mod portable
          statefulness: mod stateless with int ≰ mod stateless
          visibility: mod read_write ≰ mod immutable
+         totality: mod total with int ≰ mod total
 |}]
 
 type 'a u = Foo of 'a @@ portable
@@ -208,7 +212,7 @@ Line 3, characters 11-25:
                ^^^^^^^^^^^^^^
 Error: This type "(int -> int) u" should be an instance of type
          "('a : immutable_data)"
-       The kind of (int -> int) u is value non_float mod portable immutable
+       The kind of (int -> int) u is value non_float mod immutable portable
          because of the definition of u at line 1, characters 0-33.
        But the kind of (int -> int) u must be a subkind of immutable_data
          because of the definition of t at line 2, characters 0-28.
@@ -220,8 +224,7 @@ Line 3, characters 11-25:
                ^^^^^^^^^^^^^^
 Error: This type "(int -> int) u" should be an instance of type
          "('a : immutable_data)"
-       The kind of (int -> int) u is
-           immutable_data with int -> int @@ portable
+       The kind of (int -> int) u is logical_data with int -> int @@ portable
          because of the definition of u at line 1, characters 0-33.
        But the kind of (int -> int) u must be a subkind of immutable_data
          because of the definition of t at line 2, characters 0-28.
@@ -233,6 +236,7 @@ Error: This type "(int -> int) u" should be an instance of type
          yielding: mod unyielding with int -> int ≰ mod unyielding
          statefulness: mod stateless with int -> int ≰ mod stateless
          visibility: mod immutable with int -> int ≰ mod immutable
+         totality: mod total with int -> int ≰ mod total
 |}]
 
 module M : sig

@@ -1,0 +1,2 @@
+n > 0 implies n - 1 < n: proved
+n - 1 < n: refuted at n = -4611686018427387904 (min_int)

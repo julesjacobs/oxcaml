@@ -27,6 +27,8 @@ val leq : t -> t -> bool
 
 val co_sub : t -> t -> t
 
+val imply : t -> t -> t
+
 val equal : t -> t -> bool
 
 val hash : t -> int
@@ -49,10 +51,12 @@ val create :
   contention:Mode.Contention.Const.t ->
   forkable:Mode.Forkable.Const.t ->
   yielding:Mode.Yielding.Const.t ->
+  totality:Mode.Totality.Const.t ->
   statefulness:Mode.Statefulness.Const.t ->
   visibility:Mode.Visibility.Const.t ->
   staticity:Mode.Staticity.const ->
   externality:Jkind_axis.Externality.t ->
+  logicality:Jkind_axis.Logicality.t ->
   t
 
 val areality : t -> Mode.Regionality.Const.t
@@ -69,6 +73,8 @@ val forkable : t -> Mode.Forkable.Const.t
 
 val yielding : t -> Mode.Yielding.Const.t
 
+val totality : t -> Mode.Totality.Const.t
+
 val statefulness : t -> Mode.Statefulness.Const.t
 
 val visibility : t -> Mode.Visibility.Const.t
@@ -76,6 +82,18 @@ val visibility : t -> Mode.Visibility.Const.t
 val staticity : t -> Mode.Staticity.const
 
 val externality : t -> Jkind_axis.Externality.t
+
+val logicality : t -> Jkind_axis.Logicality.t
+
+val set_logicality : Jkind_axis.Logicality.t -> t -> t
+
+(** The logicality axis alone at [Maybe_logical], every other axis at [bot].
+    Meeting a kind with it keeps only its logicality. *)
+val logicality_only : t
+
+(** Every axis at [top] except logicality, at [Logical]. Meeting a kind with it
+    drops its logicality. *)
+val without_logicality : t
 
 val to_mode_crossing : t -> Mode.Crossing.t
 
@@ -90,12 +108,15 @@ val sync_data : t
 
 val value : t
 
+(** An arrow's own contribution. It is a [Logical] on the logicality axis:
+    whether an arrow type is logical is decided by its argument and result,
+    which ikinds adds separately. *)
 val arrow : t
 
 val immediate : t
 
 val object_legacy : t
 
-(** Map from internal axis number (used in diagnostics) to an axis
-    descriptor. *)
+(** Map from internal axis number (used in diagnostics) to an axis descriptor.
+*)
 val axis_number_to_axis_packed : int -> Jkind_axis.Axis.packed

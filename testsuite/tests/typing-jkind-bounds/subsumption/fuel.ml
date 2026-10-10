@@ -3,7 +3,7 @@
     expect;
 *)
 
-type 'a my_list = 'a list = [] | ( :: ) of 'a * 'a my_list
+type 'a my_list = 'a list = [] | ( :: ) of 'a * 'a my_list [@@inductive]
 
 (* At the time this test is written, "fuel" is used to deal with recursive types. Two
    types that are equal can get different jkinds due to fuel running out at different
@@ -12,7 +12,7 @@ type 'a my_list = 'a list = [] | ( :: ) of 'a * 'a my_list
    to be true, and all instances of them in this file should also be updated. *)
 type t : immutable_data = int list my_list list my_list list my_list list my_list list my_list list my_list list
 [%%expect {|
-type 'a my_list = 'a list = [] | (::) of 'a * 'a my_list
+type 'a my_list = 'a list = [] | (::) of 'a * 'a my_list [@@inductive]
 type t =
     int list my_list list my_list list my_list list my_list list my_list list
     my_list list
@@ -26,7 +26,7 @@ Line 1, characters 0-94:
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: The kind of type "int list list list list list list list list list list
                         list list list" is
-           immutable_data
+           logical_data
              with int list list list list list list list list list list list list
          because it's a boxed variant type.
        But the kind of type "int list list list list list list list list list
@@ -44,7 +44,7 @@ Line 1, characters 0-104:
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: The kind of type "'a list list list list list list list list list list
                         list list list" is
-           immutable_data
+           logical_data
              with 'a list list list list list list list list list list list list
          because it's a boxed variant type.
        But the kind of type "'a list list list list list list list list list

@@ -45,6 +45,9 @@ let file = Variables.make ("file",
 let readonly_files = Variables.make ("readonly_files",
   "Files which are only read by the tests")
 
+let source_directories = Variables.make ("source_directories",
+  "Additional directories searched for test source files")
+
 let make = Variables.make ("MAKE",
   "Command used to invoke make")
 
@@ -56,6 +59,9 @@ let ocamltest_log = Variables.make ("ocamltest_log",
 
 let output = Variables.make ("output",
   "Where the output of executing the program is saved")
+
+let prebuilt_modules = Variables.make ("prebuilt_modules",
+  "Modules taken from the prebuilt test library instead of being compiled")
 
 let program = Variables.make ("program",
   "Name of program produced by ocamlc.byte and ocamlopt.byte")
@@ -128,10 +134,12 @@ let init () =
     exit_status;
     file;
     readonly_files;
+    source_directories;
     make;
     ocamltest_response;
     ocamltest_log;
     output;
+    prebuilt_modules;
     program; program2;
     reason;
     reference;

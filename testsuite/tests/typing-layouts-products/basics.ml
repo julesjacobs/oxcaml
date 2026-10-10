@@ -1105,8 +1105,8 @@ let f_external_kind_annot_mode_crosses_local_2
   : local_ t -> t = fun x -> x
 [%%expect{|
 type t
-  : value non_pointer mod global external_
-    & (float64 mod global & value non_pointer mod global external_)
+  : value non_pointer mod global external_ logical
+    & (float64 mod global & value non_pointer mod global external_ logical)
 val f_external_kind_annot_mode_crosses_local_2 : t @ local -> t = <fun>
 |}]
 
@@ -2055,7 +2055,7 @@ Line 1, characters 19-27:
                        ^^^^^^^^
 Error: This type "string t" = "#(string u * string u)"
        should be an instance of type "('a : any mod global)"
-       The kind of string t is immutable_data & immutable_data
+       The kind of string t is logical_data & logical_data
          because it is an unboxed tuple.
        But the kind of string t must be a subkind of any mod global
          because of the definition of needs_any_mod_global at line 4, characters 0-47.
@@ -2085,9 +2085,7 @@ Line 3, characters 9-30:
 Error: This type "#(int * string * int)" should be an instance of type
          "('a : any mod external_)"
        The kind of #(int * string * int) is
-           immutable_data non_pointer
-           & immutable_data
-           & immutable_data non_pointer
+           logical_data non_pointer & logical_data & logical_data non_pointer
          because it is an unboxed tuple.
        But the kind of #(int * string * int) must be a subkind of
            any mod external_
@@ -2129,16 +2127,7 @@ Line 1, characters 19-27:
 1 | type should_fail = string t needs_any_mod_global
                        ^^^^^^^^
 Error: This type "string t" should be an instance of type "('a : any mod global)"
-       The kind of string t is immutable_data & immutable_data
-         because of the definition of t at line 2, characters 0-47.
-       But the kind of string t must be a subkind of any mod global
-         because of the definition of needs_any_mod_global at line 4, characters 0-47.
-|}, Principal{|
-Line 1, characters 19-27:
-1 | type should_fail = string t needs_any_mod_global
-                       ^^^^^^^^
-Error: This type "string t" should be an instance of type "('a : any mod global)"
-       The kind of string t is immutable_data & immutable_data
+       The kind of string t is logical_data & logical_data
          because of the definition of t at line 2, characters 0-47.
        But the kind of string t must be a subkind of any mod global
          because of the definition of needs_any_mod_global at line 4, characters 0-47.
@@ -2157,9 +2146,7 @@ Line 4, characters 9-17:
 Error: This type "s_record" should be an instance of type
          "('a : any mod external_)"
        The kind of s_record is
-           immutable_data non_pointer
-           & immutable_data
-           & immutable_data non_pointer
+           logical_data non_pointer & logical_data & logical_data non_pointer
          because of the definition of s_record at line 3, characters 0-51.
        But the kind of s_record must be a subkind of any mod external_
          because of the definition of t at line 1, characters 0-31.
@@ -2341,10 +2328,9 @@ Lines 1-6, characters 0-30:
 4 |     c : #(int64# * #(float# * (bool -> bool) * 'b ));
 5 |     d : char }
 6 |   constraint 'b = int * string
-Error: The kind of type "record" is value non_float mod immutable with 'a
-         because it's a boxed record type.
-       But the kind of type "record" must be a subkind of value mod portable
-         because of the annotation on the declaration of the type record.
+Error: This type definition does not satisfy its kind annotation
+         value mod portable,
+       because functions are not mod portable.
 |}]
 
 (****************************************************************************)

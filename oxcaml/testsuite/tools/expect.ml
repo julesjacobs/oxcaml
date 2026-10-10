@@ -35,6 +35,6 @@ end);;
 let () =
   Expectcommon.run
     ~read_anonymous_arg
-    ~extra_args:Options.list
+    ~extra_args:(Options.list @ !Clflags.arg_spec)
     ~extra_init:(fun () -> ())
     (module Toplevel)
