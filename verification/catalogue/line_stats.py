@@ -131,7 +131,7 @@ def module(path):
 
 class Parser:
     """source_inventory.ml, built once per compiler, with parse results
-    cached by content hash and typed trees by closure."""
+    cached by content and source kind, and typed trees by closure."""
 
     def __init__(self, prefix, cache):
         self.cache = cache
@@ -263,7 +263,9 @@ def closure(source, parser, scope):
             seen.add(name)
             for path in index[name].values():
                 raw = source.read(path).encode()
-                batch.append((path, raw, hashlib.sha256(raw).hexdigest()))
+                digest = hashlib.sha256(
+                    Path(path).suffix.encode() + b'\0' + raw).hexdigest()
+                batch.append((path, raw, digest))
         syntax = parser.parse({sha: (Path(p).suffix, raw) for p, raw, sha in batch})
         for path, raw, sha in batch:
             files.append((path, raw, syntax[sha]))
