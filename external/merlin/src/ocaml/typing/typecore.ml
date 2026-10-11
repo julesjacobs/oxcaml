@@ -2734,7 +2734,8 @@ let label_has_dependencies label ty =
 
 let record_field_projections env ~unboxed record label =
   let types, result =
-    instance_labels ~fixed:false ~representative:label label.lbl_all in
+    instance_labels ~fixed:false ~representative:label label.lbl_all
+  in
   unify_exp_types record.rexp_loc env result record.rexp_type;
   let owner = match get_desc (expand_head env result) with
     | Tconstr (path, _, _) -> path
@@ -8403,19 +8404,18 @@ and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
                           ~sub:[Location.msg ~loc:argument_loc
                                   "This is the argument.";
                                 Location.msg
-                                  "@[Hint: bind the argument to a variable \
-                                   with a let@ outside this expression.@]"]
-                          "@[the refinement type of this expression \
-                           mentions the argument@ for parameter %a, which \
-                           is not a variable@]"
+                                  "@[Hint: bind the argument to a variable with a let@ \
+                                   outside this expression.@]"]
+                          "@[the refinement type of this expression mentions the \
+                           argument@ for parameter %a, which is not a variable@]"
                           Style.inline_code parameter
                     | None ->
                         Location.errorf ~loc:sexp.pexp_loc
                           ~sub:[Location.msg
                                   "@[Hint: bind %a outside this expression.@]"
                                   Style.inline_code (Ident.name id)]
-                          "the refinement type of this expression escapes \
-                           the scope of binding %a"
+                          "the refinement type of this expression escapes the scope of \
+                           binding %a"
                           Style.inline_code (Ident.name id)
                   in
                   Error_forward error
@@ -12001,9 +12001,6 @@ and type_function_
       let newtype = id, newtype_var, jkind_annot, uid in
       begin
         try with_explanation ty_fun.explanation (fun () ->
-              (* [type_newtype] closes [exp_type] over the enclosing
-                 parameters, while [ty_expected] is opened by them: compare
-                 them closed. *)
               unify_exp_types loc env exp_type
                 (close_dependent_type dependent_openings
                    (instance ty_expected)));

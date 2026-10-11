@@ -2115,9 +2115,12 @@ Error: The functor application "Set.Make(Set)(A)" is ill-typed.
           Modules do not match:
             sig
               module type OrderedType = Set.OrderedType
+              module type TotalOrderedType = Set.TotalOrderedType
               module type S = Set.S
+              module type TotalS = Set.TotalS
               module Make = Set.Make
               module MakePortable = Set.MakePortable
+              module MakeTotal = Set.MakeTotal
             end
           is not included in
             Set.OrderedType

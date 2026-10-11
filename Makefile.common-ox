@@ -300,6 +300,8 @@ install_for_test: install
 	cp $(ocamldir)/verification/vox_smt.{ml,mli} _runtest/verification/
 	cp -R $(ocamldir)/verification/library _runtest/verification/
 	cp -R $(ocamldir)/verification/demos _runtest/verification/
+	mkdir _runtest/verification/playground
+	cp -R $(ocamldir)/verification/playground/examples _runtest/verification/playground/
 	# Use rsync to ensure hardlinks are created on both Linux and macOS
 	rsync --link-dest=../../$(ocamldir)/testsuite/ -a $(ocamldir)/testsuite/ _runtest/testsuite/
 	 # replace backend-specific testsuite/tools with their new versions
@@ -369,6 +371,8 @@ install_for_test: install
 	 $(cpl) stdlib/runtime_events/{lib,}runtime_events* otherlibs/runtime_events; \
 	 ln -s ../_build/main/$(ocamldir)/toplevel/byte/.ocamltoplevel.objs/byte toplevel; \
 	)
+
+	cp $(ocamldir)/runtime/borrow.c _runtest/runtime/
 
 	# Various directories are put on the -I paths by tools/Makefile;
 	# utils/ is one such, so we just dump the .cm* files in there for

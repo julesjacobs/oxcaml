@@ -6,12 +6,7 @@ let library = ref false
 
 let audit = ref false
 
-let registered = ref false
-
-(* Merlin: the compiler registers [-vox-library] and [-vox-audit] here; Merlin
-   does not parse compiler command lines through [Clflags], so there is
-   nothing to register. *)
-let add_arguments () = registered := true
+let add_arguments () = ()
 
 type external_kind =
   | Refined
@@ -514,8 +509,6 @@ let source_digest (ast : Parsetree.structure) =
 
 let config () =
   String.concat " "
-    (* Merlin: its [Clflags] has no [noassert]; Merlin never compiles code,
-       so the flag is recorded as off. *)
     ([ Printf.sprintf "noassert=%b unsafe=%b nopervasives=%b rectypes=%b"
          false !Clflags.unsafe !Clflags.nopervasives
          !Clflags.recursive_types ]

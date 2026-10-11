@@ -444,8 +444,8 @@ let ocaml_ignored_flags =
     "-smt-assume-verified";
     "-smt-solver-any-version";
     "-smt-unused-steps-precise";
-    "-vox-audit";
     "-vox-library";
+    "-vox-audit";
     "-absname";
     "-alias-deps";
     "-annot";

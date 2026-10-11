@@ -4178,6 +4178,7 @@ let abstract_declaration_is_logical env path _decl =
    included; abstract module types are hidden. *)
 let can_unpack_total env ty =
   let rec module_type_hides env ~constrained ~prefix = function
+    | Mty_for_hole -> true
     | Mty_ident path ->
       begin match Env.find_modtype_expansion path env with
       | mty -> module_type_hides env ~constrained ~prefix mty
@@ -4191,7 +4192,6 @@ let can_unpack_total env ty =
     | Mty_alias _ | Mty_strengthen _ ->
       (* The types are those of an existing module. *)
       false
-    | Mty_for_hole -> true
   and signature_item_hides env ~constrained ~prefix = function
     | Sig_type (id, decl, _, _) ->
       declaration_is_hidden (Path.Pident id) decl
