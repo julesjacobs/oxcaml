@@ -2768,12 +2768,16 @@ and transl_record ~scopes loc env mode fields repres opt_init_expr =
     let ll, shape = List.split (Array.to_list lv) in
     if all_ghost
     then begin
-      (* An all-ghost record has kind void: no value exists at run time.
-         Field expressions (and an extended expression) are still evaluated
-         for their effects. *)
+      (* Standalone ghost records erase; inline records retain the constructor
+         tag. Field expressions are still evaluated for their effects. *)
+      let result =
+        match repres with
+        | Record_inlined (Ordinary {runtime_tag}, _, Variant_boxed _) ->
+            tagged_immediate runtime_tag
+        | _ -> void_value (of_location ~scopes loc)
+      in
       let body =
-        List.fold_right (fun l acc -> Lsequence (l, acc)) ll
-          (void_value (of_location ~scopes loc))
+        List.fold_left (fun acc l -> Lsequence (l, acc)) result ll
       in
       match opt_init_expr with
       | None -> body

@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_int_sequence.mli vox_int_sequence.ml vox_iarray.mli vox_iarray.ml borrow_iarray.mli borrow_iarray.ml vox_table_model.ml vox_table_model_proofs.ml vox_table_bits.ml vox_table_probe.ml vox_table_wrap.ml vox_table_mask.ml vox_table_map.ml vox_table_invariant.ml vox_table_initial.ml vox_table_update_proofs.ml vox_table_insert_proofs.ml vox_table_migration_proofs.ml vox_table_read_proofs.ml vox_table_search_spec.ml vox_table_stop_proof.ml pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_table_storage.mli vox_table_storage.ml vox_table_search.ml vox_table_mutation.ml vox_table_coverage.ml vox_table_occupancy.ml vox_table_vacancy_progress.ml vox_table_vacancy.ml vox_table_insert.ml vox_table_migrate.ml vox_table_resize.ml vox_verified_flat_hashtbl.mli vox_table_bindings.ml vox_table_bindings_bridge.ml vox_table_implementation.ml vox_verified_flat_hashtbl.ml vox_egraph_key.ml vox_egraph_arena_spec.ml vox_egraph_index_spec.ml vox_egraph_owner.ml vox_egraph_union_spec.ml vox_egraph_union.ml vox_egraph_language_spec.ml vox_egraph_language_proof.ml vox_egraph_rule_spec.ml vox_egraph_rules.ml vox_egraph_derivation_spec.ml vox_egraph_derivation.ml vox_egraph_origin_frame.ml vox_egraph_rule_semantics.ml vox_egraph_ghost_arrays.ml vox_egraph_rule_union.ml vox_egraph_match_spec.ml vox_egraph_rule_node.ml vox_egraph_rule_store.ml vox_egraph_rule_hashcons.ml vox_egraph_rule_query.ml vox_egraph_rule_apply.ml vox_egraph_match_observation.ml vox_egraph_match_scan.ml vox_egraph_match_evidence.ml vox_egraph_match_subst.ml vox_egraph_match_intro.ml vox_egraph_match_bindings.ml vox_egraph_binding_frame.ml vox_egraph_match_store_intro.ml vox_egraph_pattern_admit.ml vox_egraph_rule_rewrite.ml vox_egraph_closure_spec.ml vox_egraph_quantifier.mli vox_egraph_quantifier_measure.ml vox_egraph_quantifier.ml vox_egraph_saturation_spec.ml vox_egraph_saturation_proof.ml vox_egraph_assignment_spec.ml vox_egraph_assignments.ml vox_egraph_assignment_proof.ml vox_egraph_rule_scan.ml vox_egraph_rule_cursor.ml vox_egraph_rules_scan.ml vox_egraph_congruence_spec.ml vox_egraph_congruence_proof.ml vox_egraph_fixedpoint_spec.ml vox_egraph_rule_saturate.ml vox_egraph_snapshot_spec.ml vox_egraph_snapshot_proof.ml vox_egraph_preservation_spec.ml vox_egraph_preservation_proof.ml vox_egraph_model_evidence.ml vox_egraph_rule_handle.mli vox_egraph_rule_handle.ml vox_egraph_interpret_wrapping.mli vox_egraph_interpret_wrapping.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_int_sequence.mli vox_int_sequence.ml vox_iarray.mli vox_iarray.ml borrow_iarray.mli borrow_iarray.ml vox_table_model.ml vox_table_model_proofs.ml vox_table_bits.ml vox_table_probe.ml vox_table_wrap.ml vox_table_mask.ml vox_table_map.ml vox_table_invariant.ml vox_table_initial.ml vox_table_update_proofs.ml vox_table_insert_proofs.ml vox_table_migration_proofs.ml vox_table_read_proofs.ml vox_table_search_spec.ml vox_table_stop_proof.ml pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_table_storage.mli vox_table_storage.ml vox_table_search.ml vox_table_mutation.ml vox_table_coverage.ml vox_table_occupancy.ml vox_table_vacancy_progress.ml vox_table_vacancy.ml vox_table_insert.ml vox_table_migrate.ml vox_table_resize.ml vox_verified_flat_hashtbl.mli vox_table_bindings_bridge.ml vox_table_implementation.ml vox_verified_flat_hashtbl.ml vox_egraph_key.ml vox_egraph_arena_spec.ml vox_egraph_index_spec.ml vox_egraph_owner.ml vox_egraph_union_spec.ml vox_egraph_union.ml vox_egraph_language_spec.ml vox_egraph_language_proof.ml vox_egraph_rule_spec.ml vox_egraph_rules.ml vox_egraph_derivation_spec.ml vox_egraph_derivation.ml vox_egraph_origin_frame.ml vox_egraph_rule_semantics.ml vox_egraph_ghost_arrays.ml vox_egraph_rule_union.ml vox_egraph_match_spec.ml vox_egraph_rule_node.ml vox_egraph_rule_store.ml vox_egraph_rule_hashcons.ml vox_egraph_rule_query.ml vox_egraph_rule_apply.ml vox_egraph_match_observation.ml vox_egraph_match_scan.ml vox_egraph_match_evidence.ml vox_egraph_match_subst.ml vox_egraph_match_intro.ml vox_egraph_match_bindings.ml vox_egraph_binding_frame.ml vox_egraph_match_store_intro.ml vox_egraph_pattern_admit.ml vox_egraph_rule_rewrite.ml vox_egraph_closure_spec.ml vox_egraph_quantifier.mli vox_egraph_quantifier_measure.ml vox_egraph_quantifier.ml vox_egraph_saturation_spec.ml vox_egraph_saturation_proof.ml vox_egraph_assignment_spec.ml vox_egraph_assignments.ml vox_egraph_assignment_proof.ml vox_egraph_rule_scan.ml vox_egraph_rule_cursor.ml vox_egraph_rules_scan.ml vox_egraph_congruence_spec.ml vox_egraph_congruence_proof.ml vox_egraph_fixedpoint_spec.ml vox_egraph_rule_saturate.ml vox_egraph_snapshot_spec.ml vox_egraph_snapshot_proof.ml vox_egraph_preservation_spec.ml vox_egraph_preservation_proof.ml vox_egraph_model_evidence.ml vox_egraph_rule_handle.mli vox_egraph_rule_handle.ml vox_egraph_interpret_wrapping.mli vox_egraph_interpret_wrapping.ml";
  { bytecode; }
  { native; }
 *)
@@ -102,13 +102,16 @@ let () =
   match id with
   | None -> assert false
   | Some a ->
+    let before = ghost_ (G.model (borrow_ state)) in
     let #{G.id; state} = G.admit state (L.Bool_lit false) in
+    ghost_ (G.Preserves.extends_def before (G.model (borrow_ state)));
     match id with
     | None -> assert false
     | Some b ->
       let #{G.equal; state; proof = _} = G.same_class state a b in
       assert (not equal);
       let #{G.equal; state = _; proof} = G.same_class state a a in
+      ghost_ (let _ : {u : unit | equal} = () in ());
       assert equal;
       ghost_ (
         match proof with
@@ -121,6 +124,12 @@ let () =
   let rules = R.No_rules in
   if not (R.valid rules) then assert false else
   let state = G.create rules in
+  ghost_ (
+    G.model_bounds (borrow_ state);
+    let view = G.model (borrow_ state) in
+    let observed_rules = G.rules (borrow_ state) in
+    let _ : {u : unit | 0 <= view.count && view.count <= 512
+      && R.valid observed_rules} = () in ());
   let size = Obj.size (Obj.repr state) in
   let expected = if Sys.backend_type = Sys.Native then 2 else 3 in
   assert (size = expected)

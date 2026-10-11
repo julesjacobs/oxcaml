@@ -15,7 +15,7 @@ let (join @ total) : (a : D.index) @ immutable -> (b : D.index) @ immutable ->
     {u : unit | S.advance a before === middle && S.advance b middle === after} ->
     {n : D.index | S.advance n before === after} @ immutable ghost =
   fun a b before middle after premise -> ghost_ (
-    S.advance_add a b before; D.add a b)
+    Hmc_source_proofs.advance_add a b before; D.add a b)
 
 let (atomic @ total) : (env : V.value) @ immutable -> (term : D.term) @ immutable ->
     (value : V.value) @ immutable -> (k : S.continuation) @ immutable ->

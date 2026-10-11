@@ -1,8 +1,8 @@
 # Vox demo catalogue
 
-A static site with one page per verified demo: what is proved, what the demo
-trusts, what it does not claim, a checked client, a rejected program, the
-interface and how to reproduce the checks. Pages quote the repository at one
+A static site with one page per verified demo: its interface and definitions,
+what it trusts, what it does not claim, a checked client, a rejected program,
+and how to reproduce the checks. Pages quote the repository at one
 commit, so the site describes exactly that commit.
 
 ## Build
@@ -48,16 +48,31 @@ uses `/vox/`); without it there is no such link.
 Every factual claim must be true of the commit the site is built from.
 Quote code only through directives, preferring `"from" "to"` patterns to
 line numbers so edits elsewhere in a file do not break a page. Keep the
-order of the existing pages: opening claim and what is not proved; client
-example; a rejected program with the compiler's message; interface; trusted
-base; scope; reproduce. Write plainly; define Vox syntax the first time a
-page uses it.
+order of the existing pages: opening behavior summary; interface
+and the definitions it uses; trusted base; scope; client example; a rejected
+program with the compiler's message; reproduce. The build checks that
+Interface, Trusted base and Scope are the first three sections. Keep proof
+bodies out of the interface section and identify the files that define each
+contract predicate. Write plainly; define Vox syntax the first time a page
+uses it. Link complete definitions with `[label](src:PATH)`; the renderer
+checks the repository path and links the source in the built catalogue.
 
-Status: `owner-review` when two independent reviews found no false claim
-and the page states every gap they found; `reviewed` once the owner has
-checked it after that; `review-pending` when a review found something to
-fix or has not been redone; `in-progress` while work on the demo is under
-way.
+A demo should make it plausible that engineers could write, read and maintain
+specifications like these in a real codebase. Prefer a useful, understandable
+promise to a stronger one that needs a thicket of definitions. Judge the
+interface together with the pure definitions it depends on: an opaque name
+or a link does not make a complicated meaning simpler.
+
+Union–find illustrates the aim. Its snapshot is a list of classes with a
+representative for each; its operation relations permit different list
+orders and representative choices. The forest and bridge proofs are private.
+More proof work is worthwhile when it makes the public specification easier
+to understand. Use the model that fits each demo, keep primary contracts
+apart from derived lemmas and accounting, and explain only what readers need.
+
+Status: `owner-review` when the demo and page are ready for the owner to
+read; `reviewed` once the owner has checked them; `review-pending` when a
+known issue needs attention; `in-progress` while work on the demo is under way.
 
 When a demo's code changes, rebuild: a quote whose pattern no longer matches
 fails the build, and the counts follow the code.

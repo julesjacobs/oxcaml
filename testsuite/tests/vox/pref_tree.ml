@@ -485,7 +485,8 @@ module Owned = struct
     adopt (branch_parts value left.#owned right.#owned)
 
   let mirror : (state : t) @ unique ->
-      {next : t | model next === flipped (model state)} @ unique = fun state ->
+      {next : t | shape_of (model next) === mirror_shape (shape_of (model state))
+        && model next === flipped (model state)} @ unique = fun state ->
     ghost_ (model_def (borrow_ state));
     let b = state.#owned in
     let pointer = b.#pointer in
@@ -497,7 +498,7 @@ module Owned = struct
     ghost_ (root_flipped before; H.union_law (heap after) frame frame);
     let owned = #{pointer; model = after; state = token} in
     let next : t = #{owned} in
-    ghost_ (model_def (borrow_ next));
+    ghost_ (model_def (borrow_ next); shape_flipped before);
     next
 
   let observe : (state : t) @ local read total forkable unyielding ->

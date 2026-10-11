@@ -1,3 +1,5 @@
+(** {1 Cost definitions} *)
+
 let[@def] minimum (x : Bigint.t) (y : Bigint.t) =
   if x < y then x else y
 
@@ -11,6 +13,15 @@ let[@def] rec iter (cap : Bigint.t) (level : Bigint.t)
     let next = iter cap (Bigint.sub level 1Z) (Bigint.add start 1Z) start in
     iter cap level (Bigint.sub count 1Z) next
 [@@decreases (level, count)]
+
+let[@def] rec below (cap : Bigint.t) (level : Bigint.t) =
+  if level <= 1Z then true else
+    below cap (Bigint.sub level 1Z) &&
+    iter cap (Bigint.sub level 1Z) 1Z 1Z < cap
+[@@decreases let level : Bigint.t = level in
+  if level > 0Z then level else 0Z]
+
+(** {1 Proofs and inverse computation} *)
 
 let rec (bounds @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
     (count : Bigint.t) -> (start : Bigint.t) ->
@@ -149,13 +160,6 @@ let rec (level_growth @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
     iter_def cap level 0Z next;
     ())
 [@@decreases let level : Bigint.t = level in level]
-
-let[@def] rec below (cap : Bigint.t) (level : Bigint.t) =
-  if level <= 1Z then true else
-    below cap (Bigint.sub level 1Z) &&
-    iter cap (Bigint.sub level 1Z) 1Z 1Z < cap
-[@@decreases let level : Bigint.t = level in
-  if level > 0Z then level else 0Z]
 
 let rec (search @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
     {u : unit | cap >= 1Z && 1Z <= level && level <= cap && below cap level} ->

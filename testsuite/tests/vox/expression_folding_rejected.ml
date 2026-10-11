@@ -34,7 +34,7 @@ let bad_fold (a : int) (b : int) input :
 Line 15, characters 2-4:
 15 |   ()
        ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: a = 0, b = 1, input = 0)
 Lines 3-6, characters 6-73:
 3 | ......Expression_folding.eval (Expression_folding.Lit (a - b)) input
 4 |       === Expression_folding.eval
@@ -57,4 +57,22 @@ Line 6, characters 39-60:
 6 |     | Expression_folding.Add (_, _) -> eval expression input
                                            ^^^^^^^^^^^^^^^^^^^^^
 Error: This recursive function cannot be total: the recursive argument is not a known proper descendant.
+|}]
+
+let unreduced_constants () :
+    {result : Expression_folding.t | Expression_folding.folded result} =
+  let result = Expression_folding.Add
+      (Expression_folding.Lit 1, Expression_folding.Lit 2) in
+  Expression_folding.folded_def result;
+  result
+;;
+[%%expect{|
+Line 6, characters 2-8:
+6 |   result
+      ^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 2, characters 37-69:
+2 |     {result : Expression_folding.t | Expression_folding.folded result} =
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

@@ -401,7 +401,6 @@ in
       type_attributes = sdecl.ptype_attributes;
       type_unboxed_default = false;
       type_inductive = false;
-      type_phantom_parameters = false;
       type_uid = Uid.unboxed_version uid;
       type_unboxed_version = None;
     }
@@ -422,7 +421,6 @@ in
       type_attributes = sdecl.ptype_attributes;
       type_unboxed_default = false;
       type_inductive = false;
-      type_phantom_parameters = false;
       type_uid = uid;
       type_unboxed_version;
     }
@@ -585,7 +583,7 @@ let transl_labels (type rep) ~(record_form : rep record_form) ~new_var_jkind
          raise(Error(loc, Duplicate_label name));
        all_labels := String.Set.add name !all_labels)
     lbls;
-  let mk {pld_name=name;pld_mutable=mut;pld_modalities=modalities;
+  let mk env {pld_name=name;pld_mutable=mut;pld_modalities=modalities;
           pld_type=arg;pld_loc=loc;pld_attributes=attrs} =
     Builtin_attributes.warning_scope attrs
       (fun () ->
@@ -596,7 +594,8 @@ let transl_labels (type rep) ~(record_form : rep record_form) ~new_var_jkind
             [Typemode.transl_modalities] to reject. *)
          let ghost, modalities =
            match kloc with
-           | Record { unboxed = false } | Record_unboxed_product ->
+           | Record { unboxed = false } | Inlined_record { unboxed = false }
+           | Record_unboxed_product ->
              let ghost, rest =
                List.partition
                  (fun {Location.txt = Parsetree.Modality m; _} ->
@@ -639,7 +638,57 @@ let transl_labels (type rep) ~(record_form : rep record_form) ~new_var_jkind
           ld_type = cty; ld_loc = loc; ld_attributes = attrs}
       )
   in
-  let lbls = List.map mk lbls in
+  let rec translate env = function
+    | [] -> []
+    | label :: rest ->
+        let label = Ctype.with_local_level_generalize_structure_if_principal
+            (fun () -> mk env label) in
+        let ty = label.ld_type.ctyp_type in
+        let ty = match get_desc ty with Tpoly (ty, []) -> ty | _ -> ty in
+        Ctype.register_refinement_value_scope ~level:Ident.lowest_scope
+          [label.ld_id];
+        let rest =
+          Typetexp.with_dependent_binder env label.ld_id ~uid:label.ld_uid
+            ty label.ld_loc (fun env -> translate env rest)
+        in
+        label :: rest
+  in
+  let lbls =
+    if Language_extension.is_enabled Refinement_types then translate env lbls
+    else List.map (mk env) lbls
+  in
+  let dependencies =
+    List.filter
+      (fun label -> List.exists
+        (fun next -> Ctype.refinement_ident_occurs label.ld_id
+          next.ld_type.ctyp_type) lbls)
+      lbls
+  in
+  (match dependencies with
+   | [] -> ()
+   | first :: _ ->
+       (match kloc with
+        | Record _ | Inlined_record _ | Record_unboxed_product -> ()
+        | _ -> Location.raise_errorf ~loc:first.ld_loc
+            "Dependent fields are supported in record types");
+       if List.exists (fun l -> Types.is_mutable l.ld_mutable) lbls then
+         Location.raise_errorf ~loc:first.ld_loc
+           "Dependent record fields must be immutable");
+  let lbls = List.map (fun label ->
+    if List.exists (fun l -> Ident.same l.ld_id label.ld_id) dependencies then
+      let required = Typemode.transl_modalities ~maturity:Stable Immutable
+          [Location.mkloc (Parsetree.Modality "total") label.ld_loc] in
+      let modalities = Mode.Modality.Const.concat
+          ~then_:required.moda_modalities
+          label.ld_modalities.moda_modalities in
+      List.iter (fun {Location.txt = Mode.Modality.Atom (axis, value); loc} ->
+        if Mode.Modality.Const.proj axis modalities <> value then
+          Location.raise_errorf ~loc
+            "Fields used by later refinements must be total, stateless, \
+             and portable") label.ld_modalities.moda_desc;
+      { label with ld_modalities =
+          { label.ld_modalities with moda_modalities = modalities } }
+    else label) lbls in
   let lbls' =
     List.map
       (fun ld ->
@@ -1317,9 +1366,6 @@ let transl_declaration env sdecl (id, uid) =
         type_inductive =
           Attr_helper.has_no_payload_attribute
             "inductive" sdecl.ptype_attributes;
-        type_phantom_parameters =
-          Attr_helper.has_no_payload_attribute
-            "phantom_parameters" sdecl.ptype_attributes;
         type_uid = uid;
         type_unboxed_version = None;
         (* Unboxed versions are computed after all declarations have been
@@ -1471,6 +1517,22 @@ let derive_unboxed_version env path_in_group_has_unboxed_version decl =
           })
         lbls
     in
+    let lbls_unboxed =
+      if not (List.exists (fun (field : Types.label_declaration) ->
+        List.exists (fun (binder : Types.label_declaration) ->
+          Ctype.refinement_ident_occurs binder.ld_id field.ld_type) lbls) lbls)
+      then lbls_unboxed else
+        let () = Ctype.register_refinement_value_scope ~level:Ident.lowest_scope
+          (List.map (fun label -> label.Types.ld_id) lbls_unboxed) in
+        let subst = List.fold_left2 (fun subst
+            (source : Types.label_declaration)
+            (target : Types.label_declaration) ->
+          Subst.add_bound_value source.ld_id target.ld_id subst)
+          Subst.identity lbls lbls_unboxed in
+        List.map (fun (label : Types.label_declaration) ->
+          { label with ld_type = Subst.type_expr subst label.ld_type })
+          lbls_unboxed
+    in
     let rep = Types.Record_unboxed_product in
     (* CR layouts v11: update type_jkind once we have [layout_of] layouts *)
     let jkind =
@@ -1525,7 +1587,6 @@ let derive_unboxed_version env path_in_group_has_unboxed_version decl =
         type_attributes = decl.type_attributes;
         type_unboxed_default = false;
         type_inductive = false;
-        type_phantom_parameters = false;
         type_uid = Uid.unboxed_version decl.type_uid;
         type_unboxed_version = None;
       }
@@ -1996,7 +2057,11 @@ let update_constructor_arguments_sorts env loc cd_args =
     let lbls, jkinds =
       update_label_sorts_in_place env loc lbls ~form:Legacy
     in
-    Types.Cstr_record lbls, false, jkinds, Some [| Jkind.Sort.Const.scannable |]
+    let all_ghost = List.for_all (fun lbl -> lbl.Types.ld_ghost) lbls in
+    let sort =
+      if all_ghost then Jkind.Sort.Const.void else Jkind.Sort.Const.scannable
+    in
+    Types.Cstr_record lbls, all_ghost, jkinds, Some [| sort |]
 
 let assert_mixed_product_support =
   let required_reserved_header_bits = 8 in
@@ -2202,8 +2267,9 @@ let update_constructor_representation
     | Cstr_record fields ->
         let arg_reprs =
           List.map2 (fun ld arg_jkind ->
-            Element_repr.classify env ld.Types.ld_type arg_jkind
-              ~default_to_scannable:true,
+            (if ld.Types.ld_ghost then Some Element_repr.Void
+             else Element_repr.classify env ld.Types.ld_type arg_jkind
+               ~default_to_scannable:true),
             ld.Types.ld_type)
             fields arg_jkinds
         in
@@ -3732,6 +3798,35 @@ let check_redefined_unit (td: Parsetree.type_declaration) =
    jkind.
 *)
 
+(* Replace the logicality of a declaration's (normalized) jkind by the one
+   ikinds infers from its representation. Normalization of with-bounds cuts
+   recursion off at the best bound, which is right for mode crossing but not
+   for logicality: see Note [Logicality of recursive types] in ikind.ml. A
+   parameter whose logicality bears on the declaration's gets a [with] bound
+   on the logicality axis. *)
+let set_inferred_logicality env path decl jkind =
+  match decl.type_kind, decl.type_manifest with
+  | (Type_variant _ | Type_record _ | Type_record_unboxed_product _), _ ->
+    let logicality, bearing =
+      Ikind.declaration_logicality_lower_bound ~env ~path
+    in
+    let jkind = Jkind.set_logicality logicality jkind in
+    if List.compare_lengths bearing decl.type_params <> 0
+    then Jkind.set_logicality Maybe_logical jkind
+    else
+      List.fold_left2
+        (fun jkind param bears ->
+          if bears then Jkind.add_logicality_with_bound param jkind else jkind)
+        jkind decl.type_params bearing
+  | (Type_abstract _ | Type_open), Some _ ->
+    (* An abbreviation has the kind of its manifest. Only correct a logicality
+       that normalization got wrong by cutting off recursion. *)
+    begin match Ikind.declaration_logicality_lower_bound ~env ~path with
+    | Maybe_logical, _ -> Jkind.set_logicality Maybe_logical jkind
+    | Logical, _ -> jkind
+    end
+  | (Type_abstract _ | Type_open), None -> jkind
+
 (* Normalize the jkinds in a list of (potentially mutually recursive) type declarations *)
 let normalize_decl_jkinds env decls =
   let rec normalize_decl_jkind env original_decl allow_any_crossing decl path =
@@ -3750,6 +3845,7 @@ let normalize_decl_jkinds env decls =
         ~context:normalization_context
         env
         decl.type_jkind
+      |> set_inferred_logicality env path decl
     in
     let decl =
       { decl with
@@ -3796,6 +3892,9 @@ let normalize_decl_jkinds env decls =
           let type_jkind =
             Jkind.unsafely_set_bounds env ~from:original_decl.type_jkind
               decl.type_jkind
+            (* The annotation's bounds are trusted on the modal axes only;
+               logicality still comes from the representation. *)
+            |> set_inferred_logicality env path decl
           in
           let umc = Some (Jkind.to_unsafe_mode_crossing type_jkind) in
           let type_kind =
@@ -3857,51 +3956,6 @@ let add_types_to_env ~shapes decls env =
       add_type ~long_path:false ~check:true ~shape id decl env)
     decls shapes env
 
-let check_phantom_parameters_decl env decl =
-  if decl.type_phantom_parameters then begin
-    List.iter (fun parameter ->
-      match get_desc (Ctype.expand_head env parameter) with
-      | Tvar _ | Tunivar _ -> ()
-      | _ ->
-          Location.raise_errorf ~loc:decl.type_loc
-            "Phantom parameters must be type variables.")
-      decl.type_params;
-    let visited = ref TypeSet.empty in
-    let rec visit ty =
-      if List.exists (eq_type ty) decl.type_params then
-        Location.raise_errorf ~loc:decl.type_loc
-          "A phantom parameter cannot occur in the type's representation.";
-      if not (TypeSet.mem ty !visited) then begin
-        visited := TypeSet.add ty !visited;
-        let expanded = Ctype.expand_head env ty in
-        if not (eq_type ty expanded) then visit expanded
-        else match get_desc ty with
-        | Tconstr (path, args, _) ->
-            begin match Env.find_type path env with
-            | { type_phantom_parameters = true; _ } -> ()
-            | _ | exception Not_found -> List.iter visit args
-            end
-        | _ -> Btype.iter_type_expr visit ty
-      end
-    in
-    Option.iter visit decl.type_manifest;
-    match decl.type_kind with
-    | Type_variant (constructors, _, _) ->
-        List.iter (fun (constructor : Types.constructor_declaration) ->
-          if Option.is_some constructor.cd_res then
-            Location.raise_errorf ~loc:decl.type_loc
-              "GADTs cannot guarantee phantom parameters.";
-          Btype.iter_type_expr_cstr_args visit constructor.cd_args) constructors
-    | Type_record (fields, _, _) | Type_record_unboxed_product (fields, _, _) ->
-        List.iter
-          (fun (field : Types.label_declaration) -> visit field.ld_type)
-          fields
-    | Type_abstract _ -> ()
-    | Type_open ->
-        Location.raise_errorf ~loc:decl.type_loc
-          "Extensible types cannot guarantee phantom parameters."
-  end
-
 let check_inductive_decl env ~single id decl =
   if decl.type_inductive then begin
     let reject reason =
@@ -3956,8 +4010,12 @@ let check_inductive_decl env ~single id decl =
           if Option.is_some cd.cd_res then
             reject "GADT constructors are not supported";
           match cd.cd_args with
-          | Cstr_record _ ->
-              reject "inline-record constructors are not supported"
+          | Cstr_record labels ->
+              (* An inline record's fields are the constructor's fields. *)
+              List.iter (fun (label : Types.label_declaration) ->
+                if Types.is_mutable label.ld_mutable then
+                  reject "mutable inline-record fields are not supported";
+                check TypeSet.empty true label.ld_type) labels
           | Cstr_tuple args ->
               List.iter (fun (arg : Types.constructor_argument) ->
                 check TypeSet.empty true arg.ca_type) args)
@@ -4090,7 +4148,6 @@ let transl_type_decl env rec_flag sdecl_list =
   List.iter
     (check_abbrev_regularity ~abs_env new_env id_loc_list to_check) tdecls;
   List.iter (fun (id, decl) ->
-    check_phantom_parameters_decl new_env decl;
     check_inductive_decl new_env ~single:(List.length decls = 1) id decl)
     decls;
   List.iter (fun (id, decl) ->
@@ -4191,7 +4248,6 @@ let transl_type_decl env rec_flag sdecl_list =
   (* Compute the final environment with variance and immediacy *)
   let final_env = add_types_to_env ~shapes:(Some shapes) decls env in
   List.iter (fun (id, decl) ->
-    check_phantom_parameters_decl final_env decl;
     check_inductive_decl final_env ~single:(List.length decls = 1) id decl)
     decls;
   (* Keep original declaration *)
@@ -5271,7 +5327,6 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
           type_attributes = decl.type_attributes;
           type_unboxed_default = false;
           type_inductive = false;
-          type_phantom_parameters = false;
           type_uid = Uid.unboxed_version type_uid;
           type_unboxed_version = None;
         }
@@ -5312,10 +5367,6 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
       type_attributes = sdecl.ptype_attributes;
       type_unboxed_default;
       type_inductive = sig_decl.type_inductive;
-      type_phantom_parameters =
-        sig_decl.type_phantom_parameters
-        || Attr_helper.has_no_payload_attribute
-             "phantom_parameters" sdecl.ptype_attributes;
       type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
       type_unboxed_version;
     }
@@ -5326,7 +5377,6 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
   | Some ty -> raise(Error(loc, Unbound_type_var(ty, new_sig_decl)))
   end;
   let new_sig_decl = name_recursion sdecl id new_sig_decl in
-  check_phantom_parameters_decl env new_sig_decl;
   let new_type_variance =
     let required = Typedecl_variance.variance_of_params sdecl.ptype_params in
     try
@@ -5353,7 +5403,6 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
       type_manifest = new_sig_decl.type_manifest;
       type_unboxed_default = new_sig_decl.type_unboxed_default;
       type_inductive = new_sig_decl.type_inductive;
-      type_phantom_parameters = new_sig_decl.type_phantom_parameters;
       type_is_newtype = new_sig_decl.type_is_newtype;
       type_expansion_scope = new_sig_decl.type_expansion_scope;
       type_loc = new_sig_decl.type_loc;
@@ -5426,7 +5475,6 @@ let transl_package_constraint ~loc ty =
     type_attributes = [];
     type_unboxed_default = false;
     type_inductive = false;
-    type_phantom_parameters = false;
     type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
     type_unboxed_version = None;
   }
@@ -5453,7 +5501,6 @@ let abstract_type_decl ~injective ~jkind ~params =
       type_attributes = [];
       type_unboxed_default = false;
       type_inductive = false;
-      type_phantom_parameters = false;
       type_uid = Uid.internal_not_actually_unique;
       type_unboxed_version =
         Some {
@@ -5472,7 +5519,6 @@ let abstract_type_decl ~injective ~jkind ~params =
           type_attributes = [];
           type_unboxed_default = false;
           type_inductive = false;
-          type_phantom_parameters = false;
           type_uid = Uid.internal_not_actually_unique;
           type_unboxed_version = None;
         };
@@ -5492,6 +5538,14 @@ let approx_type_decl env sdecl_list =
            ~context:(Type_declaration path)
            sdecl
          |> Option.value ~default:(Jkind.Builtin.value ~why:Default_type_jkind)
+       in
+       (* These approximations type the signatures of recursive modules, so
+          a declared logicality could justify itself through the recursion
+          ([A.t = Roll of B.u] and [B.u : immutable_data = A.t -> int]).
+          Assume nothing: see [Typemod.transl_recmodule_modtypes]. *)
+       let jkind =
+         if Ctype.jkind_is_scalar env jkind then jkind
+         else Jkind.set_logicality Maybe_logical jkind
        in
        let params =
          List.map (fun (param, _) -> get_type_param_jkind env path param)
@@ -6091,14 +6145,27 @@ let report_error ~loc = function
       in
       fprintf ppf "type %a" Style.inline_code path_end
     in
+    let not_logical =
+      if Ikind.subjkind_error_on_logicality v then
+        match Env.find_type dpath env with
+        | decl ->
+          Ctype.not_logical_reason ~component:true env
+            (Btype.newgenty (Tconstr (dpath, decl.type_params, ref Mnil)))
+        | exception Not_found -> None
+      else None
+    in
     Location.errorf ~loc "%t" (fun ppf ->
       let report () =
         Ikind.report_subjkind_error_with_offender ~offender env ppf v
       in
-      match Ikind.subjkind_error_printing_env v with
-      | None -> report ()
-      | Some printing_env ->
-        Printtyp.wrap_printing_env ~error:true printing_env report)
+      (match Ikind.subjkind_error_printing_env v with
+       | None -> report ()
+       | Some printing_env ->
+         Printtyp.wrap_printing_env ~error:true printing_env report);
+      Option.iter
+        (fun reason ->
+          fprintf ppf "@ @[It is not logical:@ %s.@]" reason)
+        not_logical)
   | Jkind_mismatch_of_type (env, ty, v) ->
     let offender ppf = fprintf ppf "type %a"
         (Style.as_inline_code Printtyp.type_expr) ty in

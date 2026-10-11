@@ -216,7 +216,7 @@ let rec go (n : int) (xs : int list) : {s : int | s <= n} =
 Line 2, characters 39-54:
 2 |   match xs with [] -> n | _ :: rest -> go (n + 1) rest;;
                                            ^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: n = 0)
 Line 1, characters 50-56:
 1 | let rec go (n : int) (xs : int list) : {s : int | s <= n} =
                                                       ^^^^^^

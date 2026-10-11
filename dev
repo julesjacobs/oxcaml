@@ -84,6 +84,21 @@ lock_has_live_owner()
   return 1
 }
 
+claim_lock()
+{
+  while ! ln "$lock_claim" "$lock_file" 2>/dev/null; do
+    [ -f "$lock_claim" ] || exit 1
+    if lock_has_live_owner; then
+      echo "$program: another command owns this worktree (pid $live_owner)" >&2
+      exit 75
+    fi
+    stale=$lock_file.stale.$$
+    if mv "$lock_file" "$stale" 2>/dev/null; then
+      rm -f "$stale"
+    fi
+  done
+}
+
 publish_lock()
 {
   child_record=${1-}
@@ -158,6 +173,14 @@ cleanup()
   exit "$status"
 }
 
+if [ "${1-}" = --claim-lock ]; then
+  [ "$#" -eq 3 ] || usage
+  lock_file=$2
+  lock_claim=$3
+  claim_lock
+  exit 0
+fi
+
 script_dir=$(CDPATH= cd -P "$(dirname "$0")" && pwd)
 root_from_git=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null) ||
   die "not inside a Git worktree"
@@ -230,16 +253,18 @@ lock_claim=$root/_build/.vox-dev.lock.$$
 lock_update=$root/_build/.vox-dev.lock.update.$$
 lock_record=$(process_record "$$") || die "cannot identify the current process"
 printf '%s\n' "$lock_record" > "$lock_claim"
-while ! ln "$lock_claim" "$lock_file" 2>/dev/null; do
-  if lock_has_live_owner; then
-    echo "$program: another command owns this worktree (pid $live_owner)" >&2
-    exit 75
-  fi
-  stale=$lock_file.stale.$$
-  if mv "$lock_file" "$stale" 2>/dev/null; then
-    rm -f "$stale"
-  fi
-done
+# Every acquisition uses the same guard inode, so stale recovery cannot remove
+# a lock another command acquired after the owner check. Keep the guard file.
+perl -MFcntl=:flock,F_SETFD -e '
+  my $path = shift @ARGV;
+  open my $guard, ">>", $path or die "open $path: $!\n";
+  flock($guard, LOCK_EX) or die "flock $path: $!\n";
+  # A surviving claim helper must retain the guard if this wrapper is killed.
+  fcntl($guard, F_SETFD, 0) or die "inherit $path: $!\n";
+  system @ARGV;
+  die "exec $ARGV[0]: $!\n" if $? == -1;
+  exit(($? & 127) ? 128 + ($? & 127) : $? >> 8);
+' "$lock_file.guard" "$root/dev" --claim-lock "$lock_file" "$lock_claim"
 rm -f "$lock_claim"
 lock_claim=
 find "$root/_build" -mindepth 1 -maxdepth 1 -type d \

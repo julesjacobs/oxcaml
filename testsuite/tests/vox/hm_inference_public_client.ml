@@ -12,7 +12,7 @@ module M = Hm_inference_model
 
 let (identity_typing @ total) :
     unit -> {d : D.typing | D.typed D.Z D.Empty_context (D.Lambda (D.Bound D.Z))
-      (D.embed (Copy_spec.Function (Copy_spec.Boolean, Copy_spec.Boolean))) d} @ immutable ghost =
+      (D.embed (M.Function (M.Boolean, M.Boolean))) d} @ immutable ghost =
   fun () -> ghost_ (
     let z = D.Z in let a = D.Boolean in let scheme = D.Forall (z, a) in
     let context = D.Binding (scheme, D.Empty_context) in let args = D.No_arguments in
@@ -24,7 +24,7 @@ let (identity_typing @ total) :
     D.typed_def z context (D.Bound z) a body;
     D.mono_wf_def z (D.Function (a, a));
     D.typed_def z D.Empty_context (D.Lambda (D.Bound z)) (D.Function (a, a)) out;
-    D.embed_def Copy_spec.Boolean; D.embed_def (Copy_spec.Function (Copy_spec.Boolean, Copy_spec.Boolean));
+    D.embed_def M.Boolean; D.embed_def (M.Function (M.Boolean, M.Boolean));
     out)
 
 let () =
@@ -33,15 +33,15 @@ let () =
     D.present_def (D.S D.Z) D.Z);
   let out = I.infer source in
   ghost_ (
-    let target = Copy_spec.Function (Copy_spec.Boolean, Copy_spec.Boolean) in
+    let target = M.Function (M.Boolean, M.Boolean) in
     let typing = identity_typing () in
     let claim = not (I.inferred_type out === None) in
-    let use : ((delta : (Copy_spec.node Pref.t @ immutable total -> Copy_spec.ty @ immutable total)) @ total ->
+    let use : ((delta : (M.variable @ immutable total -> M.ty @ immutable total)) @ total ->
       {u : unit | match I.inferred_type out with None -> false
         | Some ty -> target === M.substitute delta ty} ->
       {u : unit | claim}) @ total = fun _delta _instance -> () in
     I.principal out target typing () claim use);
-  let ty : {ty : Copy_spec.ty option | not (ty === None)} @ immutable = I.inferred_type out in
+  let ty : {ty : M.ty option | not (ty === None)} @ immutable = I.inferred_type out in
   (match ty with None -> failwith "proved typable identity rejected" | Some ty ->
     let _typing = ghost_ (I.sound out ty ()) in ());
   let self = D.Apply (D.Bound D.Z, D.Bound D.Z) in
@@ -52,7 +52,7 @@ let () =
   match I.inferred_type rejected with None -> () | Some _ -> failwith "self-application accepted"
 
 let (rejection_client @ total) : (out : I.result) @ immutable ->
-    (target : Copy_spec.ty) @ immutable -> (typing : D.typing) @ immutable ->
+    (target : M.ty) @ immutable -> (typing : D.typing) @ immutable ->
     {u : unit | I.inferred_type out === None &&
       D.typed D.Z D.Empty_context (I.source out) (D.embed target) typing} -> {u : unit | false} @ ghost =
   fun out target typing premise -> ghost_ (I.rejected out target typing premise)
@@ -63,7 +63,7 @@ let () =
   ghost_ (D.scoped_term_def D.Z word; D.scoped_term_def D.Z D.Nil; D.scoped_term_def D.Z list);
   let out = I.infer list in
   (match I.inferred_type out with
-  | Some (Copy_spec.List_type Copy_spec.Word64 as ty) -> let _typing = ghost_ (I.sound out ty ()) in ()
+  | Some (M.List_type M.Word64 as ty) -> let _typing = ghost_ (I.sound out ty ()) in ()
   | _ -> failwith "word-list inference failed");
   let id = D.Lambda (D.Bound D.Z) in
   let first = D.Apply (D.Bound D.Z, D.Truth) in
@@ -78,5 +78,5 @@ let () =
     D.scoped_term_def (D.S D.Z) body; D.scoped_term_def D.Z source);
   let out = I.infer source in
   match I.inferred_type out with
-  | Some Copy_spec.Word64 -> let _typing = ghost_ (I.sound out Copy_spec.Word64 ()) in ()
+  | Some M.Word64 -> let _typing = ghost_ (I.sound out M.Word64 ()) in ()
   | _ -> failwith "polymorphic boolean-word inference failed"

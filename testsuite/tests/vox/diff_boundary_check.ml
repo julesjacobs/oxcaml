@@ -6,7 +6,7 @@ let () =
   let library = read Sys.argv.(1) and client = read Sys.argv.(2) in
   (* The functions each executable diff function may call directly. *)
   let expected =
-    [ "snake", [ "snake" ];
+    [ "snake", [ "equal"; "snake" ];
       "step_delete", [];
       "step_insert", [];
       "choose", [ "snake" ];
@@ -18,7 +18,7 @@ let () =
   in
   (* The Proof module's fields, in order, from its block. *)
   let exports =
-    match find_all "(makeblock 0 apply_source/" library with
+    match find_all "(makeblock 0 apply_characterization/" library with
     | (start, _, _) :: _ ->
       let stop = String.index_from library start ')' in
       List.concat_map (fun (_, _, c) -> c)

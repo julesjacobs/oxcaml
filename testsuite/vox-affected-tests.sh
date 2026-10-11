@@ -8,8 +8,9 @@
 # a file whose name starts with its own base name (references), a file its
 # header names (all_modules, prebuilt_modules, module, modules,
 # readonly_files), or a module those files depend on transitively according
-# to ocamldep; or when the header of another test that lists one of its
-# prebuilt modules changed, since that can change the module's flags.
+# to ocamldep; or when another test's header in its directory changed or
+# was removed, since that can change a prebuilt module's flags. Tests that
+# share a listed prebuilt module are also affected across directories.
 # Changes include uncommitted ones, and untracked files below
 # testsuite/tests and verification/library. When a file changes outside
 # testsuite/tests, verification/library, verification/catalogue and
@@ -43,10 +44,14 @@ git -C "$root" rev-parse --verify --quiet "$base^{commit}" > /dev/null || {
   git -C "$root" ls-files -o --exclude-standard -- testsuite/tests "$library"
 } | LC_ALL=C sort -u > "$work/changed"
 
-for suite in $suites; do
-  (cd "$root/testsuite/tests/$suite" && "$ocamltest" -list-tests .) |
-    sed "s|^|testsuite/tests/$suite/|"
-done > "$work/tests"
+(cd "$root" &&
+  for suite in $suites; do
+    "$ocamltest" -find-test-dirs "testsuite/tests/$suite" |
+      while IFS= read -r directory; do
+        "$ocamltest" -list-tests "$directory" |
+          sed "s|^|$directory/|"
+      done
+  done) > "$work/tests"
 
 if awk '
     /^(testsuite\/tests|research)\// { next }
@@ -75,17 +80,28 @@ awk -F '\t' -v root="$root/" '{
   }' "$work/raw-sources" > "$work/sources"
 
 # The flags of a prebuilt module depend on every test that lists it, so a
-# changed header affects the tests that share its prebuilt modules.
+# changed or removed header affects its directory and shared modules.
 header()
 {
   awk '{ print } /\*\)/ { exit }'
 }
-grep -Fx -f "$work/tests" "$work/changed" | while IFS= read -r test; do
+is_test_header()
+{
+  awk '
+    /^[ \t\f\r]*$/ { next }
+    { found = /^[ \t\f]*(\(\*|\/\*)[ \t\f]*TEST/; exit }
+    END { exit !found }
+  ' "$1"
+}
+awk '/^testsuite\/tests\/(vox|typing-refinement-types)\/.*\.ml$/' \
+  "$work/changed" | while IFS= read -r test; do
   if git -C "$root" cat-file -e "$base:$test" 2>/dev/null; then
     git -C "$root" show "$base:$test" | header > "$work/old-header"
   else
     : > "$work/old-header"
   fi
+  grep -Fxq "$test" "$work/tests" ||
+    is_test_header "$work/old-header" || continue
   if [ -f "$root/$test" ]; then
     header < "$root/$test" > "$work/new-header"
   else
@@ -97,10 +113,35 @@ done > "$work/headers"
 # Module dependencies of every source in the suites and the library.
 (cd "$root" &&
   for directory in $library $(printf 'testsuite/tests/%s ' $suites); do
-    ls "$directory"/*.ml "$directory"/*.mli 2>/dev/null || true
+    find "$directory" \( -type f -o -type l \) \
+      \( -name '*.ml' -o -name '*.mli' \)
   done) > "$work/candidates"
+# A changed library source also changes every symlink to that source.
+perl -MCwd=abs_path -e '
+  my ($root, $changes_name, $candidates_name) = @ARGV;
+  chdir $root or die "$root: $!\n";
+  open my $changes, "<", $changes_name or die "$changes_name: $!\n";
+  my %changed;
+  while (<$changes>) {
+    chomp;
+    my $path = abs_path($_);
+    $changed{$path} = 1 if defined $path;
+  }
+  open my $files, "<", $candidates_name or die "$candidates_name: $!\n";
+  while (<$files>) {
+    chomp;
+    my $path = abs_path($_);
+    print "$_\n" if defined $path && $changed{$path};
+  }
+' "$root" "$work/changed" "$work/candidates" > "$work/aliases"
+cat "$work/aliases" >> "$work/changed"
+# Syntax-negative tests still contribute their lexical dependencies.
 (cd "$root" && tr '\n' '\0' < "$work/candidates" |
-  xargs -0 "$ocamldep" -modules) > "$work/depend"
+  xargs -0 "$ocamldep" -allow-approx -modules) > "$work/depend" \
+  2> "$work/depend-errors" || {
+    cat "$work/depend-errors" >&2
+    exit 1
+  }
 
 awk -F '\t' -v library="$library" '
   FILENAME == ARGV[1] { changed[$0] = 1; next }
@@ -110,7 +151,12 @@ awk -F '\t' -v library="$library" '
     deps[fields[1]] = fields[2]
     next
   }
-  FILENAME == ARGV[4] { header[$0] = 1; next }
+  FILENAME == ARGV[4] {
+    header[$0] = 1
+    directory = $0; sub(/\/[^\/]*$/, "", directory)
+    header_directory[directory] = 1
+    next
+  }
   FILENAME == ARGV[5] {
     seeds[$1] = seeds[$1] "\t" $2
     if ($3 == "prebuilt") {
@@ -126,7 +172,7 @@ awk -F '\t' -v library="$library" '
     delete seen
     count = 0
     stack[++count] = test
-    affected = 0
+    affected = (directory in header_directory)
     n = split(prebuilt[test], listed, "\t")
     for (i = 2; i <= n; i++) if (listed[i] in shared) affected = 1
     n = split(seeds[test], listed, "\t")

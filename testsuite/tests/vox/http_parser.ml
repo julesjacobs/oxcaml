@@ -2,58 +2,52 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_http_spec.mli vox_http_spec.ml vox_http.mli vox_http.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_http_spec.mli vox_http_spec.ml vox_http_model.ml vox_http.mli vox_http.ml";
  { bytecode; }
 *)
 open Vox_http_spec
 open Vox_http
 module S = Vox_sequence
 
-let (feed_clauses @ total) (state : state) (input : bytes) :
-  {result : result |
-    total_consumed state <= total_consumed result.state
-    && total_consumed result.state <= 16384
-    && Vox_sequence.length input === Bigint.add
-      (Bigint.of_int (consumed state result.state))
-      (Vox_sequence.length result.rest)
-    && Vox_sequence.drop (Bigint.of_int (consumed state result.state)) input
-      === result.rest
-    && Vox_sequence.append
-      (Vox_sequence.take (Bigint.of_int (consumed state result.state)) input)
-      result.rest === input
-    && (match status result.state with
-        | Incomplete -> result.rest === [] | _ -> true)
-    && (match status result.state with
-        | Incomplete | Complete _ -> processed result.state ===
-            Vox_sequence.append (processed state)
-              (Vox_sequence.take
-                (Bigint.of_int (consumed state result.state)) input)
-        | Malformed _ | Limit _ -> true)
-    && (match status result.state with
-        | Complete request -> well_formed request
-          && serialize request === processed result.state
-        | _ -> true)} =
-  let result = feed state input in
-  ghost_ (transition_def state input result);
+let (reject_bare_lf @ total) (suffix : bytes) :
+    {result : result | status result.state === Malformed Invalid_crlf
+      && result.rest === suffix} =
+  let start = initial () in
+  let result = feed start (10 :: suffix) in
+  ghost_ (
+    let machine = model start in
+    Model.initial_def ();
+    Model.feed_def machine (10 :: suffix);
+    Model.terminal_def machine.core;
+    Model.advance_def machine 10;
+    Model.step_def machine.core 10;
+    byte_def 10;
+    let failed : Model.state =
+      {core = Model.Malformed Invalid_crlf; budget = 16383} in
+    Model.feed_def failed suffix;
+    Model.terminal_def failed.core;
+    status_equation result.state;
+    Model.status_def failed.core;
+    ());
   result
 
-let (parse_clauses @ total) (input : bytes) :
-  {result : result |
-    result === feed (initial ()) input
-    && Vox_sequence.length input === Bigint.add
-      (Bigint.of_int (consumed (initial ()) result.state))
-      (Vox_sequence.length result.rest)
-    && Vox_sequence.drop
-      (Bigint.of_int (consumed (initial ()) result.state)) input === result.rest
-    && (match status result.state with
-        | Complete request -> well_formed request
-          && Vox_sequence.take
-            (Bigint.of_int (consumed (initial ()) result.state)) input ===
-            serialize request
-          && input === Vox_sequence.append (serialize request) result.rest
-        | _ -> true)} =
-  let result = parse input in
-  ghost_ (transition_def (initial ()) input result);
+let (reject_exhausted @ total)
+    (state : {s : state | total_consumed s = 16384
+      && status s === Incomplete}) (byte : int) (suffix : bytes) :
+    {result : result | status result.state === Limit Message_bytes
+      && result.rest === byte :: suffix} =
+  let input = byte :: suffix in
+  let result = feed state input in
+  ghost_ (
+    let machine = model state in
+    status_equation state;
+    total_consumed_equation state;
+    Model.status_def machine.core;
+    Model.terminal_def machine.core;
+    Model.feed_def machine input;
+    status_equation result.state;
+    Model.status_def (model result.state).core;
+    ());
   result
 
 let (decode_serialized @ total) (request : request) (suffix : bytes) :

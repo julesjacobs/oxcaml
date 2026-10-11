@@ -1,284 +1,227 @@
+module Partition = Vox_partition_classes
+module Bindings = Vox_partition
+module Group = Vox_partition_classes_group
+module Laws = Vox_partition_classes_proof
 module E = Vox_union_find_events
 
 module Make (C : Vox_big_credits.S) = struct
   module U = Vox_union_find_online.Make (C)
   type elem = U.elem
   type snapshot = U.snapshot
-  type t = #{inner : {state : U.t | U.valid state}}
+  type t = #{inner : {state : U.t | U.valid state &&
+    Bindings.valid (U.partition (U.snapshot state))}}
   type result = #{value : elem @@ aliased; state : t}
+  type 'a observation =
+    t @ local immutable total ghost forkable unyielding -> 'a @ ghost
 
-  let[@def] (contains @ total) : snapshot @ immutable -> elem @ immutable ->
-    bool @ ghost =
-    fun s x -> ghost_ (U.contains s x)
+  let[@def] model (state : t @ local immutable total ghost forkable unyielding)
+    :
+      elem Partition.t @ immutable ghost =
+    ghost_ (
+      let p = U.partition (U.snapshot state.#inner) in
+      Group.group_valid p; Group.group p)
 
-  let[@def] (root @ total) : snapshot @ immutable -> elem @ immutable ->
-    elem @ immutable ghost =
-    fun s x -> ghost_ (U.root s x)
+  let (model_size @ total)
+      (state : t @ local immutable total ghost forkable unyielding) :
+      {u : unit | Partition.size (model state) = U.size state.#inner}
+      @ ghost = ghost_ (
+    model_def state; U.partition_size state.#inner;
+    Group.group_size (U.partition (U.snapshot state.#inner)))
 
-  let[@def] (connected @ total) : snapshot @ immutable -> elem @ immutable ->
-    elem @ immutable -> bool @ ghost =
-    fun s x y -> ghost_ (U.connected s x y)
+  let (model_contains @ total)
+      (state : t @ local immutable total ghost forkable unyielding)
+      (x : elem @ immutable) :
+      {u : unit | Partition.contains (model state) x =
+        U.contains (U.snapshot state.#inner) x} @ ghost = ghost_ (
+    model_def state; U.partition_contains (U.snapshot state.#inner) x;
+    Group.group_contains (U.partition (U.snapshot state.#inner)) x)
 
-  let[@def] (added @ total) : snapshot @ immutable -> snapshot @ immutable ->
-    elem @ immutable -> bool @ ghost =
-    fun before after x -> ghost_ (U.added before after x)
+  let (model_root @ total)
+      (state : t @ local immutable total ghost forkable unyielding)
+      (x : elem @ immutable) :
+      {u : unit | Partition.representative (model state) x ===
+        U.root (U.snapshot state.#inner) x} @ ghost = ghost_ (
+    model_def state; U.partition_root (U.snapshot state.#inner) x;
+    Group.group_root (U.partition (U.snapshot state.#inner)) x)
 
-  let[@def] (found @ total) : snapshot @ immutable -> snapshot @ immutable ->
-    elem @ immutable -> bool @ ghost =
-    fun before after x -> ghost_ (U.found before after x)
+  module Cost = struct
+    type snapshot = U.snapshot
+    let[@def] snapshot
+        (state : t @ local immutable total ghost forkable unyielding) =
+      ghost_ (U.snapshot state.#inner)
+    let[@def] depth (p : snapshot @ immutable) (x : elem @ immutable) =
+      ghost_ (U.depth p x)
+    let[@def] compressed (p : snapshot @ immutable) (x : elem @ immutable) =
+      ghost_ (U.compressed p x)
+    let (depth_law @ total) (p : snapshot @ immutable) (x : elem @ immutable) :
+        {u : unit | depth p x >= 0Z} @ ghost = ghost_ (
+      depth_def p x; U.depth_law p x)
 
-  let[@def] (joined @ total) : snapshot @ immutable -> snapshot @ immutable ->
-    elem @ immutable -> elem @ immutable -> elem @ immutable ->
-    bool @ ghost =
-    fun before after x y r -> ghost_ (U.joined before after x y r)
+    let (root_depth @ total)
+        (state : t @ local immutable total ghost forkable unyielding)
+        (x : elem @ immutable) :
+        {u : unit | if Partition.contains (model state) x then
+          (depth (snapshot state) x = 0Z) =
+            (Partition.representative (model state) x === x) else true} @ ghost
+              =
+      ghost_ (
+        model_contains state x; model_root state x;
+        snapshot_def state; depth_def (snapshot state) x;
+        U.root_law state.#inner x)
 
-  let[@def] (depth @ total) : snapshot @ immutable -> elem @ immutable ->
-    Bigint.t @ ghost =
-    fun p x -> ghost_ (U.depth p x)
+    let[@def] ticks
+        (state : t @ local immutable total ghost forkable unyielding) =
+      ghost_ (U.ticks state.#inner)
+    let[@def] events
+        (state : t @ local immutable total ghost forkable unyielding) =
+      ghost_ (U.events state.#inner)
+    let[@def] account
+        (state : t @ local immutable total ghost forkable unyielding) =
+      ghost_ (U.account state.#inner)
+    let[@def] find_fee
+        (state : t @ local immutable total ghost forkable unyielding) =
+      ghost_ (U.find_fee state.#inner)
+    let[@def] union_fee
+        (state : t @ local immutable total ghost forkable unyielding) =
+      ghost_ (U.union_fee state.#inner)
 
-  let[@def] (compressed @ total) : snapshot @ immutable -> elem @ immutable ->
-    snapshot @ immutable ghost =
-    fun p x -> ghost_ (U.compressed p x)
-
-  let (depth_law @ total) : (p : snapshot) @ immutable ->
-      (x : elem) @ immutable -> {u : unit | depth p x >= 0Z} @ ghost =
-    fun p x -> ghost_ (depth_def p x; U.depth_law p x; ())
-
-  let (added_law @ total) : (before : snapshot) @ immutable ->
-      (after : snapshot) @ immutable -> (x : elem) @ immutable ->
-      (q : elem) @ immutable ->
-      {u : unit | if added before after x then
-        not (contains before x) &&
-        contains after q = (q === x || contains before q) &&
-        root after x === x &&
-        (if contains before q then root after q === root before q &&
-          not (root before q === x) else true)
-        else true} @ ghost =
-    fun before after x q ->
-    ghost_ (added_def before after x;
-      contains_def before x;
-      contains_def before q;
-      contains_def after q;
-      root_def before q;
-      root_def after x;
-      root_def after q;
-      U.added_law before after x q;
-      ())
-
-  let (found_law @ total) : (before : snapshot) @ immutable ->
-      (after : snapshot) @ immutable -> (x : elem) @ immutable ->
-      (q : elem) @ immutable ->
-      {u : unit | if found before after x then
-        contains after q = contains before q && root after q === root before q
-        else true} @ ghost =
-    fun before after x q ->
-    ghost_ (found_def before after x;
-      contains_def before q;
-      contains_def after q;
-      root_def before q;
-      root_def after q;
-      U.found_law before after x q;
-      ())
-
-  let (joined_law @ total) : (before : snapshot) @ immutable ->
-      (after : snapshot) @ immutable -> (x : elem) @ immutable ->
-      (y : elem) @ immutable -> (r : elem) @ immutable ->
-      (q : elem) @ immutable ->
-      {u : unit | if joined before after x y r then
-        (r === root before x || r === root before y) &&
-        contains after q = contains before q &&
-        (if contains before q then root after q ===
-          (if root before q === root before x || root before q === root before y
-           then r else root before q) else true) else true} @ ghost =
-    fun before after x y r q ->
-    ghost_ (joined_def before after x y r;
-      contains_def before q;
-      contains_def after q;
-      root_def before x;
-      root_def before y;
-      root_def before q;
-      root_def after q;
-      U.joined_law before after x y r q;
-      ())
-
-  let (connected_def @ total) : (p : snapshot) @ immutable ->
-    (x : elem) @ immutable -> (y : elem) @ immutable ->
-    {u : unit | connected p x y ===
-      (ghost_ (contains p x && contains p y && root p x === root p y))} =
-    fun s x y ->
-    ghost_ (connected_def s x y;
-      contains_def s x;
-      contains_def s y;
-      root_def s x;
-      root_def s y;
-      U.connected_def s x y);
-      ()
-
-  let[@def] snapshot (state : t @ local immutable total ghost forkable unyielding) =
-    ghost_ (U.snapshot state.#inner)
-
-  let[@def] size (state : t @ local immutable total ghost forkable unyielding) =
-    ghost_ (U.size state.#inner)
-
-  let[@def] ticks (state : t @ local immutable total ghost forkable unyielding) =
-    ghost_ (U.ticks state.#inner)
-
-  let[@def] account (state : t @ local immutable total ghost forkable unyielding) =
-    ghost_ (U.account state.#inner)
-
-  let[@def] find_fee (state : t @ local immutable total ghost forkable unyielding) =
-    ghost_ (U.find_fee state.#inner)
-
-  let[@def] union_fee (state : t @ local immutable total ghost forkable unyielding) =
-    ghost_ (U.union_fee state.#inner)
-
-  let[@def] events (state : t @ local immutable total ghost forkable unyielding) =
-    ghost_ (U.events state.#inner)
-
-  let (empty_law @ total) : (state : t) @ local immutable total ghost forkable unyielding ->
-      (x : elem) @ immutable ->
-      {u : unit | if size state = 0Z then
-        not (contains (snapshot state) x) else true} @ ghost =
-    fun state x ->
-    ghost_ (size_def state;
-      snapshot_def state;
-      U.empty_law state.#inner x;
-      contains_def (snapshot state) x;
-      ())
-
-  let (root_law @ total) :
-      (state : t) @ local immutable total ghost forkable unyielding ->
-      (x : elem) @ immutable ->
-      {u : unit | let p = snapshot state in if contains p x then
-        contains p (root p x) && root p (root p x) === root p x &&
-        (depth p x = 0Z) = (root p x === x) else true}
-      @ ghost =
-    fun state x ->
-    ghost_ (snapshot_def state;
-      let p = snapshot state in
-      contains_def p x; root_def p x;
-      contains_def p (root p x); root_def p (root p x); depth_def p x;
-      U.root_law state.#inner x;
-      ())
-
-  let (account_bounds @ total) : (state : t) @ local immutable total ghost forkable unyielding ->
-      {u : unit | ticks state <= account state} @ ghost =
-    fun state ->
-    ghost_ (ticks_def state; account_def state; U.account_bounds state.#inner; ())
-
-  let (observations @ total) : (state : t) @ local immutable total ghost forkable unyielding ->
-      {u : unit | 0Z <= size state &&
-        size state <= Bigint.of_int max_int && find_fee state >= 12Z &&
-        union_fee state >= 36Z} @ ghost =
-    fun state ->
-    ghost_ (size_def state;
-      find_fee_def state;
-      union_fee_def state;
-      U.observations state.#inner;
-      ())
-
-  let (fee_bounds @ total) : (state : t) @ local immutable total ghost forkable unyielding ->
-      (population : Bigint.t) -> (a : Bigint.t) ->
-      {u : unit | if 1Z <= population &&
-        size state <= population &&
-        1Z <= a && Vox_ackermann.iter population a 1Z 1Z >= population &&
+    let (event_cost @ total)
+        (state : t @ local immutable total ghost forkable unyielding) :
+        {u : unit | ticks state = E.total (events state)} @ ghost = ghost_ (
+      ticks_def state; events_def state; U.event_cost state.#inner)
+    let (account_bounds @ total)
+        (state : t @ local immutable total ghost forkable unyielding) :
+        {u : unit | ticks state <= account state} @ ghost = ghost_ (
+      ticks_def state; account_def state; U.account_bounds state.#inner)
+    let (observations @ total)
+        (state : t @ local immutable total ghost forkable unyielding) :
+        {u : unit | 0Z <= Partition.size (model state) &&
+          Partition.size (model state) <= Bigint.of_int max_int &&
+          find_fee state >= 12Z && union_fee state >= 36Z} @ ghost =
+      ghost_ (model_size state; find_fee_def state; union_fee_def state;
+        U.observations state.#inner)
+    let (fee_bounds @ total)
+        (state : t @ local immutable total ghost forkable unyielding)
+        (population : Bigint.t) (a : Bigint.t) :
+        {u : unit | if 1Z <= population &&
+          Partition.size (model state) <= population &&
+          1Z <= a && Vox_ackermann.iter population a 1Z 1Z >= population &&
           Vox_ackermann.below population a
-        then find_fee state <= Bigint.add (Bigint.mul 4Z a) 12Z &&
-          union_fee state <= Bigint.add (Bigint.mul 12Z a) 36Z else true}
-      @ ghost =
-    fun state population a ->
-    ghost_ (size_def state;
-      find_fee_def state;
-      union_fee_def state;
-      U.fee_bounds state.#inner population a;
-      ())
-
-  let (event_cost @ total) : (s : t) @ local immutable total ghost forkable unyielding ->
-    {u : unit | ticks s = E.total (events s)} @ ghost =
-    fun state ->
-    ghost_ (ticks_def state; events_def state; U.event_cost state.#inner; ())
+          then find_fee state <= Bigint.add (Bigint.mul 4Z a) 12Z &&
+            union_fee state <= Bigint.add (Bigint.mul 12Z a) 36Z else true}
+        @ ghost = ghost_ (
+      model_size state; find_fee_def state; union_fee_def state;
+      U.fee_bounds state.#inner population a)
+  end
 
   let create : (fee : {b : C.token | C.credits b = 1Z}) @ unique total ghost ->
-      {s : t | size s = 0Z && account s = 1Z && events s === [E.Initialize]}
-      @ unique =
+    {s : t | Partition.empty (model s) &&
+      Cost.account s = 1Z && Cost.events s === [E.Initialize]} @ unique =
     fun fee ->
     let state = U.create_connectivity fee in
+    ghost_ (U.partition_valid (borrow_ state));
     let state : t = #{inner = state} in
-    ghost_ (size_def (borrow_ state); account_def (borrow_ state);
-      events_def (borrow_ state));
+    ghost_ (Cost.account_def (borrow_ state);
+      Cost.events_def (borrow_ state); model_def (borrow_ state);
+      Bindings.empty_def ([] : elem Bindings.bindings);
+      Group.group_empty ([] : elem Bindings.bindings));
     state
 
-  let make_set : (state : {s : t | size s < Bigint.of_int max_int}) @ unique
-        read_write total ->
-      (fee : {b : C.token | C.credits b = 11Z}) @ unique total ghost ->
-      {r : result | added (snapshot state) (snapshot r.#state) r.#value &&
-        size r.#state = Bigint.add (size state) 1Z &&
-        contains (snapshot r.#state) r.#value &&
-        account r.#state = Bigint.add (account state) 11Z &&
-        events r.#state === E.Allocate :: events state} @ unique =
+  let make_set :
+    (state : {s : t | Partition.size (model s) < Bigint.of_int max_int})
+      @ unique read_write total ->
+    (fee : {b : C.token | C.credits b = 11Z}) @ unique total ghost ->
+    {r : result | Partition.added (model state) (model r.#state) r.#value &&
+      Cost.account r.#state = Bigint.add (Cost.account state) 11Z &&
+      Cost.events r.#state === E.Allocate :: Cost.events state} @ unique =
     fun state fee ->
-    ghost_ (size_def (borrow_ state); account_def (borrow_ state); snapshot_def (borrow_ state);
-      events_def (borrow_ state));
-    let before = ghost_ (snapshot (borrow_ state)) in
+    ghost_ (model_size (borrow_ state));
+    ghost_ (Cost.account_def (borrow_ state); Cost.snapshot_def (borrow_ state);
+      Cost.events_def (borrow_ state));
+    let before = ghost_ (
+      model_def (borrow_ state); Cost.snapshot (borrow_ state)) in
     let result = U.make_set_connectivity state.#inner fee in
     let #{U.value; state = next} = result in
+    ghost_ (U.partition_valid (borrow_ next));
     let next : t = #{inner = next} in
-    ghost_ (size_def (borrow_ next); account_def (borrow_ next);
-      snapshot_def (borrow_ next); events_def (borrow_ next);
-      added_def before (snapshot (borrow_ next)) value;
-      contains_def (snapshot (borrow_ next)) value);
+    ghost_ (Cost.account_def (borrow_ next);
+      Cost.snapshot_def (borrow_ next); Cost.events_def (borrow_ next);
+      model_def (borrow_ next); U.partition_added before (Cost.snapshot (borrow_
+        next)) value;
+      Bindings.added_intro (U.partition before) value;
+      Group.group_added (U.partition before)
+        (U.partition (Cost.snapshot (borrow_ next))) value);
     #{value; state = next}
 
   let find : (x : elem) @ immutable ->
-      (state : {s : t | contains (snapshot s) x}) @ unique read_write total ->
-      (fee : {b : C.token | C.credits b = find_fee state})
-        @ unique total ghost ->
-      {r : result | found (snapshot state) (snapshot r.#state) x &&
-        size r.#state = size state && r.#value === root (snapshot state) x &&
-        account r.#state = Bigint.add (account state) (find_fee state) &&
-        snapshot r.#state === compressed (snapshot state) x &&
-        events r.#state === E.Find (depth (snapshot state) x) :: events state}
-      @ unique =
+    (state : {s : t | Partition.contains (model s) x})
+      @ unique read_write total ->
+    (fee : {b : C.token | C.credits b = Cost.find_fee state})
+      @ unique total ghost ->
+    {r : result | r.#value === Partition.representative (model state) x &&
+      Partition.same (model state) (model r.#state) &&
+      Cost.account r.#state =
+        Bigint.add (Cost.account state) (Cost.find_fee state) &&
+      Cost.snapshot r.#state === Cost.compressed (Cost.snapshot state) x &&
+      Cost.events r.#state ===
+        E.Find (Cost.depth (Cost.snapshot state) x) :: Cost.events state}
+    @ unique =
     fun x state fee ->
-    ghost_ (size_def (borrow_ state); events_def (borrow_ state);
-      account_def (borrow_ state);
-      snapshot_def (borrow_ state);
-      find_fee_def (borrow_ state));
-    ghost_ (contains_def (snapshot (borrow_ state)) x);
-    let before = ghost_ (snapshot (borrow_ state)) in
+    ghost_ (model_contains (borrow_ state) x; model_root (borrow_ state) x);
+    ghost_ (Cost.events_def (borrow_ state);
+      Cost.account_def (borrow_ state);
+      Cost.snapshot_def (borrow_ state);
+      Cost.find_fee_def (borrow_ state));
+    let before = ghost_ (
+      model_def (borrow_ state); Cost.snapshot (borrow_ state)) in
     let result = U.find_connectivity x state.#inner fee in
     let #{U.value; state = next} = result in
+    ghost_ (U.partition_valid (borrow_ next));
     let next : t = #{inner = next} in
-    ghost_ (size_def (borrow_ next); account_def (borrow_ next);
-      snapshot_def (borrow_ next); found_def before (snapshot (borrow_ next)) x; root_def before x;
-      events_def (borrow_ next); depth_def before x; compressed_def before x);
+    ghost_ (Cost.account_def (borrow_ next);
+      Cost.snapshot_def (borrow_ next);
+      Cost.events_def (borrow_ next); Cost.depth_def before x;
+        Cost.compressed_def before x;
+      model_def (borrow_ next); U.partition_found before (Cost.snapshot (borrow_
+        next)) x;
+      Laws.same_refl (model (borrow_ next)));
     #{value; state = next}
 
   let union : (x : elem) @ immutable -> (y : elem) @ immutable ->
-      (state : {s : t | contains (snapshot s) x && contains (snapshot s) y}) @ unique
-        read_write total ->
-      (fee : {b : C.token | C.credits b = union_fee state})
-        @ unique total ghost ->
-      {r : result | joined (snapshot state) (snapshot r.#state) x y r.#value &&
-        size r.#state = size state &&
-        account r.#state = Bigint.add (account state) (union_fee state) &&
-        events r.#state === E.Union :: E.Link ::
-          E.Find (depth (compressed (snapshot state) x) y) ::
-          E.Find (depth (snapshot state) x) :: events state}
-      @ unique =
+    (state : {s : t | Partition.contains (model s) x &&
+      Partition.contains (model s) y}) @ unique read_write total ->
+    (fee : {b : C.token | C.credits b = Cost.union_fee state})
+      @ unique total ghost ->
+    {r : result |
+      Partition.joined (model state) (model r.#state) x y r.#value &&
+      Cost.account r.#state =
+        Bigint.add (Cost.account state) (Cost.union_fee state) &&
+      Cost.events r.#state === E.Union :: E.Link ::
+        E.Find (Cost.depth (Cost.compressed (Cost.snapshot state) x) y) ::
+        E.Find (Cost.depth (Cost.snapshot state) x) :: Cost.events state}
+    @ unique =
     fun x y state fee ->
-    ghost_ (size_def (borrow_ state); events_def (borrow_ state);
-      account_def (borrow_ state);
-      snapshot_def (borrow_ state);
-      union_fee_def (borrow_ state));
-    ghost_ (contains_def (snapshot (borrow_ state)) x; contains_def (snapshot (borrow_ state)) y);
-    let before = ghost_ (snapshot (borrow_ state)) in
+    ghost_ (model_contains (borrow_ state) x; model_contains (borrow_ state) y);
+    ghost_ (Cost.events_def (borrow_ state);
+      Cost.account_def (borrow_ state);
+      Cost.snapshot_def (borrow_ state);
+      Cost.union_fee_def (borrow_ state));
+    let before = ghost_ (
+      model_def (borrow_ state); Cost.snapshot (borrow_ state)) in
     let result = U.union_connectivity x y state.#inner fee in
     let #{U.value; state = next} = result in
+    ghost_ (U.partition_valid (borrow_ next));
     let next : t = #{inner = next} in
-    ghost_ (size_def (borrow_ next); account_def (borrow_ next);
-      snapshot_def (borrow_ next); joined_def before (snapshot (borrow_ next)) x y value;
-      events_def (borrow_ next); depth_def before x; compressed_def before x;
-      depth_def (compressed before x) y);
+    ghost_ (Cost.account_def (borrow_ next);
+      Cost.snapshot_def (borrow_ next);
+      Cost.events_def (borrow_ next); Cost.depth_def before x;
+        Cost.compressed_def before x;
+      Cost.depth_def (Cost.compressed before x) y;
+      model_def (borrow_ next); U.partition_joined before (Cost.snapshot
+        (borrow_ next)) x y value;
+      U.partition_contains before x; U.partition_contains before y;
+      Bindings.joined_intro (U.partition before) x y value;
+      Group.group_joined (U.partition before)
+        (U.partition (Cost.snapshot (borrow_ next))) x y value);
     #{value; state = next}
 end

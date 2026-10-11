@@ -84,3 +84,30 @@
       "message": "Warning 228: The verifier assumes this external's refinement;\n  nothing checks it."
     }
   ]
+
+  $ cat >dependent_record.ml <<EOF
+  > type interval = { lower : int; upper : {u : int | lower <= u} }
+  > let (upper @ total) (r : interval) : {u : int | r.lower <= u} = r.upper
+  > EOF
+
+  $ $MERLIN single errors -extension refinement_types \
+  > -filename dependent_record.ml <dependent_record.ml | jq '.value'
+  []
+
+  $ $MERLIN single type-enclosing -position 2:66 \
+  > -extension refinement_types -filename dependent_record.ml \
+  > <dependent_record.ml | jq -r '.value[1].type'
+  {u : int | r.lower <= u}
+
+  $ cat >dependent_constructor.ml <<EOF
+  > type _ bounded =
+  >   | Bounded : { lower : int; value : {v : int | lower <= v} } -> int bounded
+  >   | Empty : unit bounded
+  > let (ordered @ total) (Bounded {lower; value}) : {b : bool | b} = lower <= value
+  > let (project @ total) (Bounded r) : int =
+  >   let value : {v : int | r.lower <= v} = r.value in value
+  > EOF
+
+  $ $MERLIN single errors -extension refinement_types \
+  > -filename dependent_constructor.ml <dependent_constructor.ml | jq '.value'
+  []

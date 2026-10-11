@@ -10,7 +10,7 @@
  all_modules += " vox_lz4_spec_storage.ml vox_lz4_spec_parse.ml";
  all_modules += " vox_lz4_spec_decode.ml vox_lz4_spec_decode_bytes.ml";
  all_modules += " vox_lz4_spec_bytes.ml vox_lz4_heap_bytes.ml";
- all_modules += " vox_lz4_spec_match.ml vox_lz4_spec_plan.ml";
+ all_modules += " vox_lz4_match_proof.ml vox_lz4_spec_match.ml vox_lz4_spec_plan.ml";
  all_modules += " vox_lz4_spec_token.ml vox_lz4_spec_wire.ml";
  all_modules += " vox_lz4_spec_hashes.ml vox_lz4_spec_scan.ml";
  all_modules += " vox_lz4_spec.ml vox_lz4_buffer.ml vox_lz4_packed.ml";
@@ -64,7 +64,7 @@
    binary_modules += " ${lib}/vox_lz4_spec_parse ${lib}/vox_lz4_spec_decode";
    binary_modules += " ${lib}/vox_lz4_spec_decode_bytes";
    binary_modules += " ${lib}/vox_lz4_spec_bytes ${lib}/vox_lz4_heap_bytes";
-   binary_modules += " ${lib}/vox_lz4_spec_match ${lib}/vox_lz4_spec_plan";
+   binary_modules += " ${lib}/vox_lz4_match_proof ${lib}/vox_lz4_spec_match ${lib}/vox_lz4_spec_plan";
    binary_modules += " ${lib}/vox_lz4_spec_token ${lib}/vox_lz4_spec_wire";
    binary_modules += " ${lib}/vox_lz4_spec_hashes ${lib}/vox_lz4_spec_scan";
    binary_modules += " ${lib}/vox_lz4_spec ${lib}/vox_lz4_buffer";
@@ -131,7 +131,7 @@
    binary_modules += " ${lib}/vox_lz4_spec_parse ${lib}/vox_lz4_spec_decode";
    binary_modules += " ${lib}/vox_lz4_spec_decode_bytes";
    binary_modules += " ${lib}/vox_lz4_spec_bytes ${lib}/vox_lz4_heap_bytes";
-   binary_modules += " ${lib}/vox_lz4_spec_match ${lib}/vox_lz4_spec_plan";
+   binary_modules += " ${lib}/vox_lz4_match_proof ${lib}/vox_lz4_spec_match ${lib}/vox_lz4_spec_plan";
    binary_modules += " ${lib}/vox_lz4_spec_token ${lib}/vox_lz4_spec_wire";
    binary_modules += " ${lib}/vox_lz4_spec_hashes ${lib}/vox_lz4_spec_scan";
    binary_modules += " ${lib}/vox_lz4_spec ${lib}/vox_lz4_buffer";
@@ -173,7 +173,7 @@
    binary_modules += " ${lib}/vox_lz4_spec_parse ${lib}/vox_lz4_spec_decode";
    binary_modules += " ${lib}/vox_lz4_spec_decode_bytes";
    binary_modules += " ${lib}/vox_lz4_spec_bytes ${lib}/vox_lz4_heap_bytes";
-   binary_modules += " ${lib}/vox_lz4_spec_match ${lib}/vox_lz4_spec_plan";
+   binary_modules += " ${lib}/vox_lz4_match_proof ${lib}/vox_lz4_spec_match ${lib}/vox_lz4_spec_plan";
    binary_modules += " ${lib}/vox_lz4_spec_token ${lib}/vox_lz4_spec_wire";
    binary_modules += " ${lib}/vox_lz4_spec_hashes ${lib}/vox_lz4_spec_scan";
    binary_modules += " ${lib}/vox_lz4_spec ${lib}/vox_lz4_buffer";
@@ -303,7 +303,7 @@
    binary_modules += " ${lib}/vox_lz4_spec_parse ${lib}/vox_lz4_spec_decode";
    binary_modules += " ${lib}/vox_lz4_spec_decode_bytes";
    binary_modules += " ${lib}/vox_lz4_spec_bytes ${lib}/vox_lz4_heap_bytes";
-   binary_modules += " ${lib}/vox_lz4_spec_match ${lib}/vox_lz4_spec_plan";
+   binary_modules += " ${lib}/vox_lz4_match_proof ${lib}/vox_lz4_spec_match ${lib}/vox_lz4_spec_plan";
    binary_modules += " ${lib}/vox_lz4_spec_token ${lib}/vox_lz4_spec_wire";
    binary_modules += " ${lib}/vox_lz4_spec_hashes ${lib}/vox_lz4_spec_scan";
    binary_modules += " ${lib}/vox_lz4_spec ${lib}/vox_lz4_buffer";
@@ -373,7 +373,7 @@
    binary_modules += " ${lib}/vox_lz4_spec_parse ${lib}/vox_lz4_spec_decode";
    binary_modules += " ${lib}/vox_lz4_spec_decode_bytes";
    binary_modules += " ${lib}/vox_lz4_spec_bytes ${lib}/vox_lz4_heap_bytes";
-   binary_modules += " ${lib}/vox_lz4_spec_match ${lib}/vox_lz4_spec_plan";
+   binary_modules += " ${lib}/vox_lz4_match_proof ${lib}/vox_lz4_spec_match ${lib}/vox_lz4_spec_plan";
    binary_modules += " ${lib}/vox_lz4_spec_token ${lib}/vox_lz4_spec_wire";
    binary_modules += " ${lib}/vox_lz4_spec_hashes ${lib}/vox_lz4_spec_scan";
    binary_modules += " ${lib}/vox_lz4_spec ${lib}/vox_lz4_buffer";

@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_ordered_sequence.ml vox_credits.mli vox_credits.ml vox_merge_proofs.ml vox_sort_cost.ml vox_merge_sort.mli vox_merge_sort.ml merge_sort.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_ordered_sequence.ml vox_credits.mli vox_credits.ml vox_merge_proofs.ml vox_sort_cost.mli vox_sort_cost.ml vox_merge_sort.mli vox_merge_sort.ml merge_sort.ml";
  readonly_files = "merge_sort_rejected.ml";
  {
    setup-ocamlc.opt-build-env;
@@ -195,7 +195,7 @@ Line 11, characters 62-67:
 11 |   let #{ Sort.values = sorted; state = _ } = Sort.sort values token in
                                                                    ^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_merge_sort.mli", lines 51-52, characters 30-35:
+File "vox_merge_sort.mli", lines 58-59, characters 30-35:
   The refinement is stated here.
 |}]
 

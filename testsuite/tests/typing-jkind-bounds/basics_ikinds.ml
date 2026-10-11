@@ -515,7 +515,7 @@ Line 2, characters 26-34:
                               ^^^^^^^^
 Error: This constant has type "string" but an expression was expected of type
          "('a : value mod aliased)"
-       The kind of string is immutable_data
+       The kind of string is logical_data
          because it is the primitive type string.
        But the kind of string must be a subkind of value mod aliased
          because of the definition of t at line 1, characters 0-56.
@@ -823,7 +823,7 @@ Line 2, characters 43-59:
                                                ^^^^^^^^^^^^^^^^
 Error: This expression has type "t" but an expression was expected of type
          "('a : value mod external_)"
-       The kind of t is immutable_data
+       The kind of t is logical_data
          because of the definition of t at line 1, characters 0-23.
        But the kind of t must be a subkind of value mod external_
          because of the annotation on the wildcard _ at line 2, characters 20-39.
@@ -1268,7 +1268,7 @@ type ('a : bits32 mod aliased) t = ('a : any mod global)
 type ('a : value mod global) t = 'a
 type ('a : immediate) t = 'a
 type ('a : immediate) t = 'a
-type ('a : value mod everything non_float) t = 'a
+type ('a : immutable_data mod global unforkable yielding external_) t = 'a
 type 'a t = 'a
 type 'a t = 'a
 type ('a : bits32 mod global) t = 'a
@@ -1637,7 +1637,7 @@ Lines 11-12, characters 4-10:
 12 |      |> id
 Error: This expression has type "int t" but an expression was expected of type
          "('a : value mod portable)"
-       The kind of int t is immutable_data with int
+       The kind of int t is logical_data with int
          because of the definition of t at line 3, characters 0-21.
        But the kind of int t must be a subkind of value mod portable
          because of the definition of require_portable at line 2, characters 21-57.
@@ -1673,7 +1673,7 @@ Lines 11-12, characters 4-10:
 12 |      |> id
 Error: This expression has type "int t" but an expression was expected of type
          "('a : value mod portable)"
-       The kind of int t is immutable_data with int
+       The kind of int t is logical_data with int
          because of the definition of t at line 3, characters 0-21.
        But the kind of int t must be a subkind of value mod portable
          because of the definition of require_portable at line 2, characters 21-57.

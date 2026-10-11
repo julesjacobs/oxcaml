@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_ordered_sequence.ml vox_credits.mli vox_credits.ml vox_merge_proofs.ml vox_sort_cost.ml vox_merge_sort.mli vox_merge_sort.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_ordered_sequence.ml vox_credits.mli vox_credits.ml vox_merge_proofs.ml vox_sort_cost.mli vox_sort_cost.ml vox_merge_sort.mli vox_merge_sort.ml";
  { bytecode; }
 *)
 
@@ -143,6 +143,26 @@ module Make_rank_compare (C : Vox_credits.S) = struct
 end
 module Rank_compare = Make_rank_compare (C)
 module Rank_sort = Vox_merge_sort.Make (Ranked) (C) (Rank_compare)
+
+let allowed_rank_orders (first : Ranked.elt)
+    (second : {r : Ranked.elt | r.rank = first.rank}) = ghost_ (
+  let forward = [first; second] in
+  let backward = [second; first] in
+  Rank_sort.P.sorted_adjacent forward;
+  Rank_sort.P.sorted_adjacent [second];
+  Rank_sort.P.sorted_adjacent backward;
+  Rank_sort.P.sorted_adjacent [first];
+  Ranked.le_def first second;
+  Ranked.le_def second first;
+  Rank_sort.P.count_extensional forward backward (fun target ->
+    Rank_sort.P.count_def forward target;
+    Rank_sort.P.count_def [second] target;
+    Rank_sort.P.count_def backward target;
+    Rank_sort.P.count_def [first] target;
+    Rank_sort.P.count_def [] target;
+    ());
+  (() : {u : unit | Rank_sort.P.sorted forward && Rank_sort.P.sorted backward
+    && Rank_sort.P.permutation forward backward}))
 
 let check_ranked (values : Ranked.elt list) =
   let size = List.length values in

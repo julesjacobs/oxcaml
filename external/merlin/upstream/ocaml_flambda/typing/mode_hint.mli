@@ -37,6 +37,9 @@ type pinpoint_desc =
   | Quote  (** A quoted expression *)
   | Allocation  (** An allocation *)
   | Expression  (** An arbitrary expression *)
+  | Not_logical_match of string
+      (** A match or field projection on a value whose type is not logical, with
+          the reason *)
   | Effect_match  (** A pattern match with effect cases *)
   | Effect_try  (** A try-with expression with effect cases *)
   | Class  (** A class declaration *)

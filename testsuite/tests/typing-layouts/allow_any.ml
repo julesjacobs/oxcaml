@@ -24,8 +24,10 @@ type t : value mod contended = { mutable contents : string }
 [@@unsafe_allow_any_mode_crossing]
 let f (x : t @ contended) = use_uncontended x
 [%%expect{|
-type t : value non_float mod contended = { mutable contents : string; }
-[@@unsafe_allow_any_mode_crossing]
+type t
+  : value non_float mod contended logical = {
+  mutable contents : string;
+} [@@unsafe_allow_any_mode_crossing]
 val f : t @ contended -> t = <fun>
 |}]
 
@@ -66,7 +68,8 @@ type t : any = #{ f : float# }
 and s : value = t require_f64
 [%%expect{|
 type ('a : float64) require_f64
-type t : float64 = #{ f : float#; } [@@unsafe_allow_any_mode_crossing]
+type t : float64 mod logical = #{ f : float#; }
+[@@unsafe_allow_any_mode_crossing]
 and s = t require_f64
 |}]
 
@@ -75,7 +78,7 @@ type 'a t : value mod contended with 'a = { mutable contents : 'a }
 [@@unsafe_allow_any_mode_crossing]
 [%%expect{|
 type 'a t
-  : value non_float mod contended with 'a = {
+  : value non_float mod contended logical with 'a = {
   mutable contents : 'a;
 } [@@unsafe_allow_any_mode_crossing]
 |}]
@@ -136,13 +139,16 @@ end
 [%%expect{|
 module M1 :
   sig
-    type t : value non_float mod contended = { mutable contents : string; }
+    type t
+      : value non_float mod contended logical = {
+      mutable contents : string;
+    }
     [@@unsafe_allow_any_mode_crossing]
   end
 module M2 :
   sig
     type t
-      : value non_float mod contended =
+      : value non_float mod contended logical =
       M1.t = {
       mutable contents : string;
     }
@@ -164,7 +170,7 @@ end
 module Private :
   sig
     type t
-      : value non_float mod contended = private {
+      : value non_float mod contended logical = private {
       mutable contents : string;
     }
     [@@unsafe_allow_any_mode_crossing]
@@ -202,15 +208,18 @@ end
 [%%expect{|
 module M :
   sig
-    type t1 : value non_float mod contended = { mutable contents : string; }
+    type t1
+      : value non_float mod contended logical = {
+      mutable contents : string;
+    }
     [@@unsafe_allow_any_mode_crossing]
     type t2
-      : value non_float mod contended = private {
+      : value non_float mod contended logical = private {
       mutable contents : string;
     }
     [@@unsafe_allow_any_mode_crossing]
     type t3
-      : value non_float mod contended =
+      : value non_float mod contended logical =
         Immut of string
       | Mut of { mutable contents : string; }
     [@@unsafe_allow_any_mode_crossing]
@@ -234,13 +243,19 @@ Error: Signature mismatch:
          sig type t = { mutable x : int; } end
        is not included in
          sig
-           type t : value non_float mod contended = { mutable x : int; }
+           type t
+             : value non_float mod contended logical = {
+             mutable x : int;
+           }
            [@@unsafe_allow_any_mode_crossing]
          end
        Type declarations do not match:
          type t = { mutable x : int; }
        is not included in
-         type t : value non_float mod contended = { mutable x : int; }
+         type t
+           : value non_float mod contended logical = {
+           mutable x : int;
+         }
        [@@unsafe_allow_any_mode_crossing]
        They have different unsafe mode crossing behavior:
        the second has [@@unsafe_allow_any_mode_crossing], but the first does not
@@ -259,7 +274,7 @@ module _ = (M : S)
 [%%expect{|
 module type S =
   sig
-    type t : value non_float mod contended = { mutable x : int; }
+    type t : value non_float mod contended logical = { mutable x : int; }
     [@@unsafe_allow_any_mode_crossing]
   end
 module M : sig type t = { mutable x : int; } end
@@ -274,7 +289,10 @@ Error: Signature mismatch:
        Type declarations do not match:
          type t = M.t = { mutable x : int; }
        is not included in
-         type t : value non_float mod contended = { mutable x : int; }
+         type t
+           : value non_float mod contended logical = {
+           mutable x : int;
+         }
        [@@unsafe_allow_any_mode_crossing]
        They have different unsafe mode crossing behavior:
        the second has [@@unsafe_allow_any_mode_crossing], but the first does not
@@ -309,24 +327,30 @@ Error: Signature mismatch:
        Modules do not match:
          sig
            type t
-             : value non_float mod portable contended = {
+             : value non_float mod portable contended logical = {
              mutable x : int;
            }
            [@@unsafe_allow_any_mode_crossing]
          end
        is not included in
          sig
-           type t : value non_float mod contended = { mutable x : int; }
+           type t
+             : value non_float mod contended logical = {
+             mutable x : int;
+           }
            [@@unsafe_allow_any_mode_crossing]
          end
        Type declarations do not match:
          type t
-           : value non_float mod portable contended = {
+           : value non_float mod portable contended logical = {
            mutable x : int;
          }
        [@@unsafe_allow_any_mode_crossing]
        is not included in
-         type t : value non_float mod contended = { mutable x : int; }
+         type t
+           : value non_float mod contended logical = {
+           mutable x : int;
+         }
        [@@unsafe_allow_any_mode_crossing]
        They have different unsafe mode crossing behavior:
        Both specify [@@unsafe_allow_any_mode_crossing], but their bounds are not equal
@@ -350,7 +374,7 @@ end
 module A : sig type t : value mod global many portable external_ end
 module B :
   sig
-    type t : value non_float mod portable contended = { a : A.t; }
+    type t : value non_float mod portable contended logical = { a : A.t; }
     [@@unsafe_allow_any_mode_crossing]
     val a : t -> A.t
   end
@@ -363,7 +387,7 @@ type 'a t : immutable_data with 'a = P : ('a, 'k) imm -> 'a t
 [@@unsafe_allow_any_mode_crossing]
 [%%expect{|
 type ('a, 'k) imm = { inner : 'a; }
-type 'a t : immutable_data with 'a = P : ('a, 'k) imm -> 'a t
+type 'a t : logical_data with 'a = P : ('a, 'k) imm -> 'a t
 [@@unsafe_allow_any_mode_crossing]
 |}]
 
@@ -389,7 +413,7 @@ end
 module B :
   sig
     type 'a t_reexported
-      : immutable_data with 'a =
+      : logical_data with 'a =
       'a t =
         P : ('a, 'k) imm -> 'a t_reexported
     [@@unsafe_allow_any_mode_crossing]
@@ -419,7 +443,8 @@ Error: This variant or record definition does not match that of type "'a t"
        They have different unsafe mode crossing behavior:
        Both specify [@@unsafe_allow_any_mode_crossing], but their bounds are not equal
          the original has: mod forkable unyielding many total stateless
-         immutable portable contended with 'a
+         immutable portable contended
+         with 'a along linearity, contention, portability, forkable, yielding, statefulness, visibility, totality
          but this has: mod forkable unyielding many total stateless immutable
          portable contended
 |}]
@@ -430,8 +455,10 @@ type ('a, 'b) arity_2 : immutable_data with 'b = { x : 'a }
 type ('a, 'b) bad_reexport_2 : immutable_data with 'a = ('a, 'b) arity_2 = { x : 'a }
 [@@unsafe_allow_any_mode_crossing]
 [%%expect{|
-type ('a, 'b) arity_2 : immutable_data with 'b = { x : 'a; }
-[@@unsafe_allow_any_mode_crossing]
+type ('a, 'b) arity_2
+  : logical_data with 'a @@ forkable unyielding many total immutable with 'b = {
+  x : 'a;
+} [@@unsafe_allow_any_mode_crossing]
 Lines 4-5, characters 0-34:
 4 | type ('a, 'b) bad_reexport_2 : immutable_data with 'a = ('a, 'b) arity_2 = { x : 'a }
 5 | [@@unsafe_allow_any_mode_crossing]
@@ -440,9 +467,11 @@ Error: This variant or record definition does not match that of type
        They have different unsafe mode crossing behavior:
        Both specify [@@unsafe_allow_any_mode_crossing], but their bounds are not equal
          the original has: mod forkable unyielding many total stateless
-         immutable portable contended with 'b
+         immutable portable contended
+         with 'b along linearity, contention, portability, forkable, yielding, statefulness, visibility, totality
          but this has: mod forkable unyielding many total stateless immutable
-         portable contended with 'a
+         portable contended
+         with 'a along linearity, contention, portability, forkable, yielding, statefulness, visibility, totality
 |}]
 
 (* mcomp *)
@@ -498,38 +527,53 @@ end
 type (_, _) eq = Refl : ('a, 'a) eq
 module M1 :
   sig
-    type 'a t : value non_float mod contended = { x : 'a; }
+    type 'a t
+      : value non_float mod contended logical with 'a @@ contended = {
+      x : 'a;
+    }
     [@@unsafe_allow_any_mode_crossing]
   end
 module M2 :
   sig
-    type 'a t : value non_float mod contended = { x : 'a; }
+    type 'a t
+      : value non_float mod contended logical with 'a @@ contended = {
+      x : 'a;
+    }
     [@@unsafe_allow_any_mode_crossing]
   end
 module M3 :
   sig
-    type 'a t : value non_float mod portable = { x : 'a; }
+    type 'a t
+      : value non_float mod portable logical with 'a @@ portable = {
+      x : 'a;
+    }
     [@@unsafe_allow_any_mode_crossing]
   end
 module M4 :
   sig
-    type 'a t : value non_float mod contended with 'a = { mutable x : 'a; }
+    type 'a t
+      : value non_float mod contended logical with 'a = {
+      mutable x : 'a;
+    }
     [@@unsafe_allow_any_mode_crossing]
   end
 module M5 :
   sig
-    type 'a t : value non_float mod contended with 'a = { mutable x : 'a; }
+    type 'a t
+      : value non_float mod contended logical with 'a = {
+      mutable x : 'a;
+    }
     [@@unsafe_allow_any_mode_crossing]
   end
 module M6 :
   sig
-    type 'a t : immutable_data with 'a = { mutable x : 'a; }
+    type 'a t : logical_data with 'a = { mutable x : 'a; }
     [@@unsafe_allow_any_mode_crossing]
   end
 module M7 :
   sig
     type ('a, 'b) t
-      : value non_float mod contended with 'a = {
+      : value non_float mod contended logical with 'a = {
       mutable x : 'b;
     }
     [@@unsafe_allow_any_mode_crossing]
@@ -537,7 +581,7 @@ module M7 :
 module M8 :
   sig
     type ('a, 'b) t
-      : value non_float mod contended with 'a = {
+      : value non_float mod contended logical with 'a = {
       mutable x : 'b;
     }
     [@@unsafe_allow_any_mode_crossing]
@@ -545,7 +589,7 @@ module M8 :
 module M9 :
   sig
     type ('a, 'b) t
-      : value non_float mod contended with 'b = {
+      : value non_float mod contended logical with 'b = {
       mutable x : 'b;
     }
     [@@unsafe_allow_any_mode_crossing]
@@ -611,7 +655,7 @@ type t : value mod contended = { mutable i : int }
 [@@unsafe_allow_any_mode_crossing]
 and s : value mod contended = { t : t } [@@unboxed]
 [%%expect{|
-type t : value non_float mod contended = { mutable i : int; }
+type t : value non_float mod contended logical = { mutable i : int; }
 [@@unsafe_allow_any_mode_crossing]
 and s = { t : t; } [@@unboxed]
 |}]

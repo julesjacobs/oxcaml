@@ -162,21 +162,22 @@ let (assert_graph_subsumption_exact @ total) :
     (guard : graph) -> (obligations : graph) ->
     {u : unit |
       eval_qf env (assert_graph_subsumption gamma guard obligations) =
-        (eval_qf env gamma
-         && ((not (models (Global :: env) guard)
-              || models (Global :: Global :: env) obligations
-              || models (Regional :: Global :: env) obligations
-              || models (Local :: Global :: env) obligations)
-             && (not (models (Regional :: env) guard)
-                 || models (Global :: Regional :: env) obligations
-                 || models (Regional :: Regional :: env) obligations
-                 || models (Local :: Regional :: env) obligations)
-             && (not (models (Local :: env) guard)
-                 || models (Global :: Local :: env) obligations
-                 || models (Regional :: Local :: env) obligations
-                 || models (Local :: Local :: env) obligations)))} @ ghost =
+        (eval_qf env gamma && subsumes env guard obligations)} @ ghost =
  fun env gamma guard obligations -> ghost_ (
   assert_graph_subsumption_def gamma guard obligations;
+  subsumes_def env guard obligations;
+  models_exists_def [()] (Global :: env) obligations;
+  models_exists_def [()] (Regional :: env) obligations;
+  models_exists_def [()] (Local :: env) obligations;
+  models_exists_def [] (Global :: Global :: env) obligations;
+  models_exists_def [] (Regional :: Global :: env) obligations;
+  models_exists_def [] (Local :: Global :: env) obligations;
+  models_exists_def [] (Global :: Regional :: env) obligations;
+  models_exists_def [] (Regional :: Regional :: env) obligations;
+  models_exists_def [] (Local :: Regional :: env) obligations;
+  models_exists_def [] (Global :: Local :: env) obligations;
+  models_exists_def [] (Regional :: Local :: env) obligations;
+  models_exists_def [] (Local :: Local :: env) obligations;
   Mode_solver_graph_qe_proof.assert_graph_subsumption_exact env gamma guard obligations;
   ())
 

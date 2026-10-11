@@ -256,7 +256,7 @@ let rec delayed n =
 Line 2, characters 13-28:
 2 |   let f () = delayed (n - 1) in if n > 0 then f () else 0
                  ^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: n = -4611686018427387904)
 Line 3, characters 13-14:
 3 | [@@decreases n];;
                  ^

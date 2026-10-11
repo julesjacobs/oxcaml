@@ -44,7 +44,7 @@ let[@def] (returned @ total) (after : GE.state @ immutable) (word : W.t @ immuta
 let[@def] (source_returns @ total) (source : D.term @ immutable) (input : W.t @ immutable)
     (fuel : D.index @ immutable) (word : W.t @ immutable) = ghost_ (
   Hmc_source_semantics.advance fuel (Hmc_source_semantics.initial (D.Apply (source, D.Word input)))
-    === Hmc_source_semantics.Done (Hm_interpreter_typing.Word word))
+    === Hmc_source_semantics.Done (Hmc_source_values.Word word))
 
 let[@def] (exhausted @ total) (after : GE.state @ immutable) = ghost_ (
   match after.GE.execution.X.machine.E.stack with

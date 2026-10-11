@@ -88,13 +88,13 @@ module DirectPrivEta =
   (functor (X : sig end) -> Priv(X))(struct end);;
 (* CR layouts v2.8: examine the interaction between kinds and nondep. *)
 [%%expect{|
-module DirectPrivEta : sig type t : immutable_data with t end
+module DirectPrivEta : sig type t : logical_data with t end
 |}]
 
 module DirectPrivEtaUnit =
   (functor (_ : sig end) -> Priv)(struct end)(struct end);;
 [%%expect{|
-module DirectPrivEtaUnit : sig type t : immutable_data with t end
+module DirectPrivEtaUnit : sig type t : logical_data with t end
 |}]
 
 (*** Test proposed by Jacques in

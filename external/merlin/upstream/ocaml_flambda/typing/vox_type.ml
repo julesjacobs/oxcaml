@@ -41,6 +41,13 @@ let builtin_c_primitives =
           "caml_bigint_mul";
           "caml_bigint_div";
           "caml_bigint_modulo" ];
+      owned ["Stdlib__Map"]
+        [ "caml_logical_map_empty";
+          "caml_logical_map_find_opt";
+          "caml_logical_map_mem";
+          "caml_logical_map_add";
+          "caml_logical_map_remove";
+          "caml_logical_map_cardinal" ];
       owned ["Stdlib__Iarray"] ["caml_array_append"];
       owned ["Vox_table_bits"] ~native:"caml_vox_int_ctz_untagged"
         ["caml_vox_int_ctz"];

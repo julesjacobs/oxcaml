@@ -38,7 +38,7 @@ let rec (initialize @ total) : (catalog : T.catalog) @ immutable -> (entry : D.t
     let env = environment earlier in
     let mid = S.Running (S.Evaluate (env, term), k) in
     let three = D.S (D.S (D.S D.Z)) in
-    S.advance_add (startup_steps earlier) three start;
+    Hmc_source_proofs.advance_add (startup_steps earlier) three start;
     T.definition_valid_def earlier d; Hmc_admission.callable_def d.T.source;
     close_def env d.T.source;
     S.step_def mid; S.advance_def three mid;

@@ -127,7 +127,7 @@ Shows kind with increased verbosity:
         "line": 11,
         "col": 19
       },
-      "type": "type 'a l : immutable_data with 'a = 'a list",
+      "type": "type 'a l : logical_data with 'a = 'a list",
       "tail": "no"
     }
   ]

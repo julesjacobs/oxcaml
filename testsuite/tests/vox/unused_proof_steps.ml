@@ -235,6 +235,118 @@ module Arrays :
   end
 |}]
 
+module Iarray_observations = struct
+  let (length_nonnegative @ total) (a : int iarray) :
+      {u : unit | Iarray.length a >= 0} @ ghost = ghost_ ()
+
+  let (literal_length @ total) (key : int) : {n : int | n = 1} @ ghost =
+    ghost_ (
+      let a = [: key :] in
+      length_nonnegative a;
+      Iarray.length a)
+
+  let append_length (key : int) : {n : int | n = 2} =
+    let a = Iarray.append [: key :] [: key :] in
+    ghost_ (length_nonnegative a);
+    Iarray.length a
+
+  let (read_reflexive @ total) (a : int iarray)
+      (index : {i : int | 0 <= i && i < Iarray.length a}) :
+      {u : unit | Iarray.Refined.get a index = Iarray.Refined.get a index}
+        @ ghost = ghost_ ()
+
+  let literal_read (key : int) : {n : int | n = key} =
+    let a = [: key :] in
+    let zero = 0 in
+    let index : {i : int | 0 <= i && i < Iarray.length a} = zero in
+    ghost_ (read_reflexive a index);
+    Iarray.Refined.get a index
+
+  let append_read (key : int) : {n : int | n = key} =
+    let a = Iarray.append [: key :] [: key :] in
+    let zero = 0 in
+    let index : {i : int | 0 <= i && i < Iarray.length a} = zero in
+    ghost_ (read_reflexive a index);
+    Iarray.Refined.get a index
+
+  let[@def] (wrapped @ total) (a : int iarray) = a
+
+  let (needed @ total) (a : int iarray) :
+      {n : int | n = Iarray.length a} @ ghost = ghost_ (
+    wrapped_def a;
+    Iarray.length (wrapped a))
+
+  let (needed_read @ total) (a : int iarray)
+      (index : {i : int | 0 <= i && i < Iarray.length a}) :
+      {n : int | n = Iarray.Refined.get a index} @ ghost = ghost_ (
+    wrapped_def a;
+    let b = wrapped a in
+    let bounded : {i : int | 0 <= i && i < Iarray.length b} = index in
+    Iarray.Refined.get b bounded)
+end;;
+[%%expect{|
+Line 8, characters 6-26:
+8 |       length_nonnegative a;
+          ^^^^^^^^^^^^^^^^^^^^
+Warning 227 [unused-proof-step]: No refinement proof in this function used the fact from this
+  call to "length_nonnegative".
+
+Line 13, characters 11-33:
+13 |     ghost_ (length_nonnegative a);
+                ^^^^^^^^^^^^^^^^^^^^^^
+Warning 227 [unused-proof-step]: No refinement proof in this function used the fact from this
+  call to "length_nonnegative".
+
+Line 25, characters 11-35:
+25 |     ghost_ (read_reflexive a index);
+                ^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 227 [unused-proof-step]: No refinement proof in this function used the fact from this
+  call to "read_reflexive".
+
+Line 32, characters 11-35:
+32 |     ghost_ (read_reflexive a index);
+                ^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 227 [unused-proof-step]: No refinement proof in this function used the fact from this
+  call to "read_reflexive".
+
+module Iarray_observations :
+  sig
+    val length_nonnegative :
+      (a : int iarray) -> {u : unit | (Iarray.length a) >= 0} @ ghost
+    val literal_length : int -> {n : int | n = 1} @ ghost
+    val append_length : int -> {n : int | n = 2}
+    val read_reflexive :
+      (a : int iarray) ->
+      (index : {i : int | (0 <= i) && (i < (Iarray.length a))}) ->
+      {u : unit
+        | (Iarray.Refined.get a index) = (Iarray.Refined.get a index)} @ ghost
+    val literal_read : (key : int) -> {n : int | n = key}
+    val append_read : (key : int) -> {n : int | n = key}
+    val wrapped : int iarray -> int iarray
+    val wrapped_def : (a : int iarray) -> {u : unit | (wrapped a) === a}
+    val needed :
+      (a : int iarray) -> {n : int | n = (Iarray.length a)} @ ghost
+    val needed_read :
+      (a : int iarray) ->
+      (index : {i : int | (0 <= i) && (i < (Iarray.length a))}) ->
+      {n : int | n = (Iarray.Refined.get a index)} @ ghost
+  end
+|}]
+
+let (without_definition @ total) (a : int iarray) :
+    {n : int | n = Iarray.length a} @ ghost =
+  ghost_ (Iarray.length (Iarray_observations.wrapped a));;
+[%%expect{|
+Line 3, characters 9-56:
+3 |   ghost_ (Iarray.length (Iarray_observations.wrapped a));;
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 2, characters 15-34:
+2 |     {n : int | n = Iarray.length a} @ ghost =
+                   ^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
 (* A function with no proof at all uses none of its steps. *)
 module No_proof = struct
   open Lemmas

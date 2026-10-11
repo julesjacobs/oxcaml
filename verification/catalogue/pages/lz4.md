@@ -1,13 +1,19 @@
 title: LZ4 block compression
 blurb: An LZ4 block compressor and decoder whose outputs are proved equal to a specification written as a scanner model and a decoder model, with a round-trip theorem.
 status: owner-review
-date: 27 September 2026
+date: 4 October 2026
 sources:
   - verification/library/vox_lz4.mli — Public interface
   - verification/library/vox_lz4_spec.ml — The two relations the contracts use
+  - verification/library/vox_lz4_spec_parse.ml — Tokens, lengths and parser status
+  - verification/library/vox_lz4_spec_token.ml — Token and offset encoding
+  - verification/library/vox_lz4_spec_plan.ml — Match plans and terminal restrictions
+  - verification/library/vox_lz4_spec_hashes.ml — Previous positions for each hash
   - verification/library/vox_lz4_spec_decode_bytes.ml — Decoder model
   - verification/library/vox_lz4_spec_scan.ml — Compressor model: positions visited and hash-table updates
+  - verification/library/vox_lz4_spec_bytes.ml — Source-distance equality and wire bytes
   - verification/library/vox_lz4_spec_match.ml — Hash and match selection used by the compressor model
+  - verification/library/vox_lz4_match_proof.ml — Proof that a matching run can extend by one byte
   - verification/library/vox_lz4_spec_wire.ml — Wire layout of a plan
   - verification/library/vox_lz4.ml — Implementation of the public functions
   - verification/library/vox_lz4_streaming_codec.ml — Compressor over raw memory
@@ -22,31 +28,32 @@ sources:
 
 The reason and position carried by `Malformed` are not specified. The models are the definition of LZ4 here; their agreement with liblz4 is tested, not proved. Only normal return is specified; the codec functions may raise `Out_of_memory`, and `compress` raises `Invalid_argument` above 4 MiB.
 
-## Client example
-
-From the public-only client. `(source : {s : string | p})` names the argument so that the result type can refer to it, and `{v : t | p}` is the type `t` refined by the predicate `p`. `V.contents s` is an erased view of a string as a `char iarray`, and `===` is logical equality. `ghost_ (...)` is proof code, checked and then erased; here it calls the `roundtrip` theorem, whose result type states that `decoded` is `Ok` with the source's contents. `unreachable_ ()` asks the checker to prove that its branch cannot be reached (unlike `assert false`, which the checker treats as a failure that may happen). The theorem gives both that and, in the `Ok` branch, the equality of contents; without the `ghost_` line the function is rejected.
-
-@code testsuite/tests/vox/vox_lz4_public_client.ml "let roundtrip" "| Error _ -> unreachable_ ()"
-
-`lz4_boundary.ml` compiles this client against only the `.cmi` files of `Vox_lz4`, the ten specification modules and three sequence and string modules, runs it with both compilers, and checks that its `-dlambda` output contains exactly two calls into `Vox_lz4` and no reference to `Vox_lz4_spec`.
-
-## A rejected program
-
-The contract does not let a client claim more than the decoder model says. This program claims that decoding with capacity 0 never reports a malformed block. That is false, since the empty string is a malformed block, and the checker rejects it. The test `lz4_boundary.ml` compiles it against the public interfaces only and requires this error.
-
-@code testsuite/tests/vox/lz4_boundary.ml "let f (wire : string) :" "|}]"
-
-The same test checks three uses of `decompress`'s contract (an invalid capacity, the default capacity and a given one) and requires rejection of a claim that the default capacity is 0, of a claim that `compress` returns its input, a runtime use of the erased `contents`, and two references to implementation modules that the client cannot see, each with its exact error.
-
 ## Interface
 
-@code verification/library/vox_lz4.mli
-
-In `decompress`, `?capacity:(c : int)` names the optional argument as the caller passed it: `c` is an `int option`, `None` when the argument is left out. `@ ghost` marks `roundtrip`'s result as erased and `@@ total` says it terminates without effects. The two relations are defined in `vox_lz4_spec.ml`. `let[@def]` also generates a lemma, such as `matches_model_def`, that states the definition's equation for proofs to invoke:
+The observable relations define the contract before any implementation or
+proof details. `matches_model` fixes the decoded bytes and error class;
+`compresses` fixes the compressor's exact wire bytes. The diagnostic reason
+and offset of `Malformed` remain permitted choices:
 
 @code verification/library/vox_lz4_spec.ml "let[@def] (matches_model @ total)" "from_source model))"
 
-`decode_model` (in `vox_lz4_spec_decode_bytes.ml`) returns a status, a byte count and the decoded bytes in reverse order; `matches_bytes` compares them with the output string. `from_source` (in `vox_lz4_spec_scan.ml`) returns the list of matches the compressor chooses, and `wire_matches_plan` fixes their byte layout. Together with the parser, token, plan, hash and match modules, the specification is ten files and 522 lines.
+The operations use those relations directly:
+
+@code verification/library/vox_lz4.mli
+
+In `decompress`, `?capacity:(c : int)` names the caller's optional argument:
+`None` selects 4,194,304 bytes and an out-of-range `Some n` gives
+`Invalid_capacity`. `@ ghost` erases `roundtrip` and `@@ total` declares
+that it terminates without effects. `let[@def]` generates checked defining
+equations such as `matches_model_def`.
+
+`decode_block` (in `vox_lz4_spec_decode_bytes.ml`) returns a status, a byte count and the decoded bytes in reverse order; `matches_bytes` compares them with the output string. Its recursive worker `decode_model` tracks the wire cursor, last match start and output so far; the block entry point fixes their initial values. `from_source` (in `vox_lz4_spec_scan.ml`) returns the list of matches the compressor chooses, and `wire_matches_plan` fixes their byte layout. Together with the parser, token, plan, hash and match modules, these ten files define the complete specification. The source-distance extension proof is in `vox_lz4_match_proof.ml`; it contributes no model definition.
+
+The complete pure dependencies are available directly:
+
+- Decoder bytes and classification: [decoder model](src:verification/library/vox_lz4_spec_decode_bytes.ml) and [length parser](src:verification/library/vox_lz4_spec_parse.ml).
+- Compressor choices: [scan](src:verification/library/vox_lz4_spec_scan.ml), [previous hash positions](src:verification/library/vox_lz4_spec_hashes.ml), [hash and match selection](src:verification/library/vox_lz4_spec_match.ml), and [plan restrictions](src:verification/library/vox_lz4_spec_plan.ml).
+- Exact encoding: [wire layout](src:verification/library/vox_lz4_spec_wire.ml), [token and offset encoding](src:verification/library/vox_lz4_spec_token.ml), and [byte relations](src:verification/library/vox_lz4_spec_bytes.ml).
 
 ## Trusted base
 
@@ -66,6 +73,22 @@ In `decompress`, `?capacity:(c : int)` names the optional argument as the caller
 - Errors: only the kind of error is specified (`Malformed`, `Output_limit`, never `Invalid_capacity` from `decompress_verified`, and from `decompress` exactly when the capacity is out of range); the `malformed` reason and position are not. `lz4_fast_decoder_reference.ml` compares them with an unverified reference decoder, `vox_lz4_baseline.ml`, by testing.
 - An exception while scanning or decoding consumes the ownership of the raw buffer, which the finalizer then frees at some later collection; an exception from the final copy releases the buffer before it is re-raised. There is no exception-safety or prompt-cleanup theorem.
 - The ghost `roundtrip` is total; the codec functions are specified for normal return only.
+
+## Client example
+
+From the public-only client. `(source : {s : string | p})` names the argument so that the result type can refer to it, and `{v : t | p}` is the type `t` refined by the predicate `p`. `V.contents s` is an erased view of a string as a `char iarray`, and `===` is logical equality. `ghost_ (...)` is proof code, checked and then erased; here it calls the `roundtrip` theorem, whose result type states that `decoded` is `Ok` with the source's contents. `unreachable_ ()` asks the checker to prove that its branch cannot be reached (unlike `assert false`, which the checker treats as a failure that may happen). The theorem gives both that and, in the `Ok` branch, the equality of contents; without the `ghost_` line the function is rejected.
+
+@code testsuite/tests/vox/vox_lz4_public_client.ml "let roundtrip" "| Error _ -> unreachable_ ()"
+
+`lz4_boundary.ml` compiles this client against only the `.cmi` files of `Vox_lz4`, the ten specification modules and three sequence and string modules, runs it with both compilers, and checks that its `-dlambda` output contains exactly two calls into `Vox_lz4` and no reference to `Vox_lz4_spec`.
+
+## A rejected program
+
+The contract does not let a client claim more than the decoder model says. This program claims that decoding with capacity 0 never reports a malformed block. That is false, since the empty string is a malformed block, and the checker rejects it. The test `lz4_boundary.ml` compiles it against the public interfaces only and requires this error.
+
+@code testsuite/tests/vox/lz4_boundary.ml "let f (wire : string) :" "|}]"
+
+The same test checks three uses of `decompress`'s contract (an invalid capacity, the default capacity and a given one) and requires rejection of a claim that the default capacity is 0, of a claim that `compress` returns its input, a runtime use of the erased `contents`, and two references to implementation modules that the client cannot see, each with its exact error.
 
 ## Reproduce
 

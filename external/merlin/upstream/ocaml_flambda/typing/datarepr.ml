@@ -95,7 +95,6 @@ let constructor_args ~current_unit priv cd_args cd_res path rep =
           type_attributes = [];
           type_unboxed_default = false;
           type_inductive = false;
-          type_phantom_parameters = false;
           type_uid = Uid.mk ~current_unit;
           type_unboxed_version = None;
         }
@@ -328,7 +327,8 @@ let dummy_label (type rep) (record_form : rep record_form)
   | Legacy -> Record_unboxed
   | Unboxed_product -> Record_unboxed_product
   in
-  { lbl_name = ""; lbl_res = none; lbl_arg = none;
+  { lbl_id = Ident.create_local "*label*"; lbl_name = "";
+    lbl_res = none; lbl_arg = none;
     lbl_mut = Immutable; lbl_modalities = Mode.Modality.Const.id;
     lbl_ghost = false;
     lbl_sort = None;
@@ -346,7 +346,7 @@ let label_descrs record_form ty_res lbls repres priv =
       [] -> []
     | l :: rest ->
         let lbl =
-          { lbl_name = Ident.name l.ld_id;
+          { lbl_id = l.ld_id; lbl_name = Ident.name l.ld_id;
             lbl_res = ty_res;
             lbl_arg = l.ld_type;
             lbl_mut = l.ld_mutable;

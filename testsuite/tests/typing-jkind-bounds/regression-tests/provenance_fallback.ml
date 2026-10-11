@@ -11,7 +11,7 @@ type t : value mod dynamic = { mutable x : int }
 Line 1, characters 0-48:
 1 | type t : value mod dynamic = { mutable x : int }
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is mutable_data
+Error: The kind of type "t" is mutable_data mod logical
          because it's a boxed record type.
        But the kind of type "t" must be a subkind of value mod dynamic
          because of the annotation on the declaration of the type t.
@@ -22,7 +22,7 @@ type t : value mod dynamic = { mutable x : int; y : int }
 Line 1, characters 0-57:
 1 | type t : value mod dynamic = { mutable x : int; y : int }
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is mutable_data
+Error: The kind of type "t" is mutable_data mod logical
          because it's a boxed record type.
        But the kind of type "t" must be a subkind of value mod dynamic
          because of the annotation on the declaration of the type t.
@@ -33,7 +33,7 @@ type t : value mod dynamic = { x : int }
 Line 1, characters 0-40:
 1 | type t : value mod dynamic = { x : int }
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is immutable_data
+Error: The kind of type "t" is logical_data
          because it's a boxed record type.
        But the kind of type "t" must be a subkind of value mod dynamic
          because of the annotation on the declaration of the type t.
@@ -55,7 +55,7 @@ type t : value mod dynamic = A of int
 Line 1, characters 0-37:
 1 | type t : value mod dynamic = A of int
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is immutable_data
+Error: The kind of type "t" is logical_data
          because it's a boxed variant type.
        But the kind of type "t" must be a subkind of value mod dynamic
          because of the annotation on the declaration of the type t.
@@ -66,7 +66,7 @@ type t : value mod dynamic = A of { x : int }
 Line 1, characters 0-45:
 1 | type t : value mod dynamic = A of { x : int }
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is immutable_data
+Error: The kind of type "t" is logical_data
          because it's a boxed variant type.
        But the kind of type "t" must be a subkind of value mod dynamic
          because of the annotation on the declaration of the type t.
@@ -77,7 +77,7 @@ type t : value mod dynamic = A of { mutable x : int }
 Line 1, characters 0-53:
 1 | type t : value mod dynamic = A of { mutable x : int }
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is mutable_data
+Error: The kind of type "t" is mutable_data mod logical
          because it's a boxed variant type.
        But the kind of type "t" must be a subkind of value mod dynamic
          because of the annotation on the declaration of the type t.
@@ -88,7 +88,7 @@ type t : value mod contended = { mutable x : int; y : int }
 Line 1, characters 0-59:
 1 | type t : value mod contended = { mutable x : int; y : int }
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is mutable_data
+Error: The kind of type "t" is mutable_data mod logical
          because it's a boxed record type.
        But the kind of type "t" must be a subkind of value mod contended
          because of the annotation on the declaration of the type t.
@@ -150,7 +150,7 @@ type t : value mod dynamic = int * int
 Line 1, characters 0-38:
 1 | type t : value mod dynamic = int * int
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "int * int" is immutable_data
+Error: The kind of type "int * int" is logical_data
          because it's a tuple type.
        But the kind of type "int * int" must be a subkind of value mod dynamic
          because of the definition of t at line 1, characters 0-38.
@@ -161,7 +161,7 @@ type t : value mod contended = int ref
 Line 1, characters 0-38:
 1 | type t : value mod contended = int ref
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "int ref" is mutable_data.
+Error: The kind of type "int ref" is mutable_data mod logical.
        But the kind of type "int ref" must be a subkind of value mod contended
          because of the definition of t at line 1, characters 0-38.
 |}]
@@ -173,7 +173,7 @@ Line 1, characters 0-43:
 1 | type 'a t : immutable_data with 'a = 'a ref
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: The kind of type "'a ref" is
-           mutable_data with 'a @@ forkable unyielding many.
+           mutable_data mod logical with 'a @@ forkable unyielding many.
        But the kind of type "'a ref" must be a subkind of
            immutable_data with 'a
          because of the definition of t at line 1, characters 0-43.

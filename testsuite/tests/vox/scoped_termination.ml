@@ -48,7 +48,7 @@ end;;
 Line 2, characters 52-58:
 2 |   let rec (loop @ total) n = Within.call (fun () -> loop n)
                                                         ^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: n = 0)
 Line 3, characters 15-16:
 3 |   [@@decreases n]
                    ^
@@ -65,7 +65,7 @@ end;;
 Line 3, characters 26-38:
 3 |     let later = fun () -> loop (n - 1) in
                               ^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: n = -4611686018427387904)
 Line 5, characters 15-16:
 5 |   [@@decreases n]
                    ^

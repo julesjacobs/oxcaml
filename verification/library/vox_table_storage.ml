@@ -2,7 +2,7 @@ module P = Ghost_pref
 module H = P.Heap
 module M = Vox_table_model
 
-type ('k : immutable_data, 'v : immutable_data) t : immutable_data
+type ('k : immutable_data, 'v : immutable_data) t : logical_data with 'k with 'v
 type ('k : immutable_data, 'v : immutable_data) view =
   { model : ('k, 'v) M.state @@ ghost }
 

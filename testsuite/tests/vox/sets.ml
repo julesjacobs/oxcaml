@@ -336,7 +336,7 @@ end;;
 Line 19, characters 33-40:
 19 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0)
 Line 19, characters 28-29:
 19 |     let proof : {b : bool | b} = present in
                                  ^
@@ -443,7 +443,7 @@ Warning 228 [trusted-external]: The verifier assumes this external's cast of its
 Line 31, characters 33-40:
 31 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0)
 Line 31, characters 28-29:
 31 |     let proof : {b : bool | b} = present in
                                  ^
@@ -475,7 +475,7 @@ end;;
 Line 18, characters 33-40:
 18 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0)
 Line 18, characters 28-29:
 18 |     let proof : {b : bool | b} = present in
                                  ^
@@ -711,7 +711,7 @@ end;;
 Line 16, characters 2-31:
 16 |   type t : immutable_data = S.t
        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "S.t" is mutable_data.
+Error: The kind of type "S.t" is mutable_data mod logical.
        But the kind of type "S.t" must be a subkind of immutable_data
          because of the definition of t at line 16, characters 2-31.
 |}]

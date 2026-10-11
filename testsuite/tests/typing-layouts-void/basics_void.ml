@@ -72,7 +72,9 @@ Line 1, characters 0-65:
 1 | type bad : immediate = A of key [@immediate_all_void_constructor]
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: This type definition does not satisfy its kind annotation immediate,
-       because key is not mod global many stateless immutable.
+       because key is not mod global many total immutable logical.
+       It is not logical:
+       key is abstract and its kind does not say mod logical.
 |}]
 type bad : immediate = A of #(unit_u * key r) [@immediate_all_void_constructor]
 [%%expect{|
@@ -80,7 +82,9 @@ Line 1, characters 0-79:
 1 | type bad : immediate = A of #(unit_u * key r) [@immediate_all_void_constructor]
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: This type definition does not satisfy its kind annotation immediate,
-       because key is not mod global many stateless immutable.
+       because key is not mod global many total immutable logical.
+       It is not logical:
+       key is abstract and its kind does not say mod logical.
 |}]
 
 
@@ -117,13 +121,21 @@ Lines 1-3, characters 0-59:
 3 |   | B of #(unit_u * v2 r) [@immediate_all_void_constructor]
 Error: This type definition does not satisfy its kind annotation
          immediate with v1,
-       because v2 is not mod global many stateless immutable.
+       because v2 is not mod global many total immutable logical.
+       It is not logical:
+       v1 is abstract and its kind does not say mod logical.
 |}]
 
 type vme : void
 type t : value mod external_ = A of vme [@immediate_all_void_constructor]
 [%%expect{|
 type vme : void
+type t = A of vme [@immediate_all_void_constructor]
+|}]
+
+type t : value non_pointer mod external_ =
+  A of vme [@immediate_all_void_constructor]
+[%%expect{|
 type t = A of vme [@immediate_all_void_constructor]
 |}]
 

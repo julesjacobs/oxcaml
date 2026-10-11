@@ -17,22 +17,22 @@
   > type t = int option
   > EOF
   1:9-1:12: immediate
-  1:9-1:19: immutable_data
-  1:0-1:19: immutable_data
+  1:9-1:19: logical_data
+  1:0-1:19: logical_data
 
   $ run 1:16 <<EOF
   > type t = int option
   > EOF
-  1:13-1:19: immutable_data with 'a
-  1:9-1:19: immutable_data
-  1:0-1:19: immutable_data
+  1:13-1:19: logical_data with 'a
+  1:9-1:19: logical_data
+  1:0-1:19: logical_data
 
   $ run 1:18 <<EOF
   > type 'a t = 'a option
   > EOF
-  1:15-1:21: immutable_data with 'a
-  1:12-1:21: immutable_data with 'a
-  1:0-1:21: immutable_data with 'a
+  1:15-1:21: logical_data with 'a
+  1:12-1:21: logical_data with 'a
+  1:0-1:21: logical_data with 'a
 
   $ run 1:44 <<EOF
   > type 'a my_list = Nil | Cons of 'a * 'a my_list
@@ -61,7 +61,7 @@
   > type 'a t1
   > type t2 = Foo of int t1
   > EOF
-  2:0-2:23: immutable_data with int t1
+  2:0-2:23: logical_data with int t1
 
   $ run 1:14 <<EOF
   > let f (foo : int) =

@@ -3,8 +3,8 @@
    then the directory of the dumps. *)
 open Emitted_code
 
-let lemmas = [ "put_get"; "erase_get"; "count_put"; "count_erase";
-               "lookup_empty"; "lookup_equal"; "current_def" ]
+let lemmas = [ "count_bridge"; "lookup_agrees"; "count_agrees";
+               "empty_view"; "put_view"; "erase_view"; "owner_def"; "bindings_def" ]
 
 let () =
   let native = Sys.argv.(1) = "native" and dir = Sys.argv.(2) in
@@ -24,21 +24,17 @@ let () =
     (not (occurs "(field_imm%s0%sV/" exercise
           || occurs "(field_imm%s1%sV/" exercise
           || occurs "(field_imm%s2%sV/" exercise
-          || occurs "(field_imm%s3%sV/" exercise
-          || occurs "(field_imm%s4%sV/" exercise
           || occurs "(field%s0%sV/" exercise || occurs "(field%s1%sV/" exercise
-          || occurs "(field%s2%sV/" exercise || occurs "(field%s3%sV/" exercise
-          || occurs "(field%s4%sV/" exercise))
-    "the client reads none of the fields for Map and the ghost observers";
+          || occurs "(field%s2%sV/" exercise))
+    "the client reads none of the fields for Model and the ghost observers";
   check
     (not (List.exists (fun name -> occurs name exercise)
-            (lemmas @ [ "routes"; "certificate" ])))
-    "the client calls no lemma and builds no certificate";
+            (lemmas @ [ "caml_logical_map"; "routes"; "certificate" ])))
+    "the client calls no logical map operation or lemma and builds no certificate";
   if native then begin
     check
-      (occurs "before/%d[#()]" exercise && occurs "token/%d[#()]" exercise
-       && occurs "#(#(), #())" exercise)
-      "snapshots and tokens have the zero-width native layout";
+      (occurs "p/%d[#()]" exercise)
+      "permissions have the zero-width native layout";
     (* The lemmas' closures are fields of the table's module block, which
        the client builds when the functor is specialized in it; only calls
        count. *)
@@ -53,8 +49,8 @@ let () =
                 (List.exists
                    (fun lemma ->
                      List.exists (fun callee -> occurs lemma callee) callees)
-                   lemmas))
-          (name ^ " calls no ownership primitive and no lemma"))
+                   ("caml_logical_map" :: lemmas)))
+          (name ^ " calls no ownership primitive, logical map operation or lemma"))
       [ "client.cmm"; "client-O3.cmm" ];
     (* At -O3 the table's functor instance is specialized: no call goes
        through a closure of the instance. *)

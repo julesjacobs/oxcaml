@@ -660,6 +660,14 @@ module Dfa_proof :
           else true}
       @@ total
     val reduce : machine -> int -> machine option @ total @@ total
+    val reduce_valid :
+      (source : machine) ->
+      (limit : int) ->
+      {u : unit
+        | match reduce source limit with
+          | None -> true
+          | Some candidate -> Dfa_semantics.valid candidate}
+      @@ total
     val reduce_complete :
       (source : machine) ->
       (limit : int) ->
@@ -808,6 +816,13 @@ module Dfa_equivalence :
             (Dfa_semantics.run left witness.Ghost.ghost) <>
               (Dfa_semantics.run right witness.Ghost.ghost)
           else true}
+    val reduce_valid :
+      (source : Dfa_semantics.machine) ->
+      (limit : int) ->
+      {u : unit
+        | match reduce source limit with
+          | None -> true
+          | Some candidate -> Dfa_semantics.valid candidate}
     val reduce_complete :
       (source : Dfa_semantics.machine) ->
       (limit : int) ->
@@ -1506,6 +1521,14 @@ module Dfa_proof :
           else true}
       @@ total
     val reduce : machine -> int -> machine option @ total @@ total
+    val reduce_valid :
+      (source : machine) ->
+      (limit : int) ->
+      {u : unit
+        | match reduce source limit with
+          | None -> true
+          | Some candidate -> Dfa_semantics.valid candidate}
+      @@ total
     val reduce_complete :
       (source : machine) ->
       (limit : int) ->
@@ -1654,6 +1677,13 @@ module Dfa_equivalence :
             (Dfa_semantics.run left witness.Ghost.ghost) <>
               (Dfa_semantics.run right witness.Ghost.ghost)
           else true}
+    val reduce_valid :
+      (source : Dfa_semantics.machine) ->
+      (limit : int) ->
+      {u : unit
+        | match reduce source limit with
+          | None -> true
+          | Some candidate -> Dfa_semantics.valid candidate}
     val reduce_complete :
       (source : Dfa_semantics.machine) ->
       (limit : int) ->

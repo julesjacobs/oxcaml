@@ -1588,6 +1588,73 @@ let (rename_operand_valid @ total) :
        valid_operand_def physical (Reg chosen);
        ()))
 
+let (rename_instruction_valid @ total) :
+  (colors : int list) -> (registers : int) -> (physical : int) ->
+  (nodes : int) -> (instruction : instruction) ->
+  {u : unit |
+    not (length colors = registers && all_valid_reg physical colors
+         && valid_instruction registers nodes instruction)
+    || (match rename_instruction colors instruction with
+        | None -> true
+        | Some target -> valid_instruction physical nodes target)}
+  @ ghost =
+  fun colors registers physical nodes instruction -> ghost_ (
+    valid_instruction_def registers nodes instruction;
+    rename_instruction_def colors instruction;
+    match instruction with
+    | Move (dst, operand, next) ->
+      rename_operand_valid colors registers physical operand;
+      (match nth colors dst, rename_operand colors operand with
+       | Some chosen, Some operand ->
+         all_valid_reg_lookup physical colors dst chosen;
+         valid_instruction_def physical nodes (Move (chosen, operand, next))
+       | _ -> ())
+    | Binary (dst, operation, left, right, next) ->
+      rename_operand_valid colors registers physical left;
+      rename_operand_valid colors registers physical right;
+      (match nth colors dst, rename_operand colors left,
+             rename_operand colors right with
+       | Some chosen, Some left, Some right ->
+         all_valid_reg_lookup physical colors dst chosen;
+         valid_instruction_def physical nodes
+           (Binary (chosen, operation, left, right, next))
+       | _ -> ())
+    | Jump next -> valid_instruction_def physical nodes (Jump next)
+    | Branch (condition, yes, no) ->
+      rename_operand_valid colors registers physical condition;
+      (match rename_operand colors condition with
+       | None -> ()
+       | Some condition ->
+         valid_instruction_def physical nodes (Branch (condition, yes, no)))
+    | Return operand ->
+      rename_operand_valid colors registers physical operand;
+      (match rename_operand colors operand with
+       | None -> ()
+       | Some operand -> valid_instruction_def physical nodes (Return operand)))
+
+let rec (rename_valid @ total) :
+  (colors : int list) -> (registers : int) -> (physical : int) ->
+  (nodes : int) -> (code : instruction list) ->
+  {u : unit |
+    not (length colors = registers && all_valid_reg physical colors
+         && all_valid_instructions registers nodes code)
+    || (match rename colors code with
+        | None -> true
+        | Some target -> all_valid_instructions physical nodes target)}
+  @ ghost =
+  fun colors registers physical nodes code -> ghost_ (
+    all_valid_instructions_def registers nodes code;
+    rename_def colors code;
+    match code with
+    | [] -> all_valid_instructions_def physical nodes []
+    | instruction :: rest ->
+      rename_instruction_valid colors registers physical nodes instruction;
+      rename_valid colors registers physical nodes rest;
+      (match rename_instruction colors instruction, rename colors rest with
+       | Some instruction, Some rest ->
+         all_valid_instructions_def physical nodes (instruction :: rest)
+       | _ -> ()))
+
 (* Liveness validity and allocation prerequisites. *)
 
 let rec (all_valid_live_lookup @ total) :
@@ -2657,8 +2724,24 @@ let (allocation_domain @ total) :
       valid program && 0 < physical && physical <= 32
       && allocation.physical = physical
       && allocation.source_registers = program.registers
-      && allocation.source_inputs === program.inputs}
+      && allocation.source_inputs === program.inputs
+      && length allocation.code = length program.code
+      && all_valid_instructions physical (length allocation.code)
+           allocation.code}
   @ ghost =
   fun program physical -> ghost_ (
     allocate_sound program physical;
-    ())
+    valid_def program;
+    match allocate program physical with
+    | None -> ()
+    | Some _ ->
+      (match stabilize 2049 program.code (empty_live program.code) with
+       | None -> ()
+       | Some live ->
+         (match color (graph program.code live) (range physical) 0
+                  (zeros program.registers) with
+          | None -> ()
+          | Some colors ->
+            rename_length colors program.code;
+            rename_valid colors program.registers physical
+              (length program.code) program.code)))

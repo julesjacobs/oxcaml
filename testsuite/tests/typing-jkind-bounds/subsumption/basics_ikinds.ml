@@ -42,14 +42,14 @@ Lines 3-5, characters 6-3:
 5 | end
 Error: Signature mismatch:
        Modules do not match:
-         sig type t : immutable_data non_pointer end
+         sig type t : logical_data non_pointer end
        is not included in
          sig type t : immediate end
        Type declarations do not match:
-         type t : immutable_data non_pointer
+         type t : logical_data non_pointer
        is not included in
          type t : immediate
-       The kind of the first is immutable_data non_pointer
+       The kind of the first is logical_data non_pointer
          because of the definition of t at line 4, characters 2-32.
        But the kind of the first must be a subkind of immediate
          because of the definition of t at line 2, characters 2-20.
@@ -471,7 +471,7 @@ Error: Signature mismatch:
          type 'a t = 'a t2 t1 * unit t1
        is not included in
          type 'a t : immutable_data with 'a t1 t2 with unit t2
-       The kind of the first is immutable_data with 'a t2 t1 with unit t1
+       The kind of the first is logical_data with 'a t2 t1 with unit t1
          because it's a tuple type.
        But the kind of the first must be a subkind of
            immutable_data with 'a t1 t2 with unit t2
@@ -622,7 +622,8 @@ type and_even_this_should_fail : immutable_data = [`A of [`B of int ref]]
 Line 1, characters 0-73:
 1 | type and_even_this_should_fail : immutable_data = [`A of [`B of int ref]]
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "[ `A of [ `B of int ref ] ]" is mutable_data
+Error: The kind of type "[ `A of [ `B of int ref ] ]" is
+           mutable_data mod logical
          because it's a polymorphic variant type.
        But the kind of type "[ `A of [ `B of int ref ] ]" must be a subkind of
            immutable_data

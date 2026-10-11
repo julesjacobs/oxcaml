@@ -346,7 +346,7 @@ module type S =
 module type TotalS =
   sig
     type elt
-    type t : immutable_data with elt
+    type t : logical_data with elt
     include S with type elt := elt and type t := t
 
     val empty: t @@ total

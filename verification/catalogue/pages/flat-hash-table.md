@@ -1,10 +1,10 @@
 title: Flat hash table
 blurb: A mutable hash table proved to act as a finite map: lookups return the map's answer, updates are map updates and `length` is its size.
 status: owner-review
-date: 27 September 2026
+date: 4 October 2026
 sources:
   - verification/library/vox_verified_flat_hashtbl.mli — Public interface
-  - verification/library/vox_verified_flat_hashtbl.ml — Implementation: the functor and the abstract map
+  - verification/library/vox_verified_flat_hashtbl.ml — Implementation and storage-to-map bridge
   - verification/library/vox_table_storage.mli — Trusted storage and SIMD contracts
   - verification/library/vox_table_model.ml — Model of storage and of the SIMD masks
   - verification/library/vox_table_implementation.ml — Probing, insertion, deletion and rebuilding
@@ -12,27 +12,62 @@ sources:
   - testsuite/tests/vox/flat_hashtbl_public.ml — Public-only client
   - testsuite/tests/vox/flat_hashtbl_boundary.ml — The public check: public-only compile, rejected clients and erasure
 ---
-`Vox_verified_flat_hashtbl.Make` is a mutable open-addressing hash table whose operations are proved to act on a finite map: lookups return the map's answer, `replace` and `remove` return exactly `put` and `erase` of the previous map, and `length` is the number of bindings. The proof covers probing, replacement, deletion and rebuilding. The SIMD mask routines, the storage primitives and the checker itself are trusted.
+`Vox_verified_flat_hashtbl.Make` is a mutable open-addressing hash table whose operations are proved to act on a finite map: lookups return the map's answer, `replace` and `remove` return `Model.add` and `Model.remove` of the previous map, and `length` is the number of bindings. The proof covers probing, replacement, deletion and rebuilding. The SIMD mask routines, the storage primitives and the checker itself are trusted.
 
-Keys and values must be `immutable_data`. Every operation except `create` takes two extra arguments that the compiler erases: a view of the table and a permission token. `create` takes only a token. Only normal return is specified; termination, running time and concurrent use are not.
+## Interface
+
+A table has an ordinary, aliasable handle and an erased permission. The
+permission carries its current bindings: `owner p` identifies the table, and
+`bindings p` is its finite map. Reads borrow the permission; mutations consume
+it and return its replacement. A saved pure map remains usable as a historical
+snapshot. Storage layout and capacity are private.
+
+`Model = Map.MakeLogical(Key)` supplies the usual map operations. `Key.equal`
+compares keys; `===` means identical bindings, independent of insertion order
+and which equal key was stored. `cardinal` uses mathematical integers. These
+operations have built-in verifier support; clients need no map-law calls.
+The complete model API is in [Map.MakeLogical](src:stdlib/map.mli).
+
+@code verification/library/vox_verified_flat_hashtbl.mli
+
+## Trusted base
+
+- SIMD group matching: the NEON and SSE2 routines in `runtime/vox_control.c` (or its scalar fallback, used on other targets) and their native lowering in `backend/cmm_builtins.ml` are assumed to return the sixteen-lane masks specified by `vox_table_model.ml`, which is checked OCaml.
+- Logical maps: the semantics of `Map.MakeLogical` in the checker and the distinguishing-key contract of `Proof.difference`.
+- Storage: allocation, typed slot access, bulk clearing and backing replacement are assumed to meet `vox_table_storage.mli` (implemented in `runtime/pref.c`).
+- Count-trailing-zeros (`caml_vox_int_ctz` in `runtime/vox_control.c`, and its native lowering) is assumed to return the index of the lowest set bit of a nonzero 63-bit integer, and 63 for zero. The checker gives the primitive this meaning directly (`verification/vox_encoding.ml`).
+
+## Scope
+
+- Operations: `create`, `length`, `find_opt`, `find`, `mem`, `replace`, `remove` and `clear`. There is no iteration, fold, copy or presized `create`.
+- `find` raises `Not_found` for an absent key. Contracts describe normal return.
+- A mutation that raises loses the permission it consumed, so the table cannot be used afterwards. `find` only borrows its permission, so the table stays usable after `Not_found`.
+- Keys have kind `logical_data` and values have kind `immutable_data`, as stated by the interface.
+- `Key.equal` and `Key.hash` must be Vox-checked `total` functions supplied with proofs of four laws. Hash functions from existing libraries, such as those derived by ppx_hash, are not declared `total` and cannot be passed as they are.
+- Callers need not enable `-extension refinement_types` unless they write refinements or proofs.
+- No termination, running-time, concurrency or memory-reclamation theorem.
 
 ## Client example
 
-From the public-only client, inside a functor over any `Key`, with `V = Vox_verified_flat_hashtbl.Make (Key)` and `P = Ghost_pref`. `{v : t | p}` is the type `t` refined by the predicate `p`, `===` is logical equality, and `ghost_ (...)` is proof code, checked and then erased. `c.#view` and `u.#view` are erased snapshots of the table. `c.#token` is the erased permission to use it, which `replace` consumes and returns anew and `borrow_` lends to a read.
+From the public-only client, with `V = Vox_verified_flat_hashtbl.Make(Key)`.
+The result's refinement states the expected value; `borrow_` lends the permission
+to the lookup.
 
-@code testsuite/tests/vox/flat_hashtbl_public.ml "(* Reading a key back" "V.find_opt c.#table u.#view key"
+@code testsuite/tests/vox/flat_hashtbl_public.ml "  let find_after_replace" "V.find_opt c.#table key (borrow_ p)"
 
 ## A rejected program
 
-Claiming the wrong contents is a type error. This client stores 84 under key 1, proves in the ghost block that key 1 is then bound to 84, and states that `find` returns 85. `Map` is abstract, so the proof uses its laws: `put_get`, with `reflexive` for `Key.equal 1 1`. The test compiles the program after `module V = Flat_hashtbl_public.V`, against the public interfaces and the client. Just before it, the test compiles the same program claiming 84, which is accepted. Without the ghost block both claims would be rejected, because nothing would say what `find` returns.
+The boundary test stores 84 under key 1 and checks a client claiming that `find`
+returns 85. The verifier rejects it. The corresponding claim of 84 is accepted,
+without an explicit proof block: map lookup after `add` is automatic.
 
-@code testsuite/tests/vox/flat_hashtbl_boundary.ml "(* A false claim about a lookup" "|}]"
-
-The test requires 13 such programs to be rejected, each with its exact error. Six are ownership or refinement errors: this one, a stale view, a reused token, a token that does not own the table, and two false key laws. Seven are abstraction checks, such as reaching hidden internals or building a `Map.t` from a list. The stale-view, reused-token and missing-ownership programs are also compiled with both compilers without `-extension refinement_types` and are still rejected.
+The test also rejects consumed permissions, permissions for another table, false key
+laws and attempts to access private storage or fabricate the abstract model.
+Ownership checks still apply to callers that do not write refinements.
 
 ## Native code
 
-`ocamlopt -O3 -dcmm` output on x86-64 for the same example written at top level (`find_after_replace_int` in the same client). The library's table modules are also compiled at `-O3`, so the table's functor instance is specialized in the client: `create` becomes the storage allocation primitive, `replace` is a direct call, and `find_opt` is inlined. A table of 16 slots is a single group, probed in place with SSE2: one byte comparison of the 16 control bytes gives a mask of candidate slots, whose keys are compared in turn. A larger table goes to a direct call of `Vox_table_search.groups`. Tokens and views are gone, and the proof leaves only the trivial `catch` at the top. The key module compares integers and hashes a key with an exclusive or of its upper half and a multiplication (`int_mul`, computed on tagged integers). The fingerprint is the hash's low seven bits (`byte`, untagged by `(>>s byte/9517 1)`), which the multiplication by 72340172838076673 copies into each byte of a word; the group index is the hash shifted right by 7; and 33 is the capacity 16 as a tagged integer. `...` marks omitted lines, and `{...}` shortens debug locations that list five inlined calls:
+An earlier `ocamlopt -O3 -dcmm` excerpt on x86-64 for the example written at top level (`find_after_replace_int` in the same client). The library's table modules are also compiled at `-O3`, so the table's functor instance is specialized in the client: `create` becomes the storage allocation primitive, `replace` is a direct call, and `find_opt` is inlined. A table of 16 slots is a single group, probed in place with SSE2: one byte comparison of the 16 control bytes gives a mask of candidate slots, whose keys are compared in turn. A larger table goes to a direct call of `Vox_table_search.groups`. Proof data are gone, and the proof leaves only the trivial `catch` at the top. The key module compares integers and hashes a key with an exclusive or of its upper half and a multiplication (`int_mul`, computed on tagged integers). The fingerprint is the hash's low seven bits (`byte`, untagged by `(>>s byte/9517 1)`), which the multiplication by 72340172838076673 copies into each byte of a word; the group index is the hash shifted right by 7; and 33 is the capacity 16 as a tagged integer. `...` marks omitted lines, and `{...}` shortens debug locations that list five inlined calls:
 
 ```
 (function{flat_hashtbl_public.ml:146,27-339}
@@ -80,30 +115,6 @@ The test requires 13 such programs to be rejected, each with its exact error. Si
 
 The test checks that this client makes no call through a closure of the functor instance (`caml_apply`), that it calls `Vox_table_search` directly, and that neither this nor the default build calls an ownership primitive or lemma. Erased values that the optimizer cannot drop are passed as a placeholder constant (48059), for example to the function that rebuilds the table.
 
-## Interface
-
-`Pref.Heap` is a finite map from locations to values, `P.own token` is the heap a token owns, and `Ghost_pref` provides erased tokens: `empty` makes one that owns nothing, and `split` and `join` divide and recombine ownership. `Bigint` is unbounded integers, used for sizes.
-
-Every operation except `create` requires `current table view (P.own token)`: the token's heap holds `version view` at `location table`, so the view is the table's current version and the token owns the table. `current` is declared `[@@def transparent]`. Wherever it is applied to all its arguments, the checker assumes its definition lemma `current_def` at that point, as if the caller had called it. The name therefore only shortens the contracts: a client proves exactly what it would if the body were written out, never calls `current_def`, and trusts nothing new, because `current_def` is checked against the implementation's definition like any other exported value. The public client writes the body out in its own contracts and passes those tokens to the table unchanged.
-
-@code verification/library/vox_verified_flat_hashtbl.mli
-
-## Trusted base
-
-- SIMD group matching: the NEON and SSE2 routines in `runtime/vox_control.c` (or its scalar fallback, used on other targets) and their native lowering in `backend/cmm_builtins.ml` are assumed to return the sixteen-lane masks specified by `vox_table_model.ml`, which is checked OCaml.
-- Storage: allocation, typed slot access, bulk clearing and backing replacement are assumed to meet `vox_table_storage.mli` (implemented in `runtime/pref.c`).
-- Count-trailing-zeros (`caml_vox_int_ctz` in `runtime/vox_control.c`, and its native lowering) is assumed to return the index of the lowest set bit of a nonzero 63-bit integer, and 63 for zero. The checker gives the primitive this meaning directly (`verification/vox_encoding.ml`).
-
-## Scope
-
-- Operations: `create`, `length`, `find_opt`, `find`, `mem`, `replace`, `remove` and `clear`. There is no iteration, fold, copy or presized `create`.
-- Capacity is 16 to 2^30 slots. `find` raises `Not_found` for an absent key; `replace` raises `Invalid_argument` beyond 2^30 slots; any operation can raise `Out_of_memory` or `Stack_overflow`.
-- A mutation that raises loses the token it consumed, so the table cannot be used afterwards. `find` only borrows its token, so the table stays usable after `Not_found`.
-- Keys and values are `immutable_data`, so mutable records and closures cannot be stored.
-- `Key.equal` and `Key.hash` must be Vox-checked `total` functions supplied with proofs of four laws. Hash functions from existing libraries, such as those derived by ppx_hash, are not declared `total` and cannot be passed as they are.
-- Callers need not enable `-extension refinement_types` unless they write refinements or proofs.
-- No termination, running-time, concurrency or memory-reclamation theorem.
-
 ## Performance
 
 Nanoseconds per operation, median of five runs, with integer keys and values. `build` inserts every key into a table that starts at capacity 16; `hit` is `find` on present keys and `miss` is `mem` on absent keys, both in shuffled order. All three tables use the same `Key.hash`.
@@ -124,4 +135,4 @@ Checking happens during ordinary compilation; there is no separate verification 
 ./dev test vox/flat_hashtbl_boundary.ml vox/table_model.ml vox/table_ownership_rejected.ml
 ```
 
-`flat_hashtbl_boundary.ml` compiles, and so checks, the table's 32 modules with both compilers; compiles the public-only client against the `Pref`, `Ghost_pref` and `Vox_verified_flat_hashtbl` interfaces only, links and runs it; checks the rejected programs; and checks the client's Lambda and native Cmm, and the Cmm of the vacancy scan, for proof code and ownership primitives. The SMT solver is Z3 4.16.0.
+`flat_hashtbl_boundary.ml` compiles, and so checks, the table's 32 modules with both compilers; compiles the public-only client against the `Vox_verified_flat_hashtbl` interface only, links and runs it; checks the rejected programs; and checks the client's Lambda and native Cmm, and the Cmm of the vacancy scan, for proof code and ownership primitives. The SMT solver is Z3 4.16.0.

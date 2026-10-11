@@ -1,76 +1,62 @@
 module Make (Key : Vox_table_map.Key)
     (Slots : module type of Vox_table_map.Make (Key)) = struct
-  module Map = Vox_table_bindings.Make (Key)
-  module Assoc = Map.Assoc
+  module Model = Map.MakeLogical (Key)
 
-  let[@def] rec (compact @ total) (slots : 'a Slots.slots @ immutable) =
+  let[@def] rec (model @ total) (slots : 'a Slots.slots @ immutable) = ghost_ (
     match slots with
-    | [] -> []
-    | None :: tail -> compact tail
-    | Some binding :: tail -> binding :: compact tail
+    | [] -> Model.empty ()
+    | None :: tail -> model tail
+    | Some (key, value) :: tail -> Model.add key value (model tail))
 
   let rec (lookup @ total) : ('a : immutable_data).
       (slots : 'a Slots.slots) @ immutable -> (key : Key.t) @ immutable ->
-      {u : unit | Assoc.lookup (compact slots) key === Slots.lookup slots key}
+      {u : unit | Model.find_opt key (model slots) === Slots.lookup slots key}
       @ ghost = fun slots key -> ghost_ (
-    compact_def slots; Slots.lookup_def slots key;
-    Assoc.lookup_def (compact slots) key;
+    model_def slots; Slots.lookup_def slots key;
     match slots with | [] -> () | _ :: tail -> lookup tail key)
-
-  let rec (distinct @ total) : ('a : immutable_data).
-      (slots : 'a Slots.slots) @ immutable ->
-      {u : unit | Assoc.distinct (compact slots) = Slots.distinct slots}
-      @ ghost = fun slots -> ghost_ (
-    compact_def slots; Slots.distinct_def slots;
-    Assoc.distinct_def (compact slots);
-    match slots with
-    | [] -> ()
-    | None :: tail -> distinct tail
-    | Some (key, _) :: tail ->
-      Slots.absent_lookup tail key; lookup tail key; distinct tail)
-
-  let rec (agrees @ total) : ('a : immutable_data).
-      (left : 'a Slots.slots) @ immutable -> (right : 'a Slots.slots) @ immutable ->
-      {u : unit | Assoc.agrees (compact left) (compact right) = Slots.agrees left right}
-      @ ghost = fun left right -> ghost_ (
-    compact_def left; Slots.agrees_def left right;
-    Assoc.agrees_def (compact left) (compact right);
-    match left with
-    | [] -> ()
-    | None :: tail -> agrees tail right
-    | Some (key, _) :: tail -> lookup right key; agrees tail right)
 
   let (same @ total) : ('a : immutable_data).
       (left : 'a Slots.slots) @ immutable -> (right : 'a Slots.slots) @ immutable ->
-      {u : unit | Assoc.same (compact left) (compact right) = Slots.same left right}
+      {u : unit | not (Slots.same left right) || model left === model right}
       @ ghost = fun left right -> ghost_ (
-    Slots.same_def left right; Assoc.same_def (compact left) (compact right);
-    agrees left right; agrees right left)
+    match Model.Proof.difference (model left) (model right) with
+    | None -> ()
+    | Some key ->
+      lookup left key; lookup right key; Slots.same_get left right key)
 
-  let rec (erase @ total) : ('a : immutable_data).
+  let (erase @ total) : ('a : immutable_data).
       (slots : 'a Slots.slots) @ immutable -> (key : Key.t) @ immutable ->
-      {u : unit | compact (Slots.erase slots key) === Assoc.erase (compact slots) key}
+      {u : unit | model (Slots.erase slots key) ===
+        Model.remove key (model slots)}
       @ ghost = fun slots key -> ghost_ (
-    compact_def slots; Slots.erase_def slots key;
-    Assoc.erase_def (compact slots) key;
-    compact_def (Slots.erase slots key);
-    match slots with | [] -> () | _ :: tail -> erase tail key)
+    match Model.Proof.difference (model (Slots.erase slots key))
+        (Model.remove key (model slots)) with
+    | None -> ()
+    | Some query ->
+      lookup (Slots.erase slots key) query; lookup slots query;
+      Slots.erase_get slots key query)
 
   let (put @ total) : ('a : immutable_data).
       (slots : 'a Slots.slots) @ immutable -> (key : Key.t) @ immutable ->
       (value : 'a) @ immutable ->
-      {u : unit | compact (Slots.put slots key value) ===
-        Assoc.put (compact slots) key value} @ ghost =
+      {u : unit | model (Slots.put slots key value) ===
+        Model.add key value (model slots)} @ ghost =
     fun slots key value -> ghost_ (
-      Slots.put_def slots key value; compact_def (Slots.put slots key value);
-      Assoc.put_def (compact slots) key value; erase slots key)
+      match Model.Proof.difference (model (Slots.put slots key value))
+          (Model.add key value (model slots)) with
+      | None -> ()
+      | Some query ->
+        lookup (Slots.put slots key value) query; lookup slots query;
+        Slots.put_get slots key value query)
+
   let rec (empty @ total) : ('a : immutable_data).
       (capacity : int) -> (entry : (Key.t * 'a) option) @ immutable ->
       {u : unit | not (entry === None) ||
-        compact (Vox_table_model.repeat capacity entry) === []} @ ghost =
+        model (Vox_table_model.repeat capacity entry) === Model.empty ()}
+      @ ghost =
     fun capacity entry -> ghost_ (
       Vox_table_model.repeat_def capacity entry;
-      compact_def (Vox_table_model.repeat capacity entry);
+      model_def (Vox_table_model.repeat capacity entry);
       if capacity > 0 then empty (capacity - 1) entry; ())
     [@@decreases if capacity > 0 then capacity else 0]
 end

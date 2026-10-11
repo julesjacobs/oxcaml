@@ -74,12 +74,9 @@ Line 1, characters 23-28:
 Error: Unrecognized modality ghost.
 |}]
 
-type bad = A of { x : int @@ ghost }
+type inline = A of { x : int @@ ghost }
 [%%expect{|
-Line 1, characters 29-34:
-1 | type bad = A of { x : int @@ ghost }
-                                 ^^^^^
-Error: Unrecognized modality ghost.
+type inline = A of { x : int @@ ghost; }
 |}]
 
 module type Bad = sig

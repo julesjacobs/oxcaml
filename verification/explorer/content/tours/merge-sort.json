@@ -11,27 +11,38 @@
   ],
   "stops": [
     {
-      "title": "The functor's parameters: an order and a paid comparator",
+      "title": "What sorted permutation means",
       "path": "verification/library/vox_merge_sort.mli",
-      "from": "module Make (O : sig",
-      "to": "end) : sig",
-      "lines": "3-20",
-      "text": "`O` is a total preorder. Its `le` returns `bool @ ghost`, so the functor can state properties with it but cannot branch on it; reflexivity, totality and transitivity are ghost proofs the client supplies. `C` is any implementation of the credit signature `Vox_credits.S`. `Compare.compare` is the functor's only run-time access to the order: it takes a token with `C.credits t > 0`, returns `before`, equal to `O.le left right`, and a token with one credit fewer. The token parameter is `@ unique total ghost`: used at most once, and erased."
+      "from": "  module P : sig",
+      "to": "  end",
+      "text": "`sorted_adjacent` gives nondecreasing order under `O.le`. `count_def` counts complete values, and the permutation laws characterize equality of every multiplicity. Two records with equal keys and different payloads remain distinct elements; either relative order is permitted."
     },
     {
       "title": "The contract of sort",
       "path": "verification/library/vox_merge_sort.mli",
-      "from": "type result = #{ values : O.elt list @@ aliased; state : C.token @@ ghost }",
+      "from": "  val sort :",
       "to": "(Vox_sort_cost.budget (S.length values))} @ unique @@ total",
-      "lines": "48-59",
-      "text": "`sort` returns an unboxed record of the sorted list and the remaining token. It requires a token with at least `budget n` credits, where `n` is the length as a `Bigint.t` and `budget n = n * height n`, and guarantees that at most `budget n` of them are spent. The rest is correctness: sorted by `O.le`, a permutation of the input and the same length. `P`, above, characterizes `count`, `permutation` and `sorted` by laws; `permutation` compares whole values, so records with equal keys and different payloads are different elements. `sort` is `@@ total`, so it terminates without raising."
+      "text": "The result is sorted, preserves every element multiplicity and has the input length. The separate funding condition requires `budget n` credits and promises at most that amount spent. `sort` is total, so it terminates without raising."
+    },
+    {
+      "title": "The functor's parameters: an order and a paid comparator",
+      "path": "verification/library/vox_merge_sort.mli",
+      "from": "module Make (O : sig",
+      "to": "end) : sig",
+      "text": "`O` is a total preorder. Its `le` returns `bool @ ghost`, so the functor can state properties with it but cannot branch on it; reflexivity, totality and transitivity are ghost proofs the client supplies. `C` is any implementation of the credit signature `Vox_credits.S`. `Compare.compare` is the functor's only run-time access to the order: it takes a token with `C.credits t > 0`, returns `before`, equal to `O.le left right`, and a token with one credit fewer. The token parameter is `@ unique total ghost`: used at most once, and erased."
+    },
+    {
+      "title": "The budget is n⌈log₂ n⌉",
+      "path": "verification/library/vox_sort_cost.mli",
+      "from": "val height :",
+      "to": "else height size = 0Z} @@ total",
+      "text": "`height n` is 0 for `n <= 1` and otherwise `1 + height ⌈n/2⌉`, `power d` is `2^d`, and `budget n = n * height n`. The interface states these equations alongside `height_bound` and `height_minimal`, which characterize `height n` as exactly ⌈log₂ n⌉ for `n >= 1`. Their proofs remain in `vox_sort_cost.ml`. Credits are machine `int`s while budgets are `Bigint.t`, so a list whose budget exceeds `max_int` cannot be funded."
     },
     {
       "title": "Credit tokens, and what the checker does not prove",
       "path": "verification/library/vox_credits.mli",
       "from": "module type S = sig",
       "to": "end",
-      "lines": "3-33",
       "text": "A token is `void`: it has no run-time representation, and `credits` is a ghost observation. `tick` spends one credit, `split` and `merge` conserve the total and `empty` makes zero; `Budget.create`, which makes credits, exists only on the result of the generative functor `Make ()`, which the sort does not receive. Uniqueness forbids copying a token, and each `Make ()` has its own token type. It follows that the sort makes at most `budget n` calls to `Compare.compare`; that step is an argument from the signatures, and the proved statement is the bound on credits. Beyond the checker, this argument is the demo's trusted base: the merge-sort, credit and cost modules contain no `external` or `assume_`."
     },
     {
@@ -39,7 +50,6 @@
       "path": "testsuite/tests/vox/merge_sort.ml",
       "from": "module C = Vox_credits.Make ()",
       "to": "module Sort = Vox_merge_sort.Make (O) (C) (Compare)",
-      "lines": "22-37",
       "text": "The client makes a fresh token type with `Vox_credits.Make ()` and a comparator that calls `C.tick` and returns `left <= right`; `O.le` is `let[@def]`, which generates the equation `le_def` used in the ghost proof. `funded_sort`, below, gets the full contract of `Sort.sort`. The test funds tokens with `C.Budget.create`, justifying the amount with `assume_`, which checks the predicate at run time, and sorts lists of up to 128 elements with exactly `budget n`, one more and `max_int` credits, comparing each result with `List.sort`. It runs as bytecode only."
     },
     {
@@ -47,7 +57,6 @@
       "path": "testsuite/tests/vox/merge_sort_rejected.ml",
       "from": "(* [sort] of two elements needs budget 2 = 2 * height 2 credits",
       "to": "The refinement is stated here.",
-      "lines": "178-199",
       "text": "Sorting `[2; 1]` needs `budget 2 = 2` credits. With a one-credit token the call is rejected, and the error points at the precondition of `sort` in `vox_merge_sort.mli`; the phrase that follows makes the same call with two credits and is accepted. The ghost block unfolds `length`, `budget` and `height` for the solver. Earlier phrases reject a third comparison after `two` has spent both credits of a two-credit token, three false permutation claims, and `false` after splitting and merging credits, after the two `height` lemmas, and after a funded sort."
     },
     {
@@ -58,7 +67,6 @@
         "let (tick @ total)",
         "    result"
       ],
-      "lines": "33-57",
       "text": "A token is a record whose only field is a ghost balance refined to be nonnegative; a record of ghost fields has kind `void`, which matches `type token : void` in the signature. `credits` is `let[@def]`, so its body is available here through `credits_def` and hidden from clients. `tick` builds a new token whose balance is one less, and the checker proves the refinements of `amount` and of the result from the precondition `credits t > 0`. A token cannot be spent inside `ghost_ (...)`, where it is aliased, so spending is real code: the sort calls `C.split` and `C.merge` outside `ghost_`, and erasure removes their token arguments and leaves the calls."
     },
     {
@@ -66,7 +74,6 @@
       "path": "verification/library/vox_merge_sort.ml",
       "from": "let rec (merge @ total) : (left : O.elt list) @ immutable ->",
       "to": "let #{ Compare.before; state } = compared in",
-      "lines": "43-70",
       "text": "`merge` requires both inputs sorted and at least `length left + length right` credits, and returns at most that many spent. Each call of `Compare.compare` spends one credit and each recursive call shortens the inputs by one, so the budget suffices; it is not tight, since a merge makes at most `length left + length right - 1` comparisons. `O.totality x y` in the ghost block gives the solver the order of the two heads in the `else` branch. The recursion is checked by `[@@decreases]` on the total length."
     },
     {
@@ -74,7 +81,6 @@
       "path": "verification/library/vox_merge_sort.ml",
       "from": "let rec (sort_at_depth @ total) : (size : Bigint.t) @ ghost ->",
       "to": "@ unique = fun size depth values token ->",
-      "lines": "89-101",
       "text": "The recursion carries two ghost numbers: `size`, the length of the list, and `depth`, a bound on the recursion depth with `size <= power depth`. The token must hold `size * depth` credits, and at most that many are spent. `sort` calls this with `depth = height size`, so the invariant gives the budget `size * height size` directly. Because `depth` is ghost, the recursion needs no run-time counter."
     },
     {
@@ -82,19 +88,7 @@
       "path": "verification/library/vox_merge_sort.ml",
       "from": "| _ :: (_ :: _ as tail) ->",
       "to": "[@@decreases size]",
-      "lines": "108-140",
       "text": "After `split`, the token is divided with `C.split`: the left half gets `left_size * (depth - 1)` credits and the right half the rest. `Vox_sort_cost.bounded_int` turns that `Bigint.t` into the `int` that `C.split` takes; it is ghost recursion and never runs. The annotated `()` asserts the accounting identity `size * depth = size + left_size * (depth - 1) + right_size * (depth - 1)`, which the solver proves from `size = left_size + right_size`. The two leftovers are merged with `C.merge`, and `merge` spends at most `size` of them. The ghost block at the end chains the permutation lemmas."
-    },
-    {
-      "title": "The budget is n⌈log₂ n⌉",
-      "path": "verification/library/vox_sort_cost.ml",
-      "from": "let[@def] rec height (size : Bigint.t) =",
-      "to": [
-        "let rec (height_bound @ total)",
-        "if size > 0Z then size else 0Z]"
-      ],
-      "lines": "1-27",
-      "text": "`height n` is 0 for `n <= 1` and otherwise `1 + height ⌈n/2⌉`, `power d` is `2^d`, and `budget n = n * height n`. `height_bound` proves `n <= power (height n)`, which `sort` needs to start the recursion; `height_minimal`, below, proves `power (height n - 1) < n` for `n > 1`, so `height n` is exactly ⌈log₂ n⌉ for `n >= 1`. The three definitions are `let[@def]`; `height` and `power` terminate by `[@@decreases]` on a measure clamped at 0. Credits are machine `int`s while budgets are `Bigint.t`, so a list whose budget exceeds `max_int` cannot be funded."
     }
   ]
 }

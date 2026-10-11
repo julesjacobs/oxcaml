@@ -140,11 +140,10 @@ let decompress ?(capacity = max_block_size) source =
               let after_literals = !output_pos + literal_length in
               input_pos := literal_start + literal_length;
               if !input_pos = n then
-                if token land 15 <> 0
-                   || (!last_match_start >= 0
-                       && (literal_length < last_literals
-                           || !last_match_start > after_literals
-                              - match_start_margin))
+                if !last_match_start >= 0
+                   && (literal_length < last_literals
+                       || !last_match_start > after_literals
+                          - match_start_margin)
                 then fail Invalid_terminal_sequence
                 else begin
                   Bytes.blit_string source literal_start output !output_pos

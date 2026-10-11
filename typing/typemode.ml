@@ -132,26 +132,36 @@ module Nonmodal_axis_pair = struct
     | "internal" -> P (Externality, Internal)
     | "external64" -> P (Externality, External64)
     | "external_" -> P (Externality, External)
+    | "logical" -> P (Logicality, Logical)
+    | "maybe_logical" -> P (Logicality, Maybe_logical)
     | _ -> raise Not_found
 end
 
 module Nonmodal_bounds = struct
   type t =
     { externality : Externality.t Location.loc option;
+      logicality : Logicality.t Location.loc option;
       (* CR layouts-scannable: This is a temporary hack to support the previous
          syntax. The location is not being used for anything currently. *)
       nullability : Nullability.t Location.loc option;
       separability : Separability.t Location.loc option
     }
 
-  let empty = { externality = None; nullability = None; separability = None }
+  let empty =
+    { externality = None;
+      logicality = None;
+      nullability = None;
+      separability = None
+    }
 
   let get (type a) (ax : a Axis.Nonmodal.t) (t : t) : a Location.loc option =
-    match ax with Externality -> t.externality
+    match ax with Externality -> t.externality | Logicality -> t.logicality
 
   let set (type a) (ax : a Axis.Nonmodal.t) (v : a Location.loc option) (t : t)
       : t =
-    match ax with Externality -> { t with externality = v }
+    match ax with
+    | Externality -> { t with externality = v }
+    | Logicality -> { t with logicality = v }
 
   let meet_nullability t (nullability : Nullability.t loc) =
     match t.nullability with
@@ -563,6 +573,9 @@ let transl_with_bound_modifiers annots =
         | exception Not_found -> (
           match Nonmodal_axis_pair.of_string modality with
           | P (Externality, (value : Externality.t)) -> modal_annots, Some value
+          | P (Logicality, _) ->
+            (* A with-bound always bears on logicality. *)
+            raise (Error (loc, Unrecognized_modifier (Modality, modality)))
           | exception Not_found ->
             raise (Error (loc, Unrecognized_modifier (Modality, modality)))))
       ([], None) annots
@@ -657,9 +670,16 @@ let transl_mod_bounds ?(warn = true) annots =
                ( loc,
                  Duplicated_axis
                    (Modifier, Axis.Nonmodal Axis.Nonmodal.Externality) ));
-        Nonmodal_bounds.set Externality
-          (Some { txt = Externality.min; loc })
-          nonmodal
+        if Option.is_some (Nonmodal_bounds.get Logicality nonmodal)
+        then
+          raise
+            (Error
+               ( loc,
+                 Duplicated_axis
+                   (Modifier, Axis.Nonmodal Axis.Nonmodal.Logicality) ));
+        nonmodal
+        |> Nonmodal_bounds.set Externality (Some { txt = Externality.min; loc })
+        |> Nonmodal_bounds.set Logicality (Some { txt = Logicality.min; loc })
       | _ -> raise (Error (loc, Unrecognized_modifier (Modifier, txt))))
   in
   (* [everything] specifies every modal axis except staticity, so it conflicts
@@ -713,8 +733,12 @@ let transl_mod_bounds ?(warn = true) annots =
     Option.fold ~some:Location.get_txt ~none:Externality.max
       nonmodal.externality
   in
+  let logicality =
+    Option.fold ~some:Location.get_txt ~none:Logicality.max nonmodal.logicality
+  in
   let crossing = Crossing.modality modality Crossing.max in
-  create crossing ~externality, (nonmodal.nullability, nonmodal.separability)
+  ( create ~logicality crossing ~externality,
+    (nonmodal.nullability, nonmodal.separability) )
 
 let close_implied_mod_bounds (bounds : Jkind.Mod_bounds.t) : Jkind.Mod_bounds.t
     =
@@ -793,7 +817,8 @@ let untransl_mod_bounds ?(verbose = false) (bounds : Jkind.Mod_bounds.t) :
       ( { Location.txt = Parsetree.Mode s; loc = Location.none },
         only_when_verbose )
     in
-    [mk_annot Externality.max Externality.print (externality bounds)]
+    [ mk_annot Externality.max Externality.print (externality bounds);
+      mk_annot Logicality.max Logicality.print (logicality bounds) ]
     |> List.partition_map (fun (annot, only_when_verbose) ->
         match only_when_verbose with false -> Left annot | true -> Right annot)
   in

@@ -760,6 +760,9 @@ let rec value_kind env ~loc ~visited ~depth ~num_nodes_visited (ty : type_expr)
              | Record_inlined (_, Constructor_undetermined, _)),
              _) ->
           num_nodes_visited, non_nullable Pgenval
+        | Type_record (labels, Record_inlined (_, _, Variant_boxed _), _)
+          when List.for_all (fun lbl -> lbl.Types.ld_ghost) labels ->
+          num_nodes_visited, non_nullable Pintval
         | Type_record (labels, _, _)
           when List.for_all (fun lbl -> lbl.Types.ld_ghost) labels ->
           (* An all-ghost record has kind void, so no value of it can reach

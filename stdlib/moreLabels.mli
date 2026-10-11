@@ -1059,7 +1059,7 @@ module Map : sig
   module type TotalS =
     sig
       type key
-      type !+'a t : immutable_data with key with 'a
+      type !+'a t : logical_data with key with 'a
       include S with type key := key and type 'a t := 'a t
 
       val empty: 'a t @@ total
@@ -1153,6 +1153,9 @@ module Map : sig
      and type 'a t = 'a Map.MakeTotal(Ord).t
   (** Like {!Make}, with a total comparison and totality modes on operations
       that cannot raise on their own. *)
+
+  module type EquatableType = Map.EquatableType
+  module MakeLogical = Map.MakeLogical
 
 end
 
@@ -1482,7 +1485,7 @@ module Set : sig
   module type TotalS =
     sig
       type elt
-      type t : immutable_data with elt
+      type t : logical_data with elt
       include S with type elt := elt and type t := t
 
       val empty: t @@ total

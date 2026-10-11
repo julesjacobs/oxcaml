@@ -3,7 +3,7 @@
 *)
 
 module type Ordered = sig
-  type t : immutable_data mod total
+  type t : logical_data
   val equal : t -> t -> bool @@ total
 end
 
@@ -26,7 +26,7 @@ module Int_set = List_set (Int)
 let found = Int_set.head (Int_set.Cons (1, Int_set.Nil))
 [%%expect{|
 module type Ordered =
-  sig type t : immutable_data val equal : t -> t -> bool @@ total end
+  sig type t : logical_data val equal : t -> t -> bool @@ total end
 module List_set :
   functor (Element : Ordered) ->
     sig
@@ -45,13 +45,13 @@ module Int_set :
 val found : Int.t option = Some 1
 |}]
 
-module Roller (Payload : sig type t end) = struct
+module Roller (Payload : sig type t : value mod logical end) = struct
   type t = Roll of (Payload.t -> int) [@@inductive]
   let (unroll @ total) = function Roll function_ -> function_
 end
 [%%expect{|
 module Roller :
-  functor (Payload : sig type t end) ->
+  functor (Payload : sig type t : value mod logical end) ->
     sig
       type t = Roll of (Payload.t -> int)
       [@@inductive]
@@ -94,11 +94,21 @@ module Alias_attack = struct
   let (omega @ total) () = delta (R.Roll delta)
 end
 [%%expect{|
-Lines 2-4, characters 22-5:
-2 | ......................sig
+Line 3, characters 13-27:
 3 |     type t = Roller(Closed).t
-4 |   end.........
-Error: Type "Roller(Closed).t" has an [@@inductive] guarantee, which is not allowed in a recursive module signature.
+                 ^^^^^^^^^^^^^^
+Error: Modules do not match: sig type t = Closed.t end is not included in
+       sig type t : value mod logical end
+     Type declarations do not match:
+       type t = Closed.t
+     is not included in
+       type t : value mod logical
+     The kind of the first is value
+       because an abstract type has the value kind by default.
+     But the kind of the first must be a subkind of value mod logical
+       because of the definition of t at line 1, characters 29-55.
+     The first is not logical:
+     Closed.t is abstract and its kind does not say mod logical.
 |}]
 
 module Conversion_attack = struct
@@ -117,10 +127,21 @@ module Conversion_attack = struct
   let (omega @ total) () = delta (Closed.out (R.Roll delta))
 end
 [%%expect{|
-Line 4, characters 4-45:
+Line 4, characters 20-34:
 4 |     val into : t -> Roller(Closed).t @@ total
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The value "into" exposes a total value whose type depends on the current recursive module group.
+                        ^^^^^^^^^^^^^^
+Error: Modules do not match: sig type t = Closed.t end is not included in
+       sig type t : value mod logical end
+     Type declarations do not match:
+       type t = Closed.t
+     is not included in
+       type t : value mod logical
+     The kind of the first is value
+       because an abstract type has the value kind by default.
+     But the kind of the first must be a subkind of value mod logical
+       because of the definition of t at line 1, characters 29-55.
+     The first is not logical:
+     Closed.t is abstract and its kind does not say mod logical.
 |}]
 
 module rec Closed : sig

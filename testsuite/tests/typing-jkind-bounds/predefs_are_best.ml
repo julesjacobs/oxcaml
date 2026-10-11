@@ -5,7 +5,7 @@
 
 type t : immediate with string
 [%%expect {|
-type t : immutable_data non_pointer
+type t : logical_data non_pointer
 |}]
 
 module M : sig

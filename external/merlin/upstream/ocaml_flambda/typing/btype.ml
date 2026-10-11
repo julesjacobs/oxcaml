@@ -919,10 +919,12 @@ module Jkind0 = struct
   module Mod_bounds = struct
     module Crossing = Mode.Crossing
     module Externality = Jkind_axis.Externality
+    module Logicality = Jkind_axis.Logicality
 
     type t = mod_bounds = {
       crossing : Crossing.t;
       externality: Externality.t;
+      logicality: Logicality.t;
     }
 
     let crossing t = t.crossing
@@ -942,17 +944,21 @@ module Jkind0 = struct
     let staticity = Crossing.Axis.Monadic Staticity
     let ghostliness = Crossing.Axis.Comonadic Ghostliness
     let[@inline] externality t = t.externality
+    let[@inline] logicality t = t.logicality
 
     let[@inline] create
+        ?(logicality = Logicality.max)
         crossing
         ~externality =
       {
         crossing;
         externality;
+        logicality;
       }
 
     let[@inline] set_crossing crossing t = { t with crossing }
     let[@inline] set_externality externality t = { t with externality }
+    let[@inline] set_logicality logicality t = { t with logicality }
 
     let[@inline] set_max_in_set t max_axes =
       let open Jkind_axis.Axis_set in
@@ -980,6 +986,11 @@ module Jkind0 = struct
         then Externality.max
         else t.externality
       in
+      let logicality =
+        if mem max_axes (Nonmodal Logicality)
+        then Logicality.max
+        else t.logicality
+      in
       let monadic =
         Crossing.Monadic.create ~uniqueness ~contention ~visibility ~staticity
       in
@@ -991,6 +1002,7 @@ module Jkind0 = struct
       {
         crossing;
         externality;
+        logicality;
       }
 
     let[@inline] set_min_in_set t min_axes =
@@ -1019,6 +1031,11 @@ module Jkind0 = struct
         then Externality.min
         else t.externality
       in
+      let logicality =
+        if mem min_axes (Nonmodal Logicality)
+        then Logicality.min
+        else t.logicality
+      in
       let monadic =
         Crossing.Monadic.create ~uniqueness ~contention ~visibility ~staticity
       in
@@ -1030,6 +1047,7 @@ module Jkind0 = struct
       {
         crossing;
         externality;
+        logicality;
       }
 
     let[@inline] is_max_within_set t axes =
@@ -1052,9 +1070,13 @@ module Jkind0 = struct
       modal staticity &&
       modal ghostliness &&
       (not (mem axes (Nonmodal Externality)) ||
-       Externality.(le max (externality t)))
+       Externality.(le max (externality t))) &&
+      (not (mem axes (Nonmodal Logicality)) ||
+       Logicality.(le max (logicality t)))
 
-    let min = create Crossing.min ~externality:Externality.min
+    let min =
+      create ~logicality:Logicality.min Crossing.min
+        ~externality:Externality.min
 
     (* [min] with ghostliness pinned to no-crossing. Bounds stored as an
        actual kind must use this rather than [min]: no type crosses ghostliness,
@@ -1063,10 +1085,13 @@ module Jkind0 = struct
        identity for joins. *)
     let min_crossable =
       let er : _ Mode.Crossing.Axis.t = Comonadic Ghostliness in
-      create Mode.Crossing.(set er (Per_axis.max er) min)
+      create ~logicality:Logicality.min
+        Mode.Crossing.(set er (Per_axis.max er) min)
         ~externality:Externality.min
 
-    let max = create Crossing.max ~externality:Externality.max
+    let max =
+      create ~logicality:Logicality.max Crossing.max
+        ~externality:Externality.max
 
     let[@inline] is_max m = m = max
 
@@ -1081,19 +1106,24 @@ module Jkind0 = struct
 
     let debug_print ppf
           { crossing;
-            externality } =
-      Format.fprintf ppf "@[{ crossing = %a;@ externality = %a }@]"
+            externality;
+            logicality } =
+      Format.fprintf ppf
+        "@[{ crossing = %a;@ externality = %a;@ logicality = %a }@]"
         (Format_doc.compat Crossing.print) crossing
         (Format_doc.compat Externality.print) externality
+        (Format_doc.compat Logicality.print) logicality
 
     let equal t1 t2 =
       Misc.Le_result.equal ~le:Crossing.le (crossing t1) (crossing t2)
       && Externality.equal (externality t1) (externality t2)
+      && Logicality.equal (logicality t1) (logicality t2)
 
     let join t1 t2 =
       let crossing = Crossing.join (crossing t1) (crossing t2) in
       let externality = Externality.join (externality t1) (externality t2) in
-      create crossing ~externality
+      let logicality = Logicality.join (logicality t1) (logicality t2) in
+      create ~logicality crossing ~externality
 
     let extract_monadic axis t =
       let (Crossing.Monadic.Atom.Modality
@@ -1137,15 +1167,18 @@ module Jkind0 = struct
         ~totality:(totality_const t) ~statefulness:(statefulness_const t)
         ~visibility:(visibility_const t)
         ~staticity:(staticity_const t) ~externality:(externality t)
+        ~logicality:(logicality t)
 
     let of_axis_lattice (x : Axis_lattice.t) : t =
       let crossing = Axis_lattice.to_mode_crossing x in
-      create crossing ~externality:(Axis_lattice.externality x)
+      create ~logicality:(Axis_lattice.logicality x) crossing
+        ~externality:(Axis_lattice.externality x)
 
     let meet t1 t2 =
       let crossing = Crossing.meet (crossing t1) (crossing t2) in
       let externality = Externality.meet (externality t1) (externality t2) in
-      create crossing ~externality
+      let logicality = Logicality.meet (logicality t1) (logicality t2) in
+      create ~logicality crossing ~externality
 
     (* Returns the set of axes that is relevant under a given modality. For
        example, under the [global] modality, the areality axis is *not*
@@ -1165,7 +1198,10 @@ module Jkind0 = struct
            mode-crossing. In the future, we may want to complexify the
            modal-kinds setup to allow for more mode-crossing in the presence of
            non-constant non-identity modalities. *)
-        | Nonmodal Externality -> true)
+        | Nonmodal Externality -> true
+        (* A field's type always bears on whether the record is logical: no
+           modality turns a non-logical into a set. *)
+        | Nonmodal Logicality -> true)
 
     (* A ghost field has no slot, so its type does not bear on whether the
        record needs scanning (externality); it bears on every modal axis,
@@ -1398,8 +1434,23 @@ module Jkind0 = struct
         let er : _ Mode.Crossing.Axis.t = Comonadic Ghostliness in
         Mode.Crossing.(set er (Per_axis.max er) (set st (Per_axis.max st) min))
 
-      let mk_jkind ~crossing ~externality (layout : Layout.Const.t) =
-        let mod_bounds = Mod_bounds.create crossing ~externality in
+      (* A type whose values are never pointers is logical: it cannot hold a
+         function or reach a recursive knot. [void] is the exception: a void
+         value has no run-time content but may have a logical one (a ghost
+         field, a heap token), which can reach back to the type. So [void] is
+         not a set unless it says so ([void mod everything]). *)
+      let mk_jkind ?logicality ~crossing ~externality
+          (layout : Layout.Const.t) =
+        let logicality : Jkind_axis.Logicality.t =
+          match
+            logicality, (externality : Jkind_axis.Externality.t), layout
+          with
+          | Some logicality, _, _ -> logicality
+          | None, _, Base (Void, _) -> Maybe_logical
+          | None, (External | External64), _ -> Logical
+          | None, Internal, _ -> Maybe_logical
+        in
+        let mod_bounds = Mod_bounds.create ~logicality crossing ~externality in
         { base = Layout layout; mod_bounds; with_bounds = No_with_bounds }
 
       let any =
@@ -1523,6 +1574,22 @@ module Jkind0 = struct
           name = "immutable_data_or_null"
         }
 
+      (* Vox: [immutable_data mod logical]. The values form a set in the
+         mathematical sense, so total code may look inside them. *)
+      let logical_data =
+        { jkind =
+            { base =
+                Layout
+                  (Base
+                    (Scannable,
+                      { nullability = Non_null; separability = Non_float }));
+              mod_bounds =
+                Mod_bounds.set_logicality Logical immutable_data_mod_bounds;
+              with_bounds = No_with_bounds
+            };
+          name = "logical_data"
+        }
+
       let exn =
         let open Mod_bounds in
         { jkind =
@@ -1627,7 +1694,7 @@ module Jkind0 = struct
 
       let void_mod_everything =
         { jkind =
-            mk_jkind (Base (Void, Scannable_axes.max))
+            mk_jkind ~logicality:Logical (Base (Void, Scannable_axes.max))
               ~crossing:cross_all_crossable
               ~externality:Mod_bounds.Externality.min;
           name = "void mod everything"
@@ -1926,6 +1993,7 @@ module Jkind0 = struct
           value;
           immutable_data;
           immutable_data_or_null;
+          logical_data;
           sync_data;
           sync_data_or_null;
           mutable_data;
@@ -2011,11 +2079,23 @@ module Jkind0 = struct
 
       let value = of_const Const.Builtin.value.jkind
 
-      let immutable_data = of_const Const.Builtin.immutable_data.jkind
+      (* These are the kinds of the compiler's own representations (tuples,
+         records, variants, arrays, predefined boxed types), which are built
+         from their components and so are logical as far as their own
+         contribution goes; recursion and non-logical components are accounted
+         for separately (see Note [Logicality of recursive types] in ikind.ml).
+         The user-facing abbreviations of the same names make no logicality
+         promise. *)
+      let with_logical t =
+        { t with mod_bounds = Mod_bounds.set_logicality Logical t.mod_bounds }
 
-      let sync_data = of_const Const.Builtin.sync_data.jkind
+      let immutable_data =
+        with_logical (of_const Const.Builtin.immutable_data.jkind)
 
-      let mutable_data = of_const Const.Builtin.mutable_data.jkind
+      let sync_data = with_logical (of_const Const.Builtin.sync_data.jkind)
+
+      let mutable_data =
+        with_logical (of_const Const.Builtin.mutable_data.jkind)
 
       let void = of_const Const.Builtin.void.jkind
 
@@ -2291,6 +2371,13 @@ module Jkind0 = struct
              (* The [Best] is OK here because this function is used only in
                 Predef. *)
            ~quality:Best ~ran_out_of_fuel_during_normalize:false
+
+    let set_logicality logicality t =
+      { t with
+        jkind =
+          { t.jkind with
+            mod_bounds =
+              Mod_bounds.set_logicality logicality t.jkind.mod_bounds } }
 
     let get_const t = Jkind_desc.get_const t.jkind
 
@@ -2643,7 +2730,8 @@ module Jkind0 = struct
           ~staticity:false ~ghostliness:false
       in
       let mod_bounds =
-        Mod_bounds.create crossing ~externality:Mod_bounds.Externality.max
+        Mod_bounds.create ~logicality:Logical crossing
+          ~externality:Mod_bounds.Externality.max
       in
       fresh_jkind
         { base =

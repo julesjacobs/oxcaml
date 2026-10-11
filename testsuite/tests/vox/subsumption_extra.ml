@@ -1060,7 +1060,7 @@ val at_count :
 Line 8, characters 11-12:
 8 |   at_count s a;;
                ^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: a = 0)
 Line 3, characters 43-54:
 3 | let (at_count @ total) (s : {s : counter | s.count > 5})
                                                ^^^^^^^^^^^
@@ -1075,7 +1075,7 @@ let (unchecked_premise @ total) (s : counter) (a : {i : int | i = s.count})
 Line 3, characters 19-20:
 3 |   let _ = at_count s a in ();;
                        ^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: a = 0)
 Line 3, characters 43-54:
 3 | let (at_count @ total) (s : {s : counter | s.count > 5})
                                                ^^^^^^^^^^^

@@ -39,13 +39,12 @@ type r = {
 }
 and any = Any : 'a ty * 'a -> any
 and _ ty = R : r ty
-val d : r -> {u : unit | false} = <fun>
-Line 8, characters 21-33:
-8 |   let g = { f = (fun (Any (w, x)) -> match w with R -> d x) } in
-                         ^^^^^^^^^^^^
-Error: The expression is "partial"
+Line 5, characters 47-50:
+5 | let (d @ total) (g : r) : {u : unit | false} = g.f (Any (R, g))
+                                                   ^^^
+Error: The match on a value whose type is not logical (a constructor has an existential type, which could be the matched type itself) is "partial"
        but is expected to be "total"
-         because it is used inside the function at lines 7-9, characters 19-5
+         because it is used inside the function at line 5, characters 16-63
          which is expected to be "total".
 |}]
 
@@ -96,7 +95,7 @@ module M :
 Line 14, characters 15-23:
 14 |   match x with M.Roll f -> f (M.to_u x)
                     ^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (M.u is abstract and its kind does not say mod logical) is "partial"
        but is expected to be "total"
          because it is used inside the function at lines 13-14, characters 20-39
          which is expected to be "total".

@@ -1,4 +1,151 @@
 open Sorted_array_proofs
+module S = Vox_sequence
+module M = Sorted_array_model
+
+let rec (take_at @ total) (source : int list @ immutable)
+    (count : Bigint.t) (index : Bigint.t) :
+    {u : unit | if 0Z <= count && 0Z <= index then
+      S.at (S.take count source) index ===
+        (if index < count then S.at source index else None) else true}
+    @ ghost = ghost_ (
+  S.take_def count source;
+  S.at_def source index;
+  S.at_def (S.take count source) index;
+  match source with
+  | [] -> ()
+  | _ :: rest ->
+    if count <= 0Z then ()
+    else if index <= 0Z then ()
+    else take_at rest (Bigint.sub count 1Z) (Bigint.sub index 1Z))
+
+let rec (drop_at @ total) (source : int list @ immutable)
+    (count : Bigint.t) (index : Bigint.t) :
+    {u : unit | if 0Z <= count && 0Z <= index then
+      S.at (S.drop count source) index ===
+        S.at source (Bigint.add count index) else true} @ ghost = ghost_ (
+  S.drop_def count source;
+  S.at_def (S.drop count source) index;
+  S.at_def source (Bigint.add count index);
+  match source with
+  | [] -> ()
+  | _ :: rest ->
+    if count <= 0Z then ()
+    else drop_at rest (Bigint.sub count 1Z) index)
+
+let rec (append_at @ total) (left : int list @ immutable)
+    (right : int list @ immutable) (index : Bigint.t) :
+    {u : unit | if 0Z <= index then
+      S.at (S.append left right) index ===
+        (if index < S.length left then S.at left index
+         else S.at right (Bigint.sub index (S.length left))) else true}
+    @ ghost = ghost_ (
+  S.append_def left right; S.length_def left;
+  S.at_def left index; S.at_def (S.append left right) index;
+  match left with
+  | [] -> ()
+  | _ :: rest ->
+    if index <= 0Z then ()
+    else append_at rest right (Bigint.sub index 1Z))
+
+let (insert_length @ total) (source : int list @ immutable)
+    (position : Bigint.t) (value : int) :
+    {u : unit | if 0Z <= position && position <= S.length source then
+      S.length (M.insert source position value) ===
+        Bigint.add (S.length source) 1Z else true} @ ghost = ghost_ (
+  M.insert_def source position value;
+  S.cut source position;
+  S.length_def (value :: S.drop position source);
+  S.append_length (S.take position source) (value :: S.drop position source))
+
+let (remove_length @ total) (source : int list @ immutable)
+    (position : Bigint.t) :
+    {u : unit | if 0Z <= position && position < S.length source then
+      S.length (M.remove source position) ===
+        Bigint.sub (S.length source) 1Z else true} @ ghost = ghost_ (
+  M.remove_def source position;
+  S.cut source position;
+  S.cut source (Bigint.add position 1Z);
+  S.append_length (S.take position source)
+    (S.drop (Bigint.add position 1Z) source))
+
+let (insert_at @ total) (source : int list @ immutable)
+    (position : Bigint.t) (value : int) (index : Bigint.t) :
+    {u : unit | if 0Z <= position && position <= S.length source
+      && 0Z <= index then
+      S.at (M.insert source position value) index ===
+        (if index < position then S.at source index
+         else if index = position then Some value
+         else S.at source (Bigint.sub index 1Z)) else true}
+    @ ghost = ghost_ (
+  M.insert_def source position value; S.cut source position;
+  append_at (S.take position source) (value :: S.drop position source) index;
+  take_at source position index;
+  let suffix_index = Bigint.sub index position in
+  S.at_def (value :: S.drop position source) suffix_index;
+  drop_at source position (Bigint.sub suffix_index 1Z))
+
+let (remove_at_model @ total) (source : int list @ immutable)
+    (position : Bigint.t) (index : Bigint.t) :
+    {u : unit | if 0Z <= position && position < S.length source
+      && 0Z <= index then
+      S.at (M.remove source position) index ===
+        (if index < position then S.at source index
+         else S.at source (Bigint.add index 1Z)) else true}
+    @ ghost = ghost_ (
+  M.remove_def source position; S.cut source position;
+  append_at (S.take position source)
+    (S.drop (Bigint.add position 1Z) source) index;
+  take_at source position index;
+  drop_at source (Bigint.add position 1Z) (Bigint.sub index position))
+
+let (edited_contents @ total) (source : int iarray @ immutable)
+    (result : int iarray @ immutable) (position : int) (value : int)
+    (inserting : bool) :
+    {u : unit | if 0 <= position && 0 < Iarray.length source + 1
+      && (if inserting then position <= Iarray.length source
+            && Iarray.length result = Iarray.length source + 1
+          else position < Iarray.length source
+            && Iarray.length result = Iarray.length source - 1)
+      && Arrays.edited source result position value inserting 0
+           (Iarray.length result) then
+      S.of_iarray result ===
+        (if inserting then M.insert (S.of_iarray source)
+          (Bigint.of_int position) value
+         else M.remove (S.of_iarray source) (Bigint.of_int position))
+      else true} @ ghost = ghost_ (
+  let before = S.of_iarray source in
+  let after = S.of_iarray result in
+  let p = Bigint.of_int position in
+  let expected = if inserting then M.insert before p value else M.remove before p in
+  S.of_iarray_length source; S.of_iarray_length result;
+  if inserting then insert_length before p value else remove_length before p;
+  if not (0 <= position && 0 < Iarray.length source + 1
+    && (if inserting then position <= Iarray.length source
+          && Iarray.length result = Iarray.length source + 1
+        else position < Iarray.length source
+          && Iarray.length result = Iarray.length source - 1)
+    && Arrays.edited source result position value inserting 0
+         (Iarray.length result)) then ()
+  else S.extensional after expected (fun index ->
+    if index < 0Z then ()
+    else if Bigint.of_int (Iarray.length result) <= index then (
+      S.at_outside after index; S.at_outside expected index)
+    else match Bigint.to_int_opt index with
+    | None -> ()
+    | Some i ->
+      S.of_iarray_at result i;
+      Arrays.edited_at source result position value inserting 0
+        (Iarray.length result) i ();
+      Arrays.edit_value_def source position value inserting i;
+      Arrays.at_def result i;
+      if inserting then insert_at before p value index
+      else remove_at_model before p index;
+      if inserting && i = position then ()
+      else (
+        let original = if i < position then i
+          else if inserting then i - 1 else i + 1 in
+        S.of_iarray_at source original;
+        Arrays.at_def source original)))
 
 type t = {array : int iarray |
   0 < Iarray.length array + 1 && Vox_iarray.Int.sorted array}
@@ -26,6 +173,40 @@ let[@def] (range_spec @ total) (array : t) (value : int)
 let[@def] (edited @ total) (source : t) (result : t)
     (position : int) (value : int) (inserting : bool) =
   Arrays.edited source result position value inserting 0 (Iarray.length result)
+
+let[@def transparent] (inserted @ total) (source : t) (result : t)
+    (position : int) (value : int) = ghost_ (
+  0 <= position && position <= length source
+  && length result = length source + 1
+  && contents result === M.insert (contents source) (Bigint.of_int position) value)
+
+let[@def transparent] (removed @ total) (source : t) (result : t)
+    (position : int) = ghost_ (
+  0 <= position && position < length source
+  && length result = length source - 1
+  && contents result === M.remove (contents source) (Bigint.of_int position))
+
+let (contents_length @ total) : (array : t) ->
+    {u : unit | Vox_sequence.length (contents array) ===
+      Bigint.of_int (length array)} = fun array ->
+  ghost_ (length_def array);
+  ghost_ (contents_def array);
+  ghost_ (Vox_sequence.of_iarray_length array);
+  ()
+
+let (contents_at @ total) : (array : t) ->
+    (index : {i : int | 0 <= i && i < length array}) ->
+    {u : unit | let i = index in
+      Vox_sequence.at (contents array) (Bigint.of_int i) === Some (at array i)} =
+    fun array index ->
+  let i = index in
+  ghost_ (length_def array);
+  let bounded : {j : int | 0 <= j && j < Iarray.length array} = i in
+  let _value = Vox_sequence.Iarray.get array bounded in
+  ghost_ (contents_def array);
+  ghost_ (at_def array i);
+  ghost_ (Arrays.at_def array i);
+  ()
 
 let (empty @ total) : {array : t | length array = 0} =
   let array = [: :] in
@@ -62,9 +243,7 @@ let (equal_range @ total) : (array : t) -> (value : int) ->
 
 let insert : (source : t) -> (value : int) ->
     {pair : int * t | match pair with position, result ->
-      0 <= position && position <= length source
-      && length result = length source + 1
-      && occurs result value && edited source result position value true} =
+      inserted source result position value && occurs result value} =
   fun source value ->
   (* [Iarray.append] raises [Invalid_argument] long before a length gets
      near [max_int]. The checker does not know the runtime's size limit, so
@@ -89,16 +268,17 @@ let insert : (source : t) -> (value : int) ->
     length_def result;
     occurs_def result value;
     edited_def source result position value inserting;
+    contents_def source; contents_def result;
+    edited_contents source result position value true;
     (() : {u : unit | occurs result value
       && length result = length source + 1
-      && edited source result position value true}));
+      && inserted source result position value}));
   let pair : int * t = position, result in
   pair
 
 let remove_at : (source : t) -> (position : int) ->
     {u : unit | 0 <= position && position < length source} @ ghost ->
-    {result : t | length result = length source - 1
-      && edited source result position 0 false} =
+    {result : t | removed source result position} =
   fun source position bounds ->
   ghost_ (length_def source);
   let raw_result = Arrays.remove_at source position () in
@@ -108,34 +288,11 @@ let remove_at : (source : t) -> (position : int) ->
     let inserting = false in
     length_def result;
     edited_def source result position zero inserting;
+    contents_def source; contents_def result;
+    edited_contents source result position zero false;
     (() : {u : unit | length result = length source - 1
-      && edited source result position 0 false}));
+      && removed source result position}));
   result
-
-let (edited_at @ total) : (source : t) -> (result : t) ->
-    (position : int) -> (value : int) -> (inserting : bool) -> (index : int) ->
-    {u : unit | 0 <= index && index < length result
-      && edited source result position value inserting} @ ghost ->
-    {u : unit | at result index =
-      (if index < position then at source index
-       else if inserting then
-         if index = position then value else at source (index - 1)
-       else at source (index + 1))} =
-  fun source result position value inserting index premise ->
-  premise;
-  length_def result;
-  edited_def source result position value inserting;
-  let zero = 0 in
-  let stop = Iarray.length result in
-  Arrays.edited_at source result position
-    value inserting zero stop index ();
-  Arrays.edit_value_def source position value inserting index;
-  at_def result index;
-  let original =
-    if index < position then index
-    else if inserting then index - 1 else index + 1 in
-  at_def source original;
-  ()
 
 let (ordered @ total) : (array : t) -> (left : int) -> (right : int) ->
     {u : unit | 0 <= left && left <= right && right < length array} @ ghost ->
@@ -169,11 +326,8 @@ let remove_one : (source : t) -> (value : int) ->
     {result : (int * t) option | match result with
       | None -> not (occurs source value)
       | Some (position, array) ->
-        0 <= position && position < length source
-        && at source position = value
-        && not (occurs_between source value 0 position)
-        && length array = length source - 1
-        && edited source array position 0 false} =
+        removed source array position && at source position = value
+        && not (occurs_between source value 0 position)} =
   fun source value ->
   let found = find_first source value in
   match found with
@@ -219,32 +373,6 @@ let (find_last @ total) : (array : t) -> (value : int) ->
     let stop = ghost_ (length array) in
     ghost_ (occurs_between_def array value next stop);
     result
-
-let (contents_length @ total) : (array : t) ->
-    {u : unit | Vox_sequence.length (contents array) ===
-      Bigint.of_int (length array)} = fun array ->
-  ghost_ (length_def array);
-  ghost_ (contents_def array);
-  ghost_ (Vox_sequence.of_iarray_length array);
-  ()
-
-let (contents_at @ total) : (array : t) ->
-    (index : {i : int | 0 <= i && i < length array}) ->
-    {u : unit | let i = index in
-      Vox_sequence.at (contents array) (Bigint.of_int i) === Some (at array i)} =
-    fun array index ->
-  let i = index in
-  ghost_ (length_def array);
-  let bounded : {j : int | 0 <= j && j < Iarray.length array} = i in
-  let _value = Vox_sequence.Iarray.get array bounded in
-  ghost_ (contents_def array);
-  ghost_ (at_def array i);
-  ghost_ (Arrays.at_def array i);
-  ()
-
-let[@def] (edit_suffix @ total) (source : t) (result : t)
-    (position : int) (value : int) (inserting : bool) (index : int) =
-  Arrays.edited source result position value inserting index (Iarray.length result)
 
 let (length_bounds @ total) : (array : t) ->
   {u : unit | 0 <= length array && 0 < length array + 1} =
@@ -312,38 +440,33 @@ let (range_equation @ total) : (array : t) -> (value : int) ->
   at_def array past;
   ()
 
-let (edit_suffix_equation @ total) : (source : t) -> (result : t) ->
-  (position : int) -> (value : int) -> (inserting : bool) -> (index : int) ->
-  {u : unit | edit_suffix source result position value inserting index =
-    (if 0 <= index && index < length result then
-      at result index =
-        (if index < position then at source index
-         else if inserting then
-           if index = position then value else at source (index - 1)
-         else at source (index + 1))
-      && edit_suffix source result position value inserting (index + 1)
-     else true)} =
-  fun source result position value inserting index ->
-  length_def result;
-  edit_suffix_def source result position value inserting index;
-  let stop = Iarray.length result in
-  Arrays.edited_def source result position value inserting index stop;
-  Arrays.edit_value_def source position value inserting index;
-  at_def result index;
-  at_def source index;
-  let before = index - 1 in
-  let after = index + 1 in
-  at_def source before;
-  at_def source after;
-  edit_suffix_def source result position value inserting after;
-  ()
 
-let (edited_equation @ total) : (source : t) -> (result : t) ->
-  (position : int) -> (value : int) -> (inserting : bool) ->
-  {u : unit | edited source result position value inserting =
-    edit_suffix source result position value inserting 0} =
-  fun source result position value inserting ->
-  let zero = 0 in
-  edited_def source result position value inserting;
-  edit_suffix_def source result position value inserting zero;
-  ()
+let (inserted_at @ total) : (source : t) -> (result : t) ->
+  (position : int) -> (value : int) -> (index : int) ->
+  {u : unit | inserted source result position value
+    && 0 <= index && index < length result} @ ghost ->
+  {u : unit | at result index =
+    (if index < position then at source index
+     else if index = position then value else at source (index - 1))} @ ghost =
+  fun source result position value index premise -> ghost_ (
+    inserted_def source result position value;
+    contents_length source; contents_at result index;
+    insert_at (contents source) (Bigint.of_int position) value
+      (Bigint.of_int index);
+    if index = position then () else
+      let original = if index < position then index else index - 1 in
+      contents_at source original)
+
+let (removed_at @ total) : (source : t) -> (result : t) ->
+  (position : int) -> (index : int) ->
+  {u : unit | removed source result position
+    && 0 <= index && index < length result} @ ghost ->
+  {u : unit | at result index =
+    (if index < position then at source index else at source (index + 1))} @ ghost =
+  fun source result position index premise -> ghost_ (
+    removed_def source result position;
+    contents_length source; contents_at result index;
+    remove_at_model (contents source) (Bigint.of_int position)
+      (Bigint.of_int index);
+    let original = if index < position then index else index + 1 in
+    contents_at source original)

@@ -63,7 +63,7 @@ end;;
 Line 4, characters 14-23:
 4 |     | Stop -> refine_ n
                   ^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: n = 0)
 Line 2, characters 60-65:
 2 |   let rec (bad @ total) (xs : chain) (n : int) : {m : int | m > n} =
                                                                 ^^^^^

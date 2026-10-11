@@ -23,6 +23,8 @@ let[@def] (subtract @ total) (a : t @ immutable) (b : t @ immutable) : t @ immut
   let hi = if high < 0 then high + 4294967296 else high in
   {lo; hi}
 
+(* Proofs. *)
+
 let (subtract_add @ total) : (a : t) @ immutable -> (b : t) @ immutable ->
     {u : unit | (subtract (add a b) b).lo = a.lo
       && (subtract (add a b) b).hi = a.hi} @ ghost = fun a b -> ghost_ (

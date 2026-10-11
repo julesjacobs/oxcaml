@@ -106,7 +106,7 @@ Line 2, characters 23-24:
                            ^
 Error: The value "x" has type "q" but an expression was expected of type
          "('a : immutable_data)"
-       The kind of q is immutable_data with M.t
+       The kind of q is logical_data with M.t
          because of the definition of q at line 1, characters 0-32.
        But the kind of q must be a subkind of immutable_data
          because of the definition of takes_only_immutable at line 1, characters 25-64.
@@ -420,6 +420,8 @@ Error: The layout of type "u" is value non_float
        Note: The layout of immediate is value non_pointer.
        Note: The kinds mutable_data, immutable_data, and sync_data have
        the layout value non_float.
+       It is not logical:
+       a constructor has an existential type, which could be the matched type itself.
 |}]
 
 type 'a u : immutable_data =
@@ -534,6 +536,8 @@ Error: The layout of type "existential_abstract" is value non_float
        Note: The layout of immediate is value non_pointer.
        Note: The kinds mutable_data, immutable_data, and sync_data have
        the layout value non_float.
+       It is not logical:
+       abstract is abstract and its kind does not say mod logical.
 |}]
 
 type existential_abstract : immutable_data with (type : value mod portable) abstract =
@@ -768,6 +772,8 @@ Error: The layout of type "t2" is value non_float
        Note: The layout of immediate is value non_pointer.
        Note: The kinds mutable_data, immutable_data, and sync_data have
        the layout value non_float.
+       It is not logical:
+       t is abstract and its kind does not say mod logical.
 |}]
 
 (* Existential row variables *)

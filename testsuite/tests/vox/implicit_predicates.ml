@@ -203,6 +203,15 @@ Line 3, characters 16-68:
 3 |     {u : unit | match xs with [] -> true | (x, _) :: _ -> x >= other} = ();;
                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
+|}, Principal{|
+Line 3, characters 72-74:
+3 |     {u : unit | match xs with [] -> true | (x, _) :: _ -> x >= other} = ();;
+                                                                            ^^
+Error: Refinement could not be proved (counterexample: lower = 0, other = 1)
+Line 3, characters 16-68:
+3 |     {u : unit | match xs with [] -> true | (x, _) :: _ -> x >= other} = ();;
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Refinement_layers = struct

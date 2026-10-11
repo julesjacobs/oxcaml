@@ -18,7 +18,7 @@ type t : immutable_data = { mutable x : int [@atomic] }
 Line 1, characters 0-55:
 1 | type t : immutable_data = { mutable x : int [@atomic] }
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is sync_data
+Error: The kind of type "t" is sync_data mod logical
          because it's a boxed record type.
        But the kind of type "t" must be a subkind of immutable_data
          because of the annotation on the declaration of the type t.
@@ -30,7 +30,7 @@ type t : sync_data = { mutable x : int }
 Line 1, characters 0-40:
 1 | type t : sync_data = { mutable x : int }
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is mutable_data
+Error: The kind of type "t" is mutable_data mod logical
          because it's a boxed record type.
        But the kind of type "t" must be a subkind of sync_data
          because of the annotation on the declaration of the type t.
@@ -42,7 +42,7 @@ type t : sync_data =
 Lines 1-2, characters 0-48:
 1 | type t : sync_data =
 2 |   { mutable x : int; mutable y : int [@atomic] }
-Error: The kind of type "t" is mutable_data
+Error: The kind of type "t" is mutable_data mod logical
          because it's a boxed record type.
        But the kind of type "t" must be a subkind of sync_data
          because of the annotation on the declaration of the type t.
@@ -55,7 +55,7 @@ type t : immutable_data =
 Lines 1-2, characters 0-58:
 1 | type t : immutable_data =
 2 |   { mutable x : int [@atomic]; mutable y : int [@atomic] }
-Error: The kind of type "t" is sync_data
+Error: The kind of type "t" is sync_data mod logical
          because it's a boxed record type.
        But the kind of type "t" must be a subkind of immutable_data
          because of the annotation on the declaration of the type t.
@@ -66,7 +66,7 @@ type t : immutable_data = { mutable x : int [@atomic]; mutable y : int }
 Line 1, characters 0-72:
 1 | type t : immutable_data = { mutable x : int [@atomic]; mutable y : int }
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is mutable_data
+Error: The kind of type "t" is mutable_data mod logical
          because it's a boxed record type.
        But the kind of type "t" must be a subkind of immutable_data
          because of the annotation on the declaration of the type t.
@@ -77,7 +77,7 @@ type t : immutable_data = { mutable x : int; mutable y : int }
 Line 1, characters 0-62:
 1 | type t : immutable_data = { mutable x : int; mutable y : int }
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is mutable_data
+Error: The kind of type "t" is mutable_data mod logical
          because it's a boxed record type.
        But the kind of type "t" must be a subkind of immutable_data
          because of the annotation on the declaration of the type t.
@@ -95,7 +95,7 @@ type t : sync_data = A of { mutable x : int } | B
 Line 1, characters 0-49:
 1 | type t : sync_data = A of { mutable x : int } | B
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "t" is mutable_data
+Error: The kind of type "t" is mutable_data mod logical
          because it's a boxed variant type.
        But the kind of type "t" must be a subkind of sync_data
          because of the annotation on the declaration of the type t.
@@ -107,7 +107,7 @@ type t : sync_data =
 Lines 1-2, characters 0-53:
 1 | type t : sync_data =
 2 |   A of { mutable x : int; mutable y : int [@atomic] }
-Error: The kind of type "t" is mutable_data
+Error: The kind of type "t" is mutable_data mod logical
          because it's a boxed variant type.
        But the kind of type "t" must be a subkind of sync_data
          because of the annotation on the declaration of the type t.

@@ -1,1 +1,1 @@
-type 'a t [@@phantom_parameters]
+type 'a t : value mod logical

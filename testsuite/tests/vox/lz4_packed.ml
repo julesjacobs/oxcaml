@@ -10,7 +10,7 @@
                      raw_memory.ml vox_lz4_spec_storage.ml \
                      vox_lz4_spec_parse.ml vox_lz4_spec_decode.ml \
                      vox_lz4_spec_decode_bytes.ml vox_lz4_spec_bytes.ml \
-                     vox_lz4_heap_bytes.ml vox_lz4_spec_match.ml \
+                     vox_lz4_heap_bytes.ml vox_lz4_match_proof.ml vox_lz4_spec_match.ml \
                      vox_lz4_spec_plan.ml vox_lz4_spec_token.ml \
                      vox_lz4_spec_wire.ml vox_lz4_spec_hashes.ml \
                      vox_lz4_spec_scan.ml vox_lz4_spec.ml vox_lz4_buffer.ml \

@@ -39,8 +39,7 @@ Line 7, characters 20-21:
                         ^
 Error: The value "t" has type "Pref_list.node option Pref.token"
        but an expression was expected of type "'a Pref.token"
-       The kind of Pref_list.node option is
-           immutable_data with Pref_list.node
+       The kind of Pref_list.node option is logical_data with Pref_list.node
          because it's a boxed variant type.
        But the kind of Pref_list.node option must be a subkind of
            immutable_data.
@@ -67,14 +66,12 @@ Line 3, characters 50-51:
                                                       ^
 Error: The value "t" has type "Pref_list.node option Pref.token"
        but an expression was expected of type "'a Pref.token"
-       The kind of Pref_list.node option is
-           immutable_data with Pref_list.node
+       The kind of Pref_list.node option is logical_data with Pref_list.node
          because it's a boxed variant type.
        But the kind of Pref_list.node option must be a subkind of
            immutable_data.
 |}]
 
-(* Reversal reverses the values; they are not unchanged. *)
 module Unreversed_values = struct
   let (claim @ total) (xs : model @ immutable) :
       {u : unit | contents (rev_append xs Nil) === contents xs} @ ghost =
@@ -91,7 +88,6 @@ Line 3, characters 18-62:
   The refinement is stated here.
 |}]
 
-(* The nodes of a list carry its values in order, not reversed. *)
 module Reversed_nodes = struct
   let (claim @ total) (xs : model @ immutable) :
       {u : unit | node_values (nodes xs) === rev_onto (contents xs) []} @ ghost =

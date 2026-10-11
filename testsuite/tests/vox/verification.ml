@@ -191,7 +191,7 @@ let nested x = ignore (let f () : zero = refine_ x in f);;
 Line 1, characters 41-50:
 1 | let nested x = ignore (let f () : zero = refine_ x in f);;
                                              ^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = -1)
 Line 1, characters 23-28:
 1 | type zero = {n : int | n = 0}
                            ^^^^^

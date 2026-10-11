@@ -415,15 +415,15 @@
       "short": "The main GitHub Actions workflow: configure, build and test OxCaml for each entry of a configuration matrix."
     },
     "vox": {
-      "short": "The default (x86_64-linux) job installs Z3 4.16.0 from its release archive, checks the SHA-256 and version string, and sets VOX_TEST_Z3=true."
+      "short": "Compiler test jobs install Z3 4.16.0 for their OS and architecture, check the SHA-256 and version string, and set VOX_TEST_Z3=true."
     },
     "notes": [
       {
         "title": "The pinned solver",
-        "from": "- name: Install pinned Z3 for SMT integration tests",
+        "from": "- name: Install pinned Z3 for refinement tests",
         "to": "VOX_TEST_Z3=true",
         "kind": "vox",
-        "text": "Only this matrix entry has Z3, so only it runs the tests guarded by `has-z3`; the others skip them. The step fails if the archive's checksum or the reported version differs."
+        "text": "Every compiler test configuration runs the tests guarded by `has-z3`. Jobs dedicated to DWARF or LLVM tests skip this installation. The step fails if the archive's checksum or the reported version differs."
       }
     ]
   },

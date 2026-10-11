@@ -329,7 +329,8 @@ module Owned = struct
     adopt (of_list values)
 
   let reverse : (state : t) @ unique ->
-      {next : t | model next === rev_append (model state) Nil} @ unique =
+      {next : t | contents (model next) === rev_onto (contents (model state)) []
+        && model next === rev_append (model state) Nil} @ unique =
     fun state ->
     ghost_ (model_def (borrow_ state));
     let b = state.#owned in
@@ -342,7 +343,8 @@ module Owned = struct
     ghost_ (H.union_law (heap after) frame frame);
     let owned = #{pointer = reversed.pointer; model = after; state = reversed.state} in
     let next : t = #{owned} in
-    ghost_ (model_def (borrow_ next));
+    ghost_ (model_def (borrow_ next);
+      contents_rev_append before Nil; contents_def Nil);
     next
 
   let observe : (state : t) @ local read total forkable unyielding ->

@@ -19,7 +19,7 @@ type ordinary_nat = Z | S of ordinary_nat
 Line 3, characters 55-58:
 3 | let (ordinary_predecessor @ total) = function Z -> Z | S n -> n
                                                            ^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (ordinary_nat is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 3, characters 37-63
          which is expected to be "total".
@@ -70,7 +70,7 @@ let (unroll @ total) = function Roll f -> f
 Line 1, characters 32-38:
 1 | let (unroll @ total) = function Roll f -> f
                                     ^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (knot is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 1, characters 23-43
          which is expected to be "total".
@@ -109,7 +109,7 @@ type recursive_record = { run : recursive_record -> int; }
 Line 3, characters 26-31:
 3 | let (project @ total) x = x.run
                               ^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (recursive_record is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 3, characters 22-31
          which is expected to be "total".
@@ -120,7 +120,7 @@ let (destructure @ total) { run } = run
 Line 1, characters 26-33:
 1 | let (destructure @ total) { run } = run
                               ^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (recursive_record is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 1, characters 26-39
          which is expected to be "total".
@@ -131,7 +131,13 @@ type nat_wrapper = { payload : ordinary_nat }
 let (payload @ total) wrapper = wrapper.payload
 [%%expect{|
 type nat_wrapper = { payload : ordinary_nat; }
-val payload : nat_wrapper -> ordinary_nat = <fun>
+Line 3, characters 32-47:
+3 | let (payload @ total) wrapper = wrapper.payload
+                                    ^^^^^^^^^^^^^^^
+Error: The match on a value whose type is not logical (ordinary_nat is recursive but not [@@inductive]) is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 3, characters 22-47
+         which is expected to be "total".
 |}]
 
 let (generic_variant @ total) = function `Value x -> x
@@ -139,7 +145,7 @@ let (generic_variant @ total) = function `Value x -> x
 Line 1, characters 41-49:
 1 | let (generic_variant @ total) = function `Value x -> x
                                              ^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (it is a polymorphic variant) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 1, characters 32-54
          which is expected to be "total".
@@ -184,7 +190,7 @@ type 'a growing = Grow of ('a * 'a) growing
 Line 3, characters 32-38:
 3 | let (ungrow @ total) = function Grow x -> x
                                     ^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (growing is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 3, characters 23-43
          which is expected to be "total".
@@ -214,7 +220,7 @@ type ordinary_nat_alias = ordinary_nat
 Line 4, characters 20-23:
 4 |   function Z -> Z | S n -> n
                         ^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (ordinary_nat is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 4, characters 2-28
          which is expected to be "total".
@@ -243,7 +249,7 @@ and Right : sig type t = Right of Left.t end
 Line 8, characters 37-52:
 8 | let (unwrap_left @ total) = function Left.Left right -> right
                                          ^^^^^^^^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (Left.t is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 8, characters 28-61
          which is expected to be "total".
@@ -289,9 +295,13 @@ module type Abstract_dependency =
     type t = Abstract_roll of (payload -> int)
     [@@inductive]
   end
-module Abstract_eliminator :
-  functor (Argument : Abstract_dependency) ->
-    sig val unroll : Argument.t -> Argument.payload -> int end
+Line 7, characters 34-58:
+7 |   let (unroll @ total) = function Argument.Abstract_roll f -> f
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The match on a value whose type is not logical (Argument.payload is abstract and its kind does not say mod logical) is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 7, characters 25-63
+         which is expected to be "total".
 |}]
 
 module rec Closed :
@@ -369,7 +379,7 @@ type transforming_root = Transforming_root of int Transforming_left.t
 Line 10, characters 50-69:
 10 | let (unwrap_transforming_root @ total) = function Transforming_root x -> x
                                                        ^^^^^^^^^^^^^^^^^^^
-Error: The expression is "partial"
+Error: The match on a value whose type is not logical (Transforming_left.t is recursive but not [@@inductive]) is "partial"
        but is expected to be "total"
          because it is used inside the function at line 10, characters 41-74
          which is expected to be "total".

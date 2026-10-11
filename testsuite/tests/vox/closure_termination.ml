@@ -132,7 +132,7 @@ end;;
 Line 3, characters 50-56:
 3 |     let later : (unit -> int) @ total = fun () -> loop n in
                                                       ^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: n = 0)
 Line 5, characters 15-16:
 5 |   [@@decreases n]
                    ^

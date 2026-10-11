@@ -158,7 +158,7 @@ type t : value mod dynamic = int * int
 Line 1, characters 0-38:
 1 | type t : value mod dynamic = int * int
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "int * int" is immutable_data
+Error: The kind of type "int * int" is logical_data
          because it's a tuple type.
        But the kind of type "int * int" must be a subkind of value mod dynamic
          because of the definition of t at line 1, characters 0-38.
@@ -169,7 +169,7 @@ type t : value mod contended = int ref
 Line 1, characters 0-38:
 1 | type t : value mod contended = int ref
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "int ref" is mutable_data.
+Error: The kind of type "int ref" is mutable_data mod logical.
        But the kind of type "int ref" must be a subkind of value mod contended
          because of the definition of t at line 1, characters 0-38.
 |}]

@@ -471,7 +471,6 @@ type unsafe_mode_crossing_mismatch =
 type type_mismatch =
   | Arity
   | Inductiveness
-  | Phantom_parameters
   | Privacy of privacy_mismatch
   | Kind of kind_mismatch
   | Constraint of Errortrace.equality_error
@@ -487,6 +486,7 @@ type type_mismatch =
   | With_null_representation of position
   | Fixed_representation of position
   | Jkind of Ikind.subjkind_error
+  | Not_logical of Ikind.subjkind_error * string
   | Unsafe_mode_crossing of unsafe_mode_crossing_mismatch
 
 type jkind_mismatch =
@@ -842,9 +842,31 @@ let report_kind_mismatch first second ppf (kind1, kind2) =
     (kind_to_string kind2)
 
 let print_unsafe_mode_crossing ppf umc =
-  Fmt.fprintf ppf "mod %a@ %a"
-    Mode.Crossing.print umc.unsafe_mod_bounds
-    Jkind.With_bounds.format umc.unsafe_with_bounds
+  let dependencies =
+    Jkind.With_bounds.to_seq umc.unsafe_with_bounds
+    |> Seq.filter_map
+         (fun (ty, { With_bounds_type_info.relevant_axes }) ->
+           let axes =
+             Jkind_axis.Axis_set.to_seq relevant_axes
+             |> Seq.filter_map (fun (Jkind_axis.Axis.Pack axis) ->
+               match axis with
+               | Modal crossing_axis
+                 when not (Mode.Crossing.Per_axis.le crossing_axis
+                   (Mode.Crossing.Per_axis.max crossing_axis)
+                   (Mode.Crossing.proj crossing_axis umc.unsafe_mod_bounds)) ->
+                 Some (Jkind_axis.Axis.name axis)
+               | Modal _ | Nonmodal _ -> None)
+             |> List.of_seq
+           in
+           match axes with
+           | [] -> None
+           | _ -> Some (Fmt.asprintf "with %a along %s"
+                    Jkind.format_type_expr ty (String.concat ", " axes)))
+    |> List.of_seq
+    |> List.sort String.compare
+  in
+  Fmt.fprintf ppf "mod %a" Mode.Crossing.print umc.unsafe_mod_bounds;
+  List.iter (fun dependency -> Fmt.fprintf ppf "@ %s" dependency) dependencies
 
 let report_unsafe_mode_crossing_mismatch first second ppf e =
   let pr fmt = Fmt.fprintf ppf fmt in
@@ -868,8 +890,6 @@ let report_type_mismatch first second decl env ppf err =
   match err with
   | Arity ->
       pr "They have different arities."
-  | Phantom_parameters ->
-      pr "Their phantom parameter guarantees do not match."
   | Inductiveness ->
       pr "Their inductive guarantees differ;@ the guarantee can only be \
           hidden@ behind an abstract type."
@@ -928,6 +948,15 @@ let report_type_mismatch first second decl env ppf err =
        | None -> report ()
        | Some printing_env ->
          Printtyp.wrap_printing_env ~error:true printing_env report)
+  | Not_logical (v, reason) ->
+      let report () =
+        Ikind.report_subjkind_error_with_name ~name:first env ppf v
+      in
+      (match Ikind.subjkind_error_printing_env v with
+       | None -> report ()
+       | Some printing_env ->
+         Printtyp.wrap_printing_env ~error:true printing_env report);
+      pr "@ @[The first is not logical:@ %s.@]" reason
   | Unsafe_mode_crossing mismatch ->
     pr "They have different unsafe mode crossing behavior:@,@[<v 2>%a@]"
       (fun ppf (first, second, mismatch) ->
@@ -1116,7 +1145,24 @@ module Record_diffing = struct
     in
     Compute.diff (params1,params2) cstrs_1 cstrs_2
 
+  let align_dependencies l r =
+    if not (List.exists (fun (field : Types.label_declaration) ->
+      List.exists (fun (binder : Types.label_declaration) ->
+        Ctype.refinement_ident_occurs binder.ld_id field.ld_type) r) r)
+    then r else
+    let subst = List.fold_left (fun subst (right : Types.label_declaration) ->
+      match List.find_opt
+          (fun (left : Types.label_declaration) ->
+            Ident.name left.ld_id = Ident.name right.ld_id) l with
+      | None -> subst
+      | Some (left : Types.label_declaration) ->
+          Subst.add_bound_value right.ld_id left.ld_id subst)
+      Subst.identity r in
+    List.map (fun (ld : Types.label_declaration) ->
+      { ld with ld_type = Subst.type_expr subst ld.ld_type }) r
+
   let compare ~loc env params1 params2 l r =
+    let r = align_dependencies l r in
     if equal ~loc env params1 params2 l r then
       None
     else
@@ -1150,6 +1196,7 @@ module Record_diffing = struct
   let compare_with_representation (type rep) ~loc
         (record_form : rep record_form) env params1 params2 l r
         (rep1 : rep) (rep2 : rep) =
+    let r = align_dependencies l r in
     if not (equal ~loc env params1 params2 l r) then
       let patch = diffing loc env params1 params2 l r in
       Some (Record_mismatch (Label_mismatch patch))
@@ -1698,8 +1745,6 @@ let type_declarations_consistency env decl1 decl2 =
   else if decl1.type_inductive <> decl2.type_inductive
        && (decl2.type_inductive || not (Btype.type_kind_is_abstract decl2))
   then Some Inductiveness
-  else if decl2.type_phantom_parameters && not decl1.type_phantom_parameters
-  then Some Phantom_parameters
   else match privacy_mismatch env decl1 decl2 with
     | Some err -> Some (Privacy err)
     | None -> None
@@ -1802,7 +1847,17 @@ let type_declarations ?(equality = false) ~loc env ~mark name
           (* Note that [decl2.type_jkind] is an upper bound *)
           match Ctype.check_decl_jkind env decl1 decl2.type_jkind with
            | Ok _ -> None
-           | Error v -> Some (Jkind v)
+           | Error v ->
+             let reason =
+               if Jkind.requires_logical decl2.type_jkind then
+                 Ctype.not_logical_reason ~component:true env
+                   (Btype.newgenty
+                      (Tconstr (path, decl1.type_params, ref Mnil)))
+               else None
+             in
+             match reason with
+             | Some reason -> Some (Not_logical (v, reason))
+             | None -> Some (Jkind v)
         else None
     | (Type_variant (cstrs1, rep1, umc1), Type_variant (cstrs2, rep2, umc2)) -> begin
         if mark then begin

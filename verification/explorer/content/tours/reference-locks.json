@@ -14,9 +14,9 @@
     {
       "title": "The reference lock's interface",
       "path": "verification/library/reference_lock.mli",
-      "from": "type t : immutable_data",
+      "from": "type t : logical_data",
       "to": "val try_increment : t -> bool",
-      "lines": "6-29",
+      "lines": "8-36",
       "text": "A `Reference_lock.t` guards one `int` cell. `owned a h` holds when `h` is exactly the lock's cell holding a nonnegative integer, and `owned_def` exports that definition. A successful `try_acquire` returns a ghost token that owns exactly that, and a failed one a token that owns nothing; `release` requires and consumes such a token, and `read_owned` borrows it to read the value. `try_increment` has only the type `t -> bool`, so what it does is checked by run-time assertions in the tests. Nothing here relates `make`'s argument to a later reading, and a lock whose `try_acquire` always fails would also meet this interface."
     },
     {
@@ -24,8 +24,8 @@
       "path": "verification/library/unique_lock.mli",
       "from": "val make : V.t @ unique total -> t",
       "to": ["val put", "(location a) (Some (V.snapshot value))} @ unique ghost"],
-      "lines": "21-45",
-      "text": "`Unique_lock.Make (V)` guards a cell holding a unique payload of type `V.t`, which must be `value mod portable contended`. The token's heap maps the lock's location to `Some m` while the cell holds a payload whose ghost `snapshot` is `m`, and to `None` after `take`. `take` moves the payload out and `put` moves one back; `owned`, and so `release`, requires the cell to be full again. The client [`unique_lock_demo.ml`](src:testsuite/tests/vox/unique_lock_demo.ml) increments an `int` payload with acquire, `take`, `put` and release, calling `put_law` and `owned_def` to re-establish `owned` before `release`."
+      "lines": "25-49",
+      "text": "`Unique_lock.Make (V)` guards a cell holding a unique payload of type `V.t`, which must be `value mod portable contended logical`. The token's heap maps the lock's location to `Some m` while the cell holds a payload whose ghost `snapshot` is `m`, and to `None` after `take`. `take` moves the payload out and `put` moves one back; `owned`, and so `release`, requires the cell to be full again. The client [`unique_lock_demo.ml`](src:testsuite/tests/vox/unique_lock_demo.ml) increments an `int` payload with acquire, `take`, `put` and release, calling `put_law` and `owned_def` to re-establish `owned` before `release`."
     },
     {
       "title": "A client of the reference lock",

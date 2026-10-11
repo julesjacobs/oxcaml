@@ -8,8 +8,10 @@
     Dropping endpoints or authority, exceptions, and cancellation may prevent
     delivery and leak manually managed payloads. No recovery or leak-freedom
     guarantee is supplied. *)
-type ('a : value mod portable contended) send : value mod contended total
-type ('a : value mod portable contended) recv : value mod contended total
+type ('a : value mod portable contended) send
+  : value mod contended total logical
+type ('a : value mod portable contended) recv
+  : value mod contended total logical
 
 (** Allocate one sender and one receiver for a single ownership transfer. *)
 val create : ('a : value mod portable contended).

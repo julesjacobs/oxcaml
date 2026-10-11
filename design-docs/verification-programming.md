@@ -176,6 +176,45 @@ field when an erased model or witness must be stored in a representation or
 carried through an interface. A lemma does not need a `Ghost.t` wrapper merely
 because a caller erases its evaluation.
 
+Immutable record fields can depend on earlier fields:
+
+```ocaml
+type interval = { lower : int; upper : {u : int | lower <= u} }
+```
+
+Construction checks each field against the supplied earlier values. Projection
+specializes the refinement to that record: `r.upper` satisfies `r.lower <= u`.
+A `@@ ghost total` function field can carry a proof about an earlier data field,
+as `Vox_diff_spec.optimal_diff` does. The proof erases and remains available
+through the public interface, including when the producing operation is partial.
+A functional update that changes a dependency must also replace its dependent
+fields, so their contracts are checked again. Records with dependent fields must
+be immutable.
+Later refinements cannot yet apply explicitly polymorphic fields such as
+`id : 'a. 'a -> 'a`.
+When exporting a dependent field, bind the record to a name and project the field
+so its inferred type can refer to that name.
+
+Inline record constructors support the same dependencies, including in GADTs:
+
+```ocaml
+type _ bounded =
+  | Bounded : {
+      lower : int;
+      value : {v : int | lower <= v};
+    } -> int bounded
+  | Empty : unit bounded
+
+let (ordered @ total) (Bounded {lower; value}) : {b : bool | b} =
+  lower <= value
+```
+
+Construction checks the supplied fields. Matching recovers their relationships,
+alongside the GADT's type equalities. Fields may also carry erased proofs with
+`@@ ghost total`, as in standalone records. Dependencies use earlier field names;
+positional constructor arguments and GADT type indices keep their existing syntax
+and meaning.
+
 Keep evidence executable when a caller consumes it. Regex `recognize` and
 `sound` construct membership derivations that clients can inspect. Their
 correctness-only lemma calls erase, while derivation construction remains.

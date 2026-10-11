@@ -15,15 +15,41 @@
       "path": "verification/library/vox_egraph_rule_handle.mli",
       "from": "type equality = Equal | Not_proved | Invalid_input | Node_limit",
       "to": "| Rebuild_limit | Round_limit -> true)} @ unique",
-      "lines": "57-83",
-      "text": "The graph `t` is abstract and `@ unique`: each operation consumes it and returns it in an unboxed record. `model` and `rules`, above, are ghost observations, so the contracts speak about a `Q.graph`, nodes and a class label per id, that exists only for the checker. `query` answers `Equal` only with a ghost `E.evidence` that is valid for the rules and whose two ends are exactly `left` and `right`; `Not_proved` carries no information, so a `query` that always says `Not_proved` meets the contract. `saturate` answers `Fixed_point` only when `Fixed.fixed` holds of the returned model, and `Rebuild_limit` and `Round_limit` carry no information. `create`, `admit`, `query` and `saturate` are not declared total, and their contracts hold on normal return."
+      "text": "The graph `t` is abstract and `@ unique`: each operation consumes it and returns it in an unboxed record. `model` and `rules`, above, are ghost observations, so the contracts speak about a `Q.graph`, nodes and a class label per id, that exists only for the checker. `model_bounds` states the 512-node bound, array bounds and rule validity, and `same_class` guarantees that an id compares equal to itself. `query` answers `Equal` only with a ghost `E.evidence` that is valid for the rules and whose two ends are exactly `left` and `right`; `Not_proved` carries no information, so a `query` that always says `Not_proved` meets the contract. `saturate` answers `Fixed_point` only when `Fixed.fixed` holds of the returned model, and `Rebuild_limit` and `Round_limit` carry no information. `create`, `admit`, `query` and `saturate` are not declared total, and their contracts hold on normal return."
+    },
+    {
+      "title": "Expressions and evaluation",
+      "path": "verification/library/vox_egraph_language_spec.ml",
+      "from": "(* The expression language of the e-graph; the first file of the trusted",
+      "text": "The expression datatype, sorting rules and total evaluator specify the language. Evaluation uses wrapping integer addition. Rule-relative derivability is a different relation: caller rules need not preserve evaluation.",
+      "span": 72
+    },
+    {
+      "title": "Rules and substitution",
+      "path": "verification/library/vox_egraph_rule_spec.ml",
+      "from": "(* Rewrite rules, part of the trusted specification. A [pat] is an",
+      "text": "A valid rule has well-sorted sides and every right-side variable occurs on the left. `instantiate` substitutes expressions for pattern variables; `subst_valid` requires one expression of the declared sort per variable. These equations determine what a rule step means.",
+      "span": 135
+    },
+    {
+      "title": "Graph classes and pattern matching",
+      "path": "verification/library/vox_egraph_match_spec.ml",
+      "from": "(* The model of an e-graph that the public interface exposes, and pattern",
+      "text": "The graph observation stores nodes and class labels. `same` compares class labels; `matches` tests whether a pattern under a node-id assignment matches a root class. This observation is separate from expression evaluation and graph representation equality.",
+      "span": 119
+    },
+    {
+      "title": "What operations preserve",
+      "path": "verification/library/vox_egraph_preservation_spec.ml",
+      "from": "(* What every public operation preserves; part of the trusted",
+      "text": "`extends` keeps the old node count as a prefix and every old origin equal. It allows class labels to change and does not promise that all former equalities remain. `origin` is defined independently of classes in `vox_egraph_snapshot_spec.ml`, linked directly from the catalogue Interface.",
+      "span": 19
     },
     {
       "title": "Derivations from the caller's rules",
       "path": "verification/library/vox_egraph_derivation_spec.ml",
       "from": "let[@def] rec (valid @ total) (rules : R.t @ immutable)",
       "to": "R.rule_valid rule && R.subst_valid rule.vars subst)",
-      "lines": "70-95",
       "text": "An `evidence` is an `[@@inductive]` proof tree: `Refl`, `Sym`, `Trans`, one congruence step per constructor with children, and `Rule (i, rule, subst)`, one instance of rule `i`; `endpoints`, above, computes the two expressions it relates. `valid` checks every step: `Trans` only when the middle expressions are syntactically equal, congruence only at the right sorts, and `Rule` only when `rule` is exactly the `i`-th rule of the list and `subst` is well sorted. That last check is what ties an `Equal` answer to the caller's rules. The rules need not agree with the evaluator `L.eval`; [`Vox_egraph_interpret_wrapping.sound`](src:verification/library/vox_egraph_interpret_wrapping.mli) turns a valid derivation into equal evaluations only given a proof that every rule instance preserves evaluation."
     },
     {
@@ -31,7 +57,6 @@
       "path": "verification/library/vox_egraph_closure_spec.ml",
       "from": "let[@def] rec (binding_valid @ total)",
       "to": "[@@decreases if count > 0 then count else 0]",
-      "lines": "27-48",
       "text": "Closure is stated per rule and per assignment. An assignment gives each rule variable a node id, or a negative id for no node; `binding_valid` requires the nodes to have the variables' sorts, and `closed_roots` says that at every root below `count`, if the left side matches, so does the right side. [`Vox_egraph_quantifier.closed_bindings`](src:verification/library/vox_egraph_quantifier.mli) ranges over all `(count + 1)^n` assignments of a rule with `n` variables, `closed_rules` asks it of every rule, and [`Vox_egraph_fixedpoint_spec.fixed`](src:verification/library/vox_egraph_fixedpoint_spec.ml) adds congruence closure: nodes with the same constructor and children in the same classes share a class. The specification quantifies over the same space that the search enumerates, so a search that completes without a change is a proof of closure. It states closure only; nothing says that classes are merged only when a rule or congruence requires it."
     },
     {
@@ -39,7 +64,6 @@
       "path": "testsuite/tests/vox/egraph_rule_public.ml",
       "from": "let interpreted_query :",
       "to": "    | _ -> false",
-      "lines": "17-42",
       "text": "`interpreted_query` creates a graph from `input_rules`, admits both expressions, saturates with 20 rounds, 20 rebuild passes per round and 100,000 units of search fuel, and queries. When the answer is `Equal`, the ghost `proof` field holds a derivation, and `Interpret.sound` turns it into `L.eval left env === L.eval right env` given `interpretation`, a ghost total function proving that both sides of every valid rule instance evaluate equally in `env`. The saturation status is ignored, which is sound because `query`'s contract does not depend on it. [`egraph_boundary.ml`](src:testsuite/tests/vox/egraph_boundary.ml) compiles this client again with only the thirteen public specification and interface files visible."
     },
     {
@@ -47,23 +71,20 @@
       "path": "testsuite/tests/vox/egraph_boundary.ml",
       "from": "(* A saturation that stops at a limit does not establish a fixed point. *)",
       "to": "|}]",
-      "lines": "200-218",
       "text": "A client that saturates with zero rounds and then claims `F.fixed` of the result is rejected, because `Round_limit` promises nothing. The same expect test rejects two other public programs: forging a `Vox_egraph_rule_handle.t` from `()`, since the type is abstract, and creating a graph from a rule whose sides have different sorts, which fails at the refinement `R.valid rs` of `create`. [`egraph_rule_rejected.ml`](src:testsuite/tests/vox/egraph_rule_rejected.ml) rejects two derivations: `foreign_rule` uses a rule that is not in the (empty) rule list, and `wrong_endpoint` chains `0 = 0` and `1 = 1` with `Trans`."
     },
     {
       "title": "Inside: the handle and its ghost model",
       "path": "verification/library/vox_egraph_rule_handle.ml",
       "from": "type raw = {engine : H.t;",
-      "to": "s.model === P.view s.engine.store}",
-      "lines": "18-27",
-      "text": "Behind the interface, a handle is the engine `H.t` (the hash-cons table and the store), the rules and a ghost `model`, refined by the engine's invariant, `R.valid rules`, and the equations `rules === store.semantic.rules` and `model === P.view store`. So `model` and `rules` in the interface are field reads, and every operation re-establishes the refinement when it rebuilds the handle. The hash-cons table is the flat hash table's implementation (`Vox_table_implementation.Make`), and the invariant ties its ghost ownership token to the table's state. `egraph_rule_public.ml` checks that in native code the handle has two runtime fields, with `model` erased."
+      "to": "s.model === P.view s.engine.store && bounded_model s.model}",
+      "text": "Behind the interface, a handle is the engine `H.t` (the hash-cons table and the store), the rules and a ghost `model`, refined by the engine's invariant, `R.valid rules`, the equations `rules === store.semantic.rules` and `model === P.view store`, and `bounded_model model`, which states the node and array bounds. So `model` and `rules` in the interface are field reads, and every operation re-establishes the refinement when it rebuilds the handle. The hash-cons table is the flat hash table's implementation (`Vox_table_implementation.Make`), and the invariant ties its ghost ownership token to the table's state. `egraph_rule_public.ml` checks that in native code the handle has two runtime fields, with `model` erased."
     },
     {
       "title": "The key invariant: a union-find with proof edges",
       "path": "verification/library/vox_egraph_rule_union.ml",
       "from": "type t = {",
       "to": "state.union.count)",
-      "lines": "19-31",
       "text": "At run time this is `union`, a parent array in which every id's parent is at most the id, so `root` terminates by recursion on the id; there is no path compression and no union by rank. The ghost fields record each id's origin expression and a derivation on its parent edge, and `valid` requires through `S.valid_edges` that each edge's derivation is valid for the rules and leads from the id's origin to its parent's. `merge`, below, takes a ghost derivation between the origins of the two roots and stores it on the losing root, so no merge happens without evidence. `same_evidence` chains edges into a derivation between any two ids of a class, which is where `query` and `same_class` get their proofs."
     },
     {
@@ -71,7 +92,6 @@
       "path": "verification/library/vox_egraph_rule_saturate.ml",
       "from": "fun state rules rounds rebuild_passes fuel ->",
       "to": "[@@decreases if rounds > 0 then rounds else 0]",
-      "lines": "48-86",
       "text": "One round is one call of `saturate`: `H.rebuild` restores congruence with passes that compare every pair of nodes, and `Rules.scan` then searches the rules once. The scan returns `Changed` at the first rule application that merges two classes or adds a node, so each round applies at most one rewrite, and a `Changed` scan starts the next round. A `Stable` scan means the store did not change and every rule is closed on it; together with the congruence closure from the rebuild (`CP.closed`), `F.fixed_def` gives the contract's `Fixed.fixed`, and the loop returns `Fixed_point`. Search fuel carries over between rounds, and rebuild passes are allowed anew in each round."
     },
     {
@@ -79,7 +99,6 @@
       "path": "verification/library/vox_egraph_rule_scan.ml",
       "from": "fun state rules index rule bindings count fuel ->",
       "to": "[@@decreases count]",
-      "lines": "58-88",
       "text": "The search is exhaustive and does no e-matching. For each rule, `rule` below enumerates every assignment of ids (or -1) to the rule's variables with `Vox_egraph_assignments.enumerate`, `cases` walks the assignments, and `roots`, shown here, tries `W.matched_rule` with every id from `count - 1` down to 0 as the root, so one search tries up to (count + 1)^n × count candidates for a rule with n variables. `matched_rule` either admits the right side and merges it with the root, justified by an erased derivation ending in a `Rule` step, or changes nothing, and any change returns `Changed` at once. When nothing changes, the ghost calls accumulate `C.closed_roots` for each assignment, and `Equiv.closed_rule` turns them into `closed_rule` from the specification. Each case, root attempt and enumeration step costs one unit of fuel; matching within one attempt is not charged."
     },
     {
@@ -87,7 +106,6 @@
       "path": "testsuite/tests/vox/egraph_boundary_check.ml",
       "from": "let () =",
       "to": "finish ()",
-      "lines": "5-23",
       "text": "`egraph_boundary.ml` compiles five runtime modules with `-dlambda`, and this program checks that none of them applies a function from the five listed proof modules; it is a text search of the emitted Lambda for direct calls. The same test regenerates [`vox_egraph_rule_handle.spec.json`](src:verification/library/vox_egraph_rule_handle.spec.json), the exact text of every top-level declaration in the thirteen files a reader must trust, and fails if it differs. Beyond those files and the checker, the e-graph trusts what the flat hash table trusts, the `Vox_iarray` externals `get` and `set`, and `Iarray.length` and `Iarray.Refined.get`. The node, sort and union-find arrays are immutable arrays updated by copying, so adding a node or merging two classes copies 512-element arrays."
     }
   ]

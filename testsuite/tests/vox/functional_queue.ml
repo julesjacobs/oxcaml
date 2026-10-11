@@ -71,7 +71,7 @@ let (enqueue @ total) : (q : 'a t) @ immutable -> (value : 'a) @ immutable ->
   result
 
 let (dequeue @ total) :
-    (q : {q : 'a t | (contents q === []) === false}) @ immutable ->
+    (q : {q : 'a t | not (contents q === [])}) @ immutable ->
     {r : 'a * 'a t |
       match r with head, tail -> contents q === head :: contents tail}
       @ immutable total =

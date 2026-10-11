@@ -259,7 +259,7 @@ let translated_datatype_definition_lemma (x : int) :
 Line 5, characters 2-3:
 5 |   n;;
       ^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 1)
 Line 2, characters 15-20:
 2 |     {n : int | n = x} =
                    ^^^^^

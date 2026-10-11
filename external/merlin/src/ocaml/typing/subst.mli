@@ -54,6 +54,8 @@ val add_module: Ident.t -> Path.t -> 'k subst -> 'k subst
 val add_value: Ident.t -> Path.t -> 'k subst -> 'k subst
 (* Rename a term identifier bound by a type former. *)
 val add_bound_value: Ident.t -> Ident.t -> 'k subst -> 'k subst
+(* Installed by Ctype to preserve record-field binder scope under copying. *)
+val register_refinement_field_binders : (Ident.t list -> unit) ref
 val add_modtype: Ident.t -> Path.t -> 'k subst -> 'k subst
 val add_jkind: Ident.t -> Path.t -> t -> t
 

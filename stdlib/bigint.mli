@@ -16,7 +16,7 @@ open! Stdlib
 
 (** Unbounded signed integers. *)
 
-type t : immutable_data
+type t : logical_data
 
 val zero : t
 val one : t

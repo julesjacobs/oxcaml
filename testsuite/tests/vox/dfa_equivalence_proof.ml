@@ -207,6 +207,10 @@ module Dfa_proof : sig
       Bigint.compare (Dfa_semantics.state_size candidate) (Dfa_semantics.state_size other) <= 0
       else true} @@ total
   val reduce : machine -> int -> machine option @ total @@ total
+  val reduce_valid : (source : machine) -> (limit : int) ->
+    {u : unit | match reduce source limit with
+      | None -> true | Some candidate -> Dfa_semantics.valid candidate}
+    @@ total
   val reduce_complete : (source : machine) -> (limit : int) ->
     {u : unit | if Dfa_semantics.valid source && Dfa_semantics.labels_bounded source &&
       0 < limit && limit <= 64 &&
@@ -4047,7 +4051,7 @@ end = struct
     | Limit -> Comparison_limit
 
   module Pair_trace : sig
-    type t : value mod immutable
+    type t : value mod immutable logical
     val entries : t -> (int * int * int list) list @@ total
     val make : (values : (int * int * int list) list) @ total ->
       {result : t | entries result === values} @ total @@ total
@@ -4446,7 +4450,7 @@ end = struct
       Different word)
 
   module Access_trace : sig
-    type t : value mod immutable
+    type t : value mod immutable logical
     val entries : t -> (int * int list) list @@ total
     val make : (values : (int * int list) list) @ total ->
       {result : t | entries result === values} @ total @@ total
@@ -7528,6 +7532,14 @@ end = struct
     match proposal with
     | None -> None
     | Some packet -> Some packet.result_value
+
+  let (reduce_valid @ total) (source : machine) (limit : int) :
+      {u : unit | match reduce source limit with
+        | None -> true | Some candidate -> valid candidate} =
+    ghost_ (
+      reduce_def source limit;
+      match minimize_proved source limit with None | Some _ -> ());
+    ()
 
   let (reduce_complete @ total) (source : machine) (limit : int) :
       {u : unit | if valid source && labels_bounded source &&

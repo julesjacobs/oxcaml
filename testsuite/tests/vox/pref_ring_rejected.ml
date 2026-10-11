@@ -34,7 +34,7 @@ Line 16, characters 34-35:
 16 |     let t = remove s left s right t in t
                                        ^
 Error: Refinement could not be proved (counterexample)
-File "pref_ring.mli", line 169, characters 9-29:
+File "pref_ring.mli", line 187, characters 9-29:
   The refinement is stated here.
 |}, Principal{|
 Line 9, characters 59-60:
@@ -42,8 +42,7 @@ Line 9, characters 59-60:
                                                                ^
 Error: The value "t" has type "Pref_ring.node option Pref.token"
        but an expression was expected of type "'a Pref.token"
-       The kind of Pref_ring.node option is
-           immutable_data with Pref_ring.node
+       The kind of Pref_ring.node option is logical_data with Pref_ring.node
          because it's a boxed variant type.
        But the kind of Pref_ring.node option must be a subkind of
            immutable_data.
@@ -96,8 +95,7 @@ Line 4, characters 59-60:
                                                                ^
 Error: The value "t" has type "Pref_ring.node option Pref.token"
        but an expression was expected of type "'a Pref.token"
-       The kind of Pref_ring.node option is
-           immutable_data with Pref_ring.node
+       The kind of Pref_ring.node option is logical_data with Pref_ring.node
          because it's a boxed variant type.
        But the kind of Pref_ring.node option must be a subkind of
            immutable_data.
@@ -138,8 +136,7 @@ Line 3, characters 57-58:
                                                              ^
 Error: The value "t" has type "Pref_ring.node option Pref.token"
        but an expression was expected of type "'a Pref.token"
-       The kind of Pref_ring.node option is
-           immutable_data with Pref_ring.node
+       The kind of Pref_ring.node option is logical_data with Pref_ring.node
          because it's a boxed variant type.
        But the kind of Pref_ring.node option must be a subkind of
            immutable_data.
@@ -166,8 +163,7 @@ Line 3, characters 56-57:
                                                             ^
 Error: The value "t" has type "Pref_ring.node option Pref.token"
        but an expression was expected of type "'a Pref.token"
-       The kind of Pref_ring.node option is
-           immutable_data with Pref_ring.node
+       The kind of Pref_ring.node option is logical_data with Pref_ring.node
          because it's a boxed variant type.
        But the kind of Pref_ring.node option must be a subkind of
            immutable_data.

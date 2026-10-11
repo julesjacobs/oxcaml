@@ -65,12 +65,8 @@ let[@def] rec (eval @ total) (expr : expr @ immutable)
   | Eq_int (left, right) ->
     Bool_value (as_int (eval left env) = as_int (eval right env))
   | Int_if (condition, yes, no) ->
-    let choose_yes = as_bool (eval condition env) in
-    let yes_value = as_int (eval yes env) in
-    let no_value = as_int (eval no env) in
-    Int_value (if choose_yes then yes_value else no_value)
+    Int_value (if as_bool (eval condition env)
+      then as_int (eval yes env) else as_int (eval no env))
   | Bool_if (condition, yes, no) ->
-    let choose_yes = as_bool (eval condition env) in
-    let yes_value = as_bool (eval yes env) in
-    let no_value = as_bool (eval no env) in
-    Bool_value (if choose_yes then yes_value else no_value)
+    Bool_value (if as_bool (eval condition env)
+      then as_bool (eval yes env) else as_bool (eval no env))

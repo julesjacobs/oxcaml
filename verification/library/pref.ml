@@ -1,7 +1,7 @@
-type 'a t : immutable_data [@@phantom_parameters]
+type 'a t : logical_data
 type 'a pref = 'a t
-type 'a token : void mod total contended
-type 'a heap : immutable_data
+type 'a token : void mod total contended logical with 'a
+type 'a heap : logical_data with 'a
 
 type ('v : immutable_data, 'a) step =
   { value : 'v @@ global; state : 'a token }

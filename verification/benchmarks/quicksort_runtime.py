@@ -42,21 +42,26 @@ let () =
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--baseline", default="13c52c9fe7")
+    parser.add_argument("--baseline",
+                        help="optional compatible baseline revision")
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--iarray-model", action="store_true")
     args = parser.parse_args()
     compiler = ROOT / "_install/bin/ocamlopt"
     if not compiler.is_file():
         parser.error("run make install before benchmarking")
+    if args.repeats < 1:
+        parser.error("--repeats must be positive")
     modules = [Path("verification/library") / (module + suffix)
-               for module in ["vox_sequence", "vox_int_sequence", "borrow"]
+               for module in ["vox_sequence", "vox_int_sequence", "borrow",
+                              "vox_parallel"]
                for suffix in [".mli", ".ml"]]
     modules += [Path("testsuite/tests/vox") / name for name in
                 ["quicksort_model.ml", "quicksort.mli", "quicksort.ml"]]
     with tempfile.TemporaryDirectory(prefix="vox-quicksort-") as directory:
         executables = {}
-        for version in ["baseline", "candidate"]:
+        versions = ["baseline", "candidate"] if args.baseline else ["candidate"]
+        for version in versions:
             output = Path(directory, version)
             output.mkdir()
             selected = modules
@@ -88,7 +93,7 @@ def main():
             executables[version] = executable
         print("version,workload,cpu_ms_per_sort,bytes_per_sort", flush=True)
         for repeat in range(args.repeats):
-            order = ["baseline", "candidate"]
+            order = list(versions)
             if repeat % 2:
                 order.reverse()
             for version in order:

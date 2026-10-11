@@ -44,6 +44,15 @@ Line 4, characters 48-58:
 4 | let call : (lower : int) -> (unit -> {n : int | n >= lower}) -> int =
                                                     ^^^^^^^^^^
   The refinement is stated here.
+|}, Principal{|
+Line 1, characters 62-63:
+1 | let wrong_selected b = call (identity 1) (if b then fun () -> 0 else fun () -> 3);;
+                                                                  ^
+Error: Refinement could not be proved (counterexample: b = true)
+Line 4, characters 48-58:
+4 | let call : (lower : int) -> (unit -> {n : int | n >= lower}) -> int =
+                                                    ^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_match v = call (identity 1)
@@ -154,6 +163,15 @@ Line 3, characters 43-44:
 3 |   (if b then (fun () -> 1) else (fun () -> 0));;
                                                ^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 24-27:
+2 |     (unit -> {n : int | r n}) -> int = fun r f -> f ()
+                            ^^^
+  The refinement is stated here.
+|}, Principal{|
+Line 3, characters 43-44:
+3 |   (if b then (fun () -> 1) else (fun () -> 0));;
+                                               ^
+Error: Refinement could not be proved (counterexample: b = false)
 Line 2, characters 24-27:
 2 |     (unit -> {n : int | r n}) -> int = fun r f -> f ()
                             ^^^

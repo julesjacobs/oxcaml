@@ -650,7 +650,7 @@ type 'a check_m_t2_always_external : bits64 = 'a M.t2
 module M :
   sig
     type ('a : bits64) t : bits64 mod portable with 'a @@ external_
-    type ('a : bits64) t2 : bits64
+    type ('a : bits64) t2 : bits64 with 'a @@ external_
   end
 type ('a : bits64) check_m_t_always_external = 'a M.t
 type ('a : bits64) check_m_t2_always_external = 'a M.t2
@@ -675,10 +675,13 @@ type 'a check_m_t2_not_always_portable : any mod portable = 'a M.t2
 Line 1, characters 0-67:
 1 | type 'a check_m_t2_not_always_portable : any mod portable = 'a M.t2
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The kind of type "'a M.t2" is bits64
+Error: The kind of type "'a M.t2" is bits64 with 'a @@ external_
          because of the definition of t2 at line 4, characters 2-53.
        But the kind of type "'a M.t2" must be a subkind of any mod portable
          because of the definition of check_m_t2_not_always_portable at line 1, characters 0-67.
+
+       The first mode-crosses less than the second along:
+         portability: mod nonportable ≰ mod portable
 |}]
 
 (* unboxed products *)
@@ -734,11 +737,19 @@ Lines 1-2, characters 0-28:
 1 | type 'a not_always_portable : any mod portable
 2 |   = #{ a : 'a t; u : unit# }
 Error: The kind of type "not_always_portable" is
-           value mod everything with 'a t & void mod everything with 'a t
+           value mod everything
+             with 'a @@ global many total immutable external_
+             with 'a t
+           & void mod everything
+               with 'a @@ global many total immutable external_
+               with 'a t
          because it is an unboxed record.
        But the kind of type "not_always_portable" must be a subkind of
            any mod portable & any mod portable
          because of the annotation on the declaration of the type not_always_portable.
+
+       The first mode-crosses less than the second along:
+         portability: mod portable with 'a t ≰ mod portable
 |}]
 
 (* GADTs *)
@@ -759,7 +770,7 @@ Line 1, characters 0-92:
 1 | type boxed_packed_not_external : value mod external_ = T : 'a t -> boxed_packed_not_external
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: The kind of type "boxed_packed_not_external" is
-           immutable_data with (type : value) t
+           logical_data with (type : value) t
          because it's a boxed variant type.
        But the kind of type "boxed_packed_not_external" must be a subkind of
            value mod external_
@@ -772,7 +783,7 @@ Line 1, characters 0-91:
 1 | type packed_not_portable : value mod portable = T : 'a t -> packed_not_portable [@@unboxed]
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: The kind of type "packed_not_portable" is
-           value mod portable external_ with 'a @@ external_
+           value mod portable external_ logical with 'a @@ logical external_
          because of the definition of t at line 1, characters 0-61.
        But the kind of type "packed_not_portable" must be a subkind of
            value mod portable

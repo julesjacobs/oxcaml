@@ -145,10 +145,9 @@ let rec (decode @ total) :
            && literal_count <= capacity - used then begin
           let after_literals = literal_pos + literal_count in
           if after_literals = n then begin
-            if Vox_lz4_spec_parse.low15 token = 0
-               && (last_match_start < 0
-                   || (literal_count >= 5
-                       && last_match_start <= used + literal_count - 12)) then
+            if last_match_start < 0
+               || (literal_count >= 5
+                   && last_match_start <= used + literal_count - 12) then
               literals heap block used reversed source literal_pos literal_count
           end else if n - after_literals >= 2 then begin
             let low = Vox_lz4_spec_parse.byte_of_char

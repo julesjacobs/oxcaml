@@ -40,6 +40,9 @@ let[@def] (run @ total) (fuel : C.count @ immutable) (bytes : B.bytes @ immutabl
       | Calls.Running configuration -> Result (Calls.run fuel image.Binary.module_ configuration)
       | result -> Result result)
   | _ -> Rejected
+
+(* Proofs. *)
+
 let (correspondence @ total) : (image : Binary.image) @ immutable -> (bytes : B.bytes) @ immutable ->
     (input : Hmc_word64.t) @ immutable -> (globals : G.t) @ immutable ->
     (fuel : C.count) @ immutable -> (capacity : C.count) @ immutable -> (configuration : Calls.configuration) @ immutable ->

@@ -4978,6 +4978,12 @@ module Report = struct
     | Lazy -> Some (print_article_noun Consonant "lazy expression")
     | Quote -> Some (print_article_noun Consonant "quoted expression")
     | Expression -> Some (print_article_noun Vowel "expression")
+    | Not_logical_match reason ->
+      Some
+        (fun ~definite ~capitalize ->
+          Fmt.dprintf "%t on a value whose type is not logical (%s)"
+            (print_article_noun ~definite ~capitalize Consonant "match")
+            reason)
     | Effect_match ->
       Some (print_article_noun Consonant "pattern match with effect cases")
     | Effect_try ->

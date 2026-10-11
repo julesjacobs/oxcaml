@@ -900,9 +900,12 @@ let rename_ident s id =
 let rename_decl_ident s id =
   if Ident.is_global_or_predef id then id else rename_ident s id
 
+let register_refinement_field_binders = ref ignore
+
 let label_declaration copy_scope s l =
   {
-    ld_id = rename_decl_ident s l.ld_id;
+    ld_id = (match Ident.Map.find_opt l.ld_id s.bound_values with
+      | Some id -> id | None -> rename_decl_ident s l.ld_id);
     ld_mutable = l.ld_mutable;
     ld_modalities = l.ld_modalities;
     ld_ghost = l.ld_ghost;
@@ -912,6 +915,13 @@ let label_declaration copy_scope s l =
     ld_attributes = attrs s l.ld_attributes;
     ld_uid = l.ld_uid;
   }
+
+let label_declarations copy_scope s labels =
+  let s = List.fold_left (fun s l ->
+    add_bound_value l.ld_id (rename_decl_ident s l.ld_id) s) s labels in
+  !register_refinement_field_binders
+    (List.map (fun l -> Ident.Map.find l.ld_id s.bound_values) labels);
+  List.map (label_declaration copy_scope s) labels
 
 let constructor_argument copy_scope s ca =
   {
@@ -925,7 +935,7 @@ let constructor_arguments copy_scope s = function
   | Cstr_tuple l ->
       Cstr_tuple (List.map (constructor_argument copy_scope s) l)
   | Cstr_record l ->
-      Cstr_record (List.map (label_declaration copy_scope s) l)
+      Cstr_record (label_declarations copy_scope s l)
 
 let constructor_declaration copy_scope s c =
   {
@@ -965,12 +975,12 @@ let rec type_declaration' copy_scope s decl =
                         rep,
                         unsafe_mode_crossing umc)
       | Type_record(lbls, rep, umc) ->
-          Type_record (List.map (label_declaration copy_scope s) lbls,
+          Type_record (label_declarations copy_scope s lbls,
                        rep,
                        unsafe_mode_crossing umc)
       | Type_record_unboxed_product(lbls, rep, umc) ->
           Type_record_unboxed_product
-            (List.map (label_declaration copy_scope s) lbls,
+            (label_declarations copy_scope s lbls,
              rep,
              unsafe_mode_crossing umc)
       | Type_open -> Type_open
@@ -1023,7 +1033,6 @@ let rec type_declaration' copy_scope s decl =
     type_attributes = attrs s decl.type_attributes;
     type_unboxed_default = decl.type_unboxed_default;
     type_inductive = decl.type_inductive;
-    type_phantom_parameters = decl.type_phantom_parameters;
     type_uid = decl.type_uid;
     type_unboxed_version =
       Option.map (type_declaration' copy_scope s) decl.type_unboxed_version;

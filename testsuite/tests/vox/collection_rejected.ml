@@ -38,6 +38,15 @@ Lines 3-4, characters 18-43:
 3 | ..................Vox_int_sequence.count left target ===
 4 |         Vox_int_sequence.count right target.................
   The refinement is stated here.
+|}, Principal{|
+Line 5, characters 18-19:
+5 |     let u = () in u in
+                      ^
+Error: Refinement could not be proved (counterexample: target = 0)
+Lines 3-4, characters 18-43:
+3 | ..................Vox_int_sequence.count left target ===
+4 |         Vox_int_sequence.count right target.................
+  The refinement is stated here.
 |}]
 
 let invalid_count (before : int list) (after : int list) (target : int) =
@@ -51,6 +60,15 @@ Line 4, characters 57-58:
 4 |     Vox_int_sequence.count after target} = let u = () in u in
                                                              ^
 Error: Refinement could not be proved (counterexample)
+Lines 3-4, characters 22-39:
+3 | ......................Vox_int_sequence.count before target ===
+4 |     Vox_int_sequence.count after target......................
+  The refinement is stated here.
+|}, Principal{|
+Line 4, characters 57-58:
+4 |     Vox_int_sequence.count after target} = let u = () in u in
+                                                             ^
+Error: Refinement could not be proved (counterexample: target = 0)
 Lines 3-4, characters 22-39:
 3 | ......................Vox_int_sequence.count before target ===
 4 |     Vox_int_sequence.count after target......................

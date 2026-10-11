@@ -924,6 +924,14 @@ module Dfa_proof :
           else true}
       @@ total
     val reduce : machine -> int -> machine option @ total @@ total
+    val reduce_valid :
+      (source : machine) ->
+      (limit : int) ->
+      {u : unit
+        | match reduce source limit with
+          | None -> true
+          | Some candidate -> Dfa_semantics.valid candidate}
+      @@ total
     val reduce_complete :
       (source : machine) ->
       (limit : int) ->
@@ -1654,6 +1662,14 @@ module Dfa_proof :
           else true}
       @@ total
     val reduce : machine -> int -> machine option @ total @@ total
+    val reduce_valid :
+      (source : machine) ->
+      (limit : int) ->
+      {u : unit
+        | match reduce source limit with
+          | None -> true
+          | Some candidate -> Dfa_semantics.valid candidate}
+      @@ total
     val reduce_complete :
       (source : machine) ->
       (limit : int) ->

@@ -67,11 +67,11 @@ let rec (source_matches_distance_at @ total) :
     (distance : {d : int | 0 < d && d <= index}) ->
     (count : {n : int | 0 <= n && n <= Iarray.length source - index}) ->
     (offset : {j : int | 0 <= j && j < count}) ->
-    {u : unit | not (Vox_lz4_spec_match.source_matches_distance source index distance count)
+    {u : unit | not (Vox_lz4_spec_bytes.source_matches_distance source index distance count)
       || Vox_lz4_spec_bytes.source_at source (index + offset) ===
          Vox_lz4_spec_bytes.source_at source (index + offset - distance)} @ ghost =
   fun source index distance count offset -> ghost_ (
-    Vox_lz4_spec_match.source_matches_distance_def source index distance count;
+    Vox_lz4_spec_bytes.source_matches_distance_def source index distance count;
     if offset > 0 then
       source_matches_distance_at source (index + 1) distance
         (count - 1) (offset - 1);
@@ -109,15 +109,15 @@ let rec (copy_match_preserves_source @ total) :
     (remaining : {n : int | 0 <= n
       && n <= Iarray.length source - used}) ->
     {u : unit | not (R.output_matches heap block source used
-      && Vox_lz4_spec_match.source_matches_distance source used distance remaining)
+      && Vox_lz4_spec_bytes.source_matches_distance source used distance remaining)
       || R.output_matches
            (Vox_lz4_spec_decode.copy_heap heap block used distance remaining)
            block source (used + remaining)} @ ghost =
   fun heap block source used distance remaining -> ghost_ (
     Vox_lz4_spec_decode.copy_heap_def heap block used distance remaining;
     if remaining > 0 && R.output_matches heap block source used
-       && Vox_lz4_spec_match.source_matches_distance source used distance remaining then begin
-      Vox_lz4_spec_match.source_matches_distance_def source used distance remaining;
+       && Vox_lz4_spec_bytes.source_matches_distance source used distance remaining then begin
+      Vox_lz4_spec_bytes.source_matches_distance_def source used distance remaining;
       output_matches_get heap block source used (used - distance);
       Vox_lz4_spec_bytes.source_at_def source used;
       let byte = Vox_lz4_spec_parse.byte_of_char
@@ -140,7 +140,7 @@ let (sequence_preserves_source @ total) :
     (match_length : {n : int | 0 <= n
       && n <= Iarray.length source - used - literals}) ->
     {u : unit | not (R.output_matches heap block source used
-      && Vox_lz4_spec_match.source_matches_distance source (used + literals)
+      && Vox_lz4_spec_bytes.source_matches_distance source (used + literals)
            distance match_length)
       || R.output_matches
            (Vox_lz4_spec_decode.copy_heap

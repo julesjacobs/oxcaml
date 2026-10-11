@@ -7,40 +7,67 @@
   "demo": "rings",
   "order": 12,
   "summary": [
-    "Circular doubly linked lists with a sentinel, built from `Pref` cells: insertion, removal and reversal in a ring of any length, and moving a range of nodes between two rings. Each operation's contract gives the new model and the exact heap after the call as a few writes to the old one, which also says that every other cell is unchanged. The tour reads the ring predicate, the contracts, a client and a rejected program, then the abstract `Owned` interface, the proofs of insertion, reversal and the range move, the two heap laws the proofs call, and the emitted-code check.",
+    "A ring is observed by a sentinel and a list of nodes in forward order. The tour begins with list edits through an owned handle, then a range move between two rings, and only then the link predicates and exact heap updates needed at the explicit-ownership boundary.",
     "The [catalogue page](demo:rings) states the claim, the trusted base and the scope."
   ],
   "stops": [
     {
-      "title": "A ring is a predicate on a heap",
-      "path": "testsuite/tests/vox/pref_ring.mli",
-      "from": "val ring :",
-      "to": "separated rest))} @@ total",
-      "lines": "76-102",
-      "text": "A ring node is an immutable record of an `int`, a sentinel flag and two cells, `prev` and `next`, of type `node option Pref.t`. A ring's erased model is its sentinel and the list of its other nodes in forward order: `ring h s ns` says that in heap `h` the sentinel's `next` cell holds the first node, and `linked` checks each node's `prev` and `next` contents along `ns` and finally the sentinel's `prev`. `separated` says that the nodes are distinct, share no cell, and that no node's `prev` and `next` are one cell. Nodes are compared as values, so two node records are equal when they have the same value, flag and cells."
+      "title": "The model is a list of nodes in forward order",
+      "path": "testsuite/tests/vox/pref_ring_general.mli",
+      "from": "(** {1 Model definitions} *)",
+      "to": "(** {1 Operations with explicit ownership} *)",
+      "text": "A ring has a sentinel and a list of nodes in forward order. The short equations define concatenation, reversal and the last node of a prefix. An empty prefix selects the sentinel as its last node. This is the position vocabulary for insertion, removal and moving ranges."
     },
     {
-      "title": "Insert, remove, reverse: the exact heap afterwards",
+      "title": "Insert, remove and reverse through an owned handle",
       "path": "testsuite/tests/vox/pref_ring_general.mli",
-      "from": "val reverse : (sentinel : node) @ immutable ->",
-      "to": ["val remove", "&& separated (sentinel :: append prefix suffix)} @ unique"],
-      "lines": "17-45",
-      "text": "The caller names a position by splitting the model: `insert` links a new node after `left`, where the model is `append prefix suffix` and `left` is `last sentinel prefix`, and `remove` takes the model `append prefix (n :: suffix)`. Each postcondition gives the new model and the new heap: the old heap after the four link writes of `inserted` or `removed`, or for `reverse` the old heap with every node's `prev` and `next` contents exchanged (`flipped_all`). These are equations on the whole owned heap, so they also say that every other cell keeps its contents. `insert` also promises that the new node's cells were not in the old heap, and `remove` leaves `n` linked to itself, its cells still owned by the token."
+      "from": "  val empty :",
+      "to": "end (* Owned *)",
+      "text": "`Owned.t` packages one ring and its token. Insertion changes `prefix @ suffix` to `prefix @ node :: suffix`; removal removes the named node at that position; reversal reverses the list. Here `@` means concatenation. The sentinel remains the same. The heap equations additionally describe the exact link writes and preserve other cells; their definitions come after the client examples in this tour."
     },
     {
       "title": "A client builds and edits a ring",
       "path": "testsuite/tests/vox/pref_ring_general_client.ml",
       "from": "let push_front : (value : int)",
       "to": "G.Owned.remove [] n rest state",
-      "lines": "27-47",
       "text": "The client uses the one-ring `Owned` interface, which hides the ring invariant. `push_front` asks for the sentinel with `sentinel_node` and inserts after it with an empty `prefix`; `pop_front` observes the nodes and removes the first. Each states its result's model, proved from the `Owned` contracts and the `append_def` and `last_def` equations. The main program builds the ring 1, 2, 3, removes the middle node, inserts 4 after the last, reverses the ring and empties it, proving the observed node list after each step and checking the values with `assert` in bytecode and native code."
+    },
+    {
+      "title": "Moving a range between two owned rings",
+      "path": "testsuite/tests/vox/pref_ring_splice_general.mli",
+      "from": "  val splice :",
+      "to": "end",
+      "text": "`splice` removes the nonempty range `first :: rest` from the source and inserts it between the destination prefix and suffix. The result gives both new node lists and preserves the sentinels. `swap` exchanges their roles. The pair owns both rings in one token; its `adopt` and `release` boundary requires the two rings to be separated."
+    },
+    {
+      "title": "A ring is a predicate on a heap",
+      "path": "testsuite/tests/vox/pref_ring.mli",
+      "from": "val linked :",
+      "to": "      && linked h sentinel ns sentinel)} @@ total",
+      "text": "The raw ownership boundary describes the cycle itself: `linked` follows the node list with next links and checks each backward link; `ring` closes that list through the sentinel. The complete ring interface defines `head`, `present` and `separated`, which require the cells to exist and be distinct. These premises are maintained inside an owned handle."
+    },
+    {
+      "title": "The exact heap updates",
+      "path": "testsuite/tests/vox/pref_ring.mli",
+      "from": "(** {1 Heap updates} *)",
+      "to": "(** {1 Operations with explicit ownership} *)",
+      "text": "`connected` changes one next link and one previous link. `inserted` and `removed` compose two connections; removal also points the removed node’s links at itself. `flipped` exchanges a node’s previous and next contents and `flipped_all` applies it to the given node list. Each result is a function of the input heap, so every cell outside these links keeps its exact old contents."
+    },
+    {
+      "title": "Insert, remove, reverse: the exact heap afterwards",
+      "path": "testsuite/tests/vox/pref_ring_general.mli",
+      "from": "open Pref_ring",
+      "to": [
+        "val remove",
+        "&& separated (sentinel :: append prefix suffix)} @ unique"
+      ],
+      "text": "The opening equations define concatenation, reversal and the last node of a prefix. The contracts then give the exact node lists after insert, remove and reverse. Their final heaps use `inserted`, `removed` and `flipped_all`, whose equations are in [`pref_ring.mli`](src:testsuite/tests/vox/pref_ring.mli): insertion writes four links, removal bypasses the node and self-links it, and reversal exchanges every node’s two links. These heap equalities preserve every other cell, including cells outside the ring. All operations are partial and describe normal return."
     },
     {
       "title": "A rejected client: reversal without separation",
       "path": "testsuite/tests/vox/pref_ring_general_rejected.ml",
       "from": "module Missing_separation = struct",
       "to": "The refinement is stated here.",
-      "lines": "25-37",
       "text": "`reverse` requires `separated (sentinel :: ns)`. A caller that knows only `ring (Pref.own t) sentinel ns` is rejected, and the error points at that precondition in `pref_ring_general.mli`. Separation is what lets `reverse_nodes` exchange each node's links independently: if two nodes shared a cell, or a node's `prev` and `next` were one cell, a later write would undo an earlier one. The same test rejects a range move whose `final` is not the last node of the range or whose `destination_left` is misplaced, an insertion at the wrong position, removal of a node outside the model, false claims about the resulting models, reuse of a consumed `Owned.t` or released record, and uses of private proofs."
     },
     {
@@ -48,7 +75,6 @@
       "path": "testsuite/tests/vox/pref_ring_general.ml",
       "from": "module Owned = struct",
       "to": "adopt {sentinel; nodes = ghost_ []; state = made.state}",
-      "lines": "834-869",
       "text": "`Owned.t` is an unboxed record whose one field refines `payload` by `ring` and `separated`; its layout is `value & void & void`, so at run time it is the sentinel alone. `adopt` proves the invariant once, and each operation of `Owned` assumes it on entry and proves it again for the value it builds. `empty` makes a sentinel whose two cells point at itself and proves it a ring with no other nodes. Clients see `model`, `sentinel` and `heap` without their definitions: they can state the exact heap after an operation but cannot reach the representation."
     },
     {
@@ -56,7 +82,6 @@
       "path": "testsuite/tests/vox/pref_ring_general.ml",
       "from": "let insert : (sentinel : node) @ immutable ghost ->",
       "to": "{node = n; state = t}",
-      "lines": "784-812",
       "text": "`insert` reads the node after `left` with `read_node`, whose `None` branch ends in `unreachable_ ()`, a branch the checker proves dead from the precondition. `make_node` allocates the new node's two cells and points both at the node, and `insert_between` performs the four link writes. The resulting heap is the old one with eight `put`s, where the contract promises `inserted`, which has four: `allocation_inserted` proves the two equal, since the insertion overwrites both of the new node's cells, and `insert_law` proves the result a separated ring whose model is `append prefix (n :: suffix)`. `Pref_ring_proofs.allocation_frame` records that the allocation leaves the neighbors' cells unchanged."
     },
     {
@@ -64,23 +89,13 @@
       "path": "testsuite/tests/vox/pref_ring_general.ml",
       "from": "let (reverse_law @ total)",
       "to": "reverse_nodes (sentinel :: nodes) t",
-      "lines": "443-473",
       "text": "`reverse` borrows the token to `traverse` the ring forward, which returns the node list the model predicts, and passes `sentinel :: nodes` to `Pref_ring.reverse_nodes`, which exchanges each node's `prev` and `next` contents and whose contract is exactly `flipped_all` of the old heap. `reverse_law` proves the ring part: in `flipped_all h (sentinel :: ns)` the same nodes form a separated ring whose model is `reversed ns`. The traversal builds its list with a recursion that is not tail-recursive, so reversal uses stack and space linear in the ring's length."
-    },
-    {
-      "title": "Moving a range between two rings",
-      "path": "testsuite/tests/vox/pref_ring_splice_general.mli",
-      "from": "val splice : (s : node) @ immutable ghost -> (t : node) @ immutable ghost ->",
-      "to": "(t :: append destination_prefix (append (first :: rest) destination_suffix)))} @ unique",
-      "lines": "13-32",
-      "text": "`splice` takes one token that owns two rings, with sentinels `s` and `t`, and requires the concatenation of their node lists to be `separated`. It removes the nonempty range `first :: rest`, whose last node the caller passes as `final`, from the first ring and inserts it after `destination_left` in the second. The postcondition gives both new models, proves both are rings and still separated together, and states the heap as the old one after six link writes (`spliced`, three applications of `connected`). The implementation reads three links and calls `Pref_ring.splice_range`, with `splice_law` carrying the proof; `Owned.splice` and `Owned.swap` wrap it for a pair of rings, and a move within one ring is outside the scope."
     },
     {
       "title": "The trusted base, and two heap laws",
       "path": "testsuite/tests/vox/pref_ring_general.ml",
       "from": "let (allocation_overwrite @ total)",
       "to": "else ())",
-      "lines": "731-752",
       "text": "Beyond the shared `Pref` base, the C primitives behind `alloc`, `read` and `write` and the checker's encoding of heap terms, the ring proofs call two heap laws, in this lemma only. `commute_law` reorders writes to distinct cells and `put_law` drops a write that a later write to the same cell overrides; `insert` needs them, through `allocation_inserted`, to show that the allocation's writes disappear under the insertion's. `put_law` is an `external`, so each call adds an assumed instance; `commute_law` is proved in `pref.ml`. The other ring proofs rely only on the encoding of `put`, `at` and `mem` and on the contracts of the `Pref` operations."
     },
     {
@@ -88,8 +103,7 @@
       "path": "testsuite/tests/vox/structures_erasure_check.ml",
       "from": "\"pref_ring\",",
       "to": "\"observe_destination\"; \"swap\" ] ];",
-      "lines": "98-108",
-      "text": "The check described in the [lists and trees tour](tour:lists-trees/10) covers the ring modules too: [`structures_erasure.ml`](src:testsuite/tests/vox/structures_erasure.ml) compiles them natively with `-dlambda`, and each function named here, with every function of its module that it reaches by name, may call only the runtime functions on a fixed list and no model function, lemma, `_def` equation, `Proofs` member or heap law. The list covers the raw operations of `Pref_ring`, the general `insert`, `remove`, `reverse`, `splice` and `swap`, the `Owned` observers, and the entry points of the older fixed-size demos. Calls into other modules are not followed."
+      "text": "The check described in the [lists and trees tour](tour:lists-trees/13) covers the ring modules too: [`structures_erasure.ml`](src:testsuite/tests/vox/structures_erasure.ml) compiles them natively with `-dlambda`, and each function named here, with every function of its module that it reaches by name, may call only the runtime functions on a fixed list and no model function, lemma, `_def` equation, `Proofs` member or heap law. The list covers the raw operations of `Pref_ring`, the general `insert`, `remove`, `reverse`, `splice` and `swap`, the `Owned` observers, and the entry points of the older fixed-size demos. Calls into other modules are not followed."
     }
   ]
 }

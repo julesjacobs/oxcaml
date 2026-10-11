@@ -129,7 +129,7 @@ let rec (wrong @ total) :
 Line 7, characters 16-18:
 7 |     | Refl _ -> ()
                     ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0, z = 0)
 Line 3, characters 16-53:
 3 |     {u : unit | if derives d x z then x < z else true} @ ghost =
                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

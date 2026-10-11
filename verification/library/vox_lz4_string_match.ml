@@ -10,9 +10,9 @@ let rec (scan_match @ total) :
     (distance : {d : int | 0 < d && d <= position}) ->
     (limit : {n : int | 0 <= n && n <= Iarray.length model - position}) ->
     (count : {n : int | 0 <= n && n <= limit
-      && Vox_lz4_spec_match.source_matches_distance model position distance n}) ->
+      && Vox_lz4_spec_bytes.source_matches_distance model position distance n}) ->
     {r : int | count <= r && r <= limit
-      && Vox_lz4_spec_match.source_matches_distance model position distance r
+      && Vox_lz4_spec_bytes.source_matches_distance model position distance r
       && r = Vox_lz4_spec_match.scan_match model position distance limit count} =
   fun source model position distance limit count ->
     ghost_ (Vox_lz4_spec_match.scan_match_def model position distance limit count);
@@ -29,7 +29,7 @@ let rec (scan_match @ total) :
         ghost_ (
           Vox_lz4_spec_bytes.source_at_def model current;
           Vox_lz4_spec_bytes.source_at_def model prior;
-          Vox_lz4_spec_match.source_matches_distance_extend model
+          Vox_lz4_match_proof.source_matches_distance_extend model
             position distance count);
         scan_match source model position distance limit (count + 1)
       end else count
@@ -42,12 +42,12 @@ let (match_length @ total) :
     (distance : {d : int | 0 < d && d <= position}) ->
     (limit : {n : int | 0 <= n && n <= Iarray.length model - position}) ->
     {r : int | 0 <= r && r <= limit
-      && Vox_lz4_spec_match.source_matches_distance model position distance r
+      && Vox_lz4_spec_bytes.source_matches_distance model position distance r
       && r = Vox_lz4_spec_match.match_length model position distance limit} =
   fun source model position distance limit ->
     ghost_ (
       Vox_lz4_spec_match.match_length_def model position distance limit;
-      Vox_lz4_spec_match.source_matches_distance_def model position distance 0);
+      Vox_lz4_spec_bytes.source_matches_distance_def model position distance 0);
     scan_match source model position distance limit 0
 
 let[@inline always] (choose_match @ total) :
@@ -62,7 +62,7 @@ let[@inline always] (choose_match @ total) :
       | None -> true
       | Some m -> 0 < m.distance && m.distance <= 65535
         && m.distance <= position && 4 <= m.length && m.length <= limit
-        && Vox_lz4_spec_match.source_matches_distance model
+        && Vox_lz4_spec_bytes.source_matches_distance model
              position m.distance m.length} =
   fun source model position limit hint ->
     ghost_ (Vox_lz4_spec_match.choose_match_def model position limit hint);

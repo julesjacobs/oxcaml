@@ -1,9 +1,9 @@
 ok: the generic client is in the dump
-ok: the client reads none of the fields for Map and the ghost observers
-ok: the client calls no lemma and builds no certificate
-ok: snapshots and tokens have the zero-width native layout
-ok: client.cmm calls no ownership primitive and no lemma
-ok: client-O3.cmm calls no ownership primitive and no lemma
+ok: the client reads none of the fields for Model and the ghost observers
+ok: the client calls no logical map operation or lemma and builds no certificate
+ok: permissions have the zero-width native layout
+ok: client.cmm calls no ownership primitive, logical map operation or lemma
+ok: client-O3.cmm calls no ownership primitive, logical map operation or lemma
 ok: the -O3 client makes no generic application
 ok: the -O3 client calls the table's search directly
 ok: scan returns two unboxed scalars

@@ -992,19 +992,25 @@
   },
   "testsuite/tests/vox/pref_list.ml": {
     "what": {
-      "short": "In-place linked-list reversal with separate ownership for the rest and the reversed prefix, an exact node model, and an unrelated frame preserved.",
+      "short": "In-place linked-list reversal: Owned.reverse directly promises reversed values and node order; the explicit ownership interface also preserves an unrelated frame.",
+      "long": "Part of [the lists and trees demo](tour:lists-trees)."
+    }
+  },
+  "testsuite/tests/vox/pref_tree.mli": {
+    "what": {
+      "short": "In-place tree mirroring: Owned.mirror directly promises the mirrored pure shape while preserving node records; explicit ownership contracts follow.",
       "long": "Part of [the lists and trees demo](tour:lists-trees)."
     }
   },
   "testsuite/tests/vox/pref_ring_general.ml": {
     "what": {
-      "short": "Insertion, removal and reversal of separated rings of any length, with the exact physical reverse and flipped heap; the largest ring module.",
+      "short": "Insertion, removal and reversal of separated rings of any length, with exact node order and heap updates.",
       "long": "Part of [the rings demo](tour:rings)."
     }
   },
   "testsuite/tests/vox/mode_solver_public.mli": {
     "what": {
-      "short": "Representative of mode_solver_* (34 files): quantifier elimination over Global < Regional < Local, with _exact and _scoped theorems for each operation.",
+      "short": "Quantifier elimination over Global < Regional < Local, specified by the truth value of each operation's result.",
       "long": "See [the mode-solver tour](tour:mode-solver). It is a demo about a three-element chain and is not connected to OxCaml's mode solver."
     }
   },
@@ -1105,7 +1111,7 @@
   "testsuite/tests/vox/register_allocation.ml": {
     "what": {
       "short": "Representative of register_allocation* (8 files): liveness, interference, greedy coloring, renaming and the simulation proof.",
-      "long": "See [the register allocation tour](tour:register-allocation)."
+      "long": "See [the register allocation tour](tour:register-allocation). Successful allocation preserves instruction count and produces register and label indices within bounds throughout the target program; the simulation theorem preserves execution results."
     }
   },
   "testsuite/tests/vox/diff_boundary.ml": {
@@ -1116,7 +1122,7 @@
   },
   "testsuite/tests/vox/sorted_arrays.ml": {
     "what": {
-      "short": "Representative of sorted_array* (7 files): generic binary search with adjacent endpoints, equal ranges, and insertion and removal preserving sortedness.",
+      "short": "Representative of sorted_array*: generic binary search with adjacent endpoints, equal ranges, and insertion and removal specified by pure sequence equations.",
       "long": "See [the binary search tour](tour:binary-search)."
     }
   },
@@ -1286,6 +1292,26 @@
   "testsuite/tests/vox/talk_cyclic_list_no_extension.ml": {
     "what": {
       "short": "Without -extension refinement_types, let rec ones = 1 :: ones is rejected because list is [@@inductive]; a cyclic value of a non-inductive type is still accepted."
+    }
+  },
+  "testsuite/tests/vox/mode_solver_public_rejected.ml": {
+    "what": {
+      "short": "Rejects an unjustified concrete syntax result for quantifier elimination and an incorrect truth value for a closed formula."
+    }
+  },
+  "testsuite/tests/vox/hmc_source_values.ml": {
+    "what": {
+      "short": "Pure source values: words, lists, closures and environments used by the source machine and its observable-result model."
+    }
+  },
+  "testsuite/tests/vox/hmc_source_proofs.ml": {
+    "what": {
+      "short": "Derived proofs for the source machine: composing execution steps, absorbing final states and uniqueness of normal results."
+    }
+  },
+  "testsuite/tests/vox/sorted_array_model.ml": {
+    "what": {
+      "short": "Pure sequence insertion and removal, defined by taking a prefix and dropping a suffix; sorted-array edits promise these exact contents."
     }
   }
 }

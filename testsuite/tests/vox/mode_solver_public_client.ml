@@ -33,3 +33,13 @@ let () =
   let truth = Le (Const Global, Const Local) in
   assert (guarded_value [Universal; Existential] [] truth equality);
   assert (not (guarded_value [Existential; Universal] [] truth equality))
+
+let () =
+  let yes = Le (Const Global, Const Local) in
+  let also_yes = And (yes, yes) in
+  assert (yes <> also_yes);
+  List.iter (fun env -> assert (eval_qf env yes = eval_qf env also_yes))
+    [[]; [Global]; [Regional]; [Local]];
+  let equality = And (Le (Var 0, Var 1), Le (Var 1, Var 0)) in
+  let projected = project_guarded [Universal; Existential] yes equality in
+  assert (scoped_qf 0 projected.domain && scoped_qf 0 projected.winning)

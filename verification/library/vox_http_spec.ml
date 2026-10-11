@@ -88,6 +88,11 @@ let[@def] rec has_name (which : bytes) (headers : int list list) =
   | [] -> false
   | line :: rest -> let (name, _) = split 58 line in
     equal_bytes (lower_all name) which || has_name which rest
+let[@def] has_transfer_encoding headers =
+  has_name
+    [116;114;97;110;115;102;101;114;45;101;110;99;111;100;105;110;103] headers
+let[@def] has_content_length headers =
+  has_name [99;111;110;116;101;110;116;45;108;101;110;103;116;104] headers
 let[@def] rec frame_fields headers previous hosts =
   match headers with
   | [] -> if hosts <> 1 then Bad Invalid_host
@@ -108,10 +113,8 @@ let[@def] rec frame_fields headers previous hosts =
           | _ -> frame_fields rest (Some n) hosts)
       else frame_fields rest previous hosts
 let[@def] framing headers =
-  if has_name [116;114;97;110;115;102;101;114;45;101;110;99;111;100;105;110;103]
-    headers then
-    if has_name [99;111;110;116;101;110;116;45;108;101;110;103;116;104] headers
-    then Bad Transfer_encoding_content_length
+  if has_transfer_encoding headers then
+    if has_content_length headers then Bad Transfer_encoding_content_length
     else Bad Unsupported_transfer_encoding
   else frame_fields headers None 0
 let[@def] rec wire_headers headers tail =
@@ -151,12 +154,6 @@ let[@def] well_formed request =
       | Length n -> sized n request.body
       | _ -> false)
   && fits 16384 (serialize request)
-
-let[@def] has_transfer_encoding headers =
-  has_name
-    [116;114;97;110;115;102;101;114;45;101;110;99;111;100;105;110;103] headers
-let[@def] has_content_length headers =
-  has_name [99;111;110;116;101;110;116;45;108;101;110;103;116;104] headers
 
 let[@def] rec content_lengths_match headers n = ghost_ (
   match headers with

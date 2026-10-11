@@ -55,7 +55,7 @@ let wrong (b : Bigint.t) : {u : unit | not (Bigint.to_int_opt b === None)} =
 Line 2, characters 2-4:
 2 |   ();;
       ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: b = 4611686018427387904Z)
 Line 1, characters 39-73:
 1 | let wrong (b : Bigint.t) : {u : unit | not (Bigint.to_int_opt b === None)} =
                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

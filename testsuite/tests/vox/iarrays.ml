@@ -344,7 +344,7 @@ let caught_slice (source : int iarray) (position : int) (size : int) :
 Line 5, characters 2-10:
 5 |   position
       ^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: position = -1)
 Line 2, characters 20-31:
 2 |     {result : int | 0 <= result} =
                         ^^^^^^^^^^^
@@ -501,7 +501,7 @@ end;;
 Line 11, characters 6-11:
 11 |       index in
            ^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: index = 0)
 Line 10, characters 39-61:
 10 |     let bounded : {i : int | 0 <= i && i < Iarray.length data} =
                                             ^^^^^^^^^^^^^^^^^^^^^^
@@ -628,7 +628,7 @@ let wrong_initialization : (n : int) ->
 Line 3, characters 11-37:
 3 |   fun n -> Iarray.init n (fun i -> i);;
                ^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: n = 0)
 Line 2, characters 22-45:
 2 |     {a : int iarray | Iarray.length a = n + 1} =
                           ^^^^^^^^^^^^^^^^^^^^^^^
@@ -643,7 +643,7 @@ let shadowed_initialization : (n : int) ->
 Line 4, characters 2-28:
 4 |   Iarray.init n (fun i -> i);;
       ^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: n = 0)
 Line 2, characters 22-41:
 2 |     {a : int iarray | Iarray.length a = n} = fun n ->
                           ^^^^^^^^^^^^^^^^^^^

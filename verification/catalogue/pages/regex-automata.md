@@ -1,7 +1,7 @@
 title: Regular expressions and automata
 blurb: A regular-expression matcher proved to accept exactly the words its membership rules derive, and a conversion to DFA tables that, when it returns a table, returns a valid one with the same language.
 status: owner-review
-date: 27 September 2026
+date: 4 October 2026
 sources:
   - testsuite/tests/vox/regex_semantics.ml — Regular expressions and the membership rules
   - testsuite/tests/vox/regex_language.mli — Public interface
@@ -19,6 +19,40 @@ sources:
 `lower r` converts `r` to a table in the format of the [DFA equivalence and minimization](dfa-equivalence.html) demo, or returns `None`. If `lower r` returns `Some m`, then `lower_matches` says that `Dfa_semantics.run m w = matches r w` for every word `w`, and `lower_valid` says that `m` is `valid` in the sense the DFA operations require, so a client can pass it to `compare` and `reduce` without checking it. Nothing in the interface says that `lower` returns `Some`, so `fun _ -> None` still satisfies the interface. The implementation proves that it builds a table for every regex and returns `None` only if that table fails the validity check. That the check passes is not proved, and in Vox's logic it fails for very large regexes: rows are numbered with machine `int`s, which wrap, so the numbers are distinct only for tables of at most 2^63 rows (see the open question below).
 
 Lowering builds one row for every subset of the list `r :: support r`, which holds `r` and the terms its partial derivatives can reach, plus two rows. A literal of `n` symbols therefore gives 2^(n+1) + 2 rows: `a` gives 6, `abcd` 34, `abcde` 66 and a 12-symbol literal 8,194. `Dfa_equivalence.reduce` accepts at most 64 rows, so lowering `abcde` and then minimizing returns `None`. Running time and memory are not proved.
+
+## Interface
+
+The public contract is `regex_language.mli`. Its meaning is entirely in
+`regex_semantics.ml` (expressions and the membership rules) and the shared
+`dfa_semantics.ml` (tables, validity and execution, shown on the
+[DFA page](dfa-equivalence.html)). Derivatives and automaton construction
+are in `regex_core.ml`; they are not definitions of membership. Regex syntax
+equality and language equality are different observations: the client checks
+that `Symbol 7` and `Alt (Symbol 7, Symbol 7)` have the same answers on empty,
+matching, nonmatching and repeated-symbol words. Lowering permits any valid
+table with the specified language.
+
+@code testsuite/tests/vox/regex_language.mli
+
+`(x : t) -> ...` names an argument so that later types can mention it. `@@ total` on a declaration marks a total function, which may appear in refinements. `@ total` on an argument or result type marks a value at the `total` mode, which total code (here the construction inside `lower`) may consume. `Ghost.t` wraps a value that is erased at run time; `proof.ghost` reads it in specifications. The membership rules are:
+
+@code testsuite/tests/vox/regex_semantics.ml
+
+Each file wraps its contents in a module (`regex_core.ml` defines `Regex`) because the tests load the files into the toplevel with `#use`. `[@@inductive]` declares a datatype the checker reasons about by cases and induction. `let[@def]` defines a total function that refinements may mention, together with a lemma stating its defining equation. `Dfa_semantics.machine` and `run` are shown on the DFA page.
+
+## Trusted base
+
+- The test `dfa_boundary.ml` is the only one that compiles `regex_language.mli`, `regex_language.ml` (the proofs of `sound`, `complete`, `lower_matches` and `lower_valid` from the implementation) and `regex_public_client.ml`. The tests `regex.ml` and `regex_dfa_bridge.ml` check the implementation and its proofs, but not these three files.
+- `lower` checks its table with `Dfa_proof.of_raw` from the DFA demo, whose module declares three `external` aliases of `%equal` and `%greaterequal` at `int` (`dfa_equivalence_proof.ml`). The checker gives them the meaning of `=` and `>=`.
+
+## Scope
+
+- Operations: `matches` and `lower`. There is no search within a longer word, no submatch positions, no character classes and no parser; symbols are `int`s.
+- Inside `regex_core.ml`, `Regex.Dfa.correct` proves that the internal automaton accepts exactly the words `matches` accepts, for every regex. The condition on `Some` comes from the validity check on the converted table (see above).
+- Lowered tables have 2^u + 2 rows, where `u` is the length of `r :: support r`. Combined with `reduce`, only regexes with `u` at most 5 are within the DFA demo's 64-row limit. `compare_complete` needs the product of the two row counts to be at most 65,536: two regexes with `u` = 7 (130 rows each) fit, two with `u` = 8 (258 rows each) do not.
+- Every lowered row lists each symbol that occurs in `r` as an explicit edge, so a regex with more than 64 distinct symbols lowers to a table without `labels_bounded`, and `compare_complete` and `reduce_complete` say nothing about it. Such a regex is in any case far past the row limits above.
+- `matches` is total; its running time is not bounded.
+- Only normal return is specified, as on the shared page.
 
 ## An open question: sizes of in-memory data
 
@@ -53,30 +87,6 @@ Lines 3-5, characters 6-15:
 5 |       else true...
   The refinement is stated here.
 ```
-
-## Interface
-
-@code testsuite/tests/vox/regex_language.mli
-
-`(x : t) -> ...` names an argument so that later types can mention it. `@@ total` on a declaration marks a total function, which may appear in refinements. `@ total` on an argument or result type marks a value at the `total` mode, which total code (here the construction inside `lower`) may consume. `Ghost.t` wraps a value that is erased at run time; `proof.ghost` reads it in specifications. The membership rules are:
-
-@code testsuite/tests/vox/regex_semantics.ml
-
-Each file wraps its contents in a module (`regex_core.ml` defines `Regex`) because the tests load the files into the toplevel with `#use`. `[@@inductive]` declares a datatype the checker reasons about by cases and induction. `let[@def]` defines a total function that refinements may mention, together with a lemma stating its defining equation. `Dfa_semantics.machine` and `run` are shown on the DFA page.
-
-## Trusted base
-
-- The test `dfa_boundary.ml` is the only one that compiles `regex_language.mli`, `regex_language.ml` (the proofs of `sound`, `complete`, `lower_matches` and `lower_valid` from the implementation) and `regex_public_client.ml`. The tests `regex.ml` and `regex_dfa_bridge.ml` check the implementation and its proofs, but not these three files.
-- `lower` checks its table with `Dfa_proof.of_raw` from the DFA demo, whose module declares three `external` aliases of `%equal` and `%greaterequal` at `int` (`dfa_equivalence_proof.ml`). The checker gives them the meaning of `=` and `>=`.
-
-## Scope
-
-- Operations: `matches` and `lower`. There is no search within a longer word, no submatch positions, no character classes and no parser; symbols are `int`s.
-- Inside `regex_core.ml`, `Regex.Dfa.correct` proves that the internal automaton accepts exactly the words `matches` accepts, for every regex. The condition on `Some` comes from the validity check on the converted table (see above).
-- Lowered tables have 2^u + 2 rows, where `u` is the length of `r :: support r`. Combined with `reduce`, only regexes with `u` at most 5 are within the DFA demo's 64-row limit. `compare_complete` needs the product of the two row counts to be at most 65,536: two regexes with `u` = 7 (130 rows each) fit, two with `u` = 8 (258 rows each) do not.
-- Every lowered row lists each symbol that occurs in `r` as an explicit edge, so a regex with more than 64 distinct symbols lowers to a table without `labels_bounded`, and `compare_complete` and `reduce_complete` say nothing about it. Such a regex is in any case far past the row limits above.
-- `matches` is total; its running time is not bounded.
-- Only normal return is specified, as on the shared page.
 
 ## Reproduce
 

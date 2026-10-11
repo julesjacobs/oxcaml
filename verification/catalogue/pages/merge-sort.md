@@ -1,7 +1,7 @@
 title: Merge sort
 blurb: A generic merge sort on immutable lists, proved to return a sorted permutation of its input while spending at most n⌈log₂ n⌉ erased credits, one per comparator call.
 status: owner-review
-date: 27 September 2026
+date: 4 October 2026
 sources:
   - verification/library/vox_merge_sort.mli — Public interface
   - verification/library/vox_merge_sort.ml — Implementation: split, merge and the recursive sort
@@ -9,7 +9,8 @@ sources:
   - verification/library/vox_merge_proofs.ml — Lemmas for one split or merge step
   - verification/library/vox_credits.mli — Credit tokens
   - verification/library/vox_credits.ml — Credit tokens: implementation
-  - verification/library/vox_sort_cost.ml — `height`, `budget` and the proof that `height n` is ⌈log₂ n⌉
+  - verification/library/vox_sort_cost.mli — Comparison-budget definitions and logarithmic-height laws
+  - verification/library/vox_sort_cost.ml — Proofs of the comparison-budget laws
   - verification/library/README.md — The credit discipline and the cost model (section "Comparison credits and merge sort")
   - testsuite/tests/vox/merge_sort.ml — Client: integer and ranked-record sorts
   - testsuite/tests/vox/merge_sort_rejected.ml — Rejected programs
@@ -19,6 +20,45 @@ sources:
 The comparator is a functor argument, `Compare.compare`, which must return `O.le left right` and consume one credit from an erased token. `sort` requires a token holding at least `budget n = n * height n` credits, where `n` is the length of the list, and returns a token that has lost at most `budget n` credits. `Vox_sort_cost` proves that `height n` is ⌈log₂ n⌉ for `n ≥ 1` (it is 0 for `n = 0`). Because the functor can split, merge and spend credits but cannot create them, and `Compare.compare` is its only run-time access to the order, the sort makes at most n⌈log₂ n⌉ calls to `Compare.compare`. That last step is an argument from the signatures, not a statement the checker proves; the checked statement is the credit bound.
 
 Not claimed: stability (splitting alternates elements, so equal-keyed elements can change order), any cost other than comparator calls, and stack depth (`split` and `merge` are not tail-recursive). The credit operations are not all erased: `C.split` and `C.merge` are called outside `ghost_`, so erasure removes their token arguments but not the calls.
+
+## Interface
+
+The primary result is a sorted permutation of the input. Read its meaning
+before the funding contract: `sorted` compares adjacent elements through
+`O.le`, and permutation preserves each complete value's multiplicity.
+
+@code verification/library/vox_merge_sort.mli "  module P : sig" "  end"
+
+@code verification/library/vox_merge_sort.mli "  val sort :" "end"
+
+The functor parameters connect the chosen order to a comparator that spends
+one credit per call:
+
+@code verification/library/vox_merge_sort.mli "module Make (O : sig" "end) : sig"
+
+`O` must be a total preorder: `le` is a ghost function (`@ ghost`, usable only in specifications and ghost code) with proofs of reflexivity, totality and transitivity. The `P` laws characterize `count`, `permutation` and `sorted` completely. `S.length` is the length of a list as a `Bigint.t`, an unbounded integer. The credit tokens have this signature, which has no operation that adds credits:
+
+@code verification/library/vox_credits.mli "module type S = sig" "end"
+
+`Vox_credits.Make ()` also has `Budget.create`, which makes a token with any nonnegative number of credits; the sort receives only `Vox_credits.S`. The comparison-budget model has its own interface; its implementation contains the proofs:
+
+@code verification/library/vox_sort_cost.mli "val height :" "else height size = 0Z} @@ total"
+
+`height_bound` and `height_minimal` state `n ≤ power (height n)` and, for `n > 1`, `power (height n - 1) < n`.
+
+## Trusted base
+
+- The link between credits and comparator calls, as argued above: `Compare.compare` is the only run-time access to `O.le`, each call spends exactly one credit, and `Vox_credits.S` has no operation that increases the credits of the live tokens (`empty` makes zero, `split` and `merge` conserve, `tick` spends). Tokens are unique, so they cannot be copied. Each `Vox_credits.Make ()` has its own token type, so the sort cannot use credits from another instance. None of this is a checked statement.
+- Otherwise nothing beyond the shared base: the merge-sort, ordered-sequence, credit and cost modules contain no `external`, `assume_` or suppressed warning. The two `assume_` calls in the client test are checked at run time.
+
+## Scope
+
+- One operation, `sort`, and the laws in `P`. There is no merge of two sorted lists, no sorting of arrays and no deduplication.
+- Elements have kind `immutable_data mod total`, so mutable records and closures cannot be sorted. `Compare.compare` must be `total`.
+- Credits are machine `int`s. `budget n` is compared as a `Bigint.t`, so a list whose budget exceeds `max_int` cannot be funded.
+- Only calls to `Compare.compare` are counted, at one credit each. Work inside the comparator and the cost of splitting and merging lists are not.
+- Not stable. `split` and `merge` recurse to a depth proportional to the list length; the tests stop at 128 elements.
+- The client test runs as bytecode only.
 
 ## Client example
 
@@ -42,35 +82,12 @@ The expected error, with lines counted from the start of the phrase; line 26 of 
 
 @text testsuite/tests/vox/merge_sort_rejected.ml "Line 6, characters 22-29:" "The refinement is stated here."
 
+The client also proves that two equal-ranked records may appear in either
+order while remaining sorted and preserving every complete value:
+
+@code testsuite/tests/vox/merge_sort.ml "let allowed_rank_orders" "    && Rank_sort.P.permutation forward backward}))"
+
 The test also rejects claims that `[]` is a permutation of `[1]`, that `[1; 1]` is a permutation of `[1]`, and that `[a; b]` is a permutation of `[a; a]` when the records `a` and `b` have equal ranks and different payloads. It checks that `false` cannot be proved after splitting and merging credits, after the two `height` lemmas, or after a funded sort. It rejects sorting `[2; 1]` with one credit, at the precondition of `sort`, and accepts the same call with the two credits that `budget 2` requires.
-
-## Interface
-
-@code verification/library/vox_merge_sort.mli
-
-`O` must be a total preorder: `le` is a ghost function (`@ ghost`, usable only in specifications and ghost code) with proofs of reflexivity, totality and transitivity. The `P` laws characterize `count`, `permutation` and `sorted` completely. `S.length` is the length of a list as a `Bigint.t`, an unbounded integer. The credit tokens have this signature, which has no operation that adds credits:
-
-@code verification/library/vox_credits.mli "module type S = sig" "end"
-
-`Vox_credits.Make ()` also has `Budget.create`, which makes a token with any nonnegative number of credits; the sort receives only `Vox_credits.S`. The budget is defined in `Vox_sort_cost`, which has no `.mli`:
-
-@code verification/library/vox_sort_cost.ml "let[@def] rec height" "let[@def] budget"
-
-`height_bound` and `height_minimal` in the same file prove `n ≤ power (height n)` and, for `n > 1`, `power (height n - 1) < n`.
-
-## Trusted base
-
-- The link between credits and comparator calls, as argued above: `Compare.compare` is the only run-time access to `O.le`, each call spends exactly one credit, and `Vox_credits.S` has no operation that increases the credits of the live tokens (`empty` makes zero, `split` and `merge` conserve, `tick` spends). Tokens are unique, so they cannot be copied. Each `Vox_credits.Make ()` has its own token type, so the sort cannot use credits from another instance. None of this is a checked statement.
-- Otherwise nothing beyond the shared base: the merge-sort, ordered-sequence, credit and cost modules contain no `external`, `assume_` or suppressed warning. The two `assume_` calls in the client test are checked at run time.
-
-## Scope
-
-- One operation, `sort`, and the laws in `P`. There is no merge of two sorted lists, no sorting of arrays and no deduplication.
-- Elements have kind `immutable_data mod total`, so mutable records and closures cannot be sorted. `Compare.compare` must be `total`.
-- Credits are machine `int`s. `budget n` is compared as a `Bigint.t`, so a list whose budget exceeds `max_int` cannot be funded.
-- Only calls to `Compare.compare` are counted, at one credit each. Work inside the comparator and the cost of splitting and merging lists are not.
-- Not stable. `split` and `merge` recurse to a depth proportional to the list length; the tests stop at 128 elements.
-- The client test runs as bytecode only.
 
 ## Reproduce
 

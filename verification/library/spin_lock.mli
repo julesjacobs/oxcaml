@@ -10,15 +10,15 @@
 
 (** The guarded cell: its ghost location and when its payload is full. *)
 module type Cell = sig
-  type payload : immutable_data
-  type cell : immutable_data
+  type payload : logical_data
+  type cell : logical_data
   val location : cell @ immutable -> payload Ghost_pref.t @ immutable ghost
     @@ total
   val full : payload @ immutable -> bool @ ghost @@ total
 end
 
 module Make (C : Cell) : sig @@ portable
-  type t : immutable_data
+  type t : logical_data
   val cell : t @ local immutable -> C.cell @ immutable @@ total
   (** [owned a h]: [h] is exactly the cell of [a], holding a full payload. *)
   val owned : t @ immutable -> C.payload Ghost_pref.heap @ immutable ->
@@ -48,7 +48,7 @@ module Make (C : Cell) : sig @@ portable
     {r : (bool, C.payload) Ghost_pref.step |
       if r.value then owned a (Ghost_pref.own r.state)
       else Ghost_pref.own r.state === Ghost_pref.Heap.empty ()} @ unique
-  (** Release consumes full cell authority and restores it to the lock. *)
+  (** Consume full cell authority; return empty caller authority. *)
   val release : (a : t) ->
     {t : C.payload Ghost_pref.token | owned a (Ghost_pref.own t)} @ unique ghost ->
     {t : C.payload Ghost_pref.token |

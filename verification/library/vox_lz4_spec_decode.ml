@@ -51,10 +51,9 @@ let[@def] rec (decode_model @ total) (source : char iarray @ immutable)
       else
         let after_literals = literal_pos + literal_count in
         if after_literals = n then
-          if Vox_lz4_spec_parse.low15 token <> 0
-             || (last_match_start >= 0
-                 && (literal_count < 5
-                     || last_match_start > used + literal_count - 12))
+          if last_match_start >= 0
+             && (literal_count < 5
+                 || last_match_start > used + literal_count - 12)
           then { kind = Malformed; count = used; state }
           else
             { kind = Done; count = used + literal_count;

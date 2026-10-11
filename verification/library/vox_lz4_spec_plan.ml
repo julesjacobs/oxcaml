@@ -17,6 +17,6 @@ let[@def] rec (valid_plan @ total) (source : char iarray @ immutable)
     && step.distance <= step.position
     && 4 <= step.length
     && step.length <= Iarray.length source - 5 - step.position
-    && Vox_lz4_spec_match.source_matches_distance source step.position
+    && Vox_lz4_spec_bytes.source_matches_distance source step.position
          step.distance step.length
     && valid_plan source (step.position + step.length) rest)

@@ -440,7 +440,7 @@ let prove poll check ~batch loc query =
                records more, or is shown differently, so older entries are not
                replayed. *)
             Filename.concat directory
-              ("query-5-"
+              ("query-6-"
               ^ Digest.to_hex
                   (Digest.string
                      (String.concat "\000"

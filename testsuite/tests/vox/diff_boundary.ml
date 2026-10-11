@@ -3,7 +3,7 @@
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  source_directories += " ${test_source_directory}/../../../verification/demos";
- readonly_files = "vox_diff_spec.mli vox_diff_spec.ml vox_diff.mli vox_diff.ml";
+ readonly_files = "vox_sequence.mli vox_sequence.ml vox_diff_spec.ml vox_diff.mli vox_diff.ml";
  readonly_files += " diff_public_client.ml emitted_code.ml";
  readonly_files += " diff_boundary_check.ml";
  readonly_files += " diff_demo.ml";
@@ -11,7 +11,9 @@
  {
    setup-ocamlc.opt-build-env;
    lib = "${test_build_directory_prefix}/ocamlc.opt";
-   module = "vox_diff_spec.mli";
+   module = "vox_sequence.mli";
+   ocamlc.opt;
+   module = "vox_sequence.ml";
    ocamlc.opt;
    module = "vox_diff_spec.ml";
    ocamlc.opt;
@@ -21,7 +23,7 @@
    compiler_output2 = "${lib}/vox_diff.lambda";
    module = "vox_diff.ml";
    ocamlc.opt;
-   src = "${lib}/vox_diff_spec.cmi ${lib}/vox_diff.cmi";
+   src = "${lib}/vox_sequence.cmi ${lib}/vox_diff_spec.cmi ${lib}/vox_diff.cmi";
    dst = "${test_build_directory_prefix}/ocamlc.opt.public/";
    compiler_directory_suffix = ".public";
    readonly_files = "diff_public_client.ml emitted_code.ml";
@@ -47,7 +49,9 @@
  {
    setup-ocamlopt.opt-build-env;
    lib = "${test_build_directory_prefix}/ocamlopt.opt";
-   module = "vox_diff_spec.mli";
+   module = "vox_sequence.mli";
+   ocamlopt.opt;
+   module = "vox_sequence.ml";
    ocamlopt.opt;
    module = "vox_diff_spec.ml";
    ocamlopt.opt;
@@ -57,8 +61,8 @@
    compiler_output2 = "${lib}/vox_diff.lambda";
    module = "vox_diff.ml";
    ocamlopt.opt;
-   src = "${lib}/vox_diff_spec.cmi ${lib}/vox_diff.cmi";
-   src += " ${lib}/vox_diff_spec.cmx ${lib}/vox_diff.cmx";
+   src = "${lib}/vox_sequence.cmi ${lib}/vox_diff_spec.cmi ${lib}/vox_diff.cmi";
+   src += " ${lib}/vox_sequence.cmx ${lib}/vox_diff_spec.cmx ${lib}/vox_diff.cmx";
    dst = "${test_build_directory_prefix}/ocamlopt.opt.public/";
    compiler_directory_suffix = ".public";
    readonly_files = "diff_public_client.ml emitted_code.ml";
@@ -84,7 +88,7 @@
  {
    compiler_directory_suffix = ".demo";
    setup-ocamlc.opt-build-env;
-   all_modules = "vox_diff_spec.mli vox_diff_spec.ml vox_diff.mli vox_diff.ml";
+   all_modules = "vox_sequence.mli vox_sequence.ml vox_diff_spec.ml vox_diff.mli vox_diff.ml";
    all_modules += " diff_demo.ml";
    program = "${test_build_directory}/diff_demo.byte";
    ocamlc.opt;
@@ -98,6 +102,6 @@
 
 (* The Myers diff demo's boundary: the executable functions of vox_diff.ml
    call no proof, metric or big-integer code, [search] has no runtime fuel,
-   and the public client, compiled with only the two public interfaces,
+   and the public client, compiled with only the public interfaces,
    makes exactly one call, to [Vox_diff.diff]. The last block runs the
    demo program (scripts/run-diff-demo). *)

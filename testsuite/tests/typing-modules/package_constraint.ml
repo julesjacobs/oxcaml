@@ -67,6 +67,8 @@ Error: In this "with" constraint, the new definition of "t"
        But the layout of the first must be a sublayout of value non_pointer
          because of the definition of t at line 2, characters 2-22.
        Note: The layout of immediate is value non_pointer.
+       The first is not logical:
+       t_value is abstract and its kind does not say mod logical.
 |}];;
 
 (* You may not constrain types with a manifest in a package *)

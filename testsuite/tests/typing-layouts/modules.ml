@@ -341,7 +341,7 @@ type ('a : value) t4_val
 type t4 = M4.s t4_val;;
 [%%expect {|
 module F4 : functor (X : sig type t end) -> sig type s = Foo of X.t end
-module M4 : sig type s : immutable_data end
+module M4 : sig type s : logical_data end
 type 'a t4_val
 type t4 = M4.s t4_val
 |}]
@@ -561,6 +561,8 @@ Error: In this "with" constraint, the new definition of "t"
        But the layout of the first must be a sublayout of value non_pointer
          because of the definition of t at line 2, characters 2-20.
        Note: The layout of immediate is value non_pointer.
+       The first is not logical:
+       s is abstract and its kind does not say mod logical.
 |}];;
 
 module type S6_6'' = sig

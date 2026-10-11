@@ -63,14 +63,14 @@ let rec (matches @ total) :
     (distance : {d : int | 0 < d && d <= used}) ->
     (remaining : {n : int | 0 <= n && n <= Iarray.length source - used}) ->
     {u : unit | not (S.matches_bytes source used reversed
-      && Vox_lz4_spec_match.source_matches_distance source used distance remaining)
+      && Vox_lz4_spec_bytes.source_matches_distance source used distance remaining)
       || S.matches_bytes source (used + remaining)
            (S.copy_bytes reversed distance remaining)} @ ghost =
   fun source used reversed distance remaining -> ghost_ (
     S.copy_bytes_def reversed distance remaining;
-    Vox_lz4_spec_match.source_matches_distance_def source used distance remaining;
+    Vox_lz4_spec_bytes.source_matches_distance_def source used distance remaining;
     if remaining > 0 && S.matches_bytes source used reversed
-       && Vox_lz4_spec_match.source_matches_distance source used distance remaining
+       && Vox_lz4_spec_bytes.source_matches_distance source used distance remaining
     then begin
       read_distance source used reversed distance;
       I.at_get source (used - distance);
@@ -366,6 +366,7 @@ let (wire_roundtrip @ total) :
              Vox_string_view.contents output} @ ghost =
   fun source wire plan capacity decoded -> ghost_ (
     Vox_lz4_spec.matches_model_def wire capacity decoded;
+    S.decode_block_def (Vox_string_view.contents wire) capacity;
     if Vox_lz4_spec_wire.wire_matches_plan
         (Vox_string_view.contents source) (Vox_string_view.contents wire) 0 0 plan
        && Iarray.length (Vox_string_view.contents source) <= capacity

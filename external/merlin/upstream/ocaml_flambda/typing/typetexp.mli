@@ -77,7 +77,12 @@ val type_refinement_predicate:
     Typedtree.expression * Types.refinement_expression) ref
 
 val add_dependent_binder:
-  (Env.t -> Ident.t -> Types.type_expr -> Location.t -> Env.t) ref
+  (?uid:Uid.t -> ?sort:Jkind.Sort.t ->
+   Env.t -> Ident.t -> Types.type_expr -> Location.t -> Env.t) ref
+
+val with_dependent_binder :
+  Env.t -> Ident.t -> uid:Uid.t -> Types.type_expr -> Location.t ->
+  (Env.t -> 'a) -> 'a
 
 val valid_tyvar_name : string -> bool
 

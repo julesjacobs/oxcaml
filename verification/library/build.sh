@@ -6,7 +6,8 @@ prefix=${1:?Usage: build.sh COMPILER_PREFIX}
 prefix=$(cd "$prefix" && pwd)
 output="$root/_build/vox-library"
 destination="$prefix/lib/ocaml/vox"
-modules=(vox_sequence vox_http_spec vox_http vox_int_sequence vox_iarray vox_string_view
+modules=(vox_sequence vox_http_spec vox_http_model vox_http
+         vox_int_sequence vox_iarray vox_string_view
          vox_sat_spec vox_sat_proof vox_sat
          vox_cdcl_total_proof vox_cdcl_total
          vox_credits vox_ordered_sequence vox_merge_proofs vox_sort_cost
@@ -17,12 +18,16 @@ modules=(vox_sequence vox_http_spec vox_http vox_int_sequence vox_iarray vox_str
          vox_union_find_mass vox_union_find_link vox_union_find_worker
          vox_union_find_amortized vox_union_find_bank vox_union_find_spec
          vox_union_find_events vox_union_find vox_union_find_complexity
-         vox_union_find_simple vox_union_find_online vox_connectivity
+         vox_union_find_simple vox_partition
+         vox_partition_classes vox_partition_classes_proof
+         vox_partition_classes_bridge vox_partition_transport_proof
+         vox_partition_classes_group
+         vox_union_find_partition_proof vox_union_find_online vox_connectivity
          vox_union_find_online_cost
          raw_memory
          vox_lz4_spec_storage vox_lz4_spec_parse vox_lz4_spec_decode
          vox_lz4_spec_decode_bytes vox_lz4_spec_bytes vox_lz4_heap_bytes
-         vox_lz4_spec_match
+         vox_lz4_match_proof vox_lz4_spec_match
          vox_lz4_spec_plan vox_lz4_spec_token vox_lz4_spec_wire
          vox_lz4_spec_hashes vox_lz4_spec_scan vox_lz4_spec
          vox_lz4_buffer vox_lz4_packed
@@ -53,7 +58,7 @@ modules=(vox_sequence vox_http_spec vox_http vox_int_sequence vox_iarray vox_str
          vox_table_storage vox_table_search vox_table_mutation
          vox_table_coverage vox_table_occupancy vox_table_vacancy_progress
          vox_table_vacancy vox_table_insert vox_table_migrate vox_table_resize
-         vox_table_implementation vox_table_bindings vox_table_bindings_bridge
+         vox_table_implementation vox_table_bindings_bridge
          vox_verified_flat_hashtbl)
 mkdir -p "$output"
 # Units already verified with identical inputs are not verified again.
@@ -96,7 +101,7 @@ compilers="$(cd "$prefix/bin" && pwd -P)/ocamlc.opt $(cd "$prefix/bin" && pwd -P
     # parameter. These modules still undergo all refinement and termination
     # checks.
     case "$module" in
-      vox_http | vox_cdcl_total | vox_cdcl_total_proof | vox_table_* | \
+      vox_http | vox_http_model | vox_cdcl_total | vox_cdcl_total_proof | vox_table_* | \
       vox_verified_flat_hashtbl)
         module_flags=$flags ;;
     esac

@@ -55,10 +55,9 @@ let[@def] rec (decode_model @ total) (source : char iarray @ immutable)
       else
         let after_literals = literal_pos + literal_count in
         if after_literals = n then
-          if D.low15 token <> 0
-             || (last_match_start >= 0
-                 && (literal_count < 5
-                     || last_match_start > used + literal_count - 12))
+          if last_match_start >= 0
+             && (literal_count < 5
+                 || last_match_start > used + literal_count - 12)
           then { kind = D.Malformed; count = used; reversed }
           else
             { kind = D.Done; count = used + literal_count;
@@ -90,6 +89,10 @@ let[@def] rec (decode_model @ total) (source : char iarray @ immutable)
                 decode_model source next_pos current (fuel - 1) capacity
                   (current + match_code + 4) reversed)
 [@@decreases fuel]
+
+let[@def] (decode_block @ total) (wire : char iarray @ immutable)
+    (capacity : int) : model_result @ ghost = ghost_ (
+  decode_model wire 0 (-1) (Iarray.length wire) capacity 0 [])
 
 let[@def] rec (matches_bytes @ total) (values : char iarray @ immutable)
     (count : int) (reversed : byte list @ immutable) = ghost_ (

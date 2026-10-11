@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_http_spec.mli vox_http_spec.ml vox_http.mli vox_http.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_http_spec.mli vox_http_spec.ml vox_http_model.ml vox_http.mli vox_http.ml";
  readonly_files = "http_rejection_rejected.ml";
  {
    setup-ocamlc.opt-build-env;
@@ -158,5 +158,37 @@ Lines 3-6, characters 18-17:
 4 |           && total_consumed state < 16384 then
 5 |         status (feed state (65 :: rest)).state === Malformed Invalid_byte
 6 |         else true...........
+  The refinement is stated here.
+|}]
+
+module Wrong_crlf = struct
+  let (claim @ total) (suffix : bytes) :
+      {u : unit | status (feed (initial ()) (10 :: suffix)).state
+        === Malformed Invalid_header} @ ghost = ghost_ (
+    let start = initial () in
+    let result = feed start (10 :: suffix) in
+    let machine = model start in
+    Model.initial_def ();
+    Model.feed_def machine (10 :: suffix);
+    Model.terminal_def machine.core;
+    Model.advance_def machine 10;
+    Model.step_def machine.core 10;
+    byte_def 10;
+    let failed : Model.state =
+      {core = Model.Malformed Invalid_crlf; budget = 16383} in
+    Model.feed_def failed suffix;
+    Model.terminal_def failed.core;
+    status_equation result.state;
+    Model.status_def failed.core;
+    ())
+end;;
+[%%expect{|
+Line 20, characters 4-6:
+20 |     ())
+         ^^
+Error: Refinement could not be proved (counterexample)
+Lines 3-4, characters 18-36:
+3 | ..................status (feed (initial ()) (10 :: suffix)).state
+4 |         === Malformed Invalid_header....................
   The refinement is stated here.
 |}]

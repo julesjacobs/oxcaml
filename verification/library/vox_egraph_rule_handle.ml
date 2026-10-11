@@ -15,6 +15,24 @@ module R = Vox_egraph_rule_spec
 module Q = Vox_egraph_match_spec
 module P = Vox_egraph_match_evidence
 
+let[@def] (bounded_model @ total) (view : Q.graph @ immutable) =
+  0 <= view.count && view.count <= 512
+  && view.count <= Iarray.length view.nodes
+  && view.count <= Iarray.length view.classes
+
+let (view_bounds @ total) : (store : V.t) @ immutable ->
+    {u : unit | V.valid store} ->
+    {u : unit | bounded_model (P.view store)} @ ghost =
+  fun store premise -> ghost_ (
+    V.valid_def store;
+    P.bounds store ();
+    P.view_def store;
+    Vox_egraph_match_observation.observe_def store.nodes
+      store.semantic.union.parents store.semantic.union.count;
+    Vox_egraph_match_observation.labels_length store.semantic.union.parents
+      store.semantic.union.count;
+    bounded_model_def (P.view store))
+
 type raw = {engine : H.t; rules : R.t @@ global; model : Q.graph @@ ghost global}
 type t = {s : raw |  H.O.valid s.engine.owner && V.valid s.engine.store &&
       s.engine.owner.count = s.engine.store.semantic.union.count &&
@@ -24,7 +42,7 @@ type t = {s : raw |  H.O.valid s.engine.owner && V.valid s.engine.store &&
       H.H.at (H.P.own s.engine.owner.token) (H.T.location s.engine.owner.memo) ===
         Some s.engine.owner.view.model &&
   R.valid s.rules && s.rules === s.engine.store.semantic.rules &&
-  s.model === P.view s.engine.store}
+  s.model === P.view s.engine.store && bounded_model s.model}
 
 let[@def] (model @ total) (state : t @ local immutable) = ghost_ (
   let state = state in state.model)
@@ -32,12 +50,23 @@ let[@def] (model @ total) (state : t @ local immutable) = ghost_ (
 let[@def] (rules @ total) (state : t @ local immutable) = ghost_ (
   let state = state in state.rules)
 
+let (model_bounds @ total) :
+    (state : t) @ local immutable total ghost forkable unyielding ->
+    {u : unit | 0 <= (model state).count && (model state).count <= 512
+      && (model state).count <= Iarray.length (model state).nodes
+      && (model state).count <= Iarray.length (model state).classes
+      && R.valid (rules state)} @ ghost = fun state -> ghost_ (
+  model_def (borrow_ state);
+  rules_def (borrow_ state);
+  bounded_model_def state.model)
+
 let create : (input_rules : {rs : R.t | R.valid rs}) @ immutable ->
     {state : t | (model state).count = 0 && rules state === input_rules} @ unique =
   fun rules ->
     let engine = H.create rules in
     let {H.owner; store} = engine in
     let model = ghost_ (
+      view_bounds store ();
       P.view_def store;
       Vox_egraph_match_observation.observe_def store.nodes store.semantic.union.parents store.semantic.union.count;
       P.view store) in
@@ -55,7 +84,6 @@ type admit_result = #{id : int option @@ aliased; state : t}
 let admit : (state : t) @ unique -> (expr : L.expr) @ immutable ->
     {r : admit_result | rules r.#state === rules state &&
       Preserves.extends (model state) (model r.#state) &&
-      (model r.#state).count >= (model state).count &&
       (match r.#id with
        | None -> L.sort expr === None || (model r.#state).count = 512
        | Some id -> 0 <= id && id < (model r.#state).count &&
@@ -71,6 +99,7 @@ let admit : (state : t) @ unique -> (expr : L.expr) @ immutable ->
     let #{H.value; state = engine} = H.admit_expr {H.owner; store} expr in
     let {H.owner; store} = engine in
     let model = ghost_ (
+      view_bounds store ();
       P.view_def store;
       Vox_egraph_match_observation.observe_def store.nodes store.semantic.union.parents store.semantic.union.count;
       P.view store) in
@@ -106,6 +135,7 @@ let query : (state : t) @ unique -> (left : L.expr) @ immutable -> (right : L.ex
   let {H.owner; store} = engine in
   ghost_ (Preserve.extends before store ());
   let model = ghost_ (
+    view_bounds store ();
     P.view_def store;
     Vox_egraph_match_observation.observe_def store.nodes store.semantic.union.parents store.semantic.union.count;
     P.view store) in
@@ -139,6 +169,7 @@ let saturate : (state : t) @ unique -> (rounds : int) -> (rebuild_passes : int) 
   let {H.owner; store} = engine in
   ghost_ (Preserve.extends before store ());
   let model = ghost_ (
+    view_bounds store ();
     P.view_def store;
     Vox_egraph_match_observation.observe_def store.nodes store.semantic.union.parents store.semantic.union.count;
     P.view store) in
@@ -163,7 +194,7 @@ let (same_class @ total) : (state : t) @ unique ->
     (a : {i : int | 0 <= i && i < (model state).count}) ->
     (b : {i : int | 0 <= i && i < (model state).count}) ->
     {r : class_result | model r.#state === model state && rules r.#state === rules state &&
-      r.#equal = Q.same (model state) a b &&
+      r.#equal = Q.same (model state) a b && (a <> b || r.#equal) &&
       (match r.#proof with
        | None -> not r.#equal
        | Some proof -> r.#equal && E.valid (rules state) proof &&

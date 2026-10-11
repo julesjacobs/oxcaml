@@ -351,7 +351,7 @@
       "short": "Vox adds the totality tests (totality*.ml, structural_recursion.ml, recursive_module_*.ml, inductive_functors.ml) and updates outputs that now print total and partial.",
       "long": [
         "Totality is inferred for every structure, so many upstream expected outputs change: a module or functor that was printed `@@ stateless` is now `@@ total`, since `total` implies `stateless` and `portable` unless statefulness is stated, and the printer leaves implied modalities out, and a structure that was `@ stateful` is now `@ partial`.",
-        "`inductive-modules/` and `phantom-parameters-modules/` are separate-compilation tests: an `[@@inductive]` guarantee must agree between interface and implementation (it can only be hidden behind an abstract type), and `[@@phantom_parameters]` lets a field of type `node Handle.t` be projected in total code."
+        "`inductive-modules/` and `phantom-parameters-modules/` are separate-compilation tests: an `[@@inductive]` guarantee must agree between interface and implementation (it can only be hidden behind an abstract type), and `type 'a t : value mod logical` lets a field of type `node Handle.t` be projected in total code. The latter directory retains its name from the removed `phantom_parameters` attribute."
       ]
     }
   },

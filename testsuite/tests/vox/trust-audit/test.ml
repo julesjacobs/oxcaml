@@ -2,8 +2,18 @@
  has-z3;
  readonly_files = "axioms.ml client.ml helper.ml user.ml good.ml good_user.ml";
  readonly_files += " hidden.ml hidden_client.ml asserted.ml asserted_user.ml run.sh";
- arguments = "${test_source_directory}/run.sh ${ocamlc_byte} ${ocamlsrcdir}/stdlib";
- bytecode;
+ {
+   arguments = "${test_source_directory}/run.sh ${ocamlc_opt} ${ocamlsrcdir}/stdlib";
+   bytecode;
+ }
+ {
+   arguments = "${test_source_directory}/run.sh ${ocamlopt_byte} ${ocamlsrcdir}/stdlib";
+   setup-ocamlopt.byte-build-env;
+   ocamlopt.byte;
+   check-ocamlopt.byte-output;
+   run;
+   check-program-output;
+ }
 *)
 
 (* What a unit's verification trusts is recorded in its compiled files:

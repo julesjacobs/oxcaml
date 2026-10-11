@@ -1,7 +1,7 @@
 module S = Vox_sequence
 
 module Make (O : sig
-  type elt : immutable_data mod total
+  type elt : logical_data
   val le : elt @ immutable -> elt @ immutable -> bool @ ghost @@ total
   val reflexive : (x : elt) @ immutable -> {u : unit | le x x}
     @ ghost @@ total
@@ -19,31 +19,38 @@ end) (C : Vox_credits.S) (Compare : sig
       C.credits r.#state = C.credits token - 1} @ unique @@ total
 end) : sig
   module P : sig
+    (** Nondecreasing order and preservation of every element multiplicity. *)
+    val sorted : O.elt list @ immutable -> bool @ ghost @@ total
+
+    val sorted_adjacent : (values : O.elt list) @ immutable ->
+      {u : unit | sorted values === (match values with
+        | [] -> true
+        | first :: rest -> (match rest with [] -> true
+          | second :: _ -> O.le first second && sorted rest))} @ ghost @@ total
+
     val count : O.elt list @ immutable -> O.elt @ immutable ->
       Bigint.t @ ghost @@ total
+
     val count_def : (values : O.elt list) @ immutable ->
       (target : O.elt) @ immutable ->
       {u : unit | count values target === (ghost_ (match values with
         | [] -> 0Z
         | head :: tail -> Bigint.add (if head === target then 1Z else 0Z)
             (count tail target)))} @@ total
+
     val permutation : O.elt list @ immutable -> O.elt list @ immutable ->
       bool @ ghost @@ total
+
+    val permutation_count : (left : O.elt list) @ immutable ->
+      (right : O.elt list) @ immutable -> (target : O.elt) @ immutable ->
+      {u : unit | if permutation left right then
+        count left target = count right target else true} @ ghost @@ total
+
     val count_extensional : (left : O.elt list) @ immutable ->
       (right : O.elt list) @ immutable ->
       ((target : O.elt) @ immutable ->
         {u : unit | count left target = count right target} @ ghost)
         @ total ghost -> {u : unit | permutation left right} @ ghost @@ total
-    val sorted : O.elt list @ immutable -> bool @ ghost @@ total
-    val sorted_adjacent : (values : O.elt list) @ immutable ->
-      {u : unit | sorted values === (match values with
-        | [] -> true
-        | first :: rest -> (match rest with [] -> true
-          | second :: _ -> O.le first second && sorted rest))} @ ghost @@ total
-    val permutation_count : (left : O.elt list) @ immutable ->
-      (right : O.elt list) @ immutable -> (target : O.elt) @ immutable ->
-      {u : unit | if permutation left right then
-        count left target = count right target else true} @ ghost @@ total
   end
   type result = #{ values : O.elt list @@ aliased; state : C.token @@ ghost }
 

@@ -137,8 +137,8 @@ let (recombine @ total) (p : t) (q : t) (rp : t) (rq : t) (inverse : t) :
 let (decrypt_crt @ total) : (ciphertext : t) ->
     (exponent : {d : t | d >= 0Z}) ->
     (p : t) -> (other_prime : {q : t | prime p && prime q && p <> q}) ->
-    {r : t | let d = exponent in let q = other_prime in
-      0Z <= r && r < p * q && r = power ciphertext d mod (p * q)} =
+    {r : t | 0Z <= r && r < p * other_prime
+      && r = power ciphertext exponent mod (p * other_prime)} =
   fun ciphertext exponent p other_prime ->
   let d = exponent in
   let q = other_prime in

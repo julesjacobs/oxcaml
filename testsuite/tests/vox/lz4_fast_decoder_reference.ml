@@ -10,7 +10,7 @@
                      raw_memory.ml vox_lz4_spec_storage.ml \
                      vox_lz4_spec_parse.ml vox_lz4_spec_decode.ml \
                      vox_lz4_spec_decode_bytes.ml vox_lz4_spec_bytes.ml \
-                     vox_lz4_heap_bytes.ml vox_lz4_spec_match.ml \
+                     vox_lz4_heap_bytes.ml vox_lz4_match_proof.ml vox_lz4_spec_match.ml \
                      vox_lz4_spec_plan.ml vox_lz4_spec_token.ml \
                      vox_lz4_spec_wire.ml vox_lz4_spec_hashes.ml \
                      vox_lz4_spec_scan.ml vox_lz4_spec.ml vox_lz4_buffer.ml \
@@ -97,6 +97,28 @@ let check block capacity =
     assert (reference = D.Done);
     assert (got = expected)
   | Error _ -> assert (reference <> D.Done)
+
+let () =
+  let valid block expected =
+    let capacity = String.length expected in
+    assert (checked block capacity = (D.Done, expected));
+    check block capacity
+  in
+  for low = 0 to 15 do
+    let token high = String.make 1 (Char.chr (high * 16 + low)) in
+    valid (token 0) "";
+    valid (token 5 ^ "Hello") "Hello";
+    valid (token 15 ^ "\x00" ^ String.make 15 'a') (String.make 15 'a');
+    valid (token 15 ^ "\xff\x00" ^ String.make 270 'a')
+      (String.make 270 'a');
+    valid ("\x1aa\x01\x00" ^ token 5 ^ "aaaaa") (String.make 20 'a');
+    let invalid block =
+      assert (fst (checked block 20) = D.Malformed);
+      check block 20
+    in
+    invalid ("\x1aa\x01\x00" ^ token 4 ^ "aaaa");
+    invalid ("\x10a\x01\x00" ^ token 5 ^ "aaaaa")
+  done
 
 let () =
   for byte = 0 to 255 do

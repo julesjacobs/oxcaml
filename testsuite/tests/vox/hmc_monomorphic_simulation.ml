@@ -94,7 +94,7 @@ let (run @ total) : (p : C.program) @ immutable ->
   fun p definitions word fuel premise ->
     let start = initial p definitions word () in
     let out = advance p definitions fuel start () in
-    ghost_ (S.advance_add (source_offset p) fuel (source_start p word);
+    ghost_ (Hmc_source_proofs.advance_add (source_offset p) fuel (source_start p word);
       Q.advance_def definitions (D.S fuel) (target_start p word));
     out
 
@@ -134,8 +134,8 @@ let (normal_return_preservation @ total) : (p : C.program) @ immutable ->
     {u : unit | Q.advance definitions (D.S fuel) (target_start p input) === Q.Done (Q.V.Word output)} @ ghost =
   fun p definitions input output fuel premise -> ghost_ (
     add_commute (source_offset p) fuel;
-    S.advance_add fuel (source_offset p) (source_start p input);
-    S.done_absorbing (source_offset p) (V.Word output);
+    Hmc_source_proofs.advance_add fuel (source_offset p) (source_start p input);
+    Hmc_source_proofs.done_absorbing (source_offset p) (V.Word output);
     normal_return_at_offsets p definitions input output fuel ())
 
 let (normal_return_reflection @ total) : (p : C.program) @ immutable ->

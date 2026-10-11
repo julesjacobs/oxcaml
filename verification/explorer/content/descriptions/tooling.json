@@ -229,14 +229,14 @@
  },
  "verification/catalogue/line_stats.py": {
   "what": {
-   "short": "Spec, Impl and Proof physical-line counts per demo, over the module dependency closure of the demo's root modules."
+   "short": "Spec, Implementation, Model, Proof and Not reached physical-line counts per demo, over the dependency closure of its root modules."
   },
   "notes": [
    {
     "title": "What counts as proof",
-    "from": "\"\"\"Physical-line counts for each demo: Spec, Impl and Proof.",
-    "span": 9,
-    "text": "Proof lines are found syntactically: lines inside `ghost_` or refinement types, and whole `total` declarations whose result is a refined `unit` or a ghost value. The docstring says plainly that this is not an erasure analysis."
+    "from": "- Proof: the proof regions,",
+    "text": "Proof counts follow explicit ghost expressions, ghost values and refinements, together with total declarations whose result is refined unit. The surrounding docstring distinguishes the specification quoted by the page, run-time implementation, transitive model definitions and code reached by none of them.",
+    "span": 9
    }
   ]
  },

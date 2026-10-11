@@ -87,3 +87,11 @@ let () =
   | Some machine ->
     assert (Dfa_semantics.run machine [7]);
     assert (not (Dfa_semantics.run machine []))
+
+let () =
+  let literal = Regex_semantics.Symbol 7 in
+  let repeated = Regex_semantics.Alt (literal, literal) in
+  assert (literal <> repeated);
+  List.iter (fun word ->
+    assert (Regex_language.matches literal word = Regex_language.matches repeated word))
+    [[]; [7]; [8]; [7; 7]]

@@ -1,7 +1,7 @@
 title: Reference and unique-payload locks
 blurb: Two spin locks whose acquire and release are checked to hand out and take back exactly the ownership of the guarded cell; one guards a nonnegative integer, the other a unique payload.
 status: owner-review
-date: 27 September 2026
+date: 4 October 2026
 sources:
   - verification/library/reference_lock.mli — Lock over a nonnegative integer: interface
   - verification/library/reference_lock.ml — Its implementation
@@ -24,31 +24,17 @@ sources:
 
 Nothing is proved about the sequence of events: no mutual-exclusion theorem over executions, no linearizability, deadlock freedom, progress or fairness. Exclusion follows only from the ownership model, under which two live permissions never own the same cell. `make` records no relation between its argument and what a later holder observes, and `Reference_lock.try_increment` has no contract at all. The interfaces alone admit trivial locks: a `try_acquire` that always fails with an empty permission, or a `release` that discards the permission without resetting the flag, meets them. That `release` resets the flag is proved only inside `Spin_lock.Make`, against the flag's invariant, and is not exported. Contracts describe normal return: a holder that raises or drops its permission leaves the lock held forever. The concurrency argument is not mechanized. It rests on the `Verified_atomic` and `Unique_cell` contracts listed on the shared page and on the assumptions under Trusted base.
 
-## Client example
-
-From `atomic_lock.ml`, which uses only `reference_lock.mli`. `{n : int | 0 <= n}` is `int` restricted to nonnegative values. `r.P.value` says whether the lock was acquired and `r.P.state` is the ghost permission; `P.own t` is the finite map of cells it owns. Inside `if r.P.value` the checker proves `owned a (P.own t)` from `try_acquire`'s contract, which `read_owned` and `release` require. `borrow_ t` lends the permission to the read without consuming it. `try_increment`'s body is checked like any other code, but it exports no contract, so the `assert`s about its effect are checked only at run time. The test runs in bytecode and native code.
-
-@code testsuite/tests/vox/atomic_lock.ml "let () =" "end;"
-
-`unique_lock_demo.ml` writes an increment against `Unique_lock`, without the overflow guard: acquire, `take`, add one, `put`, release. With the ghost steps that re-establish `owned` before `release`, it takes 28 lines.
-
-## A rejected program
-
-Releasing a unique lock after taking its payload out, without putting it back, is a type error. `Unique_lock_demo.Data` is an `int` payload whose snapshot is the value itself. `ghost_ (...)` is proof code, checked and then erased; here it applies `owned_def`, the lemma that states the definition of `owned`, so that `take`'s precondition can be proved.
-
-The test `concurrency_boundary.ml` checks it against the public `.cmi` files, with `module L = Unique_lock.Make(Unique_lock_demo.Data)`, and requires this error:
-
-@code testsuite/tests/vox/concurrency_boundary.ml "(* unique-release-empty *)" "|}]"
-
-The same test requires ten more rejected lock programs to fail, each with its exact error: releasing with an empty permission or with another lock's permission, reading with a permission that `release` has consumed, reading after a failed acquire, claiming a negative value, taking with an empty permission, taking twice with one permission, passing one payload to `make` twice, and reaching the atomic of either lock through its hidden `Spin_lock.Make` instance.
-
 ## Interface
 
 @code verification/library/reference_lock.mli
 
+The payload model required by the unique lock is:
+
+@code verification/library/unique_cell.mli 3-7
+
 @code verification/library/unique_lock.mli
 
-`Unique_cell.Payload` supplies the payload type `V.t`, which must be `value mod portable contended` (shareable between domains without a lock), and a ghost `snapshot` of it. A permission gives the cell the contents `Some m` while it holds a payload with snapshot `m`, and `None` after `take`; `Ghost_pref.Heap.at` wraps these in one more `Some`. `Ghost_pref.Heap.put h p x` is `h` with location `p` set to `x`, and `===` is logical equality. `@ unique ghost` marks a permission that is consumed and erased.
+`Unique_cell.Payload` supplies the payload type `V.t`, which must be `value mod portable contended logical` (shareable between domains without a lock), and a ghost `snapshot` of it. A permission gives the cell the contents `Some m` while it holds a payload with snapshot `m`, and `None` after `take`; `Ghost_pref.Heap.at` wraps these in one more `Some`. `Ghost_pref.Heap.put h p x` is `h` with location `p` set to `x`, and `===` is logical equality. `@ unique ghost` marks a permission that is consumed and erased.
 
 Each lock takes `try_acquire` and `release` from its `Spin_lock.Make` instance through a wrapper that restates their contracts, because signature matching compares refinements syntactically and the instance's contracts say `L.owned` where the interface says `owned`. The wrappers are checked like the rest of the code.
 
@@ -66,6 +52,24 @@ Each lock takes `try_acquire` and `release` from its `Spin_lock.Make` instance t
 - The buffer client's snapshot is the constant 0, so the lock's contract says nothing about the byte's contents across release and reacquisition; the payload's refinement carries ownership of the byte and of the permission to free the buffer.
 - Contracts describe normal return. A holder that raises loses its permission and the lock stays held; nothing restores it.
 - The parallel tests run four domains of 1,000 increments each, with forced collections, and check the total of 4,000 at run time. They are tests, not proofs of progress or of the runtime.
+
+## Client example
+
+From `atomic_lock.ml`, which uses only `reference_lock.mli`. `{n : int | 0 <= n}` is `int` restricted to nonnegative values. `r.P.value` says whether the lock was acquired and `r.P.state` is the ghost permission; `P.own t` is the finite map of cells it owns. Inside `if r.P.value` the checker proves `owned a (P.own t)` from `try_acquire`'s contract, which `read_owned` and `release` require. `borrow_ t` lends the permission to the read without consuming it. `try_increment`'s body is checked like any other code, but it exports no contract, so the `assert`s about its effect are checked only at run time. The test runs in bytecode and native code.
+
+@code testsuite/tests/vox/atomic_lock.ml "let () =" "end;"
+
+`unique_lock_demo.ml` writes an increment against `Unique_lock`, without the overflow guard: acquire, `take`, add one, `put`, release. With the ghost steps that re-establish `owned` before `release`, it takes 28 lines.
+
+## A rejected program
+
+Releasing a unique lock after taking its payload out, without putting it back, is a type error. `Unique_lock_demo.Data` is an `int` payload whose snapshot is the value itself. `ghost_ (...)` is proof code, checked and then erased; here it applies `owned_def`, the lemma that states the definition of `owned`, so that `take`'s precondition can be proved.
+
+The test `concurrency_boundary.ml` checks it against the public `.cmi` files, with `module L = Unique_lock.Make(Unique_lock_demo.Data)`, and requires this error:
+
+@code testsuite/tests/vox/concurrency_boundary.ml "(* unique-release-empty *)" "|}]"
+
+The same test requires ten more rejected lock programs to fail, each with its exact error: releasing with an empty permission or with another lock's permission, reading with a permission that `release` has consumed, reading after a failed acquire, claiming a negative value, taking with an empty permission, taking twice with one permission, passing one payload to `make` twice, and reaching the atomic of either lock through its hidden `Spin_lock.Make` instance.
 
 ## Reproduce
 

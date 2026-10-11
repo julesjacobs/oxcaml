@@ -54,7 +54,8 @@ val may_equal_constr :
 val cstr_res_type_path : constructor_description -> Path.t
 
 type 'a gen_label_description =
-  { lbl_name: string;                   (* Short name *)
+  { lbl_id: Ident.t;                    (* Binder for dependent fields *)
+    lbl_name: string;                   (* Short name *)
     lbl_res: type_expr;                 (* Type of the result *)
     lbl_arg: type_expr;                 (* Type of the argument *)
     lbl_mut: mutability;                (* Is this a mutable field? *)

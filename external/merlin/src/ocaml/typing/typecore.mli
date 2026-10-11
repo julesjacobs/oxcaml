@@ -131,6 +131,8 @@ type module_patterns_restriction =
   | Modules_rejected
   | Modules_ignored
 
+val is_dependent_record_alias : Ident.t -> bool
+
 val type_binding:
         Env.t -> mutable_flag -> rec_flag ->
           ?force_toplevel:bool ->

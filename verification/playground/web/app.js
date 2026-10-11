@@ -62,7 +62,7 @@ function select(file) {
   editor.clearHistory();
   history.replaceState(null, '', '#' + file.replace(/\.ml$/, ''));
   clearResult();
-  if (ready) check();
+  check();
 }
 
 exampleSelect.addEventListener('change', () => select(exampleSelect.value));
@@ -77,10 +77,10 @@ $('restore').addEventListener('click', () => {
 let worker = null;
 let ready = false;
 let pending = null; // the running check: { id, file, source, started, timer }
-let requested = false; // a check was asked for while another was running
+let requested = false; // a check is queued while the worker loads or runs
 let nextId = 0;
 
-function startWorker() {
+function startWorker(autoCheck = true) {
   ready = false;
   checkButton.disabled = true;
   worker = new Worker('worker.js');
@@ -91,7 +91,7 @@ function startWorker() {
       const { z3Version, revision } = data.ready;
       $('versions').textContent = `Vox at commit ${revision}; Z3 ${z3Version}. ` +
         `Checker ready ${(performance.now() / 1000).toFixed(1)} s after the page started loading.`;
-      if (current) check();
+      if ((autoCheck || requested) && current) check();
     } else if (data.failed) {
       show('failed', 'The checker could not be loaded', data.failed);
     } else if (pending && data.id === pending.id) {
@@ -106,11 +106,12 @@ function startWorker() {
 }
 
 function check() {
-  if (!ready || !current) return;
-  if (pending) {
+  if (!current) return;
+  if (!ready || pending) {
     requested = true;
     return;
   }
+  requested = false;
   const id = ++nextId;
   pending = {
     id,
@@ -121,6 +122,8 @@ function check() {
     timer: setTimeout(() => { stopButton.hidden = false; }, 4000),
   };
   checkButton.disabled = true;
+  erased.hidden = true;
+  lambda.textContent = '';
   show('checking', 'Checking…', '');
   worker.postMessage({ id, name: current.file, source: pending.source });
 }
@@ -133,7 +136,7 @@ stopButton.addEventListener('click', () => {
   worker.terminate();
   stopButton.hidden = true;
   show('stopped', 'Stopped', 'The check was stopped. Restarting the checker…');
-  startWorker();
+  startWorker(false);
 });
 
 checkButton.addEventListener('click', () => check());

@@ -134,10 +134,13 @@ type 'a t : float64 = 'a or_null [@@or_null_reexport]
 Line 1, characters 0-53:
 1 | type 'a t : float64 = 'a or_null [@@or_null_reexport]
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The layout of type "'a or_null" is value_or_null
-         because it is the primitive type or_null.
-       But the layout of type "'a or_null" must be a sublayout of float64
-         because of the definition of t at line 1, characters 0-53.
+Error: The kind of type "t" is float64 with 'a @@ external_
+         because of the annotation on the declaration of the type t.
+       But the kind of type "t" must be a subkind of float64
+         because of the annotation on the declaration of the type t.
+
+       The first mode-crosses less than the second along:
+         logicality: mod logical with 'a ≰ mod logical
 |}]
 
 type ('a : float64) t = 'a or_null [@@or_null_reexport]

@@ -46,7 +46,7 @@ Types with kinds (kinds, not jkinds)
   Verbosity 0:
   type t = Foo of { mutable foo : int; }
   Verbosity 1:
-  type t : mutable_data = Foo of { mutable foo : int; }
+  type t : mutable_data mod logical = Foo of { mutable foo : int; }
 
   $ type_enclosing 3:17 <<EOF 
   > type 'a t1 = { foo : 'a }
@@ -56,7 +56,7 @@ Types with kinds (kinds, not jkinds)
   Verbosity 0:
   type 'a t2 = 'a t1 = { foo : 'a; }
   Verbosity 1:
-  type 'a t2 : immutable_data with 'a = 'a t1 = { foo : 'a; }
+  type 'a t2 : logical_data with 'a = 'a t1 = { foo : 'a; }
 
 Non-Tconstr types
   $ type_enclosing 2:11 <<EOF
@@ -66,7 +66,7 @@ Non-Tconstr types
   Verbosity 0:
   type t = int * string
   Verbosity 1:
-  type t : immutable_data with int with string = int * string
+  type t : logical_data with int with string = int * string
 
   $ type_enclosing 2:11 <<EOF
   > type t = [\`Foo | \`Bar of int]
@@ -75,7 +75,7 @@ Non-Tconstr types
   Verbosity 0:
   type t = [ `Bar of int | `Foo ]
   Verbosity 1:
-  type t : immutable_data with int = [ `Bar of int | `Foo ]
+  type t : logical_data with int = [ `Bar of int | `Foo ]
 
 Module types
 # CR-someday: Make kinds get printed when verbosity is 1

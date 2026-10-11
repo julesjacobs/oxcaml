@@ -69,7 +69,7 @@ STDLIB_MODULE_BASENAMES = \
   parsing \
   repr \
   set \
-  map \
+  camlinternalMap \
   stack \
   queue \
   buffer \
@@ -93,6 +93,7 @@ STDLIB_MODULE_BASENAMES = \
   weak \
   format \
   bigint \
+  map \
   scanf \
   callback \
   camlinternalOO \

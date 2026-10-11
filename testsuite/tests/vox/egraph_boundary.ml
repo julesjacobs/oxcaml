@@ -21,7 +21,7 @@
  all_modules += " vox_table_occupancy.ml vox_table_vacancy_progress.ml";
  all_modules += " vox_table_vacancy.ml vox_table_insert.ml";
  all_modules += " vox_table_migrate.ml vox_table_resize.ml";
- all_modules += " vox_verified_flat_hashtbl.mli vox_table_bindings.ml";
+ all_modules += " vox_verified_flat_hashtbl.mli";
  all_modules += " vox_table_bindings_bridge.ml";
  all_modules += " vox_table_implementation.ml";
  all_modules += " vox_verified_flat_hashtbl.ml vox_egraph_key.ml";
@@ -193,7 +193,7 @@ Line 7, characters 32-37:
 7 |   Vox_egraph_rule_handle.create rules;;
                                     ^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_egraph_rule_handle.mli", line 40, characters 40-50:
+File "vox_egraph_rule_handle.mli", line 18, characters 40-50:
   The refinement is stated here.
 |}]
 
