@@ -1,7 +1,29 @@
 (library
  (name vox_smt)
  (wrapped false)
- (modules vox_smt vox_smt_response))
+ (modules vox_smt vox_smt_response vox_smt_query_codec))
+
+(library
+ (name vox_sat_solver)
+ (wrapped false)
+ (modules vox_sat_solver))
+
+(library
+ (name vox_smt_pure)
+ (wrapped false)
+ (modules vox_smt_resource vox_smt_integer vox_smt_term vox_smt_sexp
+  vox_smt_arithmetic
+  vox_smt_bitvector vox_smt_equality vox_smt_datatype vox_smt_nonlinear
+  vox_smt_engine vox_smt_model vox_smt_frontend)
+ (libraries vox_sat_solver))
+
+(executable
+ (name vox_smt_main)
+ (public_name vox-smt)
+ (package ocaml)
+ (modules vox_smt_main)
+ (libraries vox_smt_pure)
+ (enabled_if (= %{context_name} main)))
 
 (library
  (name vox_vc)
@@ -9,11 +31,81 @@
  (modules vox_vc vox_encoding vox_proof_steps)
  (libraries vox_smt ocamlfrontend))
 
+(install
+ (section lib)
+ (package ocaml)
+ (enabled_if (= %{context_name} main))
+ (files
+  (vox_smt_pure.cma as compiler-libs/vox_smt_pure.cma)
+  (vox_smt_pure.cmxa as compiler-libs/vox_smt_pure.cmxa)
+  (vox_smt_pure.a as compiler-libs/vox_smt_pure.a)
+  (vox_smt_resource.mli as compiler-libs/vox_smt_resource.mli)
+  (.vox_smt_pure.objs/byte/vox_smt_resource.cmi
+   as compiler-libs/vox_smt_resource.cmi)
+  (.vox_smt_pure.objs/native/vox_smt_resource.cmx
+   as compiler-libs/vox_smt_resource.cmx)
+  (vox_smt_integer.mli as compiler-libs/vox_smt_integer.mli)
+  (.vox_smt_pure.objs/byte/vox_smt_integer.cmi
+   as compiler-libs/vox_smt_integer.cmi)
+  (.vox_smt_pure.objs/native/vox_smt_integer.cmx
+   as compiler-libs/vox_smt_integer.cmx)
+  (vox_smt_term.mli as compiler-libs/vox_smt_term.mli)
+  (.vox_smt_pure.objs/byte/vox_smt_term.cmi
+   as compiler-libs/vox_smt_term.cmi)
+  (.vox_smt_pure.objs/native/vox_smt_term.cmx
+   as compiler-libs/vox_smt_term.cmx)
+  (vox_smt_sexp.mli as compiler-libs/vox_smt_sexp.mli)
+  (.vox_smt_pure.objs/byte/vox_smt_sexp.cmi
+   as compiler-libs/vox_smt_sexp.cmi)
+  (.vox_smt_pure.objs/native/vox_smt_sexp.cmx
+   as compiler-libs/vox_smt_sexp.cmx)
+  (vox_smt_arithmetic.mli as compiler-libs/vox_smt_arithmetic.mli)
+  (.vox_smt_pure.objs/byte/vox_smt_arithmetic.cmi
+   as compiler-libs/vox_smt_arithmetic.cmi)
+  (.vox_smt_pure.objs/native/vox_smt_arithmetic.cmx
+   as compiler-libs/vox_smt_arithmetic.cmx)
+  (vox_smt_bitvector.mli as compiler-libs/vox_smt_bitvector.mli)
+  (.vox_smt_pure.objs/byte/vox_smt_bitvector.cmi
+   as compiler-libs/vox_smt_bitvector.cmi)
+  (.vox_smt_pure.objs/native/vox_smt_bitvector.cmx
+   as compiler-libs/vox_smt_bitvector.cmx)
+  (vox_smt_equality.mli as compiler-libs/vox_smt_equality.mli)
+  (.vox_smt_pure.objs/byte/vox_smt_equality.cmi
+   as compiler-libs/vox_smt_equality.cmi)
+  (.vox_smt_pure.objs/native/vox_smt_equality.cmx
+   as compiler-libs/vox_smt_equality.cmx)
+  (vox_smt_datatype.mli as compiler-libs/vox_smt_datatype.mli)
+  (.vox_smt_pure.objs/byte/vox_smt_datatype.cmi
+   as compiler-libs/vox_smt_datatype.cmi)
+  (.vox_smt_pure.objs/native/vox_smt_datatype.cmx
+   as compiler-libs/vox_smt_datatype.cmx)
+  (vox_smt_nonlinear.mli as compiler-libs/vox_smt_nonlinear.mli)
+  (.vox_smt_pure.objs/byte/vox_smt_nonlinear.cmi
+   as compiler-libs/vox_smt_nonlinear.cmi)
+  (.vox_smt_pure.objs/native/vox_smt_nonlinear.cmx
+   as compiler-libs/vox_smt_nonlinear.cmx)
+  (vox_smt_engine.mli as compiler-libs/vox_smt_engine.mli)
+  (.vox_smt_pure.objs/byte/vox_smt_engine.cmi
+   as compiler-libs/vox_smt_engine.cmi)
+  (.vox_smt_pure.objs/native/vox_smt_engine.cmx
+   as compiler-libs/vox_smt_engine.cmx)
+  (vox_smt_model.mli as compiler-libs/vox_smt_model.mli)
+  (.vox_smt_pure.objs/byte/vox_smt_model.cmi
+   as compiler-libs/vox_smt_model.cmi)
+  (.vox_smt_pure.objs/native/vox_smt_model.cmx
+   as compiler-libs/vox_smt_model.cmx)
+  (vox_smt_frontend.mli as compiler-libs/vox_smt_frontend.mli)
+  (.vox_smt_pure.objs/byte/vox_smt_frontend.cmi
+   as compiler-libs/vox_smt_frontend.cmi)
+  (.vox_smt_pure.objs/native/vox_smt_frontend.cmx
+   as compiler-libs/vox_smt_frontend.cmx)
+ ))
+
 (library
  (name vox_smt_solver)
  (wrapped false)
- (modules vox_smt_solver)
- (libraries vox_smt unix)
+ (modules vox_smt_solver vox_smt_embedded)
+ (libraries vox_smt vox_smt_pure unix)
  (foreign_stubs
   (language c)
   (names monotonic_clock))
@@ -23,6 +115,14 @@
  (package ocaml)
  (enabled_if (= %{context_name} main))
  (files
+  (vox_sat_solver.cma as compiler-libs/vox_sat_solver.cma)
+  (vox_sat_solver.cmxa as compiler-libs/vox_sat_solver.cmxa)
+  (vox_sat_solver.a as compiler-libs/vox_sat_solver.a)
+  (vox_sat_solver.mli as compiler-libs/vox_sat_solver.mli)
+  (.vox_sat_solver.objs/byte/vox_sat_solver.cmi
+   as compiler-libs/vox_sat_solver.cmi)
+  (.vox_sat_solver.objs/native/vox_sat_solver.cmx
+   as compiler-libs/vox_sat_solver.cmx)
   (vox_smt.cma as compiler-libs/vox_smt.cma)
   (vox_smt.cmxa as compiler-libs/vox_smt.cmxa)
   (vox_smt.a as compiler-libs/vox_smt.a)
@@ -47,6 +147,11 @@
   (vox_smt_solver.cma as compiler-libs/vox_smt_solver.cma)
   (vox_smt_solver.cmxa as compiler-libs/vox_smt_solver.cmxa)
   (vox_smt_solver.a as compiler-libs/vox_smt_solver.a)
+  (vox_smt_embedded.mli as compiler-libs/vox_smt_embedded.mli)
+  (.vox_smt_solver.objs/byte/vox_smt_embedded.cmi
+   as compiler-libs/vox_smt_embedded.cmi)
+  (.vox_smt_solver.objs/native/vox_smt_embedded.cmx
+   as compiler-libs/vox_smt_embedded.cmx)
   (.vox_smt_solver.objs/byte/vox_smt_solver.cmi as compiler-libs/vox_smt_solver.cmi)
   (.vox_smt_solver.objs/byte/vox_smt_solver.cmt as compiler-libs/vox_smt_solver.cmt)
   (.vox_smt_solver.objs/native/vox_smt_solver.cmx as compiler-libs/vox_smt_solver.cmx)

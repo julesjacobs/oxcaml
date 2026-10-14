@@ -221,7 +221,6 @@ let invalid_first () =
   Search.absent_def array target lo later;
   let result : {i : int | Search.at array i = target
     && Search.absent array target lo i} = later in
-  let result = result in
   result
 ;;
 [%%expect{|

@@ -109,7 +109,7 @@ let rec copy_work : (goal : copy_goal) @ immutable -> (saved : (node Pref.heap) 
           let d_witness5 : (history) Ghost.t = {Ghost.ghost = ghost_ (d.Ghost.ghost)} in
           let base_witness6 : (pool) Ghost.t = {Ghost.ghost = ghost_ (base.Ghost.ghost)} in
           let copy_source2 : {p : node Pref.t | H.mem saved_witness1.Ghost.ghost p} =
-            let refine_ p = child in refine_ p in
+            child in
           let resume_r : (r : {r : copied | let refine_ copy_source2 = copy_source2 in valid saved_witness1.Ghost.ghost epoch_witness4.Ghost.ghost depth r.#history && (clean_session r.#history)
       && Pref.own r.#state === heap saved_witness1.Ghost.ghost epoch_witness4.Ghost.ghost depth r.#history && r.#pool === registered base_witness6.Ghost.ghost epoch_witness4.Ghost.ghost r.#history && r.#trail === touched r.#history
       && extends d_witness5.Ghost.ghost r.#history && target_for saved_witness1.Ghost.ghost r.#history copy_source2 r.#value}) @ unique ->
@@ -145,7 +145,7 @@ let rec copy_work : (goal : copy_goal) @ immutable -> (saved : (node Pref.heap) 
           let d_witness5 : (history) Ghost.t = {Ghost.ghost = ghost_ (d.Ghost.ghost)} in
           let base_witness6 : (pool) Ghost.t = {Ghost.ghost = ghost_ (base.Ghost.ghost)} in
           let copy_source2 : {p : node Pref.t | H.mem saved_witness1.Ghost.ghost p} =
-            let refine_ p = child in refine_ p in
+            child in
           let resume_r : (r : {r : copied | let refine_ copy_source2 = copy_source2 in valid saved_witness1.Ghost.ghost epoch_witness4.Ghost.ghost depth r.#history && (clean_session r.#history)
       && Pref.own r.#state === heap saved_witness1.Ghost.ghost epoch_witness4.Ghost.ghost depth r.#history && r.#pool === registered base_witness6.Ghost.ghost epoch_witness4.Ghost.ghost r.#history && r.#trail === touched r.#history
       && extends d_witness5.Ghost.ghost r.#history && target_for saved_witness1.Ghost.ghost r.#history copy_source2 r.#value}) @ unique ->
@@ -181,7 +181,7 @@ let rec copy_work : (goal : copy_goal) @ immutable -> (saved : (node Pref.heap) 
           let d_witness11 : (history) Ghost.t = {Ghost.ghost = ghost_ (d.Ghost.ghost)} in
           let base_witness12 : (pool) Ghost.t = {Ghost.ghost = ghost_ (base.Ghost.ghost)} in
           let copy_source4 : {p : node Pref.t | H.mem saved_witness7.Ghost.ghost p} =
-            let refine_ p = a in refine_ p in
+            a in
           let resume_left : (left : {r : copied | let refine_ copy_source4 = copy_source4 in valid saved_witness7.Ghost.ghost epoch_witness10.Ghost.ghost depth r.#history && (clean_session r.#history)
       && Pref.own r.#state === heap saved_witness7.Ghost.ghost epoch_witness10.Ghost.ghost depth r.#history && r.#pool === registered base_witness12.Ghost.ghost epoch_witness10.Ghost.ghost r.#history && r.#trail === touched r.#history
       && extends d_witness11.Ghost.ghost r.#history && target_for saved_witness7.Ghost.ghost r.#history copy_source4 r.#value}) @ unique ->
@@ -199,7 +199,7 @@ let rec copy_work : (goal : copy_goal) @ immutable -> (saved : (node Pref.heap) 
           let d_witness17 : (history) Ghost.t = {Ghost.ghost = ghost_ (d1)} in
           let base_witness18 : (pool) Ghost.t = {Ghost.ghost = ghost_ (base.Ghost.ghost)} in
           let copy_source5 : {p : node Pref.t | H.mem saved_witness13.Ghost.ghost p} =
-            let refine_ p = b in refine_ p in
+            b in
           let resume_right : (right : {r : copied | let refine_ copy_source5 = copy_source5 in valid saved_witness13.Ghost.ghost epoch_witness16.Ghost.ghost depth r.#history && (clean_session r.#history)
       && Pref.own r.#state === heap saved_witness13.Ghost.ghost epoch_witness16.Ghost.ghost depth r.#history && r.#pool === registered base_witness18.Ghost.ghost epoch_witness16.Ghost.ghost r.#history && r.#trail === touched r.#history
       && extends d_witness17.Ghost.ghost r.#history && target_for saved_witness13.Ghost.ghost r.#history copy_source5 r.#value}) @ unique ->
@@ -245,7 +245,7 @@ let copy : (saved : (node Pref.heap) Ghost.t) @ immutable  ->(scope : (((p : nod
       && Pref.own r.#state === heap goal.heap goal.identity goal.depth r.#history && r.#pool === registered goal.base goal.identity r.#history && r.#trail === touched r.#history
       && extends goal.initial r.#history && target_for goal.heap r.#history goal.root r.#value} @ unique = fun r ->
       refine_ r in
-    let refine_ out = copy_work goal saved scope clean epoch depth d base pool trail p t use in refine_ out
+    copy_work goal saved scope clean epoch depth d base pool trail p t use
 
 let instantiate : (saved : (node Pref.heap) Ghost.t) @ immutable  ->(clean : (((x : node Pref.t) @ immutable ->
       {u : unit | match H.at saved.Ghost.ghost x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t) @ total  ->(scope : (((p : node Pref.t) @ immutable -> {u : unit | if H.mem saved.Ghost.ghost p then source_ok saved.Ghost.ghost p else H.at saved.Ghost.ghost p === None})) Ghost.t) @ total  ->

@@ -14,12 +14,16 @@ let eq a b = app Eq [a; b]
 
 let force_bits = ref false
 
+let last_query = Buffer.create 1024
+
 let check ?(datatypes = []) ?(symbols = []) ?(functions = []) ?(facts = []) term
     =
   let facts =
     if !force_bits then eq (app Bit_and [i 0L; i 0L]) (i 0L) :: facts else facts
   in
+  Buffer.clear last_query;
   Vox_smt_solver.check ~config ~int_width:63
+    ~dump:(fun query -> Buffer.add_string last_query query)
     { datatypes;
       symbols;
       functions;
@@ -31,7 +35,14 @@ let valid ?datatypes ?symbols ?functions ?facts term =
   match (check ?datatypes ?symbols ?functions ?facts term).validity with
   | Valid -> ()
   | Failure message -> failwith message
-  | _ -> failwith "Expected valid"
+  | Unknown reason ->
+    failwith ("Expected valid; unknown: "
+      ^ Option.value reason ~default:"unspecified" ^ "\n"
+      ^ Buffer.contents last_query)
+  | Invalid _ ->
+    failwith ("Expected valid; invalid\n" ^ Buffer.contents last_query)
+  | Timeout ->
+    failwith ("Expected valid; timeout\n" ^ Buffer.contents last_query)
 
 let invalid ?datatypes ?symbols ?functions ?facts term =
   match (check ?datatypes ?symbols ?functions ?facts term).validity with
@@ -163,7 +174,7 @@ let arithmetic () =
     (app Ge [Select (leaf, 0, Var tree_value); i (-4611686018427387904L)]);
   valid ~datatypes ~symbols:[tree_value]
     (app Le [Select (leaf, 0, Var tree_value); i 4611686018427387903L]);
-  print_endline "Z3 integration tests passed"
+  print_endline "Solver integration tests passed"
 
 let () =
   arithmetic ();
@@ -194,7 +205,7 @@ let () =
         | Invalid _ -> ()
         | _ -> failwith "A previous query's assumptions escaped its scope"
       done);
-  print_endline "Z3 session tests passed"
+  print_endline "Solver session tests passed"
 
 let () =
   let signed n = Int64.shift_right (Int64.shift_left n 1) 1 in
@@ -231,3 +242,193 @@ let () =
         [0; 1; 7; 16; 62; 63])
     values;
   ignore (invalid (eq (app Shift_right_logical [i (-1L); i 64L]) (i 0L)))
+
+let () =
+  let query ?(symbols = [x]) ?(functions = []) ?(datatypes = []) facts goal =
+    { symbols; functions; datatypes;
+      facts = List.map (fun term -> { label = "fact"; term }) facts;
+      goal = { label = "goal"; term = goal } }
+  in
+  let y = Symbol.create ~label:"y" Int63 in
+  let n = Symbol.create ~label:"n" Int in
+  let old = Symbol.create ~label:"old" Bool in
+  let current = Symbol.create ~label:"current" Bool in
+  let dump = Buffer.create 1024 in
+  let queries =
+    [ query [eq (Var x) (i 1L)] (eq (Var x) (i 1L));
+      query [eq (Var x) (i 1L); app Lt [Var x; i 2L]]
+        (app Lt [Var x; i 2L]);
+      query [eq (Var x) (i 1L)] (app Ne [Var x; i 1L]);
+      query [] (eq (Var x) (i 1L));
+      query ~symbols:[x; y] [eq (Var y) (i 2L)] (eq (Var y) (i 2L));
+      query [] (eq (Var x) (i 1L));
+      query [] (eq (app Bit_or [Var x; i 1L]) (i 0L));
+      query ~symbols:[n]
+        [app Int_gt [Var n; Big_integer "4611686018427387904"]]
+        (Boolean false);
+      query [eq (Var x) (i 1L)] (eq (Var x) (i 1L)) ]
+  in
+  let queries = queries @ List.map (fun count ->
+    let facts = List.init count (fun value ->
+      app Ge [Var x; i (Int64.of_int value)]) in
+    query facts (app Ge [Var x; i 64L])) [65; 64; 33; 32; 31; 0] in
+  let expected =
+    List.map (fun query -> (Vox_smt_solver.check ~config ~int_width:63 query)
+      .validity) queries
+  in
+  let same_answer actual expected =
+    match actual, expected with
+    | Invalid _, Invalid _ | Valid, Valid -> ()
+    | _ -> failwith "Incremental result differs from isolated result"
+  in
+  Vox_smt_solver.with_incremental_session ~config ~int_width:63
+    ~dump:(fun text -> Buffer.add_string dump text)
+    (fun check ->
+      for _ = 1 to 3 do
+        List.iter2 (fun query expected ->
+          same_answer (check query).validity expected) queries expected;
+        List.iter (fun symbol ->
+          let query = query ~symbols:[symbol] [] (Var symbol) in
+          let proved = check ~assumptions:[symbol] query in
+          assert (proved.validity = Valid);
+          assert (proved.core = Some [symbol]);
+          let unproved = check ~assumptions:[] query in
+          assert (unproved.validity
+            = Invalid (Some [symbol, Bool_value false]));
+          assert (unproved.core = None)) [old; current];
+        let query = query [app Ge [Var x; i 0L]]
+          (app Ge [app Add [Var x; i 1L]; i 0L]) in
+        (match (check ~resource_limit:1 query).validity with
+        | Unknown _ -> ()
+        | _ -> failwith "Incremental resource limit did not stop");
+        (match (check query).validity with
+        | Invalid _ -> ()
+        | _ -> failwith "Unlimited incremental check did not recover")
+      done);
+  let commands = String.split_on_char '\n' (Buffer.contents dump) in
+  let resets = List.length (List.filter (( = ) "(reset)") commands) in
+  assert (resets < 3 * List.length queries);
+  if config.executable <> "ocaml" then assert (List.mem "(pop 1)" commands);
+  Vox_smt_solver.with_incremental_session ~config ~int_width:63
+    (fun check -> List.iter (fun fields ->
+      let datatype = Datatype.create ~label:"variant" in
+      let a = Constructor.create ~datatype ~label:"A" fields in
+      let b = Constructor.create ~datatype ~label:"B" [] in
+      let value = Symbol.create ~label:"value" (Datatype datatype) in
+      let query = query ~symbols:[value]
+        ~datatypes:[{ datatype; constructors = [a; b] }]
+        [] (Is (a, Var value)) in
+      assert ((check { query with facts =
+        [{ label = "is-a"; term = Is (a, Var value) }] }).validity = Valid);
+      match (check query).validity with
+      | Invalid _ -> ()
+      | _ -> failwith "Datatype assumption escaped its scope")
+      [["value", Int63]; ["value", Bool]]);
+  print_endline "Incremental solver session tests passed"
+
+let () =
+  let variable = Symbol.create ~label:"value" Int in
+  let boolean = Symbol.create ~label:"guard" Bool in
+  let make ?(symbols = [variable]) count goal =
+    { symbols; functions = []; datatypes = [];
+      facts = List.init count (fun index ->
+        { label = "bound";
+          term = app Int_ge
+            [Var variable; Big_integer (string_of_int index)] });
+      goal = { label = "goal"; term = goal } }
+  in
+  let bounds = make 1024 (app Int_ge [Var variable; Big_integer "1023"]) in
+  let insufficient = make 1023 bounds.goal.term in
+  let dump = Buffer.create 1024 in
+  let commands () = String.split_on_char '\n' (Buffer.contents dump) in
+  let protocol command expected =
+    if config.executable <> "ocaml" then
+      assert (List.mem command (commands ()) = expected) in
+  let cleared f = Buffer.clear dump; f () in
+  Vox_smt_solver.with_automatic_session ~config ~int_width:63
+    ~dump:(fun text -> Buffer.add_string dump text) (fun check ->
+      for turn = 1 to 4 do
+        cleared (fun () -> assert ((check bounds).validity = Valid));
+        protocol "(reset)" (turn = 1);
+        protocol "(push 1)" false
+      done;
+      for turn = 1 to 3 do
+        let goal = app Int_ge
+          [Var variable; Big_integer (string_of_int (1000 + turn))] in
+        cleared (fun () -> assert ((check (make 1024 goal)).validity = Valid));
+        protocol "(reset)" (turn = 1);
+        protocol "(push 1)" true
+      done;
+      cleared (fun () ->
+        match (check insufficient).validity with
+        | Invalid (Some [symbol, Bigint_value "1022"]) ->
+          assert (symbol = variable)
+        | _ -> failwith "Automatic session retained a removed bound");
+      protocol "(reset)" true;
+      assert ((check bounds).validity = Valid);
+      cleared (fun () ->
+        match (check insufficient).validity with
+        | Invalid _ -> ()
+        | _ -> failwith "Automatic session retained a scoped bound");
+      protocol "(reset)" false;
+      let small = make 1 (app Int_ge [Var variable; Big_integer "1"]) in
+      cleared (fun () ->
+        match (check small).validity with
+        | Invalid _ -> ()
+        | _ -> failwith "Automatic session retained a larger context");
+      protocol "(reset)" true;
+      protocol "(push 1)" false;
+      let guarded = make ~symbols:[variable; boolean] 1024 (Var boolean) in
+      for _ = 1 to 4 do
+        let result = check ~assumptions:[boolean] guarded in
+        assert (result.validity = Valid && result.core = Some [boolean])
+      done;
+      (match (check ~assumptions:[] guarded).validity with
+      | Invalid _ -> ()
+      | _ -> failwith "Automatic session retained a goal assumption");
+      let limited =
+        { symbols = [x]; functions = []; datatypes = [];
+          facts = [{ label = "bound"; term = app Ge [Var x; i 0L] }];
+          goal = { label = "goal";
+            term = app Ge [app Add [Var x; i 1L]; i 0L] } }
+      in
+      (match (check ~resource_limit:1 limited).validity with
+      | Unknown _ -> ()
+      | _ -> failwith "Automatic session ignored a resource limit");
+      assert ((check bounds).validity = Valid));
+  Vox_smt_solver.with_automatic_session ~config ~int_width:63
+    ~dump:(fun text -> Buffer.add_string dump text) (fun check ->
+      for turn = 1 to 4 do
+        let query = make 1024 (app Int_ge
+          [Var variable; Big_integer (string_of_int (1000 + turn))]) in
+        cleared (fun () -> assert ((check query).validity = Valid));
+        protocol "(reset)" (turn <= 3);
+        protocol "(push 1)" (turn >= 3)
+      done);
+  let other = Symbol.create ~label:"other" Bool in
+  let number = Symbol.create ~label:"number" Int in
+  let guarded = make ~symbols:[boolean] 0 (Var boolean) in
+  Vox_smt_solver.with_automatic_session ~config ~int_width:63
+    ~dump:(fun text -> Buffer.add_string dump text) (fun check ->
+      let first = check ~assumptions:[boolean] guarded in
+      assert (first.validity = Valid && first.core = Some [boolean]);
+      cleared (fun () ->
+        assert ((check ~assumptions:[] guarded).validity =
+          Invalid (Some [boolean, Bool_value false])));
+      protocol "(reset)" false;
+      cleared (fun () ->
+        let query = { guarded with symbols = [boolean; other] } in
+        match (check ~assumptions:[] query).validity with
+        | Invalid (Some values) ->
+          assert (List.assoc boolean values = Bool_value false);
+          assert (List.mem_assoc other values)
+        | _ -> failwith "Exact-context recheck lost its model");
+      protocol "(reset)" false;
+      assert (List.mem "(declare-fun v1 () Bool)" (commands ()));
+      cleared (fun () ->
+        let query = { guarded with symbols = [boolean; number] } in
+        let result = check ~assumptions:[boolean] query in
+        assert (result.validity = Valid && result.core = Some [boolean]));
+      protocol "(reset)" true;
+      assert (List.mem "(declare-fun v1 () Int)" (commands ())));
+  print_endline "Automatic solver session tests passed"

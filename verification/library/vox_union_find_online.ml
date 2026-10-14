@@ -245,7 +245,6 @@ module Make (C : Vox_big_credits.S) = struct
       if max_int >= 1 then (())
       else invalid_arg "Vox_union_find_online.create" in
     let _ = checked in
-    let fee = fee in
     let capacity = ghost_ 1Z in
     let cap : {n : Bigint.t | 1Z <= n && n <= Bigint.of_int max_int} = capacity in
     let payment : {b : C.token | C.credits b >= 1Z} = fee in
@@ -263,7 +262,7 @@ module Make (C : Vox_big_credits.S) = struct
   let make_set :
       (state : {s : t | valid s && size s < Bigint.of_int max_int}) @ unique read_write total ->
       (fee : {b : C.token | C.credits b = 11Z}) @ unique total ghost ->
-      {r : result | let state = state in valid r.#state &&
+      {r : result | valid r.#state &&
         added (snapshot state) (snapshot r.#state) r.#value &&
         contents r.#state === M.Stop r.#value :: contents state &&
         size r.#state = Bigint.add (size state) 1Z && member r.#value r.#state &&
@@ -272,10 +271,8 @@ module Make (C : Vox_big_credits.S) = struct
         account r.#state = Bigint.add (account state) 11Z &&
         events r.#state === E.Allocate :: events state} @ unique =
       fun state fee ->
-    let state = state in
     let previous = ghost_ (snapshot (borrow_ state)) in
-    ghost_ (snapshot_valid (borrow_ state); snapshot_def (borrow_ state)); let
-      fee = fee in
+    ghost_ (snapshot_valid (borrow_ state); snapshot_def (borrow_ state));
     ghost_ (valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
@@ -301,7 +298,7 @@ module Make (C : Vox_big_credits.S) = struct
     let funds = C.split unlocked available in
     let input : {s : U.t | U.valid s && s.#U.capacity <= cap &&
       cap <= Bigint.mul 2Z s.#U.capacity && cap <= Bigint.of_int max_int} = core in
-    let payment : {b : C.token | let input = input in
+    let payment : {b : C.token |
       C.credits b >= (if cap = input.#U.capacity then 0Z
         else Bigint.mul 4Z (F.size input.#U.paths))} = funds.C.left in
     let grown = U.reparameterize cap input payment in
@@ -328,13 +325,13 @@ module Make (C : Vox_big_credits.S) = struct
       member_def value (borrow_ state); F.member_def value (contents (borrow_ state)); M.head_def (M.Stop value));
     ghost_ (snapshot_def (borrow_ state);
       added_def previous (snapshot (borrow_ state)) value);
-    let result = #{value; state} in result
+    #{value; state}
 
   let find : (x : M.elem) @ immutable ->
       (state : {s : t | valid s && member x s}) @ unique read_write total ->
-      (fee : {b : C.token | let state = state in C.credits b = find_fee state})
+      (fee : {b : C.token | C.credits b = find_fee state})
         @ unique total ghost ->
-      {r : result | let state = state in valid r.#state &&
+      {r : result | valid r.#state &&
         found (snapshot state) (snapshot r.#state) x &&
         contents r.#state === F.refresh (F.lookup x (contents state)) (contents state) &&
         F.addresses (contents r.#state) === F.addresses (contents state) &&
@@ -343,10 +340,8 @@ module Make (C : Vox_big_credits.S) = struct
         snapshot r.#state === compressed (snapshot state) x &&
         events r.#state === E.Find (depth (snapshot state) x) :: events state}
       @ unique = fun x state fee ->
-    let state = state in
     let previous = ghost_ (snapshot (borrow_ state)) in
-    ghost_ (snapshot_valid (borrow_ state); snapshot_def (borrow_ state)); let
-      fee = fee in
+    ghost_ (snapshot_valid (borrow_ state); snapshot_def (borrow_ state));
     ghost_ (valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
@@ -360,7 +355,7 @@ module Make (C : Vox_big_credits.S) = struct
     let savings = state.#savings in
     let core = state.#core in
     let input : {s : U.t | U.valid s && U.member x s} = core in
-    let payment : {b : C.token | let input = input in
+    let payment : {b : C.token |
       C.credits b >= A.find_fee input.#U.alpha} = fee in
     let r = U.find x input payment in
     let #{U.value; state = core; refund} = r in
@@ -378,13 +373,13 @@ module Make (C : Vox_big_credits.S) = struct
       compressed_def previous x; depth_def previous x;
       S.find_paths_def previous.paths x;
       S.find_heap_def previous.memory previous.paths x);
-    let result = #{value; state} in result
+    #{value; state}
 
   let union : (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
       (state : {s : t | valid s && member x s && member y s}) @ unique read_write total ->
-      (fee : {b : C.token | let state = state in C.credits b = union_fee state})
+      (fee : {b : C.token | C.credits b = union_fee state})
         @ unique total ghost ->
-      {r : result | let state = state in valid r.#state &&
+      {r : result | valid r.#state &&
         joined (snapshot state) (snapshot r.#state) x y r.#value &&
         contents r.#state === S.union_paths (heap state) (contents state) x y &&
         F.addresses (contents r.#state) === F.addresses (contents state) &&
@@ -394,10 +389,8 @@ module Make (C : Vox_big_credits.S) = struct
           E.Find (depth (compressed (snapshot state) x) y) ::
           E.Find (depth (snapshot state) x) :: events state} @ unique =
       fun x y state fee ->
-    let state = state in
     let previous = ghost_ (snapshot (borrow_ state)) in
-    ghost_ (snapshot_valid (borrow_ state); snapshot_def (borrow_ state)); let
-      fee = fee in
+    ghost_ (snapshot_valid (borrow_ state); snapshot_def (borrow_ state));
     ghost_ (valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
@@ -411,7 +404,7 @@ module Make (C : Vox_big_credits.S) = struct
     let savings = state.#savings in
     let core = state.#core in
     let input : {s : U.t | U.valid s && U.member x s && U.member y s} = core in
-    let payment : {b : C.token | let input = input in
+    let payment : {b : C.token |
       C.credits b >= A.union_fee input.#U.alpha} = fee in
     let r = U.union x y input payment in
     let #{U.value; state = core; refund} = r in
@@ -428,7 +421,7 @@ module Make (C : Vox_big_credits.S) = struct
       joined_def previous (snapshot (borrow_ state)) x y value;
       compressed_def previous x; depth_def previous x;
       depth_def (compressed previous x) y);
-    let result = #{value; state} in result
+    #{value; state}
 
   let (fee_bounds @ total) :
       (state : t) @ local immutable total ghost forkable unyielding ->
@@ -596,15 +589,13 @@ module Make (C : Vox_big_credits.S) = struct
       (state : {s : t | valid s && size s < Bigint.of_int max_int}) @ unique
         read_write total ->
       (fee : {b : C.token | C.credits b = 11Z}) @ unique total ghost ->
-      {r : result | let state = state in valid r.#state &&
+      {r : result | valid r.#state &&
         added (snapshot state) (snapshot r.#state) r.#value &&
         size r.#state = Bigint.add (size state) 1Z &&
         contains (snapshot r.#state) r.#value &&
         account r.#state = Bigint.add (account state) 11Z &&
         events r.#state === E.Allocate :: events state} @ unique =
       fun state fee ->
-    let state = state in
-    let fee = fee in
     let result = make_set state fee in
     let #{value; state} = result in
     ghost_ (observe value (borrow_ state));
@@ -612,10 +603,10 @@ module Make (C : Vox_big_credits.S) = struct
 
   let find_connectivity : (x : elem) @ immutable ->
       (state : {s : t | valid s && contains (snapshot s) x}) @ unique read_write total ->
-      (fee : {b : C.token | let state = state in
+      (fee : {b : C.token |
         C.credits b = find_fee state})
         @ unique total ghost ->
-      {r : result | let state = state in valid r.#state &&
+      {r : result | valid r.#state &&
         found (snapshot state) (snapshot r.#state) x &&
         size r.#state = size state && r.#value === root (snapshot state) x &&
         account r.#state = Bigint.add (account state) (find_fee state) &&
@@ -623,21 +614,18 @@ module Make (C : Vox_big_credits.S) = struct
         events r.#state === E.Find (depth (snapshot state) x) :: events state}
       @ unique = fun x state fee ->
     ghost_ (observe x (borrow_ state));
-    let state = state in
-    let fee = fee in
     let input : {s : t | valid s && contains (snapshot s) x} = state in
-    let payment : {b : C.token | let input = input in
+    let payment : {b : C.token |
       C.credits b = find_fee input} = fee in
-    let result = find x input payment in
-    result
+    find x input payment
 
   let union_connectivity : (x : elem) @ immutable -> (y : elem) @ immutable ->
       (state : {s : t | valid s && contains (snapshot s) x && contains (snapshot s) y}) @ unique
         read_write total ->
-      (fee : {b : C.token | let state = state in
+      (fee : {b : C.token |
         C.credits b = union_fee state})
         @ unique total ghost ->
-      {r : result | let state = state in valid r.#state &&
+      {r : result | valid r.#state &&
         joined (snapshot state) (snapshot r.#state) x y r.#value &&
         size r.#state = size state &&
         account r.#state = Bigint.add (account state) (union_fee state) &&
@@ -646,12 +634,9 @@ module Make (C : Vox_big_credits.S) = struct
           E.Find (depth (snapshot state) x) :: events state}
       @ unique = fun x y state fee ->
     ghost_ (observe x (borrow_ state); observe y (borrow_ state));
-    let state = state in
-    let fee = fee in
     let input : {s : t | valid s && contains (snapshot s) x && contains (snapshot s) y} = state in
-    let payment : {b : C.token | let input = input in
+    let payment : {b : C.token |
       C.credits b = union_fee input} = fee in
-    let result = union x y input payment in
-    result
+    union x y input payment
 
 end

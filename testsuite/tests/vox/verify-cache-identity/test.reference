@@ -14,3 +14,7 @@
 14 (version 4.16.0, failing, altered unit entry): rejected
 15 (version 4.16.0, failing, world-writable cache): rejected
 16 (version 4.16.0, failing, private cache): accepted
+17 (incremental, failing, reset caches): rejected
+18 (incremental, working): accepted
+19 (incremental, failing, unit cache): accepted
+20 (incremental, failing, query cache): rejected

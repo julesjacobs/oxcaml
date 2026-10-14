@@ -1,0 +1,5 @@
+(executable
+ (name smt_api_bench)
+ (modules smt_api_bench)
+ (libraries vox_smt vox_smt_solver)
+ (enabled_if (= %{context_name} main)))

@@ -45,10 +45,10 @@ type t = {s : raw |  H.O.valid s.engine.owner && V.valid s.engine.store &&
   s.model === P.view s.engine.store && bounded_model s.model}
 
 let[@def] (model @ total) (state : t @ local immutable) = ghost_ (
-  let state = state in state.model)
+  state.model)
 
 let[@def] (rules @ total) (state : t @ local immutable) = ghost_ (
-  let state = state in state.rules)
+  state.rules)
 
 let (model_bounds @ total) :
     (state : t) @ local immutable total ghost forkable unyielding ->

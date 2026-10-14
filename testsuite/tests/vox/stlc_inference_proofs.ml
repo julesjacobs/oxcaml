@@ -11,7 +11,7 @@ let (empty_tree @ total) : (x : node Pref.t) @ immutable ->
     {t : tree | Unifier_finite_spec.root t === x &&
       (if H.mem (H.empty ()) x then finite (H.empty ()) t else H.at (H.empty ()) x === None)}
     @ immutable ghost = fun x -> ghost_ (
-  let t = Free x in Unifier_finite_spec.root_def t; refine_ t)
+  let t = Free x in Unifier_finite_spec.root_def t; t)
 
 let (inference_finite_at @ total) : (e : term) @ immutable -> (middle : node Pref.heap) @ immutable ->
     (g : graph) @ immutable -> (ok : bool) -> (after : node Pref.heap) @ immutable -> (d : solving) @ immutable ->
@@ -23,12 +23,12 @@ let (inference_finite_at @ total) : (e : term) @ immutable -> (middle : node Pre
     let h = H.empty () in let env = Empty in
     let start : (x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
         (if H.mem h x then finite h t else H.at h x === None)} @ immutable total = fun x ->
-      let refine_ t = empty_tree x in refine_ t in
+      empty_tree x in
     let generated : (x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
         (if H.mem middle x then finite middle t else H.at middle x === None)} @ immutable total = fun x ->
-      let refine_ t = built_finite_at h start env g middle x (refine_ ()) in refine_ t in
+      built_finite_at h start env g middle x () in
     let cs = constraints g in 
-    solved_finite_at middle generated cs ok after d x (refine_ ()))
+    solved_finite_at middle generated cs ok after d x ())
 
 let (inference_sound @ total) : (e : term) @ immutable -> (middle : node Pref.heap) @ immutable ->
     (g : graph) @ immutable -> (after : node Pref.heap) @ immutable -> (d : solving) @ immutable ->
@@ -39,25 +39,25 @@ let (inference_sound @ total) : (e : term) @ immutable -> (middle : node Pref.he
     let refine_ premise = premise in inferred_def e middle g true after d;
     let trees : (x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
         (if H.mem after x then finite after t else H.at after x === None)} @ immutable total = fun x ->
-      let refine_ t = inference_finite_at e middle g true after d x (refine_ ()) in refine_ t in
+      inference_finite_at e middle g true after d x () in
     let[@def] rho : node Pref.t @ immutable total -> ty @ immutable total = fun x ->
       let refine_ t = trees x in readback t in
     let agrees : (x : node Pref.t) @ immutable ->
         {u : unit | let refine_ t = trees x in not (H.mem after x) || rho x === readback t}
-        @ total = fun x -> rho_def x; refine_ () in
+        @ total = fun x -> rho_def x; () in
     let model : (x : node Pref.t) @ immutable -> {u : unit | equation after rho x}
-        @ total = fun x -> let refine_ u = readback_model_at after trees rho agrees x in refine_ u in
+        @ total = fun x -> readback_model_at after trees rho agrees x in
     let cs = constraints g in
     let generated_model : (x : node Pref.t) @ immutable ->
         {u : unit | not (H.mem middle x) || equation middle rho x} @ total = fun x ->
-      solved_forward_at middle rho cs after d model x (refine_ ()); refine_ () in
+      solved_forward_at middle rho cs after d model x (); () in
     let r = root g in 
-    solved_forward_at middle rho cs after d model r (refine_ ());
+    solved_forward_at middle rho cs after d model r ();
     let h = H.empty () in let env = Empty in
-    generation_sound h env g middle rho generated_model (refine_ ());
+    generation_sound h env g middle rho generated_model ();
     context_of_def rho env; finite_def after t;
-    let refine_ actual = trees r in finite_unique after actual t (refine_ ()); rho_def r;
-    let proof = derive rho g in refine_ proof)
+    let refine_ actual = trees r in finite_unique after actual t (); rho_def r;
+    derive rho g)
 
 let (with_typing_factor @ total) : (e : term) @ immutable -> (middle : node Pref.heap) @ immutable ->
     (g : graph) @ immutable -> (after : node Pref.heap) @ immutable -> (d : solving) @ immutable ->
@@ -71,10 +71,10 @@ let (with_typing_factor @ total) : (e : term) @ immutable -> (middle : node Pref
   let h = H.empty () in let env = Empty in env_allocated_def h env;
   let trees : (x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
       (if H.mem h x then finite h t else H.at h x === None)} @ immutable total = fun x ->
-    let refine_ t = empty_tree x in refine_ t in
+    empty_tree x in
   let rho : node Pref.t @ immutable total -> ty @ immutable total = fun x -> TVar x in
   let model : (x : node Pref.t) @ immutable -> {u : unit | equation h rho x}
-      @ total = fun x -> equation_def h rho x; refine_ () in
+      @ total = fun x -> equation_def h rho x; () in
   context_of_def rho env;
   let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (generated_model : ((x : node Pref.t) @ immutable -> {u : unit | equation middle tau x})) @ total ->
@@ -84,11 +84,11 @@ let (with_typing_factor @ total) : (e : term) @ immutable -> (middle : node Pref
       let refine_ fit = fit in let cs = constraints g in
       let final_model : (x : node Pref.t) @ immutable -> {u : unit | equation after tau x}
           @ total = fun x -> 
-        let refine_ u = solved_backward_at middle tau generated_model cs after d x (refine_ ()) in refine_ u in
-      readback_factor after tau final_model t (refine_ ());
-      let refine_ u = use tau (refine_ ()) in refine_ u in
+        solved_backward_at middle tau generated_model cs after d x () in
+      readback_factor after tau final_model t ();
+      use tau () in
   let refine_ u = with_generation_model h trees env g middle rho model target typing
-    (refine_ ()) claim consume in refine_ u)
+    () claim consume in u)
 
 let (inference_rejects @ total) : (e : term) @ immutable -> (middle : node Pref.heap) @ immutable ->
     (g : graph) @ immutable -> (after : node Pref.heap) @ immutable -> (d : solving) @ immutable ->
@@ -99,10 +99,10 @@ let (inference_rejects @ total) : (e : term) @ immutable -> (middle : node Pref.
   let h = H.empty () in let env = Empty in env_allocated_def h env;
   let trees : (x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
       (if H.mem h x then finite h t else H.at h x === None)} @ immutable total = fun x ->
-    let refine_ t = empty_tree x in refine_ t in
+    empty_tree x in
   let rho : node Pref.t @ immutable total -> ty @ immutable total = fun x -> TVar x in
   let model : (x : node Pref.t) @ immutable -> {u : unit | equation h rho x}
-      @ total = fun x -> equation_def h rho x; refine_ () in
+      @ total = fun x -> equation_def h rho x; () in
   context_of_def rho env; let claim = false in
   let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (generated_model : ((x : node Pref.t) @ immutable -> {u : unit | equation middle tau x})) @ total ->
@@ -110,6 +110,6 @@ let (inference_rejects @ total) : (e : term) @ immutable -> (middle : node Pref.
       {u : unit | satisfies tau (constraints g) && tau (root g) === target} -> {u : unit | claim}) @ total =
     fun tau generated_model _equal fit ->
       let refine_ fit = fit in let cs = constraints g in 
-      let refine_ u = solved_refutes middle tau generated_model cs after d (refine_ ()) in refine_ u in
+      solved_refutes middle tau generated_model cs after d () in
   let refine_ u = with_generation_model h trees env g middle rho model target typing
-    (refine_ ()) claim consume in refine_ u)
+    () claim consume in u)

@@ -34,7 +34,7 @@ module Slice : sig @@ portable
     (s : 'a t) @ local immutable ->
     (index : {i : int | 0 <= i
       && Bigint.compare (Bigint.of_int i) (Model.length (current s)) < 0}) ->
-    {value : 'a | let index = index in
+    {value : 'a |
       Some value === Model.at (current s) (Bigint.of_int index)} @@ total
 
   val set : ('a : immutable_data).
@@ -43,7 +43,7 @@ module Slice : sig @@ portable
       0 <= i && Bigint.compare (Bigint.of_int i) (Model.length (current s)) <
         0}) ->
     (value : 'a) @ immutable ->
-    {r : 'a t | let index = index in
+    {r : 'a t |
       current r === Model.set (current s) (Bigint.of_int index) value
       && final r === final s} @ local unique @@ total
 
@@ -75,7 +75,7 @@ module Slice : sig @@ portable
         (right : {right : 'a t | let k = index in
           current right === Model.drop (Bigint.of_int k) (current s)})
           @ local unique ->
-        {r : 'r | let left = left in let right = right in
+        {r : 'r |
           post r (final left) (final right)}) @ local once ->
       {r : ('r, 'a t) step | let k = index in
         post r.value (Model.take (Bigint.of_int k) (current r.state))
@@ -109,8 +109,8 @@ module Slice : sig @@ portable
         (right : {right : 'a t | let j = past in
           current right === Model.drop (Bigint.of_int j) (current s)}) @ local
             unique ->
-        {r : 'r | let left = left in let middle = middle in
-          let right = right in post r (final left) (final middle) (final
+        {r : 'r |
+          post r (final left) (final middle) (final
             right)})
         @ local once ->
       {r : ('r, 'a t) step | let i = first in let j = past in
@@ -135,7 +135,7 @@ module Slice : sig @@ portable
           current middle === Model.sub (current s) (Bigint.of_int i)
             (Bigint.of_int j)})
           @ local unique ->
-        {r : 'r | let middle = middle in post r (final middle)}) @ local
+        {r : 'r | post r (final middle)}) @ local
           once ->
       {r : ('r, 'a t) step | let i = first in let j = past in
         post r.value (Model.sub (current r.state) (Bigint.of_int i)
@@ -156,10 +156,10 @@ module Slice : sig @@ portable
       (rp : ('a Model.t @ immutable -> bool @ ghost)) @ ghost ->
       ((s : {s : 'a t | current s === current left
           && final s === final left}) @ local unique ->
-        {u : unit | let s = s in lp (final s)}) @ portable once ->
+        {u : unit | lp (final s)}) @ portable once ->
       ((s : {s : 'a t | current s === current right
           && final s === final right}) @ local unique ->
-        {u : unit | let s = s in rp (final s)}) @ portable once ->
+        {u : unit | rp (final s)}) @ portable once ->
       {u : unit | lp (final left) && rp (final right)}
 
 end
@@ -210,7 +210,7 @@ module Owned_array : sig @@ portable
         @ ghost ->
       ((s : {s : 'a Slice.t | Slice.current s === contents a})
           @ local unique ->
-        {r : 'r | let s = s in post r (Slice.final s)}) @ local once ->
+        {r : 'r | post r (Slice.final s)}) @ local once ->
       {r : ('r, 'a t) step | post r.value (contents r.state)
         && Model.length (contents r.state) === Model.length (contents a)}
       @ unique @@ stateless

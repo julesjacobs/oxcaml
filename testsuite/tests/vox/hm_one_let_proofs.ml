@@ -39,14 +39,14 @@ let (with_identity_choices @ total) : (e : execution) @ immutable ->
     let empty : pool = Generalize_spec.Empty in let env : Hm_environment_spec.env = Hm_environment_spec.Empty in
     let facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h 0 empty x}) @ total = fun x ->
       runtime_at_def h 0 empty x; safe_def h x; depth_bound_def h 0 x;
-      covered_def h (-1) empty x; ordered_def h x; refine_ () in
+      covered_def h (-1) empty x; ordered_def h x; () in
     let child_facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h 1 empty x}) @ total = fun x ->
-      facts x; Hm_let_runtime_proofs.enter_runtime h 0 empty x (refine_ ()); refine_ () in
+      facts x; Hm_let_runtime_proofs.enter_runtime h 0 empty x (); () in
     let[@def] initial : node Pref.t @ immutable total -> ty @ immutable total = fun _x -> Boolean in
     let initial_model : ((x : node Pref.t) @ immutable ->
       {u : unit | Level_unifier_spec.node_equation h initial x}) @ total = fun x ->
       Level_unifier_spec.node_equation_def h initial x; Level_unifier_spec.observe_def h x;
-      refine_ () in
+      () in
     Hm_sound_proofs.mono_env_def h env; Hm_sound_proofs.context_def initial env;
     let target = Function (a, a) in let refine_ typing = identity_typing a in
     let consume : ((eta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
@@ -56,13 +56,13 @@ let (with_identity_choices @ total) : (e : execution) @ immutable ->
       let refine_ fit = fit in
       let eta_model : ((x : node Pref.t) @ immutable -> {u : unit | equation after eta x}) @ total = fun x ->
         next x; Level_unifier_spec.node_equation_def after eta x;
-        Level_unifier_spec.observe_def after x; equation_def after eta x; refine_ () in
+        Level_unifier_spec.observe_def after x; equation_def after eta x; () in
       let equal : ((x : node Pref.t) @ immutable -> {u : unit | not (below h x 0) || rho x === eta x}) @ total = fun x ->
-        below_def h x 0; refine_ () in
-      Hm_origin_proofs.rhs_interpret h 0 empty facts env e after pool rho model eta eta_model equal tree (refine_ ());
+        below_def h x 0; () in
+      Hm_origin_proofs.rhs_interpret h 0 empty facts env e after pool rho model eta eta_model equal tree ();
       C.matches_def eta e target;
-      let refine_ u = use eta (refine_ ()) in refine_ u in
-    let refine_ u = C.with_run_model h 1 empty child_facts env e after pool initial initial_model target typing (refine_ ()) claim consume in refine_ u)
+      use eta () in
+    C.with_run_model h 1 empty child_facts env e after pool initial initial_model target typing () claim consume)
 
 let (with_clean_instance @ total) : (h : node Pref.heap) @ immutable ->
     (scope : ((x : node Pref.t) @ immutable -> {u : unit | if H.mem h x then source_ok h x else H.at h x === None})) @ total ->
@@ -87,10 +87,10 @@ let (with_clean_instance @ total) : (h : node Pref.heap) @ immutable ->
       (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
       {u : unit | tau q === interpret rho choices schema} -> {u : unit | claim}) @ total = fun tau next equal fit ->
       let clean_model : ((x : node Pref.t) @ immutable -> {u : unit | equation after tau x}) @ total = fun x ->
-        next x; Clean_copy.result_at h epoch depth d x (refine_ ());
-        Copy_cleanup_spec.swept_at_def raw after trail x; equation_def raw tau x; equation_def after tau x; refine_ () in
-      let refine_ u = use tau (refine_ clean_model) equal fit in refine_ u in
-    let refine_ u = Copy_template_proofs.with_scheme_instance h scope trees rho model choices epoch depth d schema q (refine_ ()) claim consume in refine_ u)
+        next x; Clean_copy.result_at h epoch depth d x ();
+        Copy_cleanup_spec.swept_at_def raw after trail x; equation_def raw tau x; equation_def after tau x; () in
+      use tau (refine_ clean_model) equal fit in
+    Copy_template_proofs.with_scheme_instance h scope trees rho model choices epoch depth d schema q () claim consume)
 
 let (runtime_template @ total) : (h : node Pref.heap) @ immutable -> (depth : int) -> (pool : pool) @ immutable ->
     (facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h depth pool x})) @ total ->
@@ -108,10 +108,10 @@ let (runtime_template @ total) : (h : node Pref.heap) @ immutable -> (depth : in
     let coverage : ((y : node Pref.t) @ immutable -> {u : unit | covered h depth empty y}) @ total = fun y ->
       facts y; runtime_at_def h depth pool y; depth_bound_def h depth y;
       covered_def h depth empty y; finite_node_def h y; below_def h y depth; at_level_def h y;
-      refine_ () in
+      () in
     if H.mem h x then (
-      Forest_transport.unfolding_valid h tree (refine_ ());
-      Generalize_scheme_proofs.scheme_valid h depth empty coverage t (refine_ ()); refine_ s)
+      Forest_transport.unfolding_valid h tree ();
+      Generalize_scheme_proofs.scheme_valid h depth empty coverage t (); refine_ s)
     else refine_ s)
 
 let (with_identity_instance @ total) : (e : execution) @ immutable ->
@@ -138,10 +138,10 @@ let (with_identity_instance @ total) : (e : execution) @ immutable ->
   fun e rhs_heap rhs_pool tree h depth pool facts forest rho model rhs_model epoch d q a premise claim use -> ghost_ (
     let refine_ premise = premise in let schema = scheme rhs_heap 0 tree in
     let scope : ((x : node Pref.t) @ immutable -> {u : unit | if H.mem h x then source_ok h x else H.at h x === None}) @ total = fun x ->
-      facts x; runtime_at_def h depth pool x; safe_def h x; refine_ () in
+      facts x; runtime_at_def h depth pool x; safe_def h x; () in
     let trees : ((x : node Pref.t) @ immutable ->
       {s : template | not (H.mem h x) || (root s === x && template h s)} @ immutable) @ total = fun x ->
-      let refine_ s = runtime_template h depth pool facts forest x in refine_ s in
+      runtime_template h depth pool facts forest x in
     let consume_choices : ((choices : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       {u : unit | interpret rho choices (scheme rhs_heap 0 tree) === Function (a, a)} ->
       {u : unit | claim}) @ total = fun choices fit ->
@@ -150,9 +150,9 @@ let (with_identity_instance @ total) : (e : execution) @ immutable ->
         (next : ((x : node Pref.t) @ immutable -> {u : unit | equation (copy_heap h epoch depth d) tau x})) @ total ->
         (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
         {u : unit | tau q === interpret rho choices schema} -> {u : unit | claim}) @ total = fun tau next equal assigned ->
-        let refine_ assigned = assigned in let refine_ u = use tau next equal (refine_ ()) in refine_ u in
-      let refine_ u = with_clean_instance h scope trees rho model choices epoch depth d schema q (refine_ ()) claim consume in refine_ u in
-    let refine_ u = with_identity_choices e rhs_heap rhs_pool tree rho rhs_model a (refine_ ()) claim consume_choices in refine_ u)
+        let refine_ assigned = assigned in use tau next equal () in
+      with_clean_instance h scope trees rho model choices epoch depth d schema q () claim consume in
+    with_identity_choices e rhs_heap rhs_pool tree rho rhs_model a () claim consume_choices)
 
 let (with_identity_pair @ total) : (e : execution) @ immutable ->
     (rhs_heap : node Pref.heap) @ immutable -> (rhs_pool : pool) @ immutable -> (tree : bounded) @ immutable ->
@@ -183,20 +183,20 @@ let (with_identity_pair @ total) : (e : execution) @ immutable ->
     let refine_ premise = premise in let schema = scheme rhs_heap 0 tree in
     let original = root schema in let h1 = copy_heap h epoch1 0 d1 in let pool1 = Pooled_spec.registered pool epoch1 d1 in
     let facts1 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h1 0 pool1 x}) @ total = fun x ->
-      let refine_ u = Hm_runtime_proofs.copy_runtime h 0 pool facts epoch1 d1 x (refine_ ()) in refine_ u in
+      Hm_runtime_proofs.copy_runtime h 0 pool facts epoch1 d1 x () in
     let forest1 : ((x : node Pref.t) @ immutable ->
       {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
         (if H.mem h1 x then Level_finite_spec.finite h1 t else Level_unifier_spec.observe h1 x === None)} @ immutable) @ total = fun x ->
-      let refine_ t = Hm_forest_proofs.clean_copy_forest h forest epoch1 0 d1 x (refine_ ()) in refine_ t in
+      Hm_forest_proofs.clean_copy_forest h forest epoch1 0 d1 x () in
     let frame : ((x : node Pref.t) @ immutable -> {u : unit | Hm_environment_spec.protected_at h h1 0 x}) @ total = fun x ->
       if H.mem h x then (
-        Hm_protected_proofs.copy_member h epoch1 0 d1 0 x (refine_ ()); refine_ ())
+        Hm_protected_proofs.copy_member h epoch1 0 d1 0 x (); ())
       else (facts x; runtime_at_def h 0 pool x; safe_def h x;
-        Hm_environment_spec.protected_at_def h h1 0 x; below_def h x 0; refine_ ()) in
-    Hm_environment_proofs.template_transport h h1 0 frame schema (refine_ ());
-    Hm_runtime_proofs.copy_target_active h 0 pool facts epoch1 d1 original q1 (refine_ ()); active_def h1 q1;
+        Hm_environment_spec.protected_at_def h h1 0 x; below_def h x 0; ()) in
+    Hm_environment_proofs.template_transport h h1 0 frame schema ();
+    Hm_runtime_proofs.copy_target_active h 0 pool facts epoch1 d1 original q1 (); active_def h1 q1;
     let rhs_model : ((x : node Pref.t) @ immutable -> {u : unit | equation rhs_heap rho x}) @ total = fun x ->
-      model x; Generalize_proofs.closed_model rhs_heap 0 rhs_pool rho x (refine_ ()); refine_ () in
+      model x; Generalize_proofs.closed_model rhs_heap 0 rhs_pool rho x (); () in
     let a = Function (b, b) in
     let consume1 : ((tau1 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (next1 : ((x : node Pref.t) @ immutable -> {u : unit | equation (copy_heap h epoch1 0 d1) tau1 x})) @ total ->
@@ -207,19 +207,19 @@ let (with_identity_pair @ total) : (e : execution) @ immutable ->
         next1 x; facts x; runtime_at_def h 0 pool x; safe_def h x;
         equation_def h1 tau1 x; Level_unifier_spec.observe_def h1 x; Level_unifier_spec.node_equation_def h1 tau1 x;
         Level_unifier_spec.observe_def h x;
-        Hm_model_proofs.copy_restrict h epoch1 0 d1 tau1 x (refine_ ());
+        Hm_model_proofs.copy_restrict h epoch1 0 d1 tau1 x ();
         Level_unifier_spec.node_equation_def h tau1 x; equation_def h tau1 x;
-        Generalize_proofs.closed_model rhs_heap 0 rhs_pool tau1 x (refine_ ()); refine_ () in
+        Generalize_proofs.closed_model rhs_heap 0 rhs_pool tau1 x (); () in
       let consume2 : ((tau2 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
         (next2 : ((x : node Pref.t) @ immutable -> {u : unit | equation (copy_heap h1 epoch2 0 d2) tau2 x})) @ total ->
         (equal2 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h1 x) || tau2 x === tau1 x})) @ total ->
         {u : unit | tau2 q2 === Function (b, b)} -> {u : unit | claim}) @ total = fun tau2 next2 equal2 fit2 ->
           let refine_ fit2 = fit2 in equal2 q1;
-          let refine_ u = use tau2 (refine_ next2) (refine_ ()) in refine_ u in
+          use tau2 (refine_ next2) () in
       let refine_ u = with_identity_instance e rhs_heap rhs_pool tree h1 0 pool1 facts1 (refine_ forest1)
-        tau1 (refine_ next1) rhs_model1 epoch2 d2 q2 b (refine_ ()) claim consume2 in refine_ u in
+        tau1 (refine_ next1) rhs_model1 epoch2 d2 q2 b () claim consume2 in refine_ u in
     let refine_ u = with_identity_instance e rhs_heap rhs_pool tree h 0 pool facts (refine_ forest)
-      rho model rhs_model epoch1 d1 q1 a (refine_ ()) claim consume1 in refine_ u)
+      rho model rhs_model epoch1 d1 q1 a () claim consume1 in refine_ u)
 
 let rec (scheme_boundary_bound @ total) : (h : node Pref.heap) @ immutable -> (cut : int) -> (pool : pool) @ immutable ->
     (order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x})) @ total ->
@@ -232,11 +232,11 @@ let rec (scheme_boundary_bound @ total) : (h : node Pref.heap) @ immutable -> (c
     Hm_environment_spec.boundary_bound_def after cut s;
     if not (close_level cut level === Generic) then (
       order p; ordered_def h p; at_level_def h p; below_def h p cut;
-      Generalize_proofs.closed_below h cut pool p cut (refine_ ()); refine_ ())
-    else match tree with Tip _ -> refine_ ()
-    | Through (_, child) -> scheme_boundary_bound h cut pool order child (refine_ ()); refine_ ()
-    | Fork (_, a, b) -> scheme_boundary_bound h cut pool order a (refine_ ());
-      scheme_boundary_bound h cut pool order b (refine_ ()); refine_ ())
+      Generalize_proofs.closed_below h cut pool p cut (); ())
+    else match tree with Tip _ -> ()
+    | Through (_, child) -> scheme_boundary_bound h cut pool order child (); ()
+    | Fork (_, a, b) -> scheme_boundary_bound h cut pool order a ();
+      scheme_boundary_bound h cut pool order b (); ())
 
 let (identity_execution @ total) : (h : node Pref.heap) @ immutable -> (depth : int) -> (pool : pool) @ immutable ->
     (env : Hm_environment_spec.env) @ immutable -> (e : execution) @ immutable -> (after : node Pref.heap) @ immutable ->
@@ -245,8 +245,8 @@ let (identity_execution @ total) : (h : node Pref.heap) @ immutable -> (depth : 
     {u : unit | let_free e && not (result e === None)} @ ghost =
   fun h depth pool env e after final_pool premise -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool; source_def e; result_def e; let_free_def e;
-    match e with RLam (_, body, _, _, _) -> source_def body; result_def body; let_free_def body; refine_ ()
-    | _ -> refine_ ())
+    match e with RLam (_, body, _, _, _) -> source_def body; result_def body; let_free_def body; ()
+    | _ -> ())
 
 let (lambda_result_level @ total) : (h : node Pref.heap) @ immutable -> (depth : int) ->
     (pool : pool) @ immutable -> (env : Hm_environment_spec.env) @ immutable ->
@@ -259,10 +259,10 @@ let (lambda_result_level @ total) : (h : node Pref.heap) @ immutable -> (depth :
     let refine_ premise = premise in ran_def h depth pool env e after final_pool;
     source_def e; result_def e; match e with
     | RLam (a, body, middle, body_pool, out) ->
-      (match result body with None -> refine_ () | Some b -> match out with None -> refine_ () | Some q ->
+      (match result body with None -> () | Some b -> match out with None -> () | Some q ->
         let desc = Arrow (a, b) in
-        cell_def desc depth; at_level_def after p; listed_def final_pool p; refine_ ())
-    | _ -> refine_ ())
+        cell_def desc depth; at_level_def after p; listed_def final_pool p; ())
+    | _ -> ())
 
 let (with_application_model @ total) : (h : node Pref.heap) @ immutable -> (depth : int) -> (pool : pool) @ immutable ->
     (facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h depth pool x})) @ total ->
@@ -284,7 +284,7 @@ let (with_application_model @ total) : (h : node Pref.heap) @ immutable -> (dept
     let refine_ premise = premise in let var : desc = Var in let v = cell var depth in
     let h1 = H.put h p v in let pool1 = Entry (p, pool) in
     let desc = Arrow (a, p) in let h2 = H.put h1 arrow (cell desc depth) in
-    let facts1 = C.allocation_facts h depth pool facts p var (refine_ ()) in
+    let facts1 = C.allocation_facts h depth pool facts p var () in
     let consume1 : ((rho1 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (model1 : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation h1 rho1 x})) @ total ->
       (equal1 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || rho1 x === rho x})) @ total ->
@@ -297,14 +297,14 @@ let (with_application_model @ total) : (h : node Pref.heap) @ immutable -> (dept
         {u : unit | rho2 arrow === value} -> {u : unit | claim}) @ total = fun rho2 model2 equal2 fit2 ->
           let refine_ fit2 = fit2 in equal2 f; equal2 p;
           let next : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after rho2 x}) @ total = fun x ->
-            let refine_ u = C.unify_complete h2 rho2 model2 f arrow ok after d x (refine_ ()) in refine_ u in
-          C.unify_complete h2 rho2 model2 f arrow ok after d p (refine_ ());
+            C.unify_complete h2 rho2 model2 f arrow ok after d x () in
+          C.unify_complete h2 rho2 model2 f arrow ok after d p ();
           let equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || rho2 x === rho x}) @ total = fun x ->
-            equal1 x; equal2 x; refine_ () in
-          let refine_ u = use rho2 next equal (refine_ ()) in refine_ u in
-      let refine_ u = C.with_alloc h1 depth pool1 (refine_ facts1) rho1 model1 arrow desc value h2 (refine_ ()) claim consume2 in refine_ u in
+            equal1 x; equal2 x; () in
+          use rho2 next equal () in
+      C.with_alloc h1 depth pool1 (refine_ facts1) rho1 model1 arrow desc value h2 () claim consume2 in
     Copy_model_proofs.describes_def rho var target;
-    let refine_ u = C.with_alloc h depth pool facts rho model p var target h1 (refine_ ()) claim consume1 in refine_ u)
+    C.with_alloc h depth pool facts rho model p var target h1 () claim consume1)
 
 let[@def] (id_id @ total) (_u : unit) = D.Let (D.Lambda (D.Bound D.Z), D.Apply (D.Bound D.Z, D.Bound D.Z))
 
@@ -320,21 +320,21 @@ let (with_id_id_model @ total) : (e : execution) @ immutable -> (after : node Pr
     let env : Hm_environment_spec.env = Hm_environment_spec.Empty in
     ran_def initial 0 empty env e after final_pool; source_def e; result_def e; id_id_def ();
     match e with
-    | RLet_left (rhs, _) -> identity_execution initial 1 empty env rhs after final_pool (refine_ ()); refine_ ()
+    | RLet_left (rhs, _) -> identity_execution initial 1 empty env rhs after final_pool (); ()
     | RLet (rhs, body, rhs_heap, rhs_pool) ->
-      identity_execution initial 1 empty env rhs rhs_heap rhs_pool (refine_ ());
-      (match result rhs with None -> refine_ () | Some original ->
+      identity_execution initial 1 empty env rhs rhs_heap rhs_pool ();
+      (match result rhs with None -> () | Some original ->
       let h = closed_heap rhs_heap 0 rhs_pool in let pool = Nested_pool_spec.transfer h rhs_pool empty in
       let env1 = Hm_environment_spec.Bind (original, env) in
       let facts0 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at initial 0 empty x}) @ total = fun x ->
         runtime_at_def initial 0 empty x; safe_def initial x; depth_bound_def initial 0 x;
-        covered_def initial (-1) empty x; ordered_def initial x; refine_ () in
+        covered_def initial (-1) empty x; ordered_def initial x; () in
       let child_facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at initial 1 empty x}) @ total = fun x ->
-        facts0 x; Hm_let_runtime_proofs.enter_runtime initial 0 empty x (refine_ ()); refine_ () in
+        facts0 x; Hm_let_runtime_proofs.enter_runtime initial 0 empty x (); () in
       let rhs_facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at rhs_heap 1 rhs_pool x}) @ total = fun x ->
-        Hm_let_runtime_proofs.run_runtime initial 1 empty child_facts env rhs rhs_heap rhs_pool x (refine_ ()); refine_ () in
+        Hm_let_runtime_proofs.run_runtime initial 1 empty child_facts env rhs rhs_heap rhs_pool x (); () in
       let facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h 0 pool x}) @ total = fun x ->
-        Hm_let_runtime_proofs.close_runtime initial 0 empty facts0 env rhs rhs_heap rhs_pool (refine_ rhs_facts) x (refine_ ()); refine_ () in
+        Hm_let_runtime_proofs.close_runtime initial 0 empty facts0 env rhs rhs_heap rhs_pool (refine_ rhs_facts) x (); () in
       let initial_forest : ((x : node Pref.t) @ immutable ->
         {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
           (if H.mem initial x then Level_finite_spec.finite initial t else Level_unifier_spec.observe initial x === None)} @ immutable) @ total = fun x ->
@@ -342,51 +342,51 @@ let (with_id_id_model @ total) : (e : execution) @ immutable -> (after : node Pr
       let rhs_forest : ((x : node Pref.t) @ immutable ->
         {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
           (if H.mem rhs_heap x then Level_finite_spec.finite rhs_heap t else Level_unifier_spec.observe rhs_heap x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_forest_proofs.run_forest initial initial_forest 1 empty env rhs rhs_heap rhs_pool x (refine_ ()) in refine_ t in
+        Hm_forest_proofs.run_forest initial initial_forest 1 empty env rhs rhs_heap rhs_pool x () in
       let forest : ((x : node Pref.t) @ immutable ->
         {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
           (if H.mem h x then Level_finite_spec.finite h t else Level_unifier_spec.observe h x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Forest_transport.closed_forest_at rhs_heap rhs_forest 0 rhs_pool x (refine_ ()) in refine_ t in
-      Hm_execution_proofs.run_result initial 1 empty env rhs rhs_heap rhs_pool original (refine_ ());
+        Forest_transport.closed_forest_at rhs_heap rhs_forest 0 rhs_pool x () in
+      Hm_execution_proofs.run_result initial 1 empty env rhs rhs_heap rhs_pool original ();
       let refine_ finite_tree = rhs_forest original in let tree = Forest_transport.unfolding finite_tree in
-      Forest_transport.unfolding_valid rhs_heap finite_tree (refine_ ()); Forest_transport.unfolding_root finite_tree;
+      Forest_transport.unfolding_valid rhs_heap finite_tree (); Forest_transport.unfolding_root finite_tree;
       let coverage : ((x : node Pref.t) @ immutable -> {u : unit | covered rhs_heap 0 rhs_pool x}) @ total = fun x ->
-        rhs_facts x; runtime_at_def rhs_heap 1 rhs_pool x; refine_ () in
+        rhs_facts x; runtime_at_def rhs_heap 1 rhs_pool x; () in
       let order : ((x : node Pref.t) @ immutable -> {u : unit | ordered rhs_heap x}) @ total = fun x ->
-        rhs_facts x; runtime_at_def rhs_heap 1 rhs_pool x; safe_def rhs_heap x; refine_ () in
-      Generalize_scheme_proofs.scheme_valid rhs_heap 0 rhs_pool coverage tree (refine_ ());
+        rhs_facts x; runtime_at_def rhs_heap 1 rhs_pool x; safe_def rhs_heap x; () in
+      Generalize_scheme_proofs.scheme_valid rhs_heap 0 rhs_pool coverage tree ();
       Generalize_scheme_proofs.scheme_root rhs_heap 0 tree;
-      scheme_boundary_bound rhs_heap 0 rhs_pool order tree (refine_ ());
-      lambda_result_level initial 1 empty env rhs rhs_heap rhs_pool original (refine_ ());
-      Generalize_proofs.closed_observe rhs_heap 0 rhs_pool original (refine_ ());
+      scheme_boundary_bound rhs_heap 0 rhs_pool order tree ();
+      lambda_result_level initial 1 empty env rhs rhs_heap rhs_pool original ();
+      Generalize_proofs.closed_observe rhs_heap 0 rhs_pool original ();
       closed_at_def rhs_heap h 0 rhs_pool original; at_level_def rhs_heap original;
       at_level_def h original; let lvl = Finite 1 in close_level_def 0 lvl;
       source_def body; result_def body; ran_def h 0 pool env1 body after final_pool;
       match body with
-      | RApp_left (left, _) -> source_def left; result_def left; refine_ ()
-      | RApp_right (_, right, _, _) -> source_def right; result_def right; refine_ ()
+      | RApp_left (left, _) -> source_def left; result_def left; ()
+      | RApp_right (_, right, _, _) -> source_def right; result_def right; ()
       | RApp (left, right, h1, pool1, h2, pool2, p, arrow, ok, derivation) ->
         source_def left; source_def right; result_def left; result_def right;
         ran_def h 0 pool env1 left h1 pool1;
-        Hm_protected_proofs.run_member h 0 pool env1 left h1 pool1 0 original (refine_ ());
+        Hm_protected_proofs.run_member h 0 pool env1 left h1 pool1 0 original ();
         Hm_environment_spec.protected_at_def h h1 0 original; at_level_def h1 original;
         (match left with RVar (i1, q1, epoch1, d1) ->
           (match right with RVar (i2, q2, epoch2, d2) ->
           ran_def h 0 pool env1 left h1 pool1; ran_def h1 0 pool1 env1 right h2 pool2;
           Hm_environment_spec.lookup_def env1 i1; Hm_environment_spec.lookup_def env1 i2;
           let facts1 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h1 0 pool1 x}) @ total = fun x ->
-            Hm_let_runtime_proofs.run_runtime h 0 pool facts env1 left h1 pool1 x (refine_ ()); refine_ () in
+            Hm_let_runtime_proofs.run_runtime h 0 pool facts env1 left h1 pool1 x (); () in
           let facts2 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h2 0 pool2 x}) @ total = fun x ->
-            Hm_let_runtime_proofs.run_runtime h1 0 pool1 facts1 env1 right h2 pool2 x (refine_ ()); refine_ () in
-          Hm_execution_proofs.run_result h 0 pool env1 left h1 pool1 q1 (refine_ ());
-          Hm_execution_proofs.run_extends h1 0 pool1 env1 right h2 pool2 q1 (refine_ ());
-          Hm_execution_proofs.run_result h1 0 pool1 env1 right h2 pool2 q2 (refine_ ());
+            Hm_let_runtime_proofs.run_runtime h1 0 pool1 facts1 env1 right h2 pool2 x (); () in
+          Hm_execution_proofs.run_result h 0 pool env1 left h1 pool1 q1 ();
+          Hm_execution_proofs.run_extends h1 0 pool1 env1 right h2 pool2 q1 ();
+          Hm_execution_proofs.run_result h1 0 pool1 env1 right h2 pool2 q2 ();
           let consume_model : ((rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
             (model : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation h rho x})) @ total ->
             {u : unit | claim}) @ total = fun rho model ->
             let converted : ((x : node Pref.t) @ immutable -> {u : unit | equation h rho x}) @ total = fun x ->
               model x; Level_unifier_spec.node_equation_def h rho x; Level_unifier_spec.observe_def h x; equation_def h rho x;
-              refine_ () in
+              () in
             let consume_pair : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
               (next : ((x : node Pref.t) @ immutable ->
                 {u : unit | equation (copy_heap (copy_heap h epoch1 0 d1) epoch2 0 d2) tau x})) @ total ->
@@ -395,24 +395,24 @@ let (with_id_id_model @ total) : (e : execution) @ immutable -> (after : node Pr
               let refine_ fit = fit in
               let model2 : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation h2 tau x}) @ total = fun x ->
                 next x; equation_def h2 tau x; Level_unifier_spec.node_equation_def h2 tau x; Level_unifier_spec.observe_def h2 x;
-                refine_ () in
+                () in
               let target = Function (b, b) in
               let consume_application : ((final : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
                 (final_model : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after final x})) @ total ->
                 (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h2 x) || final x === tau x})) @ total ->
                 {u : unit | ok && final p === target} -> {u : unit | claim}) @ total = fun final final_model _equal assigned ->
                   let refine_ assigned = assigned in C.matches_def final e target;
-                  let refine_ u = use final final_model (refine_ ()) in refine_ u in
-              let refine_ u = with_application_model h2 0 pool2 facts2 tau model2 q1 q2 p arrow ok after derivation target (refine_ ()) claim consume_application in refine_ u in
-            let refine_ u = with_identity_pair rhs rhs_heap rhs_pool tree h pool facts forest rho converted epoch1 d1 q1 epoch2 d2 q2 b (refine_ ()) claim consume_pair in refine_ u in
-          let refine_ u = Level_finite_proofs.with_finite_model h forest claim consume_model in refine_ u
+                  use final final_model () in
+              with_application_model h2 0 pool2 facts2 tau model2 q1 q2 p arrow ok after derivation target () claim consume_application in
+            with_identity_pair rhs rhs_heap rhs_pool tree h pool facts forest rho converted epoch1 d1 q1 epoch2 d2 q2 b () claim consume_pair in
+          Level_finite_proofs.with_finite_model h forest claim consume_model
           | RShared (i, p) -> ran_def h1 0 pool1 env1 right h2 pool2;
-            Hm_environment_spec.lookup_def env1 i; active_def h1 p; at_level_def h1 p; refine_ ()
-          | _ -> refine_ ())
-        | RShared (i, p) -> Hm_environment_spec.lookup_def env1 i; active_def h p; at_level_def h p; refine_ ()
-        | _ -> refine_ ())
-      | _ -> refine_ ())
-    | _ -> refine_ ())
+            Hm_environment_spec.lookup_def env1 i; active_def h1 p; at_level_def h1 p; ()
+          | _ -> ())
+        | RShared (i, p) -> Hm_environment_spec.lookup_def env1 i; active_def h p; at_level_def h p; ()
+        | _ -> ())
+      | _ -> ())
+    | _ -> ())
 
 let (id_id_completes @ total) : (e : execution) @ immutable -> (after : node Pref.heap) @ immutable ->
     (pool : pool) @ immutable ->
@@ -422,9 +422,9 @@ let (id_id_completes @ total) : (e : execution) @ immutable -> (after : node Pre
     let use : ((rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (model : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after rho x})) @ total ->
       {u : unit | C.matches rho e (Function (b, b))} -> {u : unit | not (result e === None)}) @ total = fun rho _model fit ->
-        let refine_ fit = fit in let target = Function (b, b) in C.matches_def rho e target; refine_ () in
+        let refine_ fit = fit in let target = Function (b, b) in C.matches_def rho e target; () in
     let claim = not (result e === None) in
-    let refine_ u = with_id_id_model e after pool b (refine_ ()) claim (refine_ use) in refine_ u)
+    with_id_id_model e after pool b () claim (refine_ use))
 
 let (id_id_factor @ total) : (e : execution) @ immutable -> (after : node Pref.heap) @ immutable ->
     (pool : pool) @ immutable -> (p : node Pref.t) @ immutable -> (tree : Level_finite_spec.tree) @ immutable ->
@@ -440,6 +440,6 @@ let (id_id_factor @ total) : (e : execution) @ immutable -> (after : node Pref.h
       (model : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after rho x})) @ total ->
       {u : unit | C.matches rho e (Function (b, b))} -> {u : unit | claim}) @ total = fun rho model fit ->
         let refine_ fit = fit in let target = Function (b, b) in C.matches_def rho e target;
-        Level_mgu_proofs.readback_factor after rho model tree (refine_ ());
-        let refine_ u = use rho (refine_ ()) in refine_ u in
-    let refine_ u = with_id_id_model e after pool b (refine_ ()) claim consume in refine_ u)
+        Level_mgu_proofs.readback_factor after rho model tree ();
+        use rho () in
+    with_id_id_model e after pool b () claim consume)

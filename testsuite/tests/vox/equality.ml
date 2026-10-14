@@ -128,15 +128,13 @@ val preserve_side : (x : side) -> {r : side | r === x} = <fun>
 
 let opaque_argument_congruence (x : Opaque.t) (y : {y : Opaque.t | y === x})
     : {u : unit |
-        let y = y in
         Opaque.observe y === Opaque.observe x} =
   ();;
 [%%expect{|
 val opaque_argument_congruence :
   (x : Opaque.t) ->
-  (y' : {y : Opaque.t | y === x}) ->
-  {u : unit | let y = y' in (Opaque.observe y) === (Opaque.observe x)} =
-  <fun>
+  (y : {y : Opaque.t | y === x}) ->
+  {u : unit | (Opaque.observe y) === (Opaque.observe x)} = <fun>
 |}]
 
 let fresh_allocations : {u : unit | ref 0 === ref 0} =

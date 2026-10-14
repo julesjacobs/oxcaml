@@ -764,7 +764,7 @@ let rec (finished @ total) :
       ghost_ (target_def empty);
       ghost_ (cost_def empty);
       let result = reverse_into e.rev empty in
-      let result = Some result in result
+      Some result
     | _ ->
       let next_k = ghost_ (Bigint.add k 2Z) in
       let rest : {f : 'a entry option list |

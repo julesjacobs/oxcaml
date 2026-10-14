@@ -81,6 +81,9 @@ type s =
     bound_values: Ident.t Ident.Map.t;
     (* Term identifiers bound by type formers. *)
 
+    arrow_binders: Ident.t TypeHash.t option;
+    (* Populated only for the immediate copy in [align_arrow_codomains]. *)
+
     additional_action: additional_action;
     sort_var_mapping: sort_map;
 
@@ -127,6 +130,7 @@ let identity =
     jkinds = Path.Map.empty;
     values = Path.Map.empty;
     bound_values = Ident.Map.empty;
+    arrow_binders = None;
     additional_action = No_action;
     sort_var_mapping = Nothing;
     loc = None;
@@ -665,6 +669,11 @@ let rec typexp copy_scope s ty =
     | No_action -> false
   in
   let desc = get_desc ty in
+  let arrow_binder =
+    match s.arrow_binders with
+    | None -> None
+    | Some binders -> TypeHash.find_opt binders ty
+  in
   match desc with
     Tvar { jkind = jk } | Tunivar { jkind = jk } ->
       let desc, jkind_changed =
@@ -808,7 +817,11 @@ let rec typexp copy_scope s ty =
             | None -> None, typexp copy_scope s ret
             | Some binder ->
                 let binder' =
-                  rename_bound_ident ~scope:Ident.lowest_scope s binder in
+                  match arrow_binder with
+                  | Some binder -> binder
+                  | None ->
+                      rename_bound_ident ~scope:Ident.lowest_scope s binder
+                in
                 let ret =
                   typexp copy_scope (add_bound_value binder binder' s) ret
                 in
@@ -893,6 +906,71 @@ let jkind copy_scope s loc jk =
 let type_expr s ty =
   let loc = Option.value s.loc ~default:Location.none in
   For_copy.with_scope (fun copy_scope -> typexp copy_scope s loc ty)
+
+let align_arrow_codomains binder1 codomain1 binder2 codomain2 =
+  let subst = add_bound_value binder1 binder2 identity in
+  let visited = TypeHash.create 17 in
+  let rec collect targets arrows left right =
+    if TypeHash.mem visited left then targets, arrows else begin
+      TypeHash.add visited left ();
+      match get_desc left, get_desc right with
+      | Tarrow ((label1, _, _, Some source), _, ret1, _),
+        Tarrow ((label2, _, _, Some target), _, ret2, _)
+        when label1 = label2 && not (Ident.same source target)
+             && Ident.scope target = Ident.lowest_scope
+             && not (Ident.same target binder2)
+             && not (Ident.Set.mem target targets) ->
+          collect (Ident.Set.add target targets)
+            ((left, target) :: arrows) ret1 ret2
+      | Tarrow ((label1, _, _, None), _, ret1, _),
+        Tarrow ((label2, _, _, None), _, ret2, _)
+        when label1 = label2 ->
+          collect targets arrows ret1 ret2
+      | _ -> targets, arrows
+    end
+  in
+  let targets, arrows =
+    collect Ident.Set.empty [] codomain1 codomain2 in
+  let targets_are_fresh () =
+    let exception Occurs in
+    let visited = TypeHash.create 17 in
+    let ident id =
+      if Ident.Set.mem id targets then raise Occurs in
+    let rec visit ty =
+      if not (TypeHash.mem visited ty) then begin
+        TypeHash.add visited ty ();
+        match get_desc ty with
+        | Tarrow ((_, _, _, binder), arg, ret, _) ->
+            Option.iter ident binder;
+            visit arg;
+            visit ret
+        | Trefine { ref_binder; ref_payload; ref_pred; _ } ->
+            ident ref_binder;
+            visit ref_payload;
+            Ident.Set.iter ident
+              (Refinement_predicate.bound_idents ref_pred);
+            Refinement_predicate.iter_scoped_dependencies
+              ~bound:Ident.Set.empty ~ident
+              ~type_expr:(fun ~bound:_ ty -> visit ty) ref_pred
+        | Tvar { jkind } | Tunivar { jkind } ->
+            ignore (Jkind.map_type_expr (fun ty -> visit ty; ty) jkind)
+        | Tof_kind jkind ->
+            ignore (Jkind.map_type_expr (fun ty -> visit ty; ty) jkind)
+        | _ -> iter_type_expr visit ty
+      end
+    in
+    match visit codomain1 with
+    | () -> true
+    | exception Occurs -> false
+  in
+  match arrows with
+  | [] -> type_expr subst codomain1
+  | _ when not (targets_are_fresh ()) -> type_expr subst codomain1
+  | _ ->
+      let arrow_binders = TypeHash.create (List.length arrows) in
+      List.iter (fun (arrow, binder) ->
+        TypeHash.add arrow_binders arrow binder) arrows;
+      type_expr { subst with arrow_binders = Some arrow_binders } codomain1
 
 (* For idents that are guaranteed to be local/scoped, such as bound
    signature items and functor parameters. *)
@@ -1461,6 +1539,7 @@ and compose s1 s2 =
                  in
                  Ident.Map.add id id' bound_values)
               s1.bound_values s2.bound_values;
+          arrow_binders = None;
           additional_action = begin
             match s1.additional_action, s2.additional_action with
             | action, No_action | No_action, action -> action

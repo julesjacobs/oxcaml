@@ -13,9 +13,9 @@ let infer : (e : {e : term | scoped_term Z e}) @ immutable ->
   let refine_ e = e in
   let refine_ t = Pref.empty () in let h = ghost_ (Pref.own (borrow_ t)) in
   let env = Empty in ghost_ (env_allocated_def h env; depth_def env);
-  let env : {env : env | env_allocated h env} = refine_ env in
-  let e : {e : term | let refine_ env = env in scoped_term (depth env) e} = refine_ e in
-  let t : {t : node Pref.token | Pref.own t === h} = refine_ t in
+  let env : {env : env | env_allocated h env} = env in
+  let e : {e : term | let refine_ env = env in scoped_term (depth env) e} = e in
+  let t : {t : node Pref.token | Pref.own t === h} = t in
   let refine_ generated = Stlc_generate.generate h env e t in
   let refine_ env = env in let refine_ e = e in
   let middle = ghost_ (Pref.own (borrow_ generated.#state)) in
@@ -24,15 +24,15 @@ let infer : (e : {e : term | scoped_term Z e}) @ immutable ->
       (if H.mem middle x then finite middle t else H.at middle x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
     let start : (x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
         (if H.mem h x then finite h t else H.at h x === None)} @ immutable total = fun x ->
-      let refine_ t = empty_tree x in refine_ t in
-    let refine_ t = built_finite_at h start env graph middle x (refine_ ()) in refine_ t) in
+      empty_tree x in
+    built_finite_at h start env graph middle x ()) in
   let eqs = generated.#equations in
-  let eqs : {eqs : equations | equations_allocated middle eqs} = refine_ eqs in
-  let t = generated.#state in let t : {t : node Pref.token | Pref.own t === middle} = refine_ t in
+  let eqs : {eqs : equations | equations_allocated middle eqs} = eqs in
+  let t = generated.#state in let t : {t : node Pref.token | Pref.own t === middle} = t in
   let refine_ solved = Stlc_solve.solve middle trees eqs t in let refine_ eqs = eqs in
   let ok = solved.#ok in let solving = ghost_ solved.#solving in
   let t = solved.#state in let after = ghost_ (Pref.own (borrow_ t)) in
   ghost_ (inferred_def e middle graph ok after solving);
-  ghost_ (solved_frame middle eqs ok after solving value (refine_ ()));
-  let refine_ tree = ghost_ (inference_finite_at e middle graph ok after solving value (refine_ ())) in
-  let r = #{value; ok; state = t; graph; generated_heap = middle; solving; tree} in refine_ r
+  ghost_ (solved_frame middle eqs ok after solving value ());
+  let refine_ tree = ghost_ (inference_finite_at e middle graph ok after solving value ()) in
+  #{value; ok; state = t; graph; generated_heap = middle; solving; tree}

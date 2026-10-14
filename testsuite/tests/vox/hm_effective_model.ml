@@ -80,7 +80,7 @@ let rec (run_restrict @ total) : (h : node Pref.heap) @ immutable ->
     | RPrimitive (op, _, _, body, middle, body_pool, out) ->
       let ts : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
         (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h trees depth pool env body middle body_pool x () in refine_ t in
+        Hm_effective_forest.run_forest h trees depth pool env body middle body_pool x () in
       let mid_model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation middle rho x}) @ total = fun x ->
         model x;
         (match result body with None -> () | Some _ -> match out with None -> () | Some p ->
@@ -94,10 +94,10 @@ let rec (run_restrict @ total) : (h : node Pref.heap) @ immutable ->
       allocated_def h depth arg var; cell_def var depth; allocatable_def h v;
       let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->
-        let t = Level_finite_proofs.allocation_finite_at h trees arg v x () in t in
+        Level_finite_proofs.allocation_finite_at h trees arg v x () in
       let ts2 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total = fun x ->
-        let t = Hm_effective_forest.run_forest h1 ts1 depth pool1 env1 body middle body_pool x () in t in
+        Hm_effective_forest.run_forest h1 ts1 depth pool1 env1 body middle body_pool x () in
       let mid_model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation middle rho x}) @ total = fun x ->
         (match result body with None -> model x; () | Some b -> match out with None -> ()
           | Some p -> let desc = Arrow (arg, b) in let w = cell desc depth in
@@ -108,17 +108,17 @@ let rec (run_restrict @ total) : (h : node Pref.heap) @ immutable ->
     | RApp_right (left, right, h1, pool1) | RCons_right (left, right, h1, pool1) ->
       let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->
-        let t = Hm_effective_forest.run_forest h trees depth pool env left h1 pool1 x () in t in
+        Hm_effective_forest.run_forest h trees depth pool env left h1 pool1 x () in
       let model1 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h1 rho x}) @ total = fun x ->
         run_restrict h1 ts1 depth pool1 env right after final_pool rho model x (); () in
       run_restrict h trees depth pool env left h1 pool1 rho model1 x (); ()
     | RCons (left, right, h1, pool1, h2, pool2, p, ok, d) ->
       let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->
-        let t = Hm_effective_forest.run_forest h trees depth pool env left h1 pool1 x () in t in
+        Hm_effective_forest.run_forest h trees depth pool env left h1 pool1 x () in
       let ts2 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total = fun x ->
-        let t = Hm_effective_forest.run_forest h1 ts1 depth pool1 env right h2 pool2 x () in t in
+        Hm_effective_forest.run_forest h1 ts1 depth pool1 env right h2 pool2 x () in
       (match result left with None -> () | Some f -> match result right with None -> ()
       | Some a -> let desc = List f in let v = cell desc depth in let h3 = H.put h2 p v in
         allocated_def h2 depth p desc;
@@ -132,10 +132,10 @@ let rec (run_restrict @ total) : (h : node Pref.heap) @ immutable ->
     | RApp (left, right, h1, pool1, h2, pool2, p, arrow, ok, d) ->
       let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->
-        let t = Hm_effective_forest.run_forest h trees depth pool env left h1 pool1 x () in t in
+        Hm_effective_forest.run_forest h trees depth pool env left h1 pool1 x () in
       let ts2 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total = fun x ->
-        let t = Hm_effective_forest.run_forest h1 ts1 depth pool1 env right h2 pool2 x () in t in
+        Hm_effective_forest.run_forest h1 ts1 depth pool1 env right h2 pool2 x () in
       (match result left with None -> () | Some f -> match result right with None -> ()
       | Some a -> let var : desc = Var in let v = cell var depth in let h3 = H.put h2 p v in
         let desc = Arrow (a, p) in let w = cell desc depth in let h4 = H.put h3 arrow w in
@@ -143,7 +143,7 @@ let rec (run_restrict @ total) : (h : node Pref.heap) @ immutable ->
         cell_def var depth; allocatable_def h2 v;
       let ts3 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h3 x then finite h3 t else observe h3 x === None)} @ immutable) @ total = fun x ->
-        let t = Level_finite_proofs.allocation_finite_at h2 ts2 p v x () in t in
+        Level_finite_proofs.allocation_finite_at h2 ts2 p v x () in
       let model4 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h4 rho x}) @ total = fun x ->
         unify_restrict h4 rho f arrow ok after d model x (); () in
       let model3 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h3 rho x}) @ total = fun x ->
@@ -162,13 +162,13 @@ let rec (run_restrict @ total) : (h : node Pref.heap) @ immutable ->
       cell_def desc depth; allocatable_def h2 w; payload_scoped_def h2 w;
       let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->
-        let t = Level_finite_proofs.allocation_finite_at h trees arg v x () in t in
+        Level_finite_proofs.allocation_finite_at h trees arg v x () in
       let ts2 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total = fun x ->
-        let t = Level_finite_proofs.allocation_finite_at h1 ts1 res v x () in t in
+        Level_finite_proofs.allocation_finite_at h1 ts1 res v x () in
       let ts3 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h3 x then finite h3 t else observe h3 x === None)} @ immutable) @ total = fun x ->
-        let t = Level_finite_proofs.allocation_finite_at h2 ts2 self w x () in t in
+        Level_finite_proofs.allocation_finite_at h2 ts2 self w x () in
       let pool3 = Entry (self, Entry (res, Entry (arg, pool))) in
       let env3 = Bind (arg, Bind (self, env)) in
       let mid_model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation middle rho x}) @ total = fun x ->
@@ -185,13 +185,13 @@ let rec (run_restrict @ total) : (h : node Pref.heap) @ immutable ->
       let empty : pool = Empty in let child_depth = depth + 1 in
       let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total = fun x ->
-        let t = Hm_effective_forest.run_forest h trees child_depth empty env rhs middle child_pool x () in t in
+        Hm_effective_forest.run_forest h trees child_depth empty env rhs middle child_pool x () in
       (match result rhs with None -> () | Some p ->
       let closed = Representative_pool_spec.close_heap middle depth child_pool in
       let transferred = Representative_pool_spec.transfer_rep closed child_pool pool in let env1 = Bind (p, env) in
       let ts2 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem closed x then finite closed t else observe closed x === None)} @ immutable) @ total = fun x ->
-        let t = Hm_effective_forest.representative_closed_forest middle ts1 depth child_pool x () in t in
+        Hm_effective_forest.representative_closed_forest middle ts1 depth child_pool x () in
       let mid_model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation middle rho x}) @ total = fun x ->
         run_restrict closed ts2 depth transferred env1 body after final_pool rho model x ();
         Representative_pool_spec.close_heap_def middle depth child_pool;

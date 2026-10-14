@@ -25,8 +25,9 @@ val session_input : string -> string
 (** The request for a countermodel after ["sat"] or a reason after ["unknown"];
     after ["unsat"], the unsat core for a query checked with [assumptions] (see
     {!Vox_smt.to_smtlib}), else nothing. Raises [Protocol_error] for any other
-    answer. *)
+    answer. [request_model] defaults to [true]; [false] omits model requests. *)
 val followup :
+  ?request_model:bool ->
   ?assumptions:Vox_smt.Symbol.t list ->
   Vox_smt.Symbol.t list ->
   string ->
@@ -41,6 +42,7 @@ val resource_request : string
     [Protocol_error]. With [assumptions] (as given to [followup]), the unsat
     core of a proof, the assumptions it used, is stored in [core]. *)
 val interpret_response :
+  ?request_model:bool ->
   resources:int option ref ->
   ?assumptions:Vox_smt.Symbol.t list ->
   ?core:Vox_smt.Symbol.t list option ref ->

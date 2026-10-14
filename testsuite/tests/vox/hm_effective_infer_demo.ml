@@ -91,25 +91,25 @@ let (scoped_fixture @ total) : (s : sample) ->
   D.scoped_term_def n0 e18;
   D.scoped_term_def n0 e17;
   D.scoped_term_def n0 e19;
-  refine_ ())
+  ())
 
 let run sample expected =
   let e = expression sample in ghost_ (scoped_fixture sample);
-  let input : {e : D.term | D.scoped_term D.Z e} = refine_ e in
+  let input : {e : D.term | D.scoped_term D.Z e} = e in
   let refine_ out = Hm_effective_infer.closed_hm input in
   (match out.#value with None -> () | Some p -> ghost_ (
     let h = Pref.own (borrow_ out.#state) in let e = out.#execution in
     let pool = out.#pool in 
-    let refine_ tree = Hm_effective_forest.closed_forest e h pool p (refine_ ()) in
+    let refine_ tree = Hm_effective_forest.closed_forest e h pool p () in
     let empty = Copy_spec.H.empty () in
     let trees : ((x : Copy_spec.node Pref.t) @ immutable ->
       {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
         (if Copy_spec.H.mem empty x then Level_finite_spec.finite empty t else Level_unifier_spec.observe empty x === None)} @ immutable) @ total = fun x ->
       let t = Level_finite_spec.Free x in Level_finite_spec.tree_root_def t;
-      Level_unifier_spec.observe_def empty x; refine_ t in
+      Level_unifier_spec.observe_def empty x; t in
     let pool0 = Generalize_spec.Empty in let env0 = Hm_environment_spec.Empty in
-    Hm_effective_driver_proofs.run_result empty trees 0 pool0 env0 e h pool p (refine_ ());
-    let refine_ _typing = Hm_effective_sound.closed_sound e h pool p tree (refine_ ()) in ()));
+    Hm_effective_driver_proofs.run_result empty trees 0 pool0 env0 e h pool p ();
+    let refine_ _typing = Hm_effective_sound.closed_sound e h pool p tree () in ()));
   assert (Option.is_some out.#value = expected)
 
 let () =
@@ -126,19 +126,19 @@ let rec deep_lambdas : int -> (body : D.term) @ immutable ->
   fun count body scope ->
     if count <= 0 then (
       ghost_ (let z = D.Z in scope.Ghost.ghost z; ());
-      let input : {e : D.term | D.scoped_term D.Z e} = refine_ body in
+      let input : {e : D.term | D.scoped_term D.Z e} = body in
       deep_infer input;
       let z = D.Z in let one = D.S z in let two = D.S one in
       let variable = D.Bound z in
       let copied = D.Let (body, variable) in
       ghost_ (D.scoped_term_def z copied; D.scoped_term_def one variable;
         D.present_def one z; ());
-      let input : {e : D.term | D.scoped_term D.Z e} = refine_ copied in
+      let input : {e : D.term | D.scoped_term D.Z e} = copied in
       deep_infer input;
       let identity = D.Lambda variable in
       let applied = D.Apply (identity, body) in
       ghost_ (D.scoped_term_def z applied; D.scoped_term_def z identity; ());
-      let input : {e : D.term | D.scoped_term D.Z e} = refine_ applied in
+      let input : {e : D.term | D.scoped_term D.Z e} = applied in
       deep_infer input;
       let call = D.Apply (variable, body) in
       let outer = D.Bound one in
@@ -152,7 +152,7 @@ let rec deep_lambdas : int -> (body : D.term) @ immutable ->
         D.scoped_term_def two variable; D.present_def two z;
         D.scoped_term_def one drop; D.scoped_term_def one calls;
         D.scoped_term_def z unified; ());
-      let input : {e : D.term | D.scoped_term D.Z e} = refine_ unified in
+      let input : {e : D.term | D.scoped_term D.Z e} = unified in
       deep_infer input)
     else (
       let next = D.Lambda body in
@@ -160,7 +160,7 @@ let rec deep_lambdas : int -> (body : D.term) @ immutable ->
         {u : unit | D.scoped_term n next})) Ghost.t =
         {Ghost.ghost = ghost_ (fun n ->
           let more = D.S n in scope.Ghost.ghost more;
-          D.scoped_term_def n next; refine_ ())} in
+          D.scoped_term_def n next; ())} in
       deep_lambdas (count - 1) next scope)
 
 let () =
@@ -168,7 +168,7 @@ let () =
   let scope : (((n : D.index) @ immutable ->
     {u : unit | D.scoped_term n body})) Ghost.t =
     {Ghost.ghost = ghost_ (fun n ->
-      D.scoped_term_def n body; refine_ ())} in
+      D.scoped_term_def n body; ())} in
   deep_lambdas 200000 body scope
 
 open Copy_spec
@@ -182,40 +182,40 @@ let run : (e : D.term) @ immutable -> (target : ty) @ immutable ghost ->
   fun e target d premise ->
   ghost_ (let refine_ premise = premise in let z = D.Z in let g = D.Empty_context in
     let t = D.embed target in D.depth_def g;
-    T.typing_scoped z g e t d (refine_ ()); ());
-  let input : {e : D.term | D.scoped_term D.Z e} = refine_ e in
+    T.typing_scoped z g e t d (); ());
+  let input : {e : D.term | D.scoped_term D.Z e} = e in
   let refine_ out = Hm_effective_infer.closed_hm input in let refine_ input = input in
   let after = ghost_ (Pref.own (borrow_ out.#state)) in
   ghost_ (let refine_ premise = premise in 
-    P.closed_completes out.#execution after out.#pool target d (refine_ ()));
+    P.closed_completes out.#execution after out.#pool target d ());
   match out.#value with None ->
-    ghost_ (let _impossible : {u : unit | false} = refine_ () in ()); assert false
+    ghost_ (let _impossible : {u : unit | false} = () in ()); assert false
   | Some p ->
     ghost_ (let refine_ premise = premise in 
-      let refine_ tree = Hm_effective_forest.closed_forest out.#execution after out.#pool p (refine_ ()) in
+      let refine_ tree = Hm_effective_forest.closed_forest out.#execution after out.#pool p () in
       let h = H.empty () in let pool : Generalize_spec.pool = Generalize_spec.Empty in
       let env : Hm_environment_spec.env = Hm_environment_spec.Empty in
       let trees : ((x : node Pref.t) @ immutable ->
         {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
           (if H.mem h x then Level_finite_spec.finite h t else Level_unifier_spec.observe h x === None)} @ immutable) @ total = fun x ->
         let t = Level_finite_spec.Free x in Level_finite_spec.tree_root_def t;
-        Level_unifier_spec.observe_def h x; refine_ t in
-      Hm_effective_driver_proofs.run_result h trees 0 pool env out.#execution after out.#pool p (refine_ ());
+        Level_unifier_spec.observe_def h x; t in
+      Hm_effective_driver_proofs.run_result h trees 0 pool env out.#execution after out.#pool p ();
       let use : ((inferred : D.typing) @ immutable ->
         (delta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
         {u : unit | D.typed D.Z D.Empty_context (source out.#execution) (D.embed (Level_finite_spec.readback tree)) inferred
           && target === Level_mgu_spec.substitute delta (Level_finite_spec.readback tree)} ->
-        {u : unit | true}) @ total = fun _inferred _delta _factor -> refine_ () in
-      Hm_effective_sound.closed_principal out.#execution after out.#pool p tree target d (refine_ ()) true use; ()); ()
+        {u : unit | true}) @ total = fun _inferred _delta _factor -> () in
+      Hm_effective_sound.closed_principal out.#execution after out.#pool p tree target d () true use; ()); ()
 
 let nested (b : ty @ immutable ghost) =
   let z = D.Z in let v = D.Bound z in let rhs = D.Lambda v in
   let app = D.Apply (v, v) in let inner = D.Let (v, app) in let e = D.Let (rhs, inner) in
   let target = ghost_ (Function (b, b)) in
   let d : {d : D.typing | D.typed D.Z D.Empty_context e (D.embed target) d} @ immutable ghost = ghost_ (let a = D.embed b in T.embed_wf z b; D.embed_def target;
-    let refine_ d = Hm_polymorphic_fixtures.nested_alias_typing a (refine_ ()) in refine_ d) in
+    Hm_polymorphic_fixtures.nested_alias_typing a ()) in
   let refine_ d = d in
-  run e target d (ghost_ (refine_ ()))
+  run e target d (ghost_ ())
 
 let mixed (b : ty @ immutable ghost) =
   let z = D.Z in let one = D.S z in let v = D.Bound z in
@@ -223,9 +223,9 @@ let mixed (b : ty @ immutable ghost) =
   let truth = D.Truth in let app = D.Apply (v, truth) in
   let body = D.Let (rhs, app) in let e = D.Lambda body in
   let target = ghost_ (Function (b, b)) in
-  let d : {d : D.typing | D.typed D.Z D.Empty_context e (D.embed target) d} @ immutable ghost = ghost_ (let refine_ d = Hm_polymorphic_fixtures.mixed_typing b in refine_ d) in
+  let d : {d : D.typing | D.typed D.Z D.Empty_context e (D.embed target) d} @ immutable ghost = ghost_ (Hm_polymorphic_fixtures.mixed_typing b) in
   let refine_ d = d in
-  run e target d (ghost_ (refine_ ()))
+  run e target d (ghost_ ())
 
 let () =
   nested (ghost_ Boolean);
@@ -244,20 +244,20 @@ let saved_garbage () =
     D.scoped_term_def z identity; D.scoped_term_def one v; D.present_def one z;
     D.scoped_term_def one inner; D.scoped_term_def one identity;
     D.scoped_term_def two v; D.present_def two z; D.scoped_term_def two self_app; ());
-  let input : {e : D.term | D.scoped_term D.Z e} = refine_ e in
+  let input : {e : D.term | D.scoped_term D.Z e} = e in
   let refine_ out = Hm_effective_infer.closed_hm input in
   let after = ghost_ (Pref.own (borrow_ out.#state)) in
   match out.#value with None -> assert false | Some p ->
     ghost_ (
-      let refine_ tree = Hm_effective_forest.closed_forest out.#execution after out.#pool p (refine_ ()) in
+      let refine_ tree = Hm_effective_forest.closed_forest out.#execution after out.#pool p () in
       let h = H.empty () in let pool : Generalize_spec.pool = Generalize_spec.Empty in
       let env : Hm_environment_spec.env = Hm_environment_spec.Empty in
       let trees : ((x : node Pref.t) @ immutable ->
         {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
           (if H.mem h x then Level_finite_spec.finite h t else Level_unifier_spec.observe h x === None)} @ immutable) @ total = fun x ->
         let t = Level_finite_spec.Free x in Level_finite_spec.tree_root_def t;
-        Level_unifier_spec.observe_def h x; refine_ t in
-      Hm_effective_driver_proofs.run_result h trees 0 pool env out.#execution after out.#pool p (refine_ ());
-      let _typing = Hm_effective_sound.closed_sound out.#execution after out.#pool p tree (refine_ ()) in ()); ()
+        Level_unifier_spec.observe_def h x; t in
+      Hm_effective_driver_proofs.run_result h trees 0 pool env out.#execution after out.#pool p ();
+      let _typing = Hm_effective_sound.closed_sound out.#execution after out.#pool p tree () in ()); ()
 
 let () = saved_garbage ()

@@ -11,8 +11,8 @@ let rec (context_equal @ total) : (h : node Pref.heap) @ immutable ->
     (env : env) @ immutable -> {u : unit | env_allocated h env} ->
     {u : unit | context_of tau env === context_of rho env} @ ghost = fun h rho tau equal env premise -> ghost_ (
   let refine_ premise = premise in env_allocated_def h env; context_of_def rho env; context_of_def tau env;
-  match env with Empty -> refine_ () | Bind (p, rest) ->
-    equal p; context_equal h rho tau equal rest (refine_ ()); refine_ ())
+  match env with Empty -> () | Bind (p, rest) ->
+    equal p; context_equal h rho tau equal rest (); ())
 
 let rec (constraints_equal @ total) : (h : node Pref.heap) @ immutable ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
@@ -21,9 +21,9 @@ let rec (constraints_equal @ total) : (h : node Pref.heap) @ immutable ->
     (eqs : equations) @ immutable -> {u : unit | equations_allocated h eqs && satisfies rho eqs} ->
     {u : unit | satisfies tau eqs} @ ghost = fun h rho tau equal eqs premise -> ghost_ (
   let refine_ premise = premise in equations_allocated_def h eqs; satisfies_def rho eqs; satisfies_def tau eqs;
-  match eqs with Nothing -> refine_ () | Equal (p, q) -> equal p; equal q; refine_ ()
-  | And (a, b) -> constraints_equal h rho tau equal a (refine_ ());
-    constraints_equal h rho tau equal b (refine_ ()); refine_ ())
+  match eqs with Nothing -> () | Equal (p, q) -> equal p; equal q; ()
+  | And (a, b) -> constraints_equal h rho tau equal a ();
+    constraints_equal h rho tau equal b (); ())
 
 let (allocation_model_at @ total) : (h : node Pref.heap) @ immutable ->
     (trees : ((x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
@@ -39,18 +39,18 @@ let (allocation_model_at @ total) : (h : node Pref.heap) @ immutable ->
   let refine_ premise = premise in allocatable_def h v; describes_def rho v value;
   let after = H.put h p v in equation_def after tau x; update x;
   if x === p then (
-    match v with Var | Bool -> refine_ () | Link q -> update q; refine_ ()
-    | Arrow (a, b) -> update a; update b; refine_ ())
+    match v with Var | Bool -> () | Link q -> update q; ()
+    | Arrow (a, b) -> update a; update b; ())
   else (
     let refine_ t = trees x in
     if H.mem h x then (
-      finite_scope_at h t (refine_ ()); scoped_def h x;
+      finite_scope_at h t (); scoped_def h x;
       model x; equation_def h rho x;
       match H.at h x with
-      | None | Some (Var | Bool) -> refine_ ()
-      | Some (Link q) -> update q; refine_ ()
-      | Some (Arrow (a, b)) -> update a; update b; refine_ ())
-    else refine_ ()))
+      | None | Some (Var | Bool) -> ()
+      | Some (Link q) -> update q; ()
+      | Some (Arrow (a, b)) -> update a; update b; ())
+    else ()))
 
 let (with_allocation_model @ total) : (h : node Pref.heap) @ immutable ->
     (trees : ((x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
@@ -70,10 +70,10 @@ let (with_allocation_model @ total) : (h : node Pref.heap) @ immutable ->
   let[@def] tau : node Pref.t @ immutable total -> ty @ immutable total =
     fun x -> if x === p then value else rho x in
   let update : (x : node Pref.t) @ immutable -> {u : unit | tau x === (if x === p then value else rho x)}
-      @ total = fun x -> tau_def x; refine_ () in
+      @ total = fun x -> tau_def x; () in
   let next : (x : node Pref.t) @ immutable -> {u : unit | equation after tau x}
       @ total = fun x -> 
-    let refine_ u = allocation_model_at h trees rho model p v value tau update x (refine_ ()) in refine_ u in
+    allocation_model_at h trees rho model p v value tau update x () in
   let equal : (x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x}
-      @ total = fun x -> update x; refine_ () in
-  tau_def p; let refine_ u = use tau next equal (refine_ ()) in refine_ u)
+      @ total = fun x -> update x; () in
+  tau_def p; use tau next equal ())

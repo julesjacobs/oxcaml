@@ -8,6 +8,8 @@ let dump_resources = ref false
 
 let executable = ref Vox_smt_solver.default_config.executable
 
+let incremental_sessions = ref false
+
 (* Proofs are bounded by Z3's resource count, which does not depend on machine
    load; the wall-clock deadline is only a backstop. Z3 4.16 spends about 8
    million units per second on an Apple M4 Max core, so the defaults are about
@@ -104,6 +106,10 @@ let cache_directory () =
   | Some directory when not (trusted_directory directory) -> None
   | directory -> directory
 
+(* Incremental resource usage depends on the preceding queries. *)
+let query_cache_directory () =
+  if !incremental_sessions then None else cache_directory ()
+
 let record_entry file contents =
   try
     let directory = Filename.dirname file in
@@ -117,6 +123,12 @@ let record_entry file contents =
 (* What the solver reports for [-version], computed once per process. *)
 let solver_version = lazy (Vox_smt_solver.version ~executable:!executable)
 
+let compiler_digest =
+  lazy
+    (match Digest.file Sys.executable_name with
+    | exception Sys_error _ -> None
+    | digest -> Some (Digest.to_hex digest))
+
 (* The solver's configured name, the version it reports and the platform it
    runs on, which both caches include in their keys. The platform is part of
    the identity because resource counts differ between builds of one version:
@@ -125,9 +137,15 @@ let solver_version = lazy (Vox_smt_solver.version ~executable:!executable)
    proof or an exhausted limit obtained under different counts. *)
 let solver_identity =
   lazy
-    (Option.map
-       (fun version -> String.concat "\000" [!executable; version; Config.host])
-       (Lazy.force solver_version))
+    (let identity version extra = String.concat "\000"
+       ([!executable; version; Config.host;
+         if !incremental_sessions then "incremental" else "reset"] @ extra) in
+     match Lazy.force solver_version with
+     | None -> None
+     | Some version when !executable = "ocaml" ->
+       Option.map (fun digest -> identity version [digest])
+         (Lazy.force compiler_digest)
+     | Some version -> Some (identity version []))
 
 let any_solver_version = ref false
 
@@ -160,12 +178,6 @@ let solver_version_error () =
             -version); proofs are checked with Z3 %s. Pass \
             -smt-solver-any-version to use it anyway."
            !executable !executable Vox_smt_solver.expected_version)
-
-let compiler_digest =
-  lazy
-    (match Digest.file Sys.executable_name with
-    | exception Sys_error _ -> None
-    | digest -> Some (Digest.to_hex digest))
 
 let unit_cache_file ~whole_unit =
   let arguments = Array.to_list Sys.argv in
@@ -420,7 +432,7 @@ let prove poll check ~batch loc query =
            ~timeout_ms:!timeout_ms query)
     end;
     let cached =
-      match cache_directory () with
+      match query_cache_directory () with
       | None -> None
       | Some directory ->
         Option.map
@@ -479,7 +491,8 @@ let prove poll check ~batch loc query =
     match recorded with
     | Some outcome -> outcome
     | None -> (
-      let result : Vox_smt_solver.result = check ?resource_limit:limit query in
+      let result : Vox_smt_solver.result =
+        check ?request_model:(Some exact) ?resource_limit:limit query in
       if !dump_resources
       then
         Format.eprintf
@@ -512,7 +525,10 @@ let prove poll check ~batch loc query =
           Some
             (Refuted
                (counterexample
-                  (Some (smaller_model check ?resource_limit:limit query model))))
+                  (Some (smaller_model
+                    (fun ?resource_limit query ->
+                      check ?request_model:(Some true) ?resource_limit query)
+                    ?resource_limit:limit query model))))
         | Invalid model -> Some (Refuted (counterexample model))
         | Unknown reason -> Some (Inconclusive reason)
         | Timeout ->
@@ -541,7 +557,7 @@ let prove poll check ~batch loc query =
   in
   let outcome =
     let exact () = attempt ~exact:true ~limit query in
-    match Vox_smt.abstract_bitwise query with
+    match Vox_smt.abstract_bitwise ~poll query with
     | None -> exact ()
     | Some abstract -> (
       let limit =
@@ -618,7 +634,7 @@ let core poll check loc (query : Vox_smt.query) ~assumptions ~deletion =
       with Vox_smt.Sort_error message -> "sort error: " ^ message
     in
     let cached =
-      match cache_directory () with
+      match query_cache_directory () with
       | None -> None
       | Some directory ->
         Option.map
@@ -726,7 +742,7 @@ let core poll check loc (query : Vox_smt.query) ~assumptions ~deletion =
     | true, Some warning, None -> Some warning
     | _, _, limit -> limit
   in
-  match Vox_smt.abstract_bitwise query with
+  match Vox_smt.abstract_bitwise ~poll query with
   | None -> attempt ~exact:true ~limit query
   | Some abstract -> (
     let abstract_limit =
@@ -816,7 +832,17 @@ let install () =
   then begin
     installed := true;
     Vox_trust.add_arguments ();
+    let configure_embedded_gc = lazy (
+      if Sys.getenv_opt "OCAMLRUNPARAM" = None
+         && Sys.getenv_opt "CAMLRUNPARAM" = None
+      then begin
+        let controls = Gc.get () in
+        if controls.space_overhead < 200 then
+          Gc.set { controls with space_overhead = 200 }
+      end)
+    in
     let with_prover f =
+      let backend = !executable in
       let int_width = if Target_system.is_64_bit () then 63 else 31 in
       let dump =
         if !dump_smtlib
@@ -836,17 +862,27 @@ let install () =
         then raise Budget_exceeded
       in
       try
-        Vox_smt_solver.with_session
-          ~config:{ executable = !executable; timeout_ms = !timeout_ms }
+        let with_session =
+          if !incremental_sessions then Vox_smt_solver.with_incremental_session
+          else Vox_smt_solver.with_session
+        in
+        with_session
+          ~config:{ executable = backend; timeout_ms = !timeout_ms }
           ~cancelled:(fun () ->
             poll ();
             false)
           ?dump ~int_width
           (fun check ->
+            let check ?request_model ?resource_limit ?assumptions query =
+              if backend = "ocaml" then Lazy.force configure_embedded_gc;
+              check ?request_model ?resource_limit ?assumptions query
+            in
             f poll
-              (prove poll (fun ?resource_limit query ->
-                   check ?resource_limit query))
-              (unused_steps poll check))
+              (prove poll (fun ?request_model ?resource_limit query ->
+                   check ?request_model ?resource_limit query))
+              (unused_steps poll (fun ?resource_limit ?assumptions query ->
+                   check ~request_model:false ?resource_limit ?assumptions
+                     query)))
       with Budget_exceeded ->
         Location.raise_errorf "Refinement verification budget exhausted"
     in
@@ -921,9 +957,14 @@ let install () =
         ( "-dsmtlib",
           Arg.Set dump_smtlib,
           " Dump commands sent to the refinement solver" );
+        ( "-smt-incremental",
+          Arg.Set incremental_sessions,
+          " Reuse declarations and assertion prefixes across compatible queries"
+        );
         ( "-smt-solver",
           Arg.Set_string executable,
-          "<path> Refinement solver executable (default z3)" );
+          "<path|ocaml> Solver executable or bundled OCaml solver (default z3)"
+        );
         ( "-smt-solver-any-version",
           Arg.Set any_solver_version,
           Printf.sprintf

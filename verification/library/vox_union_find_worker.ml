@@ -19,7 +19,7 @@ module Make (C : Vox_big_credits.S) = struct
   let (charge @ total) : (amount : int) @ ghost ->
       (bank : {t : C.token | 0 <= amount &&
         Bigint.of_int amount <= C.credits t}) @ unique total ghost ->
-      {t : C.token | let bank = bank in
+      {t : C.token |
         C.credits t = Bigint.sub (C.credits bank) (Bigint.of_int amount)}
         @ unique total ghost = fun amount bank ->
     let requested = ghost_ (Bigint.of_int amount) in
@@ -30,12 +30,11 @@ module Make (C : Vox_big_credits.S) = struct
       (state : {s : resource | M.is_root (heap s) x &&
         M.is_root (heap s) y && M.rank (heap s) x + 1 >= 0 &&
         balance s >= 7Z}) @ unique read_write total ->
-      {r : result | let state = state in
+      {r : result |
         r.#value === M.winner (heap state) x y &&
         heap r.#state === M.linked (heap state) x y &&
         balance r.#state = Bigint.sub (balance state) 7Z} @ unique =
       fun x y state ->
-    let state = state in
     let before = ghost_ (heap (borrow_ state)) in
     ghost_ (heap_def (borrow_ state); balance_def (borrow_ state);
       M.is_root_def before x; M.is_root_def before y;
@@ -50,7 +49,7 @@ module Make (C : Vox_big_credits.S) = struct
     if same then (
       let state = {memory; bank} in
       ghost_ (heap_def (borrow_ state); balance_def (borrow_ state));
-      let result = #{ value = x; state } in result)
+      #{ value = x; state })
     else (
       let readable : {t : Vox_union_find_model.node P.token | H.mem (P.own t) x &&
         H.mem (P.own t) y} = memory in
@@ -62,19 +61,19 @@ module Make (C : Vox_big_credits.S) = struct
           let memory = P.write x (M.Link (rx, y)) readable in
           let state = {memory; bank} in
           ghost_ (heap_def (borrow_ state); balance_def (borrow_ state));
-          let result = #{value = y; state} in result)
+          #{value = y; state})
         else if ry < rx then (
           let memory = P.write y (M.Link (ry, x)) readable in
           let state = {memory; bank} in
           ghost_ (heap_def (borrow_ state); balance_def (borrow_ state));
-          let result = #{value = x; state} in result)
+          #{value = x; state})
         else (
           let memory = P.write y (M.Link (ry, x)) readable in
           let writable : {t : Vox_union_find_model.node P.token | H.mem (P.own t) x} = memory in
           let memory = P.write x (M.Root (rx + 1)) writable in
           let state = {memory; bank} in
           ghost_ (heap_def (borrow_ state); balance_def (borrow_ state));
-          let result = #{value = x; state} in result)
+          #{value = x; state})
       | _ -> unreachable_ ())
 
   let empty () =
@@ -85,12 +84,11 @@ module Make (C : Vox_big_credits.S) = struct
   let allocate :
       (state : {s : resource | balance s >= 3Z})
         @ unique read_write total ->
-      {r : result | let state = state in
+      {r : result |
         not (H.mem (heap state) r.#value) &&
         heap r.#state === H.put (heap state) r.#value (M.Root 0) &&
         balance r.#state = Bigint.sub (balance state) 3Z} @ unique =
       fun state ->
-    let state = state in
     ghost_ (heap_def (borrow_ state); balance_def (borrow_ state));
     let memory = state.memory in let bank = state.bank in
     let first : {t : C.token | C.credits t > 0Z} = bank in
@@ -112,12 +110,11 @@ module Make (C : Vox_big_credits.S) = struct
       (state : {s : resource | M.valid (heap s) path &&
         x === M.head path && depth = M.depth path &&
         balance s >= cost depth}) @ unique read_write total ->
-      {r : result | let state = state in
+      {r : result |
         r.#value === M.root path &&
         heap r.#state === M.compressed (heap state) path &&
         balance r.#state = Bigint.sub (balance state) (cost depth)}
         @ unique = fun depth path x state ->
-    let state = state in
     let before = ghost_ (heap (borrow_ state)) in
     ghost_ (heap_def (borrow_ state); balance_def (borrow_ state);
       cost_def depth; M.depth_nonnegative path; M.valid_def before path);

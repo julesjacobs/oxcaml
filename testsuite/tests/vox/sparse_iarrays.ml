@@ -142,7 +142,6 @@ module Demo : sig end = struct
         (left_value : Element.t) -> (right_value : Element.t) ->
         (index : int) ->
         {u : unit |
-          let right = right in
           let left_updates =
             Updates.Refined.add left left_value overlay.updates in
           let left_first = {overlay with
@@ -153,7 +152,6 @@ module Demo : sig end = struct
             updates = Updates.Refined.add left left_value right_updates} in
           lookup index left_first === lookup index right_first} =
       fun overlay left right left_value right_value index ->
-      let right = right in
       let left_updates =
         Updates.Refined.add left left_value overlay.updates in
       let left_first = {overlay with
@@ -220,7 +218,6 @@ module Demo : sig end = struct
     ghost_ (
       Int_laws.independent_updates overlay left right
         left_value right_value index);
-    let right = right in
     let left_updates = Updates.Refined.add left left_value overlay.updates in
     let left_first = {overlay with
       updates = Updates.Refined.add right right_value left_updates} in

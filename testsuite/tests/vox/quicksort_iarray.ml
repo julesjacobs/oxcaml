@@ -17,10 +17,10 @@ type runner =
   (rp : (int iarray @ total immutable -> bool @ ghost)) @ ghost ->
   ((s : {s : int Slice.t | Slice.current s === Slice.current left
       && Slice.final s === Slice.final left}) @ local unique ->
-    {u : unit | let s = s in lp (Slice.final s)}) @ portable once ->
+    {u : unit | lp (Slice.final s)}) @ portable once ->
   ((s : {s : int Slice.t | Slice.current s === Slice.current right
       && Slice.final s === Slice.final right}) @ local unique ->
-    {u : unit | let s = s in rp (Slice.final s)}) @ portable once ->
+    {u : unit | rp (Slice.final s)}) @ portable once ->
   {u : unit | lp (Slice.final left) && rp (Slice.final right)}
 
 let (sequential_runner @ portable total) : runner =
@@ -199,13 +199,11 @@ let rec (sort_sized @ portable) : (run : runner) @ portable ->
       ghost_ (Vox_iarray.slice_length divided past size);
       let _ = run spawn left right left_post right_post
         (fun child ->
-          let child = child in
           let sized : {s : int Slice.t | 0 <= boundary
             && Iarray.length (Slice.current s) = boundary} = child in
           let u = sort_sized run left_domains cutoff boundary sized in
           u)
         (fun child ->
-          let child = child in
           let sized : {s : int Slice.t | 0 <= right_size
             && Iarray.length (Slice.current s) = right_size} = child in
           let u = sort_sized run right_domains cutoff right_size sized in

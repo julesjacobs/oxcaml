@@ -31,8 +31,6 @@ module Fibonacci = struct
       (a : {a : int | a = fib (n - 1)}) (b : {b : int | b = fib n}) :
       {r : int | r = fib (n + 1)} =
     if n < 1 || n > 90 then raise Overflow;
-    let a = a in
-    let b = b in
     let next = ghost_ (n + 1) in
     ghost_ (fib_def next);
     let r = a + b in
@@ -41,8 +39,6 @@ module Fibonacci = struct
   let rec tail_loop : (n : int) -> (i : int) ->
       {a : int | a = fib i} -> {b : int | b = fib (i + 1)} ->
       {r : int | r = fib n} = fun n i a b ->
-    let a = a in
-    let b = b in
     if i = n then a
     else if 0 <= i && i < n && n <= 90 then
       let j = i + 1 in
@@ -94,8 +90,6 @@ module Fibonacci = struct
       ghost_ (fib_def twice_next);
       let p = tail prev in
       let q = tail n in
-      let p = p in
-      let q = q in
       doubling_step p q;
       u
   [@@decreases n]
@@ -113,15 +107,11 @@ module Fibonacci = struct
       let k = n / 2 in
       double k;
       let a, b = doubling_pair k in
-      let a = a in
-      let b = b in
       doubling_identity k;
       let c = a * (2 * b - a) in
       let d = a * a + b * b in
       let c : {r : int | r = fib (2 * k)} = c in
       let d : {r : int | r = fib (2 * k + 1)} = d in
-      let c = c in
-      let d = d in
       if n mod 2 = 0 then (c, d)
       else
         let lower : {r : int | r = fib (n - 1)} = c in

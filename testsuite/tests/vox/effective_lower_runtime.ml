@@ -85,7 +85,7 @@ let rec run_lower : (goal : lower_goal) @ immutable -> (h : node Pref.heap Ghost
       let tree : {b : bounded | bound_root b === p && effective_bounded h.Ghost.ghost heads.Ghost.ghost bound b} @ immutable ghost = ghost_ (
         let refine_ ft = trees p in
         E.effective_below_def h.Ghost.ghost heads.Ghost.ghost p bound; at_level_def h.Ghost.ghost p;
-        let refine_ b = Effective_lower_tree.bounded_tree h.Ghost.ghost heads.Ghost.ghost witness.Ghost.ghost order bound ft () in refine_ b) in
+        Effective_lower_tree.bounded_tree h.Ghost.ghost heads.Ghost.ghost witness.Ghost.ghost order bound ft ()) in
       let edits = ghost_ Keep in
       ghost_ (effective_lower_valid_def h.Ghost.ghost heads.Ghost.ghost bound edits; lower_heap_def h.Ghost.ghost bound edits; confined_def edits tree);
       let r = #{state = t; edits; tree} in use (refine_ r)

@@ -89,3 +89,9 @@ chmod o+w "$VOX_VERIFY_CACHE"
 strict "15 (version 4.16.0, failing, world-writable cache)" "$OCAMLC" -w +a
 chmod o-w "$VOX_VERIFY_CACHE"
 strict "16 (version 4.16.0, failing, private cache)" "$OCAMLC" -w +a
+strict "17 (incremental, failing, reset caches)" "$OCAMLC" -smt-incremental
+solver "4.16.0 - 64 bit" works
+strict "18 (incremental, working)" "$OCAMLC" -smt-incremental
+solver "4.16.0 - 64 bit" fails
+strict "19 (incremental, failing, unit cache)" "$OCAMLC" -smt-incremental
+strict "20 (incremental, failing, query cache)" "$OCAMLC" -smt-incremental -w +a

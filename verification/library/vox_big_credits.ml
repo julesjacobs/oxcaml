@@ -12,19 +12,19 @@ module type S = sig
 
   val tick : (token : {t : token | credits t > 0Z})
       @ unique total ghost ->
-    {t : token | let token = token in
+    {t : token |
       credits t = Bigint.sub (credits token) 1Z} @ unique total ghost @@ total
 
   val split : (amount : Bigint.t) @ ghost ->
     (token : {t : token | 0Z <= amount && amount <= credits t})
       @ unique total ghost ->
-    {p : partition | let token = token in credits p.left = amount &&
+    {p : partition | credits p.left = amount &&
       credits p.right = Bigint.sub (credits token) amount} @ unique @@ total
 
   val merge : (left : token) @ unique total ghost ->
     (right : {t : token | 0Z <= credits left && 0Z <= credits t})
       @ unique total ghost ->
-    {t : token | let right = right in
+    {t : token |
       credits t = Bigint.add (credits left) (credits right)} @ unique total ghost @@ total
 
 end
@@ -35,7 +35,7 @@ module Make () = struct
   type partition = { left : token @@ ghost; right : token @@ ghost }
 
   let[@def] credits (token : token @ local immutable total ghost) =
-    ghost_ (let balance = token.balance in balance)
+    ghost_ (token.balance)
 
   let (nonnegative @ total) (token : token @ local immutable total ghost) :
       {u : unit | 0Z <= credits token} @ ghost = ghost_ (
@@ -45,9 +45,8 @@ module Make () = struct
 
   let (tick @ total) (token : {t : token | credits t > 0Z}
         @ unique total ghost) :
-      {t : token | let token = token in
+      {t : token |
       credits t = Bigint.sub (credits token) 1Z} @ unique total ghost =
-    let token = token in
     ghost_ (credits_def (borrow_ token));
     let result = { balance = ghost_ (
       let balance = token.balance in
@@ -58,9 +57,8 @@ module Make () = struct
   let (split @ total) (amount : Bigint.t @ ghost)
       (token : {t : token | 0Z <= amount && amount <= credits t}
         @ unique total ghost) :
-      {p : partition | let token = token in credits p.left = amount &&
+      {p : partition | credits p.left = amount &&
         credits p.right = Bigint.sub (credits token) amount} @ unique =
-    let token = token in
     let left = { balance = ghost_ (amount : amount) } in
     ghost_ (credits_def (borrow_ token));
     let right = { balance = ghost_ (
@@ -74,9 +72,8 @@ module Make () = struct
   let (merge @ total) (left : token @ unique total ghost)
       (right : {t : token | 0Z <= credits left && 0Z <= credits t}
         @ unique total ghost) :
-      {t : token | let right = right in
+      {t : token |
       credits t = Bigint.add (credits left) (credits right)} @ unique total ghost =
-    let right = right in
     ghost_ (credits_def (borrow_ left); credits_def (borrow_ right));
     let result = { balance = ghost_ (
       let a = left.balance in
@@ -87,9 +84,8 @@ module Make () = struct
 
   module Budget = struct
     let (create @ total) (amount : {n : Bigint.t | n >= 0Z} @ ghost) :
-        {t : token | let amount = amount in credits t = amount}
+        {t : token | credits t = amount}
         @ unique total ghost =
-      let amount = amount in
       let result = { balance = ghost_ (amount : amount) } in
       ghost_ (credits_def (borrow_ result));
       result
@@ -98,6 +94,5 @@ module Make () = struct
       {t : token | credits t = 0Z} @ unique total ghost =
     let zero = ghost_ 0Z in
     let initial : amount = zero in
-    let result = Budget.create initial in
-    result
+    Budget.create initial
 end

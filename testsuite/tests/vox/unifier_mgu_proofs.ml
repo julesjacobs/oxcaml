@@ -16,11 +16,11 @@ let rec (readback_factor @ total) :
     let x = root t in model x; equation_def h rho x;
     let v = readback t in substitute_def rho v;
     match t with
-    | Free _ | Boolean _ -> refine_ ()
-    | Alias (_, child) -> readback_factor h rho model child (refine_ ()); refine_ ()
+    | Free _ | Boolean _ -> ()
+    | Alias (_, child) -> readback_factor h rho model child (); ()
     | Branch (_, a, b) ->
-      readback_factor h rho model a (refine_ ());
-      readback_factor h rho model b (refine_ ()); refine_ ())
+      readback_factor h rho model a ();
+      readback_factor h rho model b (); ())
 
 let (normal_model_at @ total) :
     (h : node Pref.heap) @ immutable ->
@@ -36,8 +36,8 @@ let (normal_model_at @ total) :
         {u : unit | let refine_ t = trees x in not (H.mem h x) || sigma x === readback t}
         @ total = fun x ->
       normal x; let refine_ t = trees x in normalizes_def h sigma x t;
-      refine_ () in
-    let refine_ u = readback_model_at h trees sigma agrees x in refine_ u)
+      () in
+    readback_model_at h trees sigma agrees x)
 
 let (mgu_solution_at @ total) :
     (h : node Pref.heap) @ immutable ->
@@ -56,8 +56,8 @@ let (mgu_solution_at @ total) :
     let refine_ premise = premise in
     let model : (x : node Pref.t) @ immutable -> {u : unit | equation after sigma x}
         @ total = fun x ->
-      let refine_ u = normal_model_at after trees sigma normal x in refine_ u in
-    success_forward_at h sigma p q after d model x (refine_ ()))
+      normal_model_at after trees sigma normal x in
+    success_forward_at h sigma p q after d model x ())
 
 let (mgu_factor_at @ total) :
     (h : node Pref.heap) @ immutable ->
@@ -80,11 +80,11 @@ let (mgu_factor_at @ total) :
     if H.mem after x then (
       let after_model : (x : node Pref.t) @ immutable -> {u : unit | equation after rho x}
           @ total = fun x ->
-        let refine_ u = success_backward_at h rho model p q after d x (refine_ ()) in
-        refine_ u in
-      readback_factor after rho after_model t (refine_ ()); refine_ ())
+        let refine_ u = success_backward_at h rho model p q after d x () in
+        u in
+      readback_factor after rho after_model t (); ())
     else (
-      let v = TVar x in substitute_def rho v; refine_ ()))
+      let v = TVar x in substitute_def rho v; ()))
 
 let (mgu_support_at @ total) :
     (h : node Pref.heap) @ immutable ->
@@ -96,8 +96,8 @@ let (mgu_support_at @ total) :
       && not (H.mem h x)} ->
     {u : unit | sigma x === TVar x} @ ghost = fun h p q after d sigma x t premise -> ghost_ (
   let refine_ premise = premise in 
-  unified_frame h p q true after d x (refine_ ());
-  normalizes_def after sigma x t; refine_ ())
+  unified_frame h p q true after d x ();
+  normalizes_def after sigma x t; ())
 
 let (instance_solution_at @ total) :
     (h : node Pref.heap) @ immutable ->
@@ -115,12 +115,12 @@ let (instance_solution_at @ total) :
     model x; equation_def h sigma x; equation_def h rho x;
     instance p; instance q; instance x;
     match H.at h x with
-    | None | Some Var -> refine_ ()
-    | Some Bool -> let v = TBool in substitute_def delta v; refine_ ()
-    | Some (Link y) -> instance y; refine_ ()
+    | None | Some Var -> ()
+    | Some Bool -> let v = TBool in substitute_def delta v; ()
+    | Some (Link y) -> instance y; ()
     | Some (Arrow (a, b)) ->
       instance a; instance b;
-      let v = TArrow (sigma a, sigma b) in substitute_def delta v; refine_ ())
+      let v = TArrow (sigma a, sigma b) in substitute_def delta v; ())
 
 let (with_mgu @ total) :
     (h : node Pref.heap) @ immutable ->
@@ -147,8 +147,8 @@ let (with_mgu @ total) :
       {t : tree | root t === x &&
         (if H.mem after x then finite after t else H.at after x === None)}
       @ immutable total = fun x ->
-    let refine_ t = unified_finite_at h before_trees p q true after d x (refine_ ()) in
-    refine_ t in
+    let refine_ t = unified_finite_at h before_trees p q true after d x () in
+    t in
   let[@def] sigma : node Pref.t @ immutable total -> ty @ immutable total = fun x ->
     let refine_ t = trees x in
     if H.mem after x then readback t else TVar x in
@@ -156,25 +156,25 @@ let (with_mgu @ total) :
       {u : unit | let refine_ t = trees x in normalizes after sigma x t}
       @ total = fun x ->
     sigma_def x; let refine_ t = trees x in normalizes_def after sigma x t;
-    refine_ () in
+    () in
   let model : (x : node Pref.t) @ immutable -> {u : unit | equation h sigma x}
       @ total = fun x ->
-    mgu_solution_at h p q after d trees sigma normal x (refine_ ()); refine_ () in
+    mgu_solution_at h p q after d trees sigma normal x (); () in
   let solution : (x : node Pref.t) @ immutable ->
       {u : unit | equation h sigma x && sigma p === sigma q
         && sigma x === substitute sigma (sigma x)
         && (H.mem h x || sigma x === TVar x)} @ total = fun x ->
-    mgu_solution_at h p q after d trees sigma normal x (refine_ ());
-    mgu_factor_at h p q after d trees sigma normal sigma model x (refine_ ());
+    mgu_solution_at h p q after d trees sigma normal x ();
+    mgu_factor_at h p q after d trees sigma normal sigma model x ();
     normal x; let refine_ t = trees x in
     if not (H.mem h x) then (
-      mgu_support_at h p q after d sigma x t (refine_ ()); refine_ ())
-    else refine_ () in
+      mgu_support_at h p q after d sigma x t (); ())
+    else () in
   let factor : ((rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (old_model : ((x : node Pref.t) @ immutable -> {u : unit | equation h rho x})) @ total ->
       (x : node Pref.t) @ immutable -> {u : unit | rho p === rho q} ->
       {u : unit | rho x === substitute rho (sigma x)}) @ total = fun rho old_model x equal ->
     let refine_ equal = equal in 
-    let refine_ u = mgu_factor_at h p q after d trees sigma normal rho old_model x (refine_ ()) in
-    refine_ u in
-  let refine_ u = use sigma solution factor in refine_ u)
+    let refine_ u = mgu_factor_at h p q after d trees sigma normal rho old_model x () in
+    u in
+  use sigma solution factor)

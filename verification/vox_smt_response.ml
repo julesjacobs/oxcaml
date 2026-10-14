@@ -180,11 +180,12 @@ let session_input input =
            else line)
          (String.split_on_char '\n' input))
 
-let followup ?assumptions symbols answer =
+let followup ?(request_model = true) ?assumptions symbols answer =
   match answer with
-  | "unsat" -> if Option.is_some assumptions then "(get-unsat-core)\n" else ""
+  | "unsat" ->
+    if Option.is_some assumptions then "(get-unsat-assumptions)\n" else ""
   | "sat" ->
-    if symbols = []
+    if not request_model || symbols = []
     then ""
     else
       "(get-value ("
@@ -200,8 +201,8 @@ let resource_request = "(get-info :rlimit)\n"
 
 (* The resource count restarts at each reset. It is recorded before the rest of
    the response is interpreted, which may fail. *)
-let interpret_response ~resources ?assumptions ?(core = ref None) symbols answer
-    text =
+let interpret_response ?(request_model = true) ~resources ?assumptions
+    ?(core = ref None) symbols answer text =
   let response =
     match List.rev (parse text) with
     | List [Atom ":rlimit"; Atom count] :: rest -> (
@@ -236,4 +237,8 @@ let interpret_response ~resources ?assumptions ?(core = ref None) symbols answer
     | Some _, "unsat", _ -> protocol "Missing unsat core"
     | _ -> response
   in
-  interpret symbols answer response
+  if not request_model && answer = "sat" then
+    match response with
+    | [] -> Invalid None
+    | _ -> protocol "Unexpected solver response"
+  else interpret symbols answer response

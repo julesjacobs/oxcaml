@@ -22,7 +22,7 @@ let finish : (before : (node Pref.heap) Ghost.t) @ immutable ->
       let h_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
       let scope_witness2 : (((q : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h_witness1.Ghost.ghost q) || finite_scope h_witness1.Ghost.ghost q})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope.Ghost.ghost)} in
-      let p_argument3 : {p : node Pref.t | H.mem h_witness1.Ghost.ghost p && active h_witness1.Ghost.ghost p} = let refine_ argument = input in refine_ argument in
+      let p_argument3 : {p : node Pref.t | H.mem h_witness1.Ghost.ghost p && active h_witness1.Ghost.ghost p} = input in
       let refine_ state_argument4 = borrowed in
       let refine_ out = Level_unifier.representative h_witness1 scope_witness2 p_argument3 (refine_ state_argument4) in let refine_ input = input in refine_ out in
     let refine_ rp = rp in
@@ -32,7 +32,7 @@ let finish : (before : (node Pref.heap) Ghost.t) @ immutable ->
       let h_witness5 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
       let scope_witness6 : (((q : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h_witness5.Ghost.ghost q) || finite_scope h_witness5.Ghost.ghost q})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope.Ghost.ghost)} in
-      let p_argument7 : {p : node Pref.t | H.mem h_witness5.Ghost.ghost p && active h_witness5.Ghost.ghost p} = let refine_ argument = input in refine_ argument in
+      let p_argument7 : {p : node Pref.t | H.mem h_witness5.Ghost.ghost p && active h_witness5.Ghost.ghost p} = input in
       let refine_ state_argument8 = borrowed in
       let refine_ out = Level_unifier.representative h_witness5 scope_witness6 p_argument7 (refine_ state_argument8) in let refine_ input = input in refine_ out in
     let refine_ rq = rq in let p = rp.#value in let q = rq.#value in
@@ -41,11 +41,11 @@ let finish : (before : (node Pref.heap) Ghost.t) @ immutable ->
     else (
       let pv : {v : node | H.at h.Ghost.ghost p === Some v} =
         let borrowed = borrow_ state in let borrowed : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ borrowed in
-        let refine_ v = Pref.read p borrowed in refine_ v in
+        Pref.read p borrowed in
       let refine_ pv = pv in
       let qv : {v : node | H.at h.Ghost.ghost q === Some v} =
         let borrowed = borrow_ state in let borrowed : {t : node Pref.token | H.mem (Pref.own t) q} = refine_ borrowed in
-        let refine_ v = Pref.read q borrowed in refine_ v in
+        Pref.read q borrowed in
       let refine_ qv = qv in
       match pv.desc, qv.desc, pv.level, qv.level with
       | Arrow _, Arrow _, Finite pn, Finite qn
@@ -53,19 +53,19 @@ let finish : (before : (node Pref.heap) Ghost.t) @ immutable ->
         let source = if pn >= qn then p else q in
         let target = if pn >= qn then q else p in
         let source_tree : {t : tree | finite h.Ghost.ghost t && tree_root t === source} @ immutable ghost = ghost_ (
-          let refine_ t = trees.Ghost.ghost source in refine_ t) in
+          trees.Ghost.ghost source) in
         let target_tree : {t : tree | finite h.Ghost.ghost t && tree_root t === target} @ immutable ghost = ghost_ (
-          let refine_ t = trees.Ghost.ghost target in refine_ t) in
+          trees.Ghost.ghost target) in
         let refine_ source_tree = source_tree in let refine_ target_tree = target_tree in
         let proof : {u : unit | Structure_spec.linkable h.Ghost.ghost source_tree target_tree} @ ghost = ghost_ (
           let equality : {u : unit | readback source_tree === readback target_tree} =
-          if pn >= qn then (Optimized_link_proofs.equal_roots before.Ghost.ghost old_p old_q h.Ghost.ghost d.Ghost.ghost trees.Ghost.ghost p q rp.#path rq.#path source_tree target_tree (refine_ ()); refine_ ())
-          else ( Optimized_link_proofs.equal_roots before.Ghost.ghost old_p old_q h.Ghost.ghost d.Ghost.ghost trees.Ghost.ghost p q rp.#path rq.#path target_tree source_tree (refine_ ()); refine_ ()) in
+          if pn >= qn then (Optimized_link_proofs.equal_roots before.Ghost.ghost old_p old_q h.Ghost.ghost d.Ghost.ghost trees.Ghost.ghost p q rp.#path rq.#path source_tree target_tree (); ())
+          else ( Optimized_link_proofs.equal_roots before.Ghost.ghost old_p old_q h.Ghost.ghost d.Ghost.ghost trees.Ghost.ghost p q rp.#path rq.#path target_tree source_tree (); ()) in
           let refine_ equality = equality in
           active_def h.Ghost.ghost p; active_def h.Ghost.ghost q;
           terminal_def h.Ghost.ghost source; observe_def h.Ghost.ghost source; terminal_def h.Ghost.ghost target; observe_def h.Ghost.ghost target;
           at_level_def h.Ghost.ghost source; at_level_def h.Ghost.ghost target; below_def h.Ghost.ghost target pn; below_def h.Ghost.ghost target qn;
-          Structure_spec.linkable_def h.Ghost.ghost source_tree target_tree; refine_ ()) in
+          Structure_spec.linkable_def h.Ghost.ghost source_tree target_tree; ()) in
         let refine_ proof = proof in
         let state : {t : node Pref.token | Pref.own t === h.Ghost.ghost && Structure_spec.linkable h.Ghost.ghost source_tree target_tree
           && tree_root source_tree === source && tree_root target_tree === target} = refine_ state in

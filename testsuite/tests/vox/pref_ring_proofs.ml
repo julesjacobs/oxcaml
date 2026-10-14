@@ -38,7 +38,7 @@ let (allocation_frame @ total) (n : node @ immutable)
     (other : node @ immutable)
     (h : {h : node option Pref.heap | H.mem h other.prev && H.mem h other.next
       && not (H.mem h n.prev) && not (H.mem h n.next)} @ immutable) :
-    {u : unit | let h = h in
+    {u : unit |
       let after = H.put (H.put (H.put (H.put h n.prev None) n.next None)
         n.prev (Some n)) n.next (Some n) in
       H.mem after other.prev && H.mem after other.next

@@ -157,20 +157,25 @@ let shape_uid env namespace path =
   Option.bind (Env.shape_of_path_opt ~namespace env path) (fun shape ->
       resolved_uid (Shape_reducer.reduce_for_uid env shape))
 
-let make_total_result_uid env standard_make_total modules name namespace =
-  Option.bind
+let make_total_shape env standard_make_total =
+  Option.map (fun shape -> Shape.app shape ~arg:Shape.dummy_mod)
     (Env.shape_of_path_opt ~namespace:Shape.Sig_component_kind.Module env
-       standard_make_total) (fun shape ->
-      let shape = Shape.app shape ~arg:Shape.dummy_mod in
-      let shape =
-        List.fold_left
-          (fun shape name ->
-            Shape.proj shape
-              (Shape.Item.make name Shape.Sig_component_kind.Module))
-          shape modules
-      in
-      let shape = Shape.proj shape (Shape.Item.make name namespace) in
-      resolved_uid (Shape_reducer.reduce_for_uid env shape))
+       standard_make_total)
+
+let make_total_member_uid env shape modules name namespace =
+  let shape =
+    List.fold_left
+      (fun shape name ->
+        Shape.proj shape
+          (Shape.Item.make name Shape.Sig_component_kind.Module))
+      shape modules
+  in
+  let shape = Shape.proj shape (Shape.Item.make name namespace) in
+  resolved_uid (Shape_reducer.reduce_for_uid env shape)
+
+let make_total_result_uid env standard_make_total modules name namespace =
+  Option.bind (make_total_shape env standard_make_total) (fun shape ->
+    make_total_member_uid env shape modules name namespace)
 
 let set_operations =
   [ [], "empty", ("%set_empty", 0);
@@ -185,18 +190,17 @@ let set_operations =
     ["Refined"], "find", ("%set_refined_find", 2) ]
 
 let functor_result_value env standard_make_total operations path =
-  let actual = shape_uid env Shape.Sig_component_kind.Value path in
-  List.find_map
-    (fun (modules, name, operation) ->
-      match
-        ( actual,
-          make_total_result_uid env standard_make_total modules name
-            Shape.Sig_component_kind.Value )
-      with
-      | Some actual, Some standard when Shape.Uid.equal actual standard ->
-        Some operation
-      | _ -> None)
-    operations
+  Option.bind (shape_uid env Shape.Sig_component_kind.Value path)
+    (fun actual ->
+      Option.bind (make_total_shape env standard_make_total) (fun shape ->
+        List.find_map
+          (fun (modules, name, operation) ->
+            match make_total_member_uid env shape modules name
+                Shape.Sig_component_kind.Value with
+            | Some standard when Shape.Uid.equal actual standard ->
+              Some operation
+            | _ -> None)
+          operations))
 
 let set_make_total = standard_make_total "Stdlib__Set"
 

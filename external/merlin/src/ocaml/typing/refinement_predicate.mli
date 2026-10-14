@@ -64,8 +64,12 @@ type type_pair =
 
 (** [equal], returning the types of corresponding nodes when the predicates
     are alpha-equivalent.  Equal predicates denote the same proposition only
-    when these types are also related. *)
+    when these types are also related. The optional path functions normalize
+    paths before comparison. *)
 val equal_with_types :
+  ?value_path:(Path.t -> Path.t) ->
+  ?constructor_path:(Path.t -> Path.t) ->
+  ?type_path:(Path.t -> Path.t) ->
   pairs:(Ident.t * Ident.t) list ->
   refinement_expression -> refinement_expression ->
   type_pair list option

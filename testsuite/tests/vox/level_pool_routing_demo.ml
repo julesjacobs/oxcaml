@@ -17,11 +17,11 @@ let (close_frame @ total) : (h : node Pref.heap) @ immutable ->
     {u : unit | H.mem h p === H.mem (S.close_heap h cut pool) p} @ ghost =
   fun h cut pool p premise -> ghost_ (
     let refine_ premise = premise in 
-    S.close_heap_def h cut pool; R.representatives_scoped h pool (refine_ ());
+    S.close_heap_def h cut pool; R.representatives_scoped h pool ();
     let filtered = R.representatives h pool in
     let after = S.close_heap h cut pool in
-    Generalize_proofs.closed_observe h cut filtered p (refine_ ());
-    closed_at_def h after cut filtered p; refine_ ())
+    Generalize_proofs.closed_observe h cut filtered p ();
+    closed_at_def h after cut filtered p; ())
 
 let rec repeat : (h : node Pref.heap Ghost.t) @ immutable ->
     (n : int) -> (p : node Pref.t) @ immutable ->
@@ -30,10 +30,10 @@ let rec repeat : (h : node Pref.heap Ghost.t) @ immutable ->
     {pool : pool | pool_scoped h.Ghost.ghost pool} @ immutable =
   fun h n p tail ->
     let refine_ tail = tail in
-    if n <= 0 then refine_ tail else
+    if n <= 0 then tail else
       let next = Entry (p, tail) in
       ghost_ (pool_scoped_def h.Ghost.ghost next);
-      let refine_ out = repeat h (n - 1) p (refine_ next) in refine_ out
+      repeat h (n - 1) p next
 
 let rec length acc = function
   | Empty -> acc
@@ -69,25 +69,25 @@ let run count =
     pool_scoped_def h two; pool_scoped_def h tail;
     ());
   let witness = {Ghost.ghost = ghost_ h} in
-  let refine_ child = repeat witness count p (refine_ tail) in
+  let refine_ child = repeat witness count p tail in
   let existing = Entry (q, Empty) in
   let values = [: Empty; existing; Empty; Empty :] in
   let refine_ pools = A.of_iarray values in
   let state : {t : node Pref.token | Pref.own t === witness.Ghost.ghost && pool_scoped witness.Ghost.ghost child} =
-    refine_ state in
+    state in
   let pools : {a : pool A.t | 0 <= 3 && 3 < Iarray.length (A.contents a)} =
-    refine_ pools in
+    pools in
   let refine_ out = Level_pool_routing.close_and_route witness 3 child state pools in
   let state = out.#state in let refine_ values = A.into_iarray out.#pools in
   assert (length 0 (Iarray.get values 0) = count);
   assert ((Iarray.get values 1) = existing);
   assert ((Iarray.get values 2) = Entry (q, Empty));
   assert ((Iarray.get values 3) = Empty);
-  ghost_ (close_frame h 3 child r (refine_ ());
-    close_frame h 3 child link (refine_ ()));
-  let state : {t : node Pref.token | H.mem (Pref.own t) r} = refine_ state in
+  ghost_ (close_frame h 3 child r ();
+    close_frame h 3 child link ());
+  let state : {t : node Pref.token | H.mem (Pref.own t) r} = state in
   let refine_ rv = Pref.read r (borrow_ state) in let refine_ state = state in
-  let state : {t : node Pref.token | H.mem (Pref.own t) link} = refine_ state in
+  let state : {t : node Pref.token | H.mem (Pref.own t) link} = state in
   let refine_ lv = Pref.read link (borrow_ state) in
   assert (rv.level = Generic);
   assert (lv.level = Finite 9);

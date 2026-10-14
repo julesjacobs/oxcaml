@@ -139,7 +139,7 @@ let () =
   ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
     A.union_fee_def alpha);
   let input : {s : U.t | U.valid s && U.member x0 s && U.member x1 s} = state in
-  let payment : {b : C.token | let input = input in
+  let payment : {b : C.token |
     C.credits b >= A.union_fee input.#U.alpha} = refund in
   let before_x0 = ghost_ (U.representative x0 (borrow_ input)) in
   let before_x1 = ghost_ (U.representative x1 (borrow_ input)) in
@@ -165,7 +165,7 @@ let () =
   ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
     A.union_fee_def alpha);
   let input : {s : U.t | U.valid s && U.member x2 s && U.member x3 s} = state in
-  let payment : {b : C.token | let input = input in
+  let payment : {b : C.token |
     C.credits b >= A.union_fee input.#U.alpha} = refund in
   let joined = U.union x2 x3 input payment in
   let #{U.value = _; state; refund} = joined in
@@ -182,7 +182,7 @@ let () =
   ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
     A.union_fee_def alpha);
   let input : {s : U.t | U.valid s && U.member x0 s && U.member x2 s} = state in
-  let payment : {b : C.token | let input = input in
+  let payment : {b : C.token |
     C.credits b >= A.union_fee input.#U.alpha} = refund in
   let joined = U.union x0 x2 input payment in
   let #{U.value = _; state; refund} = joined in
@@ -199,7 +199,7 @@ let () =
   ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
     A.union_fee_def alpha);
   let input : {s : U.t | U.valid s && U.member x1 s && U.member x3 s} = state in
-  let payment : {b : C.token | let input = input in
+  let payment : {b : C.token |
     C.credits b >= A.union_fee input.#U.alpha} = refund in
   let joined = U.union x1 x3 input payment in
   let #{U.value = _; state; refund} = joined in
@@ -216,7 +216,7 @@ let () =
   ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
     A.find_fee_def alpha);
   let input : {s : U.t | U.valid s && U.member x0 s} = state in
-  let payment : {b : C.token | let input = input in
+  let payment : {b : C.token |
     C.credits b >= A.find_fee input.#U.alpha} = refund in
   let before_x2 = ghost_ (U.representative x2 (borrow_ input)) in
   ghost_ (U.find_semantics x0 x2 (borrow_ input));
@@ -239,7 +239,7 @@ let () =
   ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
     A.find_fee_def alpha);
   let input : {s : U.t | U.valid s && U.member x1 s} = state in
-  let payment : {b : C.token | let input = input in
+  let payment : {b : C.token |
     C.credits b >= A.find_fee input.#U.alpha} = refund in
   let found = U.find x1 input payment in
   let #{U.value = r1; state; refund} = found in
@@ -254,7 +254,7 @@ let () =
   let old_paths = ghost_ (U.contents (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state));
   let input : {s : U.t | U.valid s && U.member x2 s} = state in
-  let payment : {b : C.token | let input = input in
+  let payment : {b : C.token |
     C.credits b >= A.find_fee input.#U.alpha} = refund in
   let found = U.find x2 input payment in
   let #{U.value = r2; state; refund} = found in
@@ -271,7 +271,7 @@ let () =
   ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
     A.find_fee_def alpha);
   let input : {s : U.t | U.valid s && U.member x3 s} = state in
-  let payment : {b : C.token | let input = input in
+  let payment : {b : C.token |
     C.credits b >= A.find_fee input.#U.alpha} = refund in
   let found = U.find x3 input payment in
   let #{U.value = r3; state; refund} = found in

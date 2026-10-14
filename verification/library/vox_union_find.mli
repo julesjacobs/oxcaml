@@ -96,13 +96,13 @@ module Make (C : Vox_big_credits.S) : sig
 
   val create : (capacity : {n : Bigint.t | 1Z <= n && n <= Bigint.of_int max_int})
       @ ghost -> (fee : {b : C.token | C.credits b >= 1Z}) @ unique total ghost ->
-      {r : initialized | let capacity = capacity in
+      {r : initialized |
         valid r.#state && r.#state.#spent = 1Z && account r.#state = 1Z &&
         r.#state.#events === [E.Initialize] &&
         1Z <= r.#state.#alpha && r.#state.#alpha <= r.#state.#capacity &&
         r.#state.#capacity = capacity && r.#state.#paths === [] &&
         K.below capacity r.#state.#alpha &&
-        (let fee = fee in C.credits r.#refund = Bigint.sub (C.credits fee) 1Z &&
+        (C.credits r.#refund = Bigint.sub (C.credits fee) 1Z &&
           Bigint.add (account r.#state) (C.credits r.#refund) = C.credits fee)}
       @ unique
 
@@ -111,15 +111,15 @@ module Make (C : Vox_big_credits.S) : sig
       (state : {s : t | valid s && s.#capacity <= capacity &&
         capacity <= Bigint.mul 2Z s.#capacity && capacity <= Bigint.of_int max_int})
         @ unique read_write total ->
-      (fee : {b : C.token | let state = state in
+      (fee : {b : C.token |
         C.credits b >= (if capacity = state.#capacity then 0Z
           else Bigint.mul 4Z (F.size state.#paths))}) @ unique total ghost ->
-      {r : initialized | let state = state in
+      {r : initialized |
         valid r.#state && r.#state.#capacity = capacity &&
         state.#alpha <= r.#state.#alpha && r.#state.#alpha <= Bigint.add state.#alpha 1Z &&
         r.#state.#paths === state.#paths && heap r.#state === heap state &&
         r.#state.#spent = state.#spent && r.#state.#events === state.#events &&
-        (let fee = fee in
+        (
           C.credits r.#refund = Bigint.sub (C.credits fee)
             (Bigint.mul 4Z (Bigint.mul (Bigint.sub r.#state.#alpha state.#alpha)
               (D.mass (heap state) state.#paths))) &&
@@ -132,14 +132,14 @@ module Make (C : Vox_big_credits.S) : sig
       (state : {s : t | valid s && F.size s.#paths < s.#capacity})
         @ unique read_write total ->
       (fee : {b : C.token | C.credits b >= 3Z}) @ unique total ghost ->
-      {r : result | let state = state in
+      {r : result |
         valid r.#state && r.#state.#capacity = state.#capacity &&
         r.#state.#alpha = state.#alpha &&
         r.#state.#paths === M.Stop r.#value :: state.#paths &&
         r.#state.#events === E.Allocate :: state.#events &&
         not (H.mem (heap state) r.#value) &&
         heap r.#state === H.put (heap state) r.#value (M.Root 0) &&
-        (let fee = fee in
+        (
           Bigint.add (account r.#state) (C.credits r.#refund) =
             Bigint.add (account state) (C.credits fee) &&
           C.credits r.#refund = Bigint.sub (C.credits fee) 3Z &&
@@ -148,9 +148,9 @@ module Make (C : Vox_big_credits.S) : sig
 
   val find : (x : M.elem) @ immutable ->
       (state : {s : t | valid s && member x s}) @ unique read_write total ->
-      (fee : {b : C.token | let state = state in
+      (fee : {b : C.token |
         C.credits b >= A.find_fee state.#alpha}) @ unique total ghost ->
-      {r : result | let state = state in
+      {r : result |
         valid r.#state && F.addresses r.#state.#paths === F.addresses state.#paths &&
         F.size r.#state.#paths = F.size state.#paths &&
         r.#state.#paths === F.refresh
@@ -160,7 +160,7 @@ module Make (C : Vox_big_credits.S) : sig
         heap r.#state === M.compressed (heap state) (F.lookup x state.#paths) &&
         r.#state.#events ===
           E.Find (M.depth (F.lookup x state.#paths)) :: state.#events &&
-        (let fee = fee in
+        (
           Bigint.add (account r.#state) (C.credits r.#refund) =
             Bigint.add (account state) (C.credits fee) && C.credits r.#refund >=
           Bigint.sub (C.credits fee) (A.find_fee state.#alpha) &&
@@ -169,9 +169,9 @@ module Make (C : Vox_big_credits.S) : sig
 
   val union : (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
       (state : {s : t | valid s && member x s && member y s}) @ unique read_write total ->
-      (fee : {b : C.token | let state = state in
+      (fee : {b : C.token |
         C.credits b >= A.union_fee state.#alpha}) @ unique total ghost ->
-      {r : result | let state = state in
+      {r : result |
         valid r.#state && r.#state.#capacity = state.#capacity &&
         r.#state.#alpha = state.#alpha &&
         r.#state.#paths === S.union_paths (heap state) state.#paths x y &&
@@ -182,7 +182,7 @@ module Make (C : Vox_big_credits.S) : sig
         r.#state.#events === E.Union :: E.Link ::
           E.Find (M.depth (F.lookup y (S.find_paths state.#paths x))) ::
           E.Find (M.depth (F.lookup x state.#paths)) :: state.#events &&
-        (let fee = fee in
+        (
           Bigint.add (account r.#state) (C.credits r.#refund) =
             Bigint.add (account state) (C.credits fee) && C.credits r.#refund >=
           Bigint.sub (C.credits fee) (A.union_fee state.#alpha) &&

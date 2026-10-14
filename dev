@@ -460,7 +460,8 @@ add_compilerlib_modes()
 
 add_verifier_libraries()
 {
-  for verifier_library in vox_smt vox_vc vox_smt_solver vox_verify; do
+  for verifier_library in vox_smt vox_sat_solver vox_smt_pure vox_vc \
+    vox_smt_solver vox_verify; do
     case "$verifier_library" in
       vox_verify) verifier_dir=verification/runtime ;;
       *) verifier_dir=verification ;;

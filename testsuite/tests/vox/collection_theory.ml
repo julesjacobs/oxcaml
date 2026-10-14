@@ -14,7 +14,6 @@ let (rotate_at @ total) : (values : int list) ->
       && Bigint.compare i (Model.length values) <= 0}) ->
     {result : int list | Spec.permutation values result
       && Model.length result === Model.length values} = fun values position ->
-  let position = position in
   let left = Model.take position values in
   let right = Model.drop position values in
   let result = Model.append right left in

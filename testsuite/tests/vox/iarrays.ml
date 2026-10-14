@@ -446,7 +446,6 @@ module Record_bounds = struct
       {i : int | 0 <= i && i < Iarray.length container.data} -> int =
     fun container index ->
     let data = container.data in
-    let index = index in
     let bounded : {i : int | 0 <= i && i < Iarray.length data} =
       index in
     Iarray.Refined.get data bounded
@@ -469,7 +468,6 @@ module Polymorphic_record_bounds = struct
       {i : int | 0 <= i && i < Iarray.length container.data} -> 'a =
     fun container index ->
     let data = container.data in
-    let index = index in
     let bounded : {i : int | 0 <= i && i < Iarray.length data} =
       index in
     Iarray.Refined.get data bounded
@@ -492,19 +490,18 @@ module Separate_record_bounds = struct
       {i : int | 0 <= i && i < Iarray.length container.data} -> 'a =
     fun container other index ->
     let data = other.data in
-    let index = index in
     let bounded : {i : int | 0 <= i && i < Iarray.length data} =
       index in
     Iarray.Refined.get data bounded
 end;;
 [%%expect{|
-Line 11, characters 6-11:
-11 |       index in
+Line 10, characters 6-11:
+10 |       index in
            ^^^^^
 Error: Refinement could not be proved (counterexample: index = 0)
-Line 10, characters 39-61:
-10 |     let bounded : {i : int | 0 <= i && i < Iarray.length data} =
-                                            ^^^^^^^^^^^^^^^^^^^^^^
+Line 9, characters 39-61:
+9 |     let bounded : {i : int | 0 <= i && i < Iarray.length data} =
+                                           ^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
 |}]
 

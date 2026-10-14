@@ -26,5 +26,5 @@ val height_minimal : (size : Bigint.t) ->
 (** Proof support for splitting a machine-integer credit token. *)
 val bounded_int : (bound : int) ->
   (amount : {n : Bigint.t | 0Z <= n && n <= Bigint.of_int bound}) ->
-  {n : int | let amount = amount in
+  {n : int |
     Bigint.of_int n = amount && 0 <= n && n <= bound} @ ghost @@ total

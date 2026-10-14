@@ -92,6 +92,12 @@ val type_path: t -> Path.t -> Path.t
 val modtype_path: t -> Path.t -> Path.t
 
 val type_expr: t -> type_expr -> type_expr
+
+(** Rename the first arrow's binder in its codomain, preserving corresponding
+    internal arrow binders when their target identifiers are fresh in the
+    source codomain. Other binders use the ordinary substitution rules. *)
+val align_arrow_codomains :
+  Ident.t -> type_expr -> Ident.t -> type_expr -> type_expr
 val class_type: t -> class_type -> class_type
 val value_description: t -> value_description -> value_description
 val type_declaration: t -> type_declaration -> type_declaration

@@ -108,10 +108,10 @@ module Slice : sig @@ portable
       (rp : ('a iarray @ total immutable -> bool @ ghost)) @ ghost ->
       ((s : {s : 'a t | current s === current left
           && final s === final left}) @ local unique ->
-        {u : unit | let s = s in lp (final s)}) @ portable once ->
+        {u : unit | lp (final s)}) @ portable once ->
       ((s : {s : 'a t | current s === current right
           && final s === final right}) @ local unique ->
-        {u : unit | let s = s in rp (final s)}) @ portable once ->
+        {u : unit | rp (final s)}) @ portable once ->
       {u : unit | lp (final left) && rp (final right)}
 
 end
@@ -168,7 +168,7 @@ module Owned_array : sig @@ portable
         @ ghost ->
       ((s : {s : 'a Slice.t | Slice.current s === contents a})
           @ local unique ->
-        {r : 'r | let s = s in post r (Slice.final s)}) @ local once ->
+        {r : 'r | post r (Slice.final s)}) @ local once ->
       {r : ('r, 'a t) step | post r.value (contents r.state)
         && Iarray.length (contents r.state) = Iarray.length (contents a)}
       @ unique @@ stateless

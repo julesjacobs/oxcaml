@@ -29,36 +29,36 @@ let run hit =
     active_def h needle; active_def h leaf; active_def h pair; active_def h right;
     at_level_def h needle; at_level_def h leaf; at_level_def h pair; at_level_def h right;
     active_def h x; at_level_def h x; source_ok_def h x; finite_scope_def h x;
-    refine_ ()) in
+    ()) in
   let unmarked : ((x : node Pref.t) @ immutable ->
     {u : unit | match H.at h x with
       None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
     let desc : desc = Var in cell_def desc 0; cell_def pair_desc 0; cell_def root_desc 0;
-    active_def h x; at_level_def h x; refine_ ()) in
+    active_def h x; at_level_def h x; ()) in
   ghost_ (active_def h root; at_level_def h root; cell_def root_desc 0);
-  let state : {t : node Pref.token | Pref.own t === h && H.mem h root && active h root} = refine_ state in
-  let h_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h)} in
+  let state : {t : node Pref.token | Pref.own t === h && H.mem h root && active h root} = state in
+  let h_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ h} in
   let scope_witness2 : (((x : node Pref.t) @ immutable ->
-      {u : unit | not (H.mem h_witness1.Ghost.ghost x) || finite_scope h_witness1.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope)} in
+      {u : unit | not (H.mem h_witness1.Ghost.ghost x) || finite_scope h_witness1.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ scope} in
   let unmarked_witness3 : (((x : node Pref.t) @ immutable ->
       {u : unit | match H.at h_witness1.Ghost.ghost x with
-        None -> true | Some v -> not v.visited})) Ghost.t = {Ghost.ghost = ghost_ (refine_ unmarked)} in
+        None -> true | Some v -> not v.visited})) Ghost.t = {Ghost.ghost = ghost_ unmarked} in
   let refine_ state_argument4 = state in
-  let refine_ out = Marked_occurs.occurs h_witness1 scope_witness2 unmarked_witness3 needle root (refine_ state_argument4) in
+  let refine_ out = Marked_occurs.occurs h_witness1 scope_witness2 unmarked_witness3 needle root state_argument4 in
   assert (out.#found = hit);
   let state = out.#state in let d = ghost_ out.#marks in
   let after = ghost_ (Pref.own (borrow_ state)) in
   let frame : ((x : node Pref.t) @ immutable ->
     {u : unit | H.mem h x === H.mem after x && H.at h x === H.at after x}) @ total ghost = ghost_ (fun x ->
-    let refine_ u = restored_at h needle d x (refine_ ()) in refine_ u) in
+    restored_at h needle d x ()) in
   ghost_ (frame leaf; frame pair; frame root);
-  let state : {t : node Pref.token | H.mem (Pref.own t) leaf} = refine_ state in
+  let state : {t : node Pref.token | H.mem (Pref.own t) leaf} = state in
   let refine_ a = Pref.read leaf (borrow_ state) in let refine_ state = state in
   assert (not a.visited);
-  let state : {t : node Pref.token | H.mem (Pref.own t) pair} = refine_ state in
+  let state : {t : node Pref.token | H.mem (Pref.own t) pair} = state in
   let refine_ a = Pref.read pair (borrow_ state) in let refine_ state = state in
   assert (not a.visited);
-  let state : {t : node Pref.token | H.mem (Pref.own t) root} = refine_ state in
+  let state : {t : node Pref.token | H.mem (Pref.own t) root} = state in
   let refine_ a = Pref.read root (borrow_ state) in
   assert (not a.visited);
   ()

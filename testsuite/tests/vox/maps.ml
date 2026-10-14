@@ -89,7 +89,6 @@ module Demo : sig end = struct
       unit =
     fun key equivalent ->
     let bools = ghost_ (M.Refined.singleton key true) in
-    let equivalent = equivalent in
     let present = ghost_ (M.mem equivalent bools) in
     let found = ghost_ (M.Refined.find bools equivalent) in
     let result = () in

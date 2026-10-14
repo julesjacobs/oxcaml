@@ -162,6 +162,105 @@ let wrap_trace_gadt_instances ?force env f x =
 
 let simple_abbrevs = ref Mnil
 
+module Simple_abbrev_index = struct
+  type index = {
+    public : type_expr Path.Tbl.t;
+    private_ : type_expr Path.Tbl.t;
+  }
+
+  type contents = Indexed of index | Linked | Short
+  type t = (abbrev_memo, contents) Ephemeron.K1.t option ref
+
+  let create () : t = ref None
+  let clear cache = cache := None
+
+  let extend entry = function
+    | Linked | Short as contents -> contents
+    | Indexed index as contents ->
+        let priv, path, ty = entry in
+        Path.Tbl.replace index.private_ path ty;
+        begin match priv with
+        | Public -> Path.Tbl.replace index.public path ty
+        | Private -> ()
+        end;
+        contents
+
+  let empty () =
+    Indexed { public = Path.Tbl.create 16; private_ = Path.Tbl.create 16 }
+
+  let refresh cache memo =
+    let previous = !cache in
+    (* An interrupted refresh must not publish a partially extended index. *)
+    cache := None;
+    let rec walk length prefix memo =
+      let saved =
+        match previous with
+        | None -> None
+        | Some cached -> Ephemeron.K1.query cached memo
+      in
+      match saved, memo with
+      | Some contents, _ ->
+          List.fold_left (fun t e -> extend e t) contents prefix
+      | None, Mnil ->
+          if length <= 16 then Short
+          else List.fold_left (fun t e -> extend e t) (empty ()) prefix
+      | None, Mlink _ -> Linked
+      | None, Mcons (priv, path, _, ty, tail) ->
+          walk (length + 1) ((priv, path, ty) :: prefix) tail
+    in
+    let contents = walk 0 [] memo in
+    cache :=
+      (match contents with
+       | Short -> None
+       | Indexed _ | Linked -> Some (Ephemeron.K1.make memo contents));
+    contents
+
+  let indexed_find cache priv path memo =
+    let contents =
+      match !cache with
+      | Some cached ->
+          begin match Ephemeron.K1.query cached memo with
+          | Some contents -> contents
+          | None -> refresh cache memo
+          end
+      | None -> refresh cache memo
+    in
+    match contents with
+    | Linked | Short -> Btype.find_expans priv path memo
+    | Indexed index ->
+        Path.Tbl.find_opt
+          (match priv with Public -> index.public | Private -> index.private_)
+          path
+
+  let rec scan cache priv path memo remaining = function
+    | Mnil -> None
+    | Mcons (priv', path', _, ty, _)
+      when (priv = Private || priv' = Public) && Path.same path path' ->
+        Some ty
+    | Mcons (_, _, _, _, tail) when remaining > 0 ->
+        scan cache priv path memo (remaining - 1) tail
+    | Mcons _ | Mlink _ -> indexed_find cache priv path memo
+
+  let find cache priv path memo =
+    match memo with
+    | Mnil -> clear cache; None
+    | Mcons (priv', path', _, ty, _)
+      when (priv = Private || priv' = Public) && Path.same path path' -> Some ty
+    | Mcons (_, _, _, _, tail) ->
+        begin match !cache with
+        | None -> scan cache priv path memo 15 tail
+        | Some _ -> indexed_find cache priv path memo
+        end
+    | Mlink _ -> indexed_find cache priv path memo
+end
+
+let simple_abbrev_index = Simple_abbrev_index.create ()
+
+let find_abbrev_expansion kind path abbrev =
+  if abbrev == simple_abbrevs then
+    Simple_abbrev_index.find simple_abbrev_index kind path !abbrev
+  else Btype.find_expans kind path !abbrev
+
 let proper_abbrevs tl abbrev =
   if tl <> [] || !trace_gadt_instances || !Clflags.principal
   then abbrev
@@ -180,6 +279,11 @@ module Refinement_scope_dependencies =
 
 let refinement_scope_dependencies =
   s_table Refinement_scope_dependencies.create 251
+
+let remove_refinement_scope_dependency ty =
+  let dependencies = !refinement_scope_dependencies in
+  if Refinement_scope_dependencies.mem dependencies ty then
+    Refinement_scope_dependencies.remove dependencies ty
 
 let in_refinement_predicate = s_ref false
 
@@ -247,8 +351,7 @@ let refresh_refinement_scope ty
   let ty = Transient_expr.type_expr ty in
   begin match !dependency with
   | None ->
-      Refinement_scope_dependencies.remove !refinement_scope_dependencies
-        (Transient_expr.coerce ty);
+      remove_refinement_scope_dependency (Transient_expr.coerce ty);
       set_scope ty ref_structural_scope
   | Some ((_, scope) as dependency) ->
       Refinement_scope_dependencies.replace !refinement_scope_dependencies
@@ -261,7 +364,7 @@ let () =
     match Transient_expr.get_desc ty with
     | Trefine refinement -> refresh_refinement_scope ty refinement
     | _ ->
-        Refinement_scope_dependencies.remove !refinement_scope_dependencies ty)
+        remove_refinement_scope_dependency ty)
 
 (* merlin specific *)
 type levels =
@@ -2510,7 +2613,7 @@ let expand_abbrev_gen kind find_type_expansion env ty =
   let lookup_abbrev = proper_abbrevs args abbrev in
   let expansion =
     (* first look for an existing expansion *)
-    match find_expans kind path !lookup_abbrev with
+    match find_abbrev_expansion kind path lookup_abbrev with
     | None -> None
     | Some ty' -> try
         (* prerr_endline
@@ -4963,14 +5066,57 @@ let may_have_jkind_intersection_tk env ty jkind =
    and that both their objects and variants are closed
  *)
 
+let refinement_scope_escape_in ids visit_root =
+  let exception Found of Ident.t in
+  let visit_ident id =
+    let visited = TypeHash.create 17 in
+    let ids = Ident.Set.singleton id in
+    let rec visit ty =
+      if not (TypeHash.mem visited ty) then begin
+        TypeHash.add visited ty ();
+        match get_desc ty with
+        | Tarrow ((_, _, _, binder), arg, ret, _) ->
+            visit arg;
+            if not
+                (match binder with
+                 | Some binder -> Ident.same id binder
+                 | None -> false)
+            then visit ret
+        | Trefine { ref_binder; ref_payload; ref_pred; _ } ->
+            visit ref_payload;
+            if not (Ident.same id ref_binder) then begin
+              Option.iter (fun id -> raise (Found id))
+                (Refinement_predicate.find_ident ids ref_pred);
+              ignore
+                (Refinement_predicate.fold_types
+                   (fun () ty -> visit ty) () ref_pred
+                 : unit)
+            end
+        | _ -> iter_type_expr visit ty
+      end
+    in
+    visit_root visit
+  in
+  match Ident.Set.iter visit_ident ids with
+  | () -> None
+  | exception Found id -> Some id
+
+let refinement_ident_occurs id ty =
+  Option.is_some
+    (refinement_scope_escape_in
+       (Ident.Set.singleton id) (fun visit -> visit ty))
+
 let align_arrow_codomains binder1 codomain1 binder2 codomain2 =
   match binder1, binder2 with
   | None, None -> Some (codomain1, codomain2)
   | Some binder1, Some binder2 ->
       let codomain1 =
-        Subst.type_expr
-          (Subst.add_bound_value binder1 binder2 Subst.identity)
-          codomain1
+        if Ident.same binder1 binder2
+           || not (refinement_ident_occurs binder1 codomain1)
+        then codomain1
+        else
+          Subst.align_arrow_codomains
+            binder1 codomain1 binder2 codomain2
       in
       Some (codomain1, codomain2)
   | None, Some _ | Some _, None -> None
@@ -5590,16 +5736,16 @@ let normalize_owner_type_path env owner =
     end
   | exception Not_found -> owner
 
+let normalize_refinement_constructor_path env = function
+  | Path.Pextra_ty (owner, Path.Pcstr_ty name) ->
+      Path.Pextra_ty
+        (normalize_owner_type_path env owner, Path.Pcstr_ty name)
+  | path -> Env.normalize_value_path None env path
+
 let normalize_refinement_predicate env =
-  let constructor_path = function
-    | Path.Pextra_ty (owner, Path.Pcstr_ty name) ->
-      let owner = normalize_owner_type_path env owner in
-      Path.Pextra_ty (owner, Path.Pcstr_ty name)
-    | path -> Env.normalize_value_path None env path
-  in
   Refinement_predicate.map
     ~value_path:(Env.normalize_value_path None env)
-    ~constructor_path
+    ~constructor_path:(normalize_refinement_constructor_path env)
     ~type_path:(normalize_owner_type_path env)
 
 (* Alpha-equal predicates, with the types of their corresponding nodes.  The
@@ -5607,8 +5753,9 @@ let normalize_refinement_predicate env =
    relation at hand: a law about [int t] is not a law about [bool t]. *)
 let refinement_predicate_types env ~pairs pred1 pred2 =
   Refinement_predicate.equal_with_types ~pairs
-    (normalize_refinement_predicate env pred1)
-    (normalize_refinement_predicate env pred2)
+    ~value_path:(Env.normalize_value_path None env)
+    ~constructor_path:(normalize_refinement_constructor_path env)
+    ~type_path:(normalize_owner_type_path env) pred1 pred2
 
 (* The types of corresponding predicate nodes are related by their
    skeletons: the verifier encodes a predicate by sorts, which ignore
@@ -9686,46 +9833,6 @@ let nondep_type env id ty =
   with Nondep_cannot_erase _ as exn ->
     clear_hash ();
     raise exn
-
-let refinement_scope_escape_in ids visit_root =
-  let exception Found of Ident.t in
-  let visit_ident id =
-    let visited = TypeHash.create 17 in
-    let ids = Ident.Set.singleton id in
-    let rec visit ty =
-      if not (TypeHash.mem visited ty) then begin
-        TypeHash.add visited ty ();
-        match get_desc ty with
-        | Tarrow ((_, _, _, binder), arg, ret, _) ->
-            visit arg;
-            if not
-                (match binder with
-                 | Some binder -> Ident.same id binder
-                 | None -> false)
-            then visit ret
-        | Trefine { ref_binder; ref_payload; ref_pred; _ } ->
-            visit ref_payload;
-            if not (Ident.same id ref_binder) then begin
-              Option.iter (fun id -> raise (Found id))
-                (Refinement_predicate.find_ident ids ref_pred);
-              ignore
-                (Refinement_predicate.fold_types
-                   (fun () ty -> visit ty) () ref_pred
-                 : unit)
-            end
-        | _ -> iter_type_expr visit ty
-      end
-    in
-    visit_root visit
-  in
-  match Ident.Set.iter visit_ident ids with
-  | () -> None
-  | exception Found id -> Some id
-
-let refinement_ident_occurs id ty =
-  Option.is_some
-    (refinement_scope_escape_in
-       (Ident.Set.singleton id) (fun visit -> visit ty))
 
 let substitute_refinement_ident id replacement ty =
   Subst.type_expr

@@ -76,7 +76,8 @@ let first_line text =
   skip text
 
 let check_impl ?(config = default_config) ?(dump = fun _ -> ())
-    ?(cancelled = fun () -> false) ?resource_limit ?assumptions ~int_width q =
+    ?(cancelled = fun () -> false) ?(request_model = true)
+    ?resource_limit ?assumptions ~int_width q =
   if config.timeout_ms <= 0 then invalid_arg "Vox_smt_solver: timeout_ms";
   let started = monotonic_time () in
   if cancelled () then raise Cancelled;
@@ -93,14 +94,15 @@ let check_impl ?(config = default_config) ?(dump = fun _ -> ())
       dump input;
       let answer, rest = first_line (eval input) in
       let request =
-        Vox_smt_response.followup ?assumptions q.symbols answer
+        Vox_smt_response.followup ~request_model ?assumptions q.symbols answer
         ^ Vox_smt_response.resource_request
       in
       dump request;
       let response = rest ^ eval request in
       (* Z3's own [:timeout] option, set by [to_smtlib], stands in for the
          native runner's deadline: it answers unknown with reason timeout. *)
-      Vox_smt_response.interpret_response ~resources ?assumptions ~core
+      Vox_smt_response.interpret_response ~request_model ~resources
+        ?assumptions ~core
         q.symbols answer response
     with
     | Vox_smt_response.Protocol_error message -> Failure message
@@ -120,17 +122,24 @@ let with_session ?config ?dump ?cancelled ~int_width f =
   Fun.protect
     ~finally:(fun () -> closed := true)
     (fun () ->
-      f (fun ?resource_limit ?assumptions query ->
+      f (fun ?request_model ?resource_limit ?assumptions query ->
           if !closed then invalid_arg "Vox_smt_solver: closed session";
           if !busy then invalid_arg "Vox_smt_solver: recursive session query";
           busy := true;
           Fun.protect
             ~finally:(fun () -> busy := false)
             (fun () ->
-              check_impl ?config ?dump ?cancelled ?resource_limit ?assumptions
+              check_impl ?request_model ?config ?dump ?cancelled ?resource_limit
+                ?assumptions
                 ~int_width query)))
 
-let check ?config ?dump ?cancelled ?resource_limit ?assumptions ~int_width query
-    =
+let with_incremental_session ?config ?dump ?cancelled ~int_width f =
+  with_session ?config ?dump ?cancelled ~int_width f
+
+let with_automatic_session ?config ?dump ?cancelled ~int_width f =
+  with_session ?config ?dump ?cancelled ~int_width f
+
+let check ?request_model ?config ?dump ?cancelled ?resource_limit
+    ?assumptions ~int_width query =
   with_session ?config ?dump ?cancelled ~int_width (fun check ->
-      check ?resource_limit ?assumptions query)
+      check ?request_model ?resource_limit ?assumptions query)

@@ -43,11 +43,10 @@ module Client (Element : sig type t : immutable_data end) = struct
   let (independent_updates @ total) : (source : Element.t S.t) ->
       (left : int) -> (right : {i : int | i <> left}) ->
       (a : Element.t) -> (b : Element.t) -> (query : int) ->
-      {u : unit | let right = right in
+      {u : unit |
         S.lookup query (S.set right b (S.set left a source)) ===
         S.lookup query (S.set left a (S.set right b source))} =
     fun source left right a b query ->
-    let right = right in
     let left_first = S.set left a source in
     let right_first = S.set right b source in
     L.set_lookup source left a query;

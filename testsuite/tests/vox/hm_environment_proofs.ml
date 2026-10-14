@@ -18,18 +18,18 @@ let rec (interpret_boundary_agreement @ total) : (s : template) @ immutable ->
     | Product (_, a, b) ->
       let left : ((x : node Pref.t) @ immutable ->
         {u : unit | not (boundary_member a x) || rho x === tau x}) @ total = fun x ->
-        boundary_member_def s x; equal x; refine_ () in
+        boundary_member_def s x; equal x; () in
       let right : ((x : node Pref.t) @ immutable ->
         {u : unit | not (boundary_member b x) || rho x === tau x}) @ total = fun x ->
-        boundary_member_def s x; equal x; refine_ () in
+        boundary_member_def s x; equal x; () in
       interpret_boundary_agreement a rho tau left choices;
       interpret_boundary_agreement b rho tau right choices; ()
     | Indirect (_, child) | List_template (_, child) ->
       let next : ((x : node Pref.t) @ immutable ->
         {u : unit | not (boundary_member child x) || rho x === tau x}) @ total = fun x ->
-        boundary_member_def s x; equal x; refine_ () in
+        boundary_member_def s x; equal x; () in
       interpret_boundary_agreement child rho tau next choices; ());
-    refine_ ())
+    ())
 
 let rec (boundary_below @ total) : (h : node Pref.heap) @ immutable -> (depth : int) ->
     (s : template) @ immutable -> (p : node Pref.t) @ immutable ->
@@ -37,11 +37,11 @@ let rec (boundary_below @ total) : (h : node Pref.heap) @ immutable -> (depth : 
     {u : unit | below h p depth} @ ghost = fun h depth s p premise -> ghost_ (
     let refine_ premise = premise in boundary_bound_def h depth s;
     boundary_member_def s p; match s with
-    | Boundary _ | Parameter _ | Constant _ | Word_constant _ -> refine_ ()
+    | Boundary _ | Parameter _ | Constant _ | Word_constant _ -> ()
     | Product (_, a, b) -> if boundary_member a p then
-      (boundary_below h depth a p (refine_ ()); refine_ ())
-      else (boundary_below h depth b p (refine_ ()); refine_ ())
-    | Indirect (_, child) | List_template (_, child) -> boundary_below h depth child p (refine_ ()); refine_ ())
+      (boundary_below h depth a p (); ())
+      else (boundary_below h depth b p (); ())
+    | Indirect (_, child) | List_template (_, child) -> boundary_below h depth child p (); ())
 
 let rec (aligned_lookup @ total) : (g : D.context) @ immutable ->
     (ts : templates) @ immutable -> (i : D.index) @ immutable ->
@@ -52,10 +52,10 @@ let rec (aligned_lookup @ total) : (g : D.context) @ immutable ->
     let refine_ premise = premise in aligned_def g ts;
     D.lookup_def g i; template_lookup_def ts i;
     match g with
-    | D.Empty_context -> refine_ ()
-    | D.Binding (_, rest) -> match ts with No_templates -> refine_ ()
-      | Template_binding (_, tail) -> match i with D.Z -> refine_ ()
-        | D.S i -> aligned_lookup rest tail i (refine_ ()); refine_ ())
+    | D.Empty_context -> ()
+    | D.Binding (_, rest) -> match ts with No_templates -> ()
+      | Template_binding (_, tail) -> match i with D.Z -> ()
+        | D.S i -> aligned_lookup rest tail i (); ())
 
 let rec (env_lookup @ total) : (h : node Pref.heap) @ immutable -> (depth : int) ->
     (env : env) @ immutable -> (ts : templates) @ immutable ->
@@ -67,10 +67,10 @@ let rec (env_lookup @ total) : (h : node Pref.heap) @ immutable -> (depth : int)
     let refine_ premise = premise in env_at_def h depth env ts;
     lookup_def env i; template_lookup_def ts i;
     match env with
-    | Empty -> refine_ ()
-    | Bind (_, rest) -> match ts with No_templates -> refine_ ()
-      | Template_binding (_, tail) -> match i with D.Z -> refine_ ()
-        | D.S i -> env_lookup h depth rest tail i s (refine_ ()); refine_ ())
+    | Empty -> ()
+    | Bind (_, rest) -> match ts with No_templates -> ()
+      | Template_binding (_, tail) -> match i with D.Z -> ()
+        | D.S i -> env_lookup h depth rest tail i s (); ())
 
 let rec (template_transport @ total) : (h : node Pref.heap) @ immutable ->
     (after : node Pref.heap) @ immutable -> (depth : int) ->
@@ -87,10 +87,10 @@ let rec (template_transport @ total) : (h : node Pref.heap) @ immutable ->
     generic_desc_def h p desc; generic_desc_def after p desc;
     finite_node_def after p; below_def after p depth; at_level_def after p;
     match s with
-    | Boundary _ | Parameter _ | Constant _ | Word_constant _ -> refine_ ()
-    | Product (_, a, b) -> template_transport h after depth frame a (refine_ ());
-      template_transport h after depth frame b (refine_ ()); refine_ ()
-    | Indirect (_, child) | List_template (_, child) -> template_transport h after depth frame child (refine_ ()); refine_ ())
+    | Boundary _ | Parameter _ | Constant _ | Word_constant _ -> ()
+    | Product (_, a, b) -> template_transport h after depth frame a ();
+      template_transport h after depth frame b (); ()
+    | Indirect (_, child) | List_template (_, child) -> template_transport h after depth frame child (); ())
 
 let rec (env_transport @ total) : (h : node Pref.heap) @ immutable ->
     (after : node Pref.heap) @ immutable -> (depth : int) ->
@@ -102,10 +102,10 @@ let rec (env_transport @ total) : (h : node Pref.heap) @ immutable ->
   fun h after depth frame env ts premise -> ghost_ (
     let refine_ premise = premise in env_at_def h depth env ts;
     env_at_def after depth env ts; match env with
-    | Empty -> refine_ ()
-    | Bind (_, rest) -> match ts with No_templates -> refine_ ()
-      | Template_binding (s, tail) -> template_transport h after depth frame s (refine_ ());
-        env_transport h after depth frame rest tail (refine_ ()); refine_ ())
+    | Empty -> ()
+    | Bind (_, rest) -> match ts with No_templates -> ()
+      | Template_binding (s, tail) -> template_transport h after depth frame s ();
+        env_transport h after depth frame rest tail (); ())
 
 let (allocation_protected @ total) : (h : node Pref.heap) @ immutable ->
     (p : node Pref.t) @ immutable -> (v : node) @ immutable -> (depth : int) ->
@@ -117,7 +117,7 @@ let (allocation_protected @ total) : (h : node Pref.heap) @ immutable ->
     Copy_heap_proofs.put_frame h p v x; protected_at_def h after depth x;
     below_def h x depth; below_def after x depth;
     at_level_def h x; at_level_def after x;
-    refine_ ())
+    ())
 
 let (copy_protected @ total) : (h : node Pref.heap) @ immutable ->
     (epoch : node Pref.t) @ immutable -> (depth : int) -> (d : history) @ immutable ->
@@ -127,10 +127,10 @@ let (copy_protected @ total) : (h : node Pref.heap) @ immutable ->
     {u : unit | protected_at h (heap h epoch depth d) protected_depth x} @ ghost =
   fun h epoch depth d protected_depth x premise -> ghost_ (
     let refine_ premise = premise in let after = heap h epoch depth d in
-    Copy_heap_proofs.history_at h epoch depth d x (refine_ ());
+    Copy_heap_proofs.history_at h epoch depth d x ();
     protected_at_def h after protected_depth x;
     below_def h x protected_depth; below_def after x protected_depth;
-    at_level_def h x; at_level_def after x; refine_ ())
+    at_level_def h x; at_level_def after x; ())
 
 let (close_protected @ total) : (h : node Pref.heap) @ immutable ->
     (cut : int) -> (pool : Generalize_spec.pool) @ immutable ->
@@ -139,13 +139,13 @@ let (close_protected @ total) : (h : node Pref.heap) @ immutable ->
     {u : unit | protected_at h (Generalize_spec.closed_heap h cut pool) depth x} @ ghost =
   fun h cut pool depth x premise -> ghost_ (
     let refine_ premise = premise in let after = Generalize_spec.closed_heap h cut pool in
-    Generalize_proofs.closed_observe h cut pool x (refine_ ());
+    Generalize_proofs.closed_observe h cut pool x ();
     Generalize_spec.closed_at_def h after cut pool x;
     protected_at_def h after depth x;
     below_def h x depth; below_def after x depth;
     at_level_def h x; at_level_def after x;
     (match H.at h x with None -> () | Some v -> Generalize_spec.close_level_def cut v.level; ());
-    refine_ ())
+    ())
 
 let (unify_protected @ total) : (h : node Pref.heap) @ immutable ->
     (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
@@ -156,14 +156,14 @@ let (unify_protected @ total) : (h : node Pref.heap) @ immutable ->
     {u : unit | protected_at h after depth x} @ ghost =
   fun h p q ok after d depth x premise -> ghost_ (
     let refine_ premise = premise in 
-    Optimized_metadata.unified_frame h p q ok after d x (refine_ ());
-    Optimized_metadata.unified_scratch h p q ok after d x (refine_ ());
+    Optimized_metadata.unified_frame h p q ok after d x ();
+    Optimized_metadata.unified_scratch h p q ok after d x ();
     Level_unifier_metadata.scratch_frame_def h after x;
     protected_at_def h after depth x;
     below_def h x depth; below_def after x depth;
     at_level_def h x; at_level_def after x;
     (match H.at h x, H.at after x with
-    | Some v, Some w -> decreases_def v.level w.level; () | _ -> ()); refine_ ())
+    | Some v, Some w -> decreases_def v.level w.level; () | _ -> ()); ())
 
 let (protected_trans @ total) : (h : node Pref.heap) @ immutable ->
     (middle : node Pref.heap) @ immutable -> (after : node Pref.heap) @ immutable ->
@@ -173,7 +173,7 @@ let (protected_trans @ total) : (h : node Pref.heap) @ immutable ->
   fun h middle after depth x premise -> ghost_ (
     let refine_ premise = premise in protected_at_def h middle depth x;
     protected_at_def middle after depth x; protected_at_def h after depth x;
-    refine_ ())
+    ())
 
 module T = Hm_type_proofs
 
@@ -188,7 +188,7 @@ let (realize_empty @ total) :
       {u : unit | claim})) @ total -> {u : unit | claim} @ ghost =
   fun rho xi i sigma schema args premise claim use -> ghost_ (
     let refine_ premise = premise in let g = D.Empty_context in
-    D.lookup_def g i; refine_ ())
+    D.lookup_def g i; ())
 
 let rec (eval_empty @ total) : (args : T.values) @ immutable ->
     (xi : (D.index @ immutable total -> ty @ immutable total)) @ total -> (a : D.mono) @ immutable ->
@@ -197,11 +197,11 @@ let rec (eval_empty @ total) : (args : T.values) @ immutable ->
   fun args xi a premise -> ghost_ (
     let refine_ premise = premise in T.eval_prefixed_def args xi a; T.eval_def xi a;
     match a with
-    | D.Parameter i -> T.prefix_def args xi i; refine_ ()
-    | D.Free _ | D.Boolean | D.Word64 -> refine_ ()
-    | D.List_type a -> eval_empty args xi a (refine_ ()); refine_ ()
-    | D.Function (a, b) -> eval_empty args xi a (refine_ ());
-      eval_empty args xi b (refine_ ()); refine_ ())
+    | D.Parameter i -> T.prefix_def args xi i; ()
+    | D.Free _ | D.Boolean | D.Word64 -> ()
+    | D.List_type a -> eval_empty args xi a (); ()
+    | D.Function (a, b) -> eval_empty args xi a ();
+      eval_empty args xi b (); ())
 
 let (realize_monomorphic @ total) :
     (g : D.context) @ immutable -> (ts : templates) @ immutable ->
@@ -232,11 +232,11 @@ let (realize_monomorphic @ total) :
     | D.Z -> D.arity_def mono; T.values_length_def args;
       (match args with
       | T.No_values ->
-        T.meaning_def xi mono args; eval_empty args xi a (refine_ ());
+        T.meaning_def xi mono args; eval_empty args xi a ();
         interpret_def rho rho bound;
-        let refine_ u = use rho (refine_ ()) in refine_ u
-      | T.Value _ -> refine_ ())
-    | D.S i -> let refine_ u = realize i sigma schema args (refine_ ()) claim use in refine_ u)
+        use rho ()
+      | T.Value _ -> ())
+    | D.S i -> realize i sigma schema args () claim use)
 
 let (realize_weaken @ total) :
     (g : D.context) @ immutable -> (ts : templates) @ immutable ->
@@ -261,7 +261,7 @@ let (realize_weaken @ total) :
   fun g ts rho xi realize ambient zeta equal i sigma schema args premise claim use -> ghost_ (
     let refine_ premise = premise in let k = T.values_length ambient in
     T.lookup_weaken k g i; match D.lookup g i with
-    | None -> refine_ ()
+    | None -> ()
     | Some original ->
       D.weaken_scheme_def k original;
       D.arity_def sigma; D.arity_def original;
@@ -269,18 +269,18 @@ let (realize_weaken @ total) :
         {u : unit | interpret rho choices schema === T.meaning xi original args} ->
         {u : unit | claim}) @ total = fun choices fit ->
         let refine_ fit = fit in 
-        T.meaning_weaken args ambient xi zeta equal original (refine_ ());
-        let refine_ u = use choices (refine_ ()) in refine_ u in
-      let refine_ u = realize i original schema args (refine_ ()) claim forward in refine_ u)
+        T.meaning_weaken args ambient xi zeta equal original ();
+        use choices () in
+      realize i original schema args () claim forward)
 
 let rec (lookup_boundary @ total) : (ts : templates) @ immutable ->
     (i : D.index) @ immutable -> (s : template) @ immutable -> (p : node Pref.t) @ immutable ->
     {u : unit | template_lookup ts i === Some s && boundary_member s p} ->
     {u : unit | environment_boundary ts p} @ ghost = fun ts i s p premise -> ghost_ (
     let refine_ premise = premise in template_lookup_def ts i; environment_boundary_def ts p;
-    match ts with No_templates -> refine_ ()
-    | Template_binding (_, rest) -> match i with D.Z -> refine_ ()
-      | D.S i -> lookup_boundary rest i s p (refine_ ()); refine_ ())
+    match ts with No_templates -> ()
+    | Template_binding (_, rest) -> match i with D.Z -> ()
+      | D.S i -> lookup_boundary rest i s p (); ())
 
 let rec (environment_boundary_owned @ total) : (h : node Pref.heap) @ immutable ->
     (depth : int) -> (env : env) @ immutable -> (ts : templates) @ immutable ->
@@ -288,11 +288,11 @@ let rec (environment_boundary_owned @ total) : (h : node Pref.heap) @ immutable 
     {u : unit | env_at h depth env ts && environment_boundary ts p} ->
     {u : unit | H.mem h p} @ ghost = fun h depth env ts p premise -> ghost_ (
     let refine_ premise = premise in env_at_def h depth env ts; environment_boundary_def ts p;
-    match env with Empty -> refine_ ()
-    | Bind (_, rest) -> match ts with No_templates -> refine_ ()
+    match env with Empty -> ()
+    | Bind (_, rest) -> match ts with No_templates -> ()
       | Template_binding (s, tail) -> if boundary_member s p then
-        (boundary_below h depth s p (refine_ ()); below_def h p depth; refine_ ())
-        else (environment_boundary_owned h depth rest tail p (refine_ ()); refine_ ()))
+        (boundary_below h depth s p (); below_def h p depth; ())
+        else (environment_boundary_owned h depth rest tail p (); ()))
 
 let (realize_transport @ total) :
     (g : D.context) @ immutable -> (ts : templates) @ immutable ->
@@ -319,14 +319,14 @@ let (realize_transport @ total) :
     let boundaries : ((p : node Pref.t) @ immutable ->
         {u : unit | not (boundary_member schema p) || rho p === tau p}) @ total = fun p ->
       if boundary_member schema p then (
-        lookup_boundary ts i schema p (refine_ ());
-        equal p; refine_ ()) else refine_ () in
+        lookup_boundary ts i schema p ();
+        equal p; ()) else () in
     let forward : ((choices : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
         {u : unit | interpret rho choices schema === T.meaning xi sigma args} ->
         {u : unit | claim}) @ total = fun choices fit ->
       let refine_ fit = fit in interpret_boundary_agreement schema rho tau boundaries choices;
-      let refine_ u = use choices (refine_ ()) in refine_ u in
-    let refine_ u = realize i sigma schema args (refine_ ()) claim forward in refine_ u)
+      use choices () in
+    realize i sigma schema args () claim forward)
 
 let (cleanup_protected @ total) : (h : node Pref.heap) @ immutable ->
     (after : node Pref.heap) @ immutable -> (trail : Generalize_spec.pool) @ immutable ->
@@ -336,13 +336,13 @@ let (cleanup_protected @ total) : (h : node Pref.heap) @ immutable ->
   fun h after trail depth x premise -> ghost_ (
     let refine_ premise = premise in Copy_cleanup_spec.swept_at_def h after trail x;
     protected_at_def h after depth x; below_def h x depth; below_def after x depth;
-    at_level_def h x; at_level_def after x; refine_ ())
+    at_level_def h x; at_level_def after x; ())
 
 let (active_template @ total) : (h : node Pref.heap) @ immutable ->
     (schema : template) @ immutable -> (p : node Pref.t) @ immutable ->
     {u : unit | template h schema && root schema === p && active h p} ->
     {u : unit | schema === Boundary p} @ ghost = fun h schema p premise -> ghost_ (
       let refine_ premise = premise in 
-      Copy_heap_proofs.template_head h schema p (refine_ ());
+      Copy_heap_proofs.template_head h schema p ();
       head_generic_def schema; root_def schema; active_def h p; at_level_def h p;
-      refine_ ())
+      ())

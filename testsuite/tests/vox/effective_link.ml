@@ -24,18 +24,18 @@ let finish : (before : (node Pref.heap) Ghost.t) @ immutable ->
       let h_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
       let scope_witness2 : (((q : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h_witness1.Ghost.ghost q) || source_ok h_witness1.Ghost.ghost q})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope.Ghost.ghost)} in
-      let p_argument3 : {p : node Pref.t | H.mem h_witness1.Ghost.ghost p} = let refine_ argument = input in refine_ argument in
+      let p_argument3 : {p : node Pref.t | H.mem h_witness1.Ghost.ghost p} = input in
       let refine_ state_argument4 = borrowed in
-      let refine_ out = Graph_representative.representative h_witness1 scope_witness2 p_argument3 (refine_ state_argument4) in refine_ out in
+      Graph_representative.representative h_witness1 scope_witness2 p_argument3 (refine_ state_argument4) in
     let rq : {r : resolved | H.mem h.Ghost.ghost r.#value && terminal h.Ghost.ghost r.#value && resolves h.Ghost.ghost old_q r.#value r.#path} =
       let input : {p : node Pref.t | H.mem h.Ghost.ghost p} = refine_ old_q in
       let borrowed = borrow_ state in let borrowed : {t : node Pref.token | Pref.own t === h.Ghost.ghost} = refine_ borrowed in
       let h_witness5 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
       let scope_witness6 : (((q : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h_witness5.Ghost.ghost q) || source_ok h_witness5.Ghost.ghost q})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope.Ghost.ghost)} in
-      let p_argument7 : {p : node Pref.t | H.mem h_witness5.Ghost.ghost p} = let refine_ argument = input in refine_ argument in
+      let p_argument7 : {p : node Pref.t | H.mem h_witness5.Ghost.ghost p} = input in
       let refine_ state_argument8 = borrowed in
-      let refine_ out = Graph_representative.representative h_witness5 scope_witness6 p_argument7 (refine_ state_argument8) in refine_ out in
+      Graph_representative.representative h_witness5 scope_witness6 p_argument7 (refine_ state_argument8) in
     let p = rp.#value in let q = rq.#value in
     ghost_ (valid.Ghost.ghost old_p; valid.Ghost.ghost old_q;
       E.effective_active_def h.Ghost.ghost heads.Ghost.ghost old_p;
@@ -45,18 +45,18 @@ let finish : (before : (node Pref.heap) Ghost.t) @ immutable ->
     if same then (let out = #{ok = true; state; derivation = d.Ghost.ghost} in refine_ out)
     else (
       let pv : {v : node | H.at h.Ghost.ghost p === Some v} =
-        let borrowed = borrow_ state in let refine_ v = Pref.read p borrowed in refine_ v in
+        let borrowed = borrow_ state in Pref.read p borrowed in
       let qv : {v : node | H.at h.Ghost.ghost q === Some v} =
-        let borrowed = borrow_ state in let refine_ v = Pref.read q borrowed in refine_ v in
+        let borrowed = borrow_ state in Pref.read q borrowed in
       match pv.desc, qv.desc, pv.level, qv.level with
       | Arrow _, Arrow _, Finite pn, Finite qn
       | List _, List _, Finite pn, Finite qn ->
         let source = if pn >= qn then p else q in
         let target = if pn >= qn then q else p in
         let source_tree : {t : tree | finite h.Ghost.ghost t && tree_root t === source} @ immutable ghost = ghost_ (
-          let refine_ t = trees.Ghost.ghost source in refine_ t) in
+          trees.Ghost.ghost source) in
         let target_tree : {t : tree | finite h.Ghost.ghost t && tree_root t === target} @ immutable ghost = ghost_ (
-          let refine_ t = trees.Ghost.ghost target in refine_ t) in
+          trees.Ghost.ghost target) in
         let _ : {u : unit | Structure_spec.linkable h.Ghost.ghost source_tree target_tree} @ ghost = ghost_ (let _ : {u : unit | readback source_tree === readback target_tree} =
           if pn >= qn then (Effective_link_proofs.equal_roots before.Ghost.ghost old_p old_q h.Ghost.ghost d.Ghost.ghost trees.Ghost.ghost p q rp.#path rq.#path source_tree target_tree (); ())
           else ( Effective_link_proofs.equal_roots before.Ghost.ghost old_p old_q h.Ghost.ghost d.Ghost.ghost trees.Ghost.ghost p q rp.#path rq.#path target_tree source_tree (); ()) in

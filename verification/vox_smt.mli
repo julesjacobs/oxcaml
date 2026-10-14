@@ -13,6 +13,8 @@ module Datatype : sig
   val create : label:string -> t
 
   val label : t -> string
+
+  val hash : t -> int
 end
 
 type constructor
@@ -27,6 +29,8 @@ module Constructor : sig
   val datatype : t -> Datatype.t
 
   val fields : t -> (string * sort) list
+
+  val hash : t -> int
 end
 
 type datatype_declaration =
@@ -34,7 +38,8 @@ type datatype_declaration =
     constructors : Constructor.t list
   }
 
-val datatypes_well_founded : datatype_declaration list -> bool
+val datatypes_well_founded :
+  ?poll:(unit -> unit) -> datatype_declaration list -> bool
 
 module Symbol : sig
   type t
@@ -46,6 +51,8 @@ module Symbol : sig
   val label : t -> string
 
   val sort : t -> sort
+
+  val hash : t -> int
 end
 
 module Function : sig
@@ -58,6 +65,8 @@ module Function : sig
   val arguments : t -> sort list
 
   val result : t -> sort
+
+  val hash : t -> int
 end
 
 (** Unprefixed arithmetic wraps modulo [2^63] and uses signed order. [Int_*]
@@ -111,6 +120,11 @@ type term =
   | Is of Constructor.t * term
   | Select of Constructor.t * int * term
 
+(** Lexicographic structural operand order, with cancellation polling and
+    memoization for shared terms. Matches [Stdlib.compare]. *)
+val compare_operands :
+  poll:(unit -> unit) -> term list -> term list -> int
+
 type labelled_term =
   { label : string;
     term : term
@@ -130,7 +144,7 @@ exception Sort_error of string
 exception Unsupported_target of int
 
 (** Canonical signed decimal text: no leading zeroes, plus sign, or [-0]. *)
-val decimal_integer : string -> bool
+val decimal_integer : ?poll:(unit -> unit) -> string -> bool
 
 (** Result sort of a well-sorted term; does not validate operands or
     declarations. Only conditional result branches need traversal. Use [check]
@@ -140,15 +154,28 @@ val term_sort : term -> sort
 (** [int_width] is the target's OCaml integer width, not the host width. Only 63
     is supported. Operators have fixed arity. [Integer] constants must be signed
     63-bit integers; [Big_integer] constants use canonical decimal text.
-    Undeclared and duplicate symbols are errors. *)
+    Undeclared and duplicate symbols are errors. Shared terms are memoized;
+    [poll] covers declarations and terms. *)
 val check : ?poll:(unit -> unit) -> int_width:int -> query -> unit
 
-(** Replaces each bitwise operation by an uninterpreted function, adding facts
-    that hold for the 63-bit operation (sign and range facts, low masks, and
-    shifts by a constant). [None] when the query has no bitwise operation. The
+type query_features =
+  { bitvector_encoding : bool; machine_multiplication : bool }
+
+(** Validates like [check] and records machine-integer multiplication and
+    whether a bitwise or shift operator selects the bitvector encoding. This
+    includes all six bitwise and shift operators. *)
+val check_features :
+  ?poll:(unit -> unit) -> int_width:int -> query -> query_features
+
+(** Replaces [Bit_and], [Bit_or], [Bit_xor], and [Shift_right_logical] by
+    uninterpreted functions, adding facts that hold for the 63-bit operation
+    (sign and range facts, low masks, and shifts by a constant).
+    [None] when the query has none of these operations. The
     result only has weaker premises, so its validity implies the query's; it
-    avoids the bitvector encoding of [to_smtlib]. *)
-val abstract_bitwise : query -> query option
+    avoids the bitvector encoding of [to_smtlib].
+    [poll] is called during traversal and may raise to cancel. *)
+val abstract_bitwise :
+  ?poll:(unit -> unit) -> query -> query option
 
 (** [poll] is called during traversal and may raise to cancel construction.
     Always checks sorts first. Names [v0], [v1], ... follow declaration order.
@@ -178,6 +205,30 @@ val to_smtlib :
   timeout_ms:int ->
   query ->
   string
+
+(** The same serialization split at declaration and assertion boundaries.
+    Generated range assertions precede the query's facts. Names remain local
+    to the query. Each declaration pairs a generated compatibility key with
+    its command text; the datatype declaration group has one shared key.
+    Reusing a key requires comparing its exact command text. *)
+type smtlib_query =
+  { settings : string;
+    limits : string;
+    logic : string;
+    declarations : (string * string) list;
+    assertions : string list;
+    goal_assertion : string;
+    check_command : string
+  }
+
+val to_smtlib_query :
+  ?poll:(unit -> unit) ->
+  ?resource_limit:int ->
+  ?assumptions:Symbol.t list ->
+  int_width:int ->
+  timeout_ms:int ->
+  query ->
+  smtlib_query
 
 (** Integer model values are signed, including on a narrower host. *)
 type value =

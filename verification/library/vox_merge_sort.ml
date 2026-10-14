@@ -4,7 +4,7 @@ module Make (O : Vox_ordered_sequence.Order) (C : Vox_credits.S) (Compare : sig
   type result = #{ before : bool; state : C.token @@ ghost }
   val compare : (left : O.elt) @ immutable -> (right : O.elt) @ immutable ->
     (token : {t : C.token | C.credits t > 0}) @ unique total ghost ->
-    {r : result | let token = token in
+    {r : result |
       r.#before = (O.le left right) &&
       C.credits r.#state = C.credits token - 1} @ unique @@ total
 end) = struct
@@ -46,7 +46,7 @@ end) = struct
         P.sorted left && P.sorted right &&
         Bigint.of_int (C.credits t) >=
           Bigint.add (S.length left) (S.length right)}) @ unique total ghost ->
-      {r : result | let token = token in
+      {r : result |
         P.sorted r.#values && P.permutation (S.append left right) r.#values &&
         S.length r.#values = Bigint.add (S.length left) (S.length right) &&
         0 <= C.credits r.#state && C.credits r.#state <= C.credits token &&
@@ -92,7 +92,7 @@ end) = struct
         size <= Vox_sort_cost.power depth &&
         Bigint.mul size depth <= Bigint.of_int (C.credits t)})
         @ unique total ghost ->
-      {r : result | let token = token in
+      {r : result |
         P.sorted r.#values && P.permutation values r.#values &&
         S.length r.#values = size &&
         0 <= C.credits r.#state && C.credits r.#state <= C.credits token &&
@@ -142,7 +142,7 @@ end) = struct
   let (sort @ total) : (values : O.elt list) @ immutable ->
       (token : {t : C.token | Vox_sort_cost.budget (S.length values) <=
         Bigint.of_int (C.credits t)}) @ unique total ghost ->
-      {r : result | let token = token in
+      {r : result |
         P.sorted r.#values && P.permutation values r.#values &&
         S.length r.#values = S.length values &&
         0 <= C.credits r.#state && C.credits r.#state <= C.credits token &&

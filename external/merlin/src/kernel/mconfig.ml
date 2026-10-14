@@ -441,6 +441,7 @@ let ocaml_ignored_flags =
     "-dvc";
     "-dsmtlib";
     "-dsmt-resources";
+    "-smt-incremental";
     "-smt-assume-verified";
     "-smt-solver-any-version";
     "-smt-unused-steps-precise";

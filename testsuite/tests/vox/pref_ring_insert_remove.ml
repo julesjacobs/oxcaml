@@ -38,7 +38,6 @@ let insert_remove_demo : (s : node) @ immutable -> (a : node) @ immutable -> (b
       && not (a.next === b.prev)
       && not (a.next === b.next)}) @ unique -> unit =
   fun s a b t ->
-  let t = t in
   let empty = [] in
   let empty_back = [] in
   let h = ghost_ (Pref.own (borrow_ t)) in
@@ -345,7 +344,6 @@ let insert_remove_demo : (s : node) @ immutable -> (a : node) @ immutable -> (b
     let borrowed = borrow_ detached in
     let borrowed : {t : node option Pref.token | H.mem (Pref.own t) p} = borrowed in
     let actual = Pref.read p borrowed in actual in
-  let actual = actual in
   assert (match actual with Some n -> n == a | None -> false);
   let t = Pref.join detached rest in
   let _t = t in

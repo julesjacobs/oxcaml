@@ -54,7 +54,7 @@ for file in $modules; do
   fi
 done
 (cd "$build" && "$prefix/bin/ocamlopt.opt" -I . "${objects[@]}" -o wasm_differential.exe)
-harness=$tests/wasm_differential_harness.js
+harness=$tests/wasm_differential_harness.cjs
 
 if [[ $# -eq 0 ]]; then
   output=$(mktemp)

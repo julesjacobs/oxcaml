@@ -12,19 +12,19 @@ let rec (search_finite @ total) :
     let flag = false in searched_def h p x flag trace;
     let after = H.put h p (Link q) in
     match trace with
-    | Hit | Left _ -> let t = Free x in refine_ t
+    | Hit | Left _ -> Free x
     | Leaf ->
       if H.at h x === Some Var then (
-        let t = Free x in root_def t; finite_def after t; refine_ t)
+        let t = Free x in root_def t; finite_def after t; t)
       else (
-        let t = Boolean x in root_def t; finite_def after t; refine_ t)
+        let t = Boolean x in root_def t; finite_def after t; t)
     | Follow (y, rest) ->
-      let refine_ child = search_finite h p q y rest (refine_ ()) in
-      let t = Alias (x, child) in root_def t; finite_def after t; refine_ t
+      let refine_ child = search_finite h p q y rest () in
+      let t = Alias (x, child) in root_def t; finite_def after t; t
     | Both (a, b, left, right) ->
-      let refine_ ta = search_finite h p q a left (refine_ ()) in
-      let refine_ tb = search_finite h p q b right (refine_ ()) in
-      let t = Branch (x, ta, tb) in root_def t; finite_def after t; refine_ t)
+      let refine_ ta = search_finite h p q a left () in
+      let refine_ tb = search_finite h p q b right () in
+      let t = Branch (x, ta, tb) in root_def t; finite_def after t; t)
 
 let rec (replace_free @ total) :
     (h : node Pref.heap) @ immutable ->
@@ -40,16 +40,16 @@ let rec (replace_free @ total) :
     match old with
     | Free x ->
       if x === p then (
-        let t = Alias (x, target) in root_def t; finite_def after t; refine_ t)
-      else (finite_def after old; refine_ old)
-    | Boolean _ -> finite_def after old; refine_ old
+        let t = Alias (x, target) in root_def t; finite_def after t; t)
+      else (finite_def after old; old)
+    | Boolean _ -> finite_def after old; old
     | Alias (x, child) ->
-      let refine_ child = replace_free h p q target child (refine_ ()) in
-      let t = Alias (x, child) in root_def t; finite_def after t; refine_ t
+      let refine_ child = replace_free h p q target child () in
+      let t = Alias (x, child) in root_def t; finite_def after t; t
     | Branch (x, a, b) ->
-      let refine_ a = replace_free h p q target a (refine_ ()) in
-      let refine_ b = replace_free h p q target b (refine_ ()) in
-      let t = Branch (x, a, b) in root_def t; finite_def after t; refine_ t)
+      let refine_ a = replace_free h p q target a () in
+      let refine_ b = replace_free h p q target b () in
+      let t = Branch (x, a, b) in root_def t; finite_def after t; t)
 
 let rec (unified_finite_at @ total) :
     (h : node Pref.heap) @ immutable ->
@@ -65,37 +65,37 @@ let rec (unified_finite_at @ total) :
     unified_def h p q ok after d;
     let refine_ old = trees x in
     match d with
-    | Same | Constants | Occurs_left _ | Occurs_right _ | Clash -> refine_ old
+    | Same | Constants | Occurs_left _ | Occurs_right _ | Clash -> old
     | Bind_left trace ->
       if H.mem h x then (
-        let refine_ target = search_finite h p q q trace (refine_ ()) in
-        let refine_ t = replace_free h p q target old (refine_ ()) in refine_ t)
-      else refine_ old
+        let refine_ target = search_finite h p q q trace () in
+        replace_free h p q target old ())
+      else old
     | Bind_right trace ->
       if H.mem h x then (
-        let refine_ target = search_finite h q p p trace (refine_ ()) in
-        let refine_ t = replace_free h q p target old (refine_ ()) in refine_ t)
-      else refine_ old
-    | Swap rest -> unified_finite_at h trees q p ok after rest x (refine_ ())
+        let refine_ target = search_finite h q p p trace () in
+        replace_free h q p target old ())
+      else old
+    | Swap rest -> unified_finite_at h trees q p ok after rest x ()
     | Resolve (r, s, _, _, rest) ->
-      unified_finite_at h trees r s ok after rest x (refine_ ())
+      unified_finite_at h trees r s ok after rest x ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       let middle_trees : (x : node Pref.t) @ immutable ->
           {t : tree | root t === x && (if H.mem middle x then finite middle t else H.at middle x === None)}
           @ immutable total = fun x ->
-        let refine_ t = unified_finite_at h trees a c left_ok middle left x (refine_ ()) in
-        refine_ t in
+        let refine_ t = unified_finite_at h trees a c left_ok middle left x () in
+        t in
       if left_ok then
-        unified_finite_at middle middle_trees b e ok after right x (refine_ ())
-      else let refine_ t = middle_trees x in refine_ t)
+        unified_finite_at middle middle_trees b e ok after right x ()
+      else middle_trees x)
 
 let rec (size_positive @ total) : (t : tree) @ immutable ->
     {u : unit | size t > Bigint.zero} @ ghost = fun t -> ghost_ (
   size_def t;
   match t with
-  | Free _ | Boolean _ -> refine_ ()
-  | Alias (_, child) -> size_positive child; refine_ ()
-  | Branch (_, a, b) -> size_positive a; size_positive b; refine_ ())
+  | Free _ | Boolean _ -> ()
+  | Alias (_, child) -> size_positive child; ()
+  | Branch (_, a, b) -> size_positive a; size_positive b; ())
 
 let rec (finite_unique @ total) :
     (h : node Pref.heap) @ immutable -> (a : tree) @ immutable -> (b : tree) @ immutable ->
@@ -106,15 +106,15 @@ let rec (finite_unique @ total) :
   match a with
   | Alias (_, child) ->
     (match b with
-     | Alias (_, other) -> finite_unique h child other (refine_ ()); refine_ ()
-     | _ -> refine_ ())
+     | Alias (_, other) -> finite_unique h child other (); ()
+     | _ -> ())
   | Branch (_, left, right) ->
     (match b with
      | Branch (_, other_left, other_right) ->
-       finite_unique h left other_left (refine_ ());
-       finite_unique h right other_right (refine_ ()); refine_ ()
-     | _ -> refine_ ())
-  | Free _ | Boolean _ -> refine_ ())
+       finite_unique h left other_left ();
+       finite_unique h right other_right (); ()
+     | _ -> ())
+  | Free _ | Boolean _ -> ())
 
 let (edge_smaller @ total) :
     (h : node Pref.heap) @ immutable -> (a : tree) @ immutable -> (b : tree) @ immutable ->
@@ -124,13 +124,13 @@ let (edge_smaller @ total) :
   finite_def h a; root_def a;
   let ra = root a in let rb = root b in edge_def h ra rb; size_def a;
   match a with
-  | Free _ | Boolean _ -> refine_ ()
-  | Alias (_, child) -> finite_unique h child b (refine_ ()); refine_ ()
+  | Free _ | Boolean _ -> ()
+  | Alias (_, child) -> finite_unique h child b (); ()
   | Branch (_, left, right) ->
     size_positive left; size_positive right;
     if root left === root b then (
-      finite_unique h left b (refine_ ()); refine_ ())
-    else (finite_unique h right b (refine_ ()); refine_ ()))
+      finite_unique h left b (); ())
+    else (finite_unique h right b (); ()))
 
 let rec (walk_bound @ total) :
     (h : node Pref.heap) @ immutable ->
@@ -147,7 +147,7 @@ let rec (walk_bound @ total) :
     walks_def h p q w;
     let refine_ tp = trees p in finite_def h tp; root_def tp;
     match w with
-    | Stop -> refine_ ()
+    | Stop -> ()
     | Step (next, rest) ->
       edge_def h p next;
       (match tp with
@@ -155,9 +155,9 @@ let rec (walk_bound @ total) :
        | Alias (_, child) -> finite_def h child; ()
        | Branch (_, a, b) -> finite_def h a; finite_def h b; ());
       let refine_ tn = trees next in
-      edge_smaller h tp tn (refine_ ());
-      walk_bound h trees next q rest (refine_ ());
-      refine_ ())
+      edge_smaller h tp tn ();
+      walk_bound h trees next q rest ();
+      ())
 
 let (no_cycle @ total) :
     (h : node Pref.heap) @ immutable ->
@@ -167,7 +167,7 @@ let (no_cycle @ total) :
     {u : unit | H.mem h p && walks h p p w && not (w === Stop)} ->
     {u : unit | false} @ ghost = fun h trees p w premise -> ghost_ (
   let refine_ premise = premise in
-  walk_bound h trees p p w (refine_ ()); refine_ ())
+  walk_bound h trees p p w (); ())
 
 let (readback_model_at @ total) :
     (h : node Pref.heap) @ immutable ->
@@ -183,18 +183,18 @@ let (readback_model_at @ total) :
   agrees x; readback_def t;
   if H.mem h x then (
     match t with
-    | Free _ | Boolean _ -> refine_ ()
+    | Free _ | Boolean _ -> ()
     | Alias (_, child) ->
       finite_def h child;
       let y = root child in let refine_ ty = trees y in
-      finite_unique h child ty (refine_ ()); agrees y; refine_ ()
+      finite_unique h child ty (); agrees y; ()
     | Branch (_, a, b) ->
       finite_def h a; finite_def h b;
       let y = root a in let z = root b in
       let refine_ ta = trees y in let refine_ tb = trees z in
-      finite_unique h a ta (refine_ ()); finite_unique h b tb (refine_ ());
-      agrees y; agrees z; refine_ ())
-  else refine_ ())
+      finite_unique h a ta (); finite_unique h b tb ();
+      agrees y; agrees z; ())
+  else ())
 
 
 let rec (allocation_frame @ total) :
@@ -205,11 +205,11 @@ let rec (allocation_frame @ total) :
   let refine_ premise = premise in finite_def h t; root_def t;
   let after = H.put h p v in finite_def after t;
   match t with
-  | Free _ | Boolean _ -> refine_ ()
-  | Alias (_, child) -> allocation_frame h p v child (refine_ ()); refine_ ()
+  | Free _ | Boolean _ -> ()
+  | Alias (_, child) -> allocation_frame h p v child (); ()
   | Branch (_, a, b) ->
-    allocation_frame h p v a (refine_ ());
-    allocation_frame h p v b (refine_ ()); refine_ ())
+    allocation_frame h p v a ();
+    allocation_frame h p v b (); ())
 
 let (allocation_finite_at @ total) :
     (h : node Pref.heap) @ immutable ->
@@ -227,19 +227,19 @@ let (allocation_finite_at @ total) :
     let after = H.put h p v in 
     if x === p then (
       match v with
-      | Var -> let t = Free p in root_def t; finite_def after t; refine_ t
-      | Bool -> let t = Boolean p in root_def t; finite_def after t; refine_ t
+      | Var -> let t = Free p in root_def t; finite_def after t; t
+      | Bool -> let t = Boolean p in root_def t; finite_def after t; t
       | Link q ->
-        let refine_ child = trees q in allocation_frame h p v child (refine_ ());
-        let t = Alias (p, child) in root_def t; finite_def after t; refine_ t
+        let refine_ child = trees q in allocation_frame h p v child ();
+        let t = Alias (p, child) in root_def t; finite_def after t; t
       | Arrow (a, b) ->
         let refine_ ta = trees a in let refine_ tb = trees b in
-        allocation_frame h p v ta (refine_ ()); allocation_frame h p v tb (refine_ ());
-        let t = Branch (p, ta, tb) in root_def t; finite_def after t; refine_ t)
+        allocation_frame h p v ta (); allocation_frame h p v tb ();
+        let t = Branch (p, ta, tb) in root_def t; finite_def after t; t)
     else (
       let refine_ t = trees x in
-      if H.mem h x then (allocation_frame h p v t (refine_ ()); refine_ t)
-      else refine_ t))
+      if H.mem h x then (allocation_frame h p v t (); t)
+      else t))
 
 let (finite_scope_at @ total) :
     (h : node Pref.heap) @ immutable -> (t : tree) @ immutable ->
@@ -248,9 +248,9 @@ let (finite_scope_at @ total) :
   let refine_ premise = premise in finite_def h t; root_def t;
   let x = root t in scoped_def h x;
   match t with
-  | Free _ | Boolean _ -> refine_ ()
-  | Alias (_, child) -> finite_def h child; refine_ ()
-  | Branch (_, a, b) -> finite_def h a; finite_def h b; refine_ ())
+  | Free _ | Boolean _ -> ()
+  | Alias (_, child) -> finite_def h child; ()
+  | Branch (_, a, b) -> finite_def h a; finite_def h b; ())
 
 let (with_finite_model @ total) :
     (h : node Pref.heap) @ immutable ->
@@ -267,8 +267,8 @@ let (with_finite_model @ total) :
     let refine_ t = trees x in readback t in
   let agrees : (x : node Pref.t) @ immutable ->
       {u : unit | let refine_ t = trees x in not (H.mem h x) || rho x === readback t}
-      @ total = fun x -> rho_def x; refine_ () in
+      @ total = fun x -> rho_def x; () in
   let model : (x : node Pref.t) @ immutable -> {u : unit | equation h rho x}
       @ total = fun x ->
-    let refine_ u = readback_model_at h trees rho agrees x in refine_ u in
-  let refine_ u = use rho model in refine_ u)
+    readback_model_at h trees rho agrees x in
+  use rho model)

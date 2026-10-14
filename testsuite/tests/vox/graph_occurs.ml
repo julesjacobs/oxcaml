@@ -203,7 +203,7 @@ let scan : (h : (node Pref.heap) Ghost.t) @ immutable  ->(scope : (((x : node Pr
       && Pref.own r.#state === marked_heap goal.heap r.#marks
       && searched goal.heap goal.needle goal.root r.#found r.#search} @ unique = fun r ->
       refine_ r in
-    let refine_ out = scan_work goal h scope unmarked needle p d trail state use in refine_ out
+    scan_work goal h scope unmarked needle p d trail state use
 
 let rec reset : (h : (node Pref.heap) Ghost.t) @ immutable  ->
     (trail : trail) @ immutable  ->(members : (((x : node Pref.t) @ immutable ->
@@ -227,7 +227,7 @@ let rec reset : (h : (node Pref.heap) Ghost.t) @ immutable  ->
       let members_witness2 : (((x : node Pref.t) @ immutable ->
       {u : unit | not (on_trail rest x) || H.mem h_witness1.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ tail)} in
       let refine_ state_argument3 = state in
-      let refine_ state = reset h_witness1 rest members_witness2 (refine_ state_argument3) in refine_ state
+      reset h_witness1 rest members_witness2 (refine_ state_argument3)
 
 let occurs : (h : (node Pref.heap) Ghost.t) @ immutable  ->(scope : (((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h.Ghost.ghost x) || source_ok h.Ghost.ghost x})) Ghost.t) @ total  ->(unmarked : (((x : node Pref.t) @ immutable ->

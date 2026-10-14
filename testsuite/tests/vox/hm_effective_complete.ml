@@ -129,7 +129,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
         let middle_forest : ((x : node Pref.t) @ immutable ->
           {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
             (if H.mem middle x then Level_finite_spec.finite middle t else Level_unifier_spec.observe middle x === None)} @ immutable) @ total = fun x ->
-          let refine_ t = Hm_effective_forest.run_forest h forest child_depth empty env rhs middle child_pool x () in refine_ t in
+          Hm_effective_forest.run_forest h forest child_depth empty env rhs middle child_pool x () in
       let[@def] middle_heads : E.heads = fun x -> let refine_ r = Forest_heads.select middle middle_forest x in r in
       let middle_valid : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head middle middle_heads x}) @ total = fun x ->
         middle_heads_def x; let refine_ r = Forest_heads.select middle middle_forest x in E.valid_head_def middle middle_heads x;
@@ -144,7 +144,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
         let closed_forest : ((x : node Pref.t) @ immutable ->
           {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
             (if H.mem closed x then Level_finite_spec.finite closed t else Level_unifier_spec.observe closed x === None)} @ immutable) @ total = fun x ->
-          let refine_ t = Forest_transport.closed_forest_at middle middle_forest depth filtered x () in refine_ t in
+          Forest_transport.closed_forest_at middle middle_forest depth filtered x () in
         Hm_effective_driver_proofs.run_result h forest child_depth empty env rhs middle child_pool original ();
         let refine_ finite_tree = middle_forest original in let tree = finite_tree in
         Forest_transport.unfolding_valid middle finite_tree ();
@@ -318,7 +318,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
       let body_d = Hm_primitive_constraints.construct n g left right dl dr () in
       let forest1 : ((x : node Pref.t) @ immutable ->
         {t : tree | tree_root t === x && (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h forest depth pool env body middle body_pool x () in refine_ t in
+        Hm_effective_forest.run_forest h forest depth pool env body middle body_pool x () in
       let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select middle forest1 x in r in
       let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head middle heads1 x}) @ total = fun x ->
         heads1_def x; let refine_ r = Forest_heads.select middle forest1 x in E.valid_head_def middle heads1 x; () in
@@ -355,7 +355,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
       allocated_def h depth arg var;
       let forest1 : ((x : node Pref.t) @ immutable ->
         {t : tree | tree_root t === x && (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->
-        let trees = Hm_effective_forest.allocated_forest h forest depth arg var () in let refine_ t = trees x in refine_ t in
+        let trees = Hm_effective_forest.allocated_forest h forest depth arg var () in trees x in
       let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select h1 forest1 x in r in
       let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 heads1 x}) @ total = fun x ->
         heads1_def x; let refine_ r = Forest_heads.select h1 forest1 x in E.valid_head_def h1 heads1 x;
@@ -400,7 +400,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
           equal2 arg; let desc = Arrow (arg, body_root) in Copy_model_proofs.describes_def rho2 desc value;
           let middle_forest : ((x : node Pref.t) @ immutable ->
         {t : tree | tree_root t === x && (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h1 forest1 depth pool1 env1 body middle body_pool x () in refine_ t in
+        Hm_effective_forest.run_forest h1 forest1 depth pool1 env1 body middle body_pool x () in
       let[@def] middle_heads : E.heads = fun x -> let refine_ r = Forest_heads.select middle middle_forest x in r in
       let middle_valid : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head middle middle_heads x}) @ total = fun x ->
         middle_heads_def x; let refine_ r = Forest_heads.select middle middle_forest x in E.valid_head_def middle middle_heads x;
@@ -447,7 +447,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
       let forest1 : ((x : node Pref.t) @ immutable ->
         {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
           (if H.mem h1 x then Level_finite_spec.finite h1 t else Level_unifier_spec.observe h1 x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h forest depth pool env left h1 pool1 x () in refine_ t in
+        Hm_effective_forest.run_forest h forest depth pool env left h1 pool1 x () in
       let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select h1 forest1 x in r in
       let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 heads1 x}) @ total = fun x ->
         heads1_def x; let refine_ r = Forest_heads.select h1 forest1 x in E.valid_head_def h1 heads1 x;
@@ -484,7 +484,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
       let forest1 : ((x : node Pref.t) @ immutable ->
         {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
           (if H.mem h1 x then Level_finite_spec.finite h1 t else Level_unifier_spec.observe h1 x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h forest depth pool env left h1 pool1 x () in refine_ t in
+        Hm_effective_forest.run_forest h forest depth pool env left h1 pool1 x () in
       let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select h1 forest1 x in r in
       let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 heads1 x}) @ total = fun x ->
         heads1_def x; let refine_ r = Forest_heads.select h1 forest1 x in E.valid_head_def h1 heads1 x;
@@ -521,7 +521,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
       let forest1 : ((x : node Pref.t) @ immutable ->
         {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
           (if H.mem h1 x then Level_finite_spec.finite h1 t else Level_unifier_spec.observe h1 x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h forest depth pool env left h1 pool1 x () in refine_ t in
+        Hm_effective_forest.run_forest h forest depth pool env left h1 pool1 x () in
       let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select h1 forest1 x in r in
       let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 heads1 x}) @ total = fun x ->
         heads1_def x; let refine_ r = Forest_heads.select h1 forest1 x in E.valid_head_def h1 heads1 x;
@@ -556,7 +556,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
 
       let forest2 : ((x : node Pref.t) @ immutable ->
         {t : tree | tree_root t === x && (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h1 forest1 depth pool1 env right h2 pool2 x () in refine_ t in
+        Hm_effective_forest.run_forest h1 forest1 depth pool1 env right h2 pool2 x () in
       let[@def] heads2 : E.heads = fun x -> let refine_ r = Forest_heads.select h2 forest2 x in r in
       let valid2 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h2 heads2 x}) @ total = fun x ->
         heads2_def x; let refine_ r = Forest_heads.select h2 forest2 x in E.valid_head_def h2 heads2 x;
@@ -583,7 +583,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
       let forest1 : ((x : node Pref.t) @ immutable ->
         {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
           (if H.mem h1 x then Level_finite_spec.finite h1 t else Level_unifier_spec.observe h1 x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h forest depth pool env left h1 pool1 x () in refine_ t in
+        Hm_effective_forest.run_forest h forest depth pool env left h1 pool1 x () in
       let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select h1 forest1 x in r in
       let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 heads1 x}) @ total = fun x ->
         heads1_def x; let refine_ r = Forest_heads.select h1 forest1 x in E.valid_head_def h1 heads1 x;
@@ -618,7 +618,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
 
       let forest2 : ((x : node Pref.t) @ immutable ->
         {t : tree | tree_root t === x && (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h1 forest1 depth pool1 env right h2 pool2 x () in refine_ t in
+        Hm_effective_forest.run_forest h1 forest1 depth pool1 env right h2 pool2 x () in
       let[@def] heads2 : E.heads = fun x -> let refine_ r = Forest_heads.select h2 forest2 x in r in
       let valid2 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h2 heads2 x}) @ total = fun x ->
         heads2_def x; let refine_ r = Forest_heads.select h2 forest2 x in E.valid_head_def h2 heads2 x;
@@ -653,7 +653,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
       allocated_def h depth arg var;
       let forest1 : ((x : node Pref.t) @ immutable ->
         {t : tree | tree_root t === x && (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->
-        let trees = Hm_effective_forest.allocated_forest h forest depth arg var () in let refine_ t = trees x in refine_ t in
+        let trees = Hm_effective_forest.allocated_forest h forest depth arg var () in trees x in
       let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select h1 forest1 x in r in
       let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 heads1 x}) @ total = fun x ->
         heads1_def x; let refine_ r = Forest_heads.select h1 forest1 x in E.valid_head_def h1 heads1 x;
@@ -663,7 +663,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
             allocated_def h1 depth res var;
       let forest2 : ((x : node Pref.t) @ immutable ->
         {t : tree | tree_root t === x && (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total = fun x ->
-        let trees = Hm_effective_forest.allocated_forest h1 forest1 depth res var () in let refine_ t = trees x in refine_ t in
+        let trees = Hm_effective_forest.allocated_forest h1 forest1 depth res var () in trees x in
       let[@def] heads2 : E.heads = fun x -> let refine_ r = Forest_heads.select h2 forest2 x in r in
       let valid2 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h2 heads2 x}) @ total = fun x ->
         heads2_def x; let refine_ r = Forest_heads.select h2 forest2 x in E.valid_head_def h2 heads2 x;
@@ -673,7 +673,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
             allocated_def h2 depth self desc;
       let forest3 : ((x : node Pref.t) @ immutable ->
         {t : tree | tree_root t === x && (if H.mem h3 x then finite h3 t else observe h3 x === None)} @ immutable) @ total = fun x ->
-        let trees = Hm_effective_forest.allocated_forest h2 forest2 depth self desc () in let refine_ t = trees x in refine_ t in
+        let trees = Hm_effective_forest.allocated_forest h2 forest2 depth self desc () in trees x in
       let[@def] heads3 : E.heads = fun x -> let refine_ r = Forest_heads.select h3 forest3 x in r in
       let valid3 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h3 heads3 x}) @ total = fun x ->
         heads3_def x; let refine_ r = Forest_heads.select h3 forest3 x in E.valid_head_def h3 heads3 x;

@@ -179,10 +179,9 @@ let rec (search @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
   let level : Bigint.t = level in Bigint.sub cap level]
 
 let (inverse @ total) : (capacity : {n : Bigint.t | n >= 1Z}) ->
-    {k : Bigint.t | let capacity = capacity in
+    {k : Bigint.t |
       1Z <= k && k <= capacity && iter capacity k 1Z 1Z >= capacity &&
       below capacity k} = fun capacity ->
-  let capacity = capacity in
   let capacity : Bigint.t = capacity in
   let one = 1Z in
   below_def capacity one;

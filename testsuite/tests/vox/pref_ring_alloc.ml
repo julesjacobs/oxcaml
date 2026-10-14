@@ -10,7 +10,7 @@ let extend : (x : node) @ immutable -> (y : node) @ immutable -> (z : node) @
     && H.mem (Pref.own t) y.next
     && H.mem (Pref.own t) z.prev
     && H.mem (Pref.own t) z.next}) @ unique ->
-  {r : created | let t = t in r.node.value = data
+  {r : created | r.node.value = data
     && r.node.sentinel = flag
     && not (r.node.prev === r.node.next)
     && H.mem (Pref.own r.state) r.node.prev
@@ -42,7 +42,6 @@ let extend : (x : node) @ immutable -> (y : node) @ immutable -> (z : node) @
     && not (r.node.prev === z.next)
     && not (r.node.next === z.next)} @ unique =
   fun x y z flag data t ->
-  let t = t in
   let before = ghost_ (Pref.own (borrow_ t)) in
   let r = make_node flag data t in
   let n = r.node in

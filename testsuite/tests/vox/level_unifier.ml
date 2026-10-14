@@ -40,8 +40,8 @@ let rec representative_loop :
           let joined = Via (q, path) in
           resolves_def h.Ghost.ghost p value joined;
           let joined : {d : resolution | resolves h.Ghost.ghost p value d} = refine_ joined in
-          let refine_ result = lift.Ghost.ghost value joined in refine_ result)} in
-      let refine_ out = representative_loop start h_witness5 scope_witness6 q (refine_ state_argument8) next_lift in refine_ out
+          lift.Ghost.ghost value joined)} in
+      representative_loop start h_witness5 scope_witness6 q (refine_ state_argument8) next_lift
 
     | Var | Bool | Word | List _ | Arrow _ ->
       let path = ghost_ Here in
@@ -49,7 +49,7 @@ let rec representative_loop :
       ghost_ (resolves_def h.Ghost.ghost p p path);
       let path : {d : resolution | resolves h.Ghost.ghost start.Ghost.ghost p d} @ immutable ghost = ghost_ (
         let path : {d : resolution | resolves h.Ghost.ghost p p d} = refine_ path in
-        let refine_ out = lift.Ghost.ghost p path in refine_ out) in
+        lift.Ghost.ghost p path) in
       let refine_ path = path in
       let result = #{value = p; path = path} in refine_ result
 
@@ -65,9 +65,9 @@ let representative :
     let lift : (((value : node Pref.t) @ immutable ->
       (path : {d : resolution | resolves h.Ghost.ghost p value d}) @ immutable ->
       {d : resolution | resolves h.Ghost.ghost start.Ghost.ghost value d} @ immutable)) Ghost.t =
-      {Ghost.ghost = ghost_ (fun value path -> let refine_ path = path in refine_ path)} in
+      {Ghost.ghost = ghost_ (fun value path -> path)} in
     let t : {t : node Pref.token | Pref.own t === h.Ghost.ghost && H.mem h.Ghost.ghost p && active h.Ghost.ghost p} = refine_ t in
-    let refine_ result = representative_loop start h scope p t lift in refine_ result
+    representative_loop start h scope p t lift
 
 let bind_searched :
     (h : node Pref.heap) @ immutable ghost ->
@@ -101,12 +101,12 @@ let bind_searched :
       let levels = ghost_ lowered.#edits in
       let middle = ghost_ (Pref.own (borrow_ lowered.#state)) in
       ghost_ (let flag = false in
-        lower_searched h bound levels p q flag search (refine_ ());
-        lower_observe h bound levels p (refine_ ()); lower_observe h bound levels q (refine_ ());
-        lowering_at h bound levels p (refine_ ()); frame_active h middle p (refine_ ());
-        lowering_at h bound levels q (refine_ ()); frame_active h middle q (refine_ ());
-        below_def h p bound; lower_fixed h bound levels p (refine_ ()); at_level_def middle p;
-        let tree = lowered.#tree in lower_bounded_at middle bound tree q (refine_ ()));
+        lower_searched h bound levels p q flag search ();
+        lower_observe h bound levels p (); lower_observe h bound levels q ();
+        lowering_at h bound levels p (); frame_active h middle p ();
+        lowering_at h bound levels q (); frame_active h middle q ();
+        below_def h p bound; lower_fixed h bound levels p (); at_level_def middle p;
+        let tree = lowered.#tree in lower_bounded_at middle bound tree q ());
       let t = lowered.#state in
       let t : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ t in
       let refine_ current = Pref.read p (borrow_ t) in let refine_ t = t in
@@ -146,11 +146,11 @@ let bind :
     let found = checked.#found in let mid = ghost_ (scan_heap h marks) in
     let scope_mid : ((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem mid x) || finite_scope mid x}) @ total ghost = ghost_ (fun x ->
-      let refine_ u = scan_scope h scope p marks x (refine_ ()) in refine_ u) in
+      scan_scope h scope p marks x ()) in
     ghost_ (scan_heap_def h marks;
-      scan_observe h p marks p (refine_ ()); scan_observe h p marks q (refine_ ());
+      scan_observe h p marks p (); scan_observe h p marks q ();
       terminal_def h q; terminal_def mid q;
-      scan_searched h p marks p q found search (refine_ ()));
+      scan_searched h p marks p q found search ());
     let t = checked.#state in
     let t : {t : node Pref.token | Pref.own t === mid && H.mem mid p && H.mem mid q
       && active mid p && active mid q && observe mid p === Some Var
@@ -180,9 +180,9 @@ let rec unify :
     let h_witness9 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h)} in
     let scope_witness10 : (((q : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h_witness9.Ghost.ghost q) || finite_scope h_witness9.Ghost.ghost q})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope)} in
-    let p_argument11 : {p : node Pref.t | H.mem h_witness9.Ghost.ghost p && active h_witness9.Ghost.ghost p} = let refine_ argument = p in refine_ argument in
+    let p_argument11 : {p : node Pref.t | H.mem h_witness9.Ghost.ghost p && active h_witness9.Ghost.ghost p} = p in
     let refine_ state_argument12 = b in
-    let refine_ r = representative h_witness9 scope_witness10 p_argument11 (refine_ state_argument12) in refine_ r in
+    representative h_witness9 scope_witness10 p_argument11 (refine_ state_argument12) in
   let refine_ rp = rp in
   let sq : {r : resolved | H.mem h r.#value && active h r.#value && terminal h r.#value
     && resolves h q r.#value r.#path} =
@@ -192,9 +192,9 @@ let rec unify :
     let h_witness13 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h)} in
     let scope_witness14 : (((q : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h_witness13.Ghost.ghost q) || finite_scope h_witness13.Ghost.ghost q})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope)} in
-    let p_argument15 : {p : node Pref.t | H.mem h_witness13.Ghost.ghost p && active h_witness13.Ghost.ghost p} = let refine_ argument = q in refine_ argument in
+    let p_argument15 : {p : node Pref.t | H.mem h_witness13.Ghost.ghost p && active h_witness13.Ghost.ghost p} = q in
     let refine_ state_argument16 = b in
-    let refine_ r = representative h_witness13 scope_witness14 p_argument15 (refine_ state_argument16) in refine_ r in
+    representative h_witness13 scope_witness14 p_argument15 (refine_ state_argument16) in
   let refine_ sq = sq in
   let r = rp.#value in
   let s = sq.#value in
@@ -268,8 +268,8 @@ let rec unify :
           let scope_middle : ((x : node Pref.t) @ immutable ->
               {u : unit | not (H.mem middle x) || finite_scope middle x}) @ total ghost =
             ghost_ (fun x ->
-              unified_scope h scope a c left_ok middle ld x (refine_ ());
-              refine_ ()) in
+              unified_scope h scope a c left_ok middle ld x ();
+              ()) in
           let proof = ghost_ (
             let u = () in
             unified_frame h a c left_ok middle ld b (refine_ u);
@@ -281,8 +281,8 @@ let rec unify :
           let t : {t : node Pref.token | Pref.own t === middle && H.mem middle b && H.mem middle e && active middle b && active middle e} = refine_ t in
           let unmarked_middle : ((x : node Pref.t) @ immutable ->
             {u : unit | match H.at middle x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
-            unmarked x; unified_scratch h a c left_ok middle ld x (refine_ ());
-            scratch_frame_def h middle x; refine_ ()) in
+            unmarked x; unified_scratch h a c left_ok middle ld x ();
+            scratch_frame_def h middle x; ()) in
           let refine_ right = unify middle scope_middle unmarked_middle b e t in
           let ok = right.#ok in
           let t = right.#state in

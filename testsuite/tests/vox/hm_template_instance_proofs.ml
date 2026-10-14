@@ -201,7 +201,7 @@ let (canonical_instance @ total) : (h : node Pref.heap) @ immutable -> (cut : in
       {u : unit | A.position names p === None || at_level h p === Generic}) @ total = fun p ->
         let () = selected_generic h schema p () in () in
     canonical_boundaries h cut order trees rho values names generic schema ();
-    let refine_ args = scheme_instance rho choices schema () in refine_ args)
+    scheme_instance rho choices schema ())
 
 let[@def] rec (body @ total) (names : A.names @ immutable)
     (rho : (node Pref.t @ immutable total -> ty @ immutable total) @ total)

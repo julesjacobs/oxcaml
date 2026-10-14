@@ -38,7 +38,7 @@ let rec (finite @ total) : (h : node Pref.heap) @ immutable -> (after : node Pre
       Compression_finite_proofs.finite_compress h p q r path tree ();
       Compression_finite_proofs.compress_root p tree; Compression_finite_proofs.compress_readback p tree;
       let changed = Compression_finite_proofs.compress p tree in
-      let refine_ out = finite middle after rest changed () in refine_ out)
+      finite middle after rest changed ())
 
 let rec (frame @ total) : (h : node Pref.heap) @ immutable -> (after : node Pref.heap) @ immutable -> (d : edits) @ immutable ->
     (x : node Pref.t) @ immutable -> {u : unit | rewritten h after d} ->
@@ -150,4 +150,4 @@ let rec (resolution @ total) : (h : node Pref.heap) @ immutable ->
       Compression_path_proofs.resolution_terminal h x r original (); terminal_def h r;
       let middle = H.put h x (redirect h x r) in
       let refine_ next = Compression_path_proofs.shortcut_resolution h x r original p root path () in
-      let refine_ out = resolution middle after rest p root next () in refine_ out)
+      resolution middle after rest p root next ())

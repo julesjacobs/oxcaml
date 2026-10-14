@@ -45,10 +45,9 @@ let (fee_bounds @ total) :
   ())
 
 let create : (fee : {b : C.token | C.credits b >= 1Z}) @ unique total ghost ->
-    {s : funded | let fee = fee in P.size (U.model s.#state) = 0Z && budget s = C.credits fee &&
+    {s : funded | P.size (U.model s.#state) = 0Z && budget s = C.credits fee &&
       available s = Bigint.sub (C.credits fee) 1Z && Cost.ticks s.#state = 1Z} @ unique =
     fun fee ->
-  let fee = fee in
   let split = C.split 1Z fee in
   let state = U.create split.C.left in
   ghost_ (Laws.empty_size (U.model (borrow_ state));
@@ -61,14 +60,13 @@ let create : (fee : {b : C.token | C.credits b >= 1Z}) @ unique total ghost ->
 let allocate :
     (owned : {s : funded | P.size (U.model s.#state) < Bigint.of_int max_int && available s >= 11Z})
       @ unique read_write total ->
-    {r : result | let owned = owned in P.size (U.model r.#owned.#state) = Bigint.add (P.size (U.model owned.#state)) 1Z && P.contains (U.model r.#owned.#state) r.#value &&
+    {r : result | P.size (U.model r.#owned.#state) = Bigint.add (P.size (U.model owned.#state)) 1Z && P.contains (U.model r.#owned.#state) r.#value &&
       not (P.contains (U.model owned.#state) r.#value) &&
       P.added (U.model owned.#state) (U.model r.#owned.#state) r.#value &&
       budget r.#owned = budget owned &&
       available r.#owned >= Bigint.sub (available owned) 11Z &&
       Cost.ticks r.#owned.#state = Bigint.add (Cost.ticks owned.#state) 3Z} @ unique =
     fun owned ->
-  let owned = owned in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned);
     Cost.event_cost (borrow_ owned.#state));
   let history = ghost_ (Cost.events (borrow_ owned.#state)) in
@@ -83,12 +81,12 @@ let allocate :
     E.total_def (E.Allocate :: history); E.weight_def E.Allocate);
   let owned = #{state; wallet = split.C.right} in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
-  let r = #{value; owned} in r
+  #{value; owned}
 
 let join : (x : U.elem) @ immutable -> (y : U.elem) @ immutable ->
     (owned : {s : funded | P.size (U.model s.#state) <= 8Z && P.contains (U.model s.#state) x && P.contains (U.model s.#state) y && available s >= 132Z})
       @ unique read_write total ->
-    {r : result | let owned = owned in P.size (U.model r.#owned.#state) = P.size (U.model owned.#state) &&
+    {r : result | P.size (U.model r.#owned.#state) = P.size (U.model owned.#state) &&
       P.joined (U.model owned.#state) (U.model r.#owned.#state) x y r.#value &&
       budget r.#owned = budget owned &&
       available r.#owned >= Bigint.sub (available owned) 132Z &&
@@ -97,7 +95,6 @@ let join : (x : U.elem) @ immutable -> (y : U.elem) @ immutable ->
           (Bigint.add 12Z (Bigint.mul 4Z
             (Bigint.add (Cost.depth p x) (Cost.depth (Cost.compressed p x) y)))))} @ unique =
     fun x y owned ->
-  let owned = owned in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned);
     Cost.observations (borrow_ owned.#state); fee_bounds (borrow_ owned.#state);
     Cost.event_cost (borrow_ owned.#state));
@@ -121,12 +118,12 @@ let join : (x : U.elem) @ immutable -> (y : U.elem) @ immutable ->
     E.weight_def second; E.weight_def first);
   let owned = #{state; wallet = split.C.right} in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
-  let r = #{value; owned} in r
+  #{value; owned}
 
 let find : (x : U.elem) @ immutable ->
     (owned : {s : funded | P.size (U.model s.#state) <= 8Z && P.contains (U.model s.#state) x && available s >= 44Z})
       @ unique read_write total ->
-    {r : result | let owned = owned in P.size (U.model r.#owned.#state) = P.size (U.model owned.#state) && r.#value === P.representative (U.model owned.#state) x &&
+    {r : result | P.size (U.model r.#owned.#state) = P.size (U.model owned.#state) && r.#value === P.representative (U.model owned.#state) x &&
       P.same (U.model owned.#state) (U.model r.#owned.#state) &&
       budget r.#owned = budget owned &&
       available r.#owned >= Bigint.sub (available owned) 44Z &&
@@ -134,7 +131,6 @@ let find : (x : U.elem) @ immutable ->
         (Bigint.add 2Z (Bigint.mul 4Z (Cost.depth (Cost.snapshot owned.#state) x)))}
       @ unique =
     fun x owned ->
-  let owned = owned in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned);
     Cost.observations (borrow_ owned.#state); fee_bounds (borrow_ owned.#state);
     Cost.event_cost (borrow_ owned.#state));
@@ -151,7 +147,7 @@ let find : (x : U.elem) @ immutable ->
     E.total_def (E.Find (Cost.depth p x) :: history); E.weight_def (E.Find (Cost.depth p x)));
   let owned = #{state; wallet = split.C.right} in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
-  let r = #{value; owned} in r
+  #{value; owned}
 
 let initially_empty (x : U.elem @ immutable) =
   let amount = ghost_ 1Z in

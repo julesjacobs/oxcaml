@@ -10,9 +10,42 @@ module Term_table = Hashtbl.Make (struct
 
   let equal left right = compare left right = 0
 
-  (* The default hash only inspects ten meaningful nodes. Large obligations
-     share that prefix, causing expensive comparisons in the visited table. *)
-  let hash term = Hashtbl.hash_param 100 1000 term
+  (* Divide the budget between children so a long left spine does not hide
+     symbols in its right branches. *)
+  let add value n = (value * 65599) lxor n
+
+  let rec visit budget value term =
+    if budget <= 0 then value
+    else
+      let budget = budget - 1 in
+      match term with
+      | Boolean b -> add (add value 0) (Bool.to_int b)
+      | Integer n -> add (add value 1) (Hashtbl.hash n)
+      | Big_integer text -> add (add value 2) (Hashtbl.hash text)
+      | Var symbol -> add (add value 3) (Symbol.hash symbol)
+      | App (op, args) ->
+        arguments budget (add (add value 4) (Hashtbl.hash op)) args
+      | Call (fn, args) ->
+        arguments budget (add (add value 5) (Function.hash fn)) args
+      | Construct (constructor, args) ->
+        arguments budget (add (add value 6) (Constructor.hash constructor)) args
+      | Is (constructor, arg) ->
+        visit budget (add (add value 7) (Constructor.hash constructor)) arg
+      | Select (constructor, index, arg) ->
+        visit budget
+          (add (add (add value 8) (Constructor.hash constructor)) index) arg
+
+  and arguments budget value = function
+    | [] -> add value 9
+    | [term] -> add (visit budget value term) 9
+    | term :: rest ->
+      if budget <= 0 then value
+      else
+        let first = max 1 (budget / 2) in
+        arguments (budget - first) (visit first value term) rest
+
+  let hash term = visit 64 0 term
+
 end)
 
 type logical_lambda =
@@ -671,12 +704,34 @@ let record_observation_equation ctx term value =
   if not unguarded
   then Term_table.replace equation_steps term !Vox_proof_steps.current
 
+(* Bound stack use for wide array literals. *)
+let map_term_arguments f args =
+  let rec map budget = function
+    | [] -> []
+    | args when budget = 0 -> List.map f args
+    | arg :: rest as args ->
+      let mapped = f arg in
+      let rest' = map (budget - 1) rest in
+      if mapped == arg && rest' == rest then args else mapped :: rest'
+  in
+  map 64 args
+
 let map_term_children f = function
-  | App (op, args) -> App (op, List.map f args)
-  | Call (fn, args) -> Call (fn, List.map f args)
-  | Construct (constructor, args) -> Construct (constructor, List.map f args)
-  | Is (constructor, arg) -> Is (constructor, f arg)
-  | Select (constructor, field, arg) -> Select (constructor, field, f arg)
+  | App (op, args) as term ->
+    let mapped = map_term_arguments f args in
+    if mapped == args then term else App (op, mapped)
+  | Call (fn, args) as term ->
+    let mapped = map_term_arguments f args in
+    if mapped == args then term else Call (fn, mapped)
+  | Construct (constructor, args) as term ->
+    let mapped = map_term_arguments f args in
+    if mapped == args then term else Construct (constructor, mapped)
+  | Is (constructor, arg) as term ->
+    let mapped = f arg in
+    if mapped == arg then term else Is (constructor, mapped)
+  | Select (constructor, field, arg) as term ->
+    let mapped = f arg in
+    if mapped == arg then term else Select (constructor, field, mapped)
   | (Boolean _ | Integer _ | Big_integer _ | Var _) as term -> term
 
 (* Unresolved body results are not captures: keeping them free would identify
@@ -5028,36 +5083,23 @@ let query ?indicators ctx code =
   (* Observation equations recorded during VC generation are keyed by terms
      written before renaming; those added during expansion already use the
      renamed terms. *)
+  let equation_steps_of term =
+    Option.value ~default:[] (Term_table.find_opt equation_steps term)
+  in
   let generated_equations =
     lazy
-      (let table = Hashtbl.create (Hashtbl.length ctx.observation_equations) in
+      (let table = Term_table.create (Hashtbl.length ctx.observation_equations) in
        Hashtbl.iter
-         (fun key value -> Hashtbl.replace table (rename key) value)
+         (fun key value ->
+           Term_table.replace table (rename key) (value, equation_steps_of key))
          ctx.observation_equations;
        table)
   in
   let observation_equation term =
     match Hashtbl.find_opt ctx.observation_equations term with
-    | Some _ as equation -> equation
+    | Some value -> Some (value, equation_steps_of term)
     | None when Hashtbl.length renamed = 0 -> None
-    | None -> Hashtbl.find_opt (Lazy.force generated_equations) term
-  in
-  let renamed_equation_steps =
-    lazy
-      (let table = Term_table.create (Term_table.length equation_steps) in
-       Term_table.iter
-         (fun key steps -> Term_table.replace table (rename key) steps)
-         equation_steps;
-       table)
-  in
-  (* The steps whose evaluation recorded an observation equation or symbol. *)
-  let equation_steps_of term =
-    match Term_table.find_opt equation_steps term with
-    | Some steps -> steps
-    | None when Hashtbl.length renamed = 0 -> []
-    | None ->
-      Option.value ~default:[]
-        (Term_table.find_opt (Lazy.force renamed_equation_steps) term)
+    | None -> Term_table.find_opt (Lazy.force generated_equations) term
   in
   let expand ~slice goal =
     let raw = { datatypes = []; symbols = []; functions = []; facts; goal } in
@@ -5274,9 +5316,9 @@ let query ?indicators ctx code =
             (entries array_equalities array))
         observations;
       Option.iter
-        (fun value ->
+        (fun (value, steps) ->
           with_guard
-            (union !guard (declared (equation_steps_of term)))
+            (union !guard (declared steps))
             (fun () -> define "iarray observation" term value))
         (observation_equation term);
       match term with

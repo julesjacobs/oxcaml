@@ -106,7 +106,6 @@ module Demo : sig end = struct
       Int_set.Refined.find
     in
     let representative = ghost_ (find set member) in
-    let member = member in
     let singleton = ghost_ (Int_set.Refined.singleton member) in
     let unit = () in
     let proof :

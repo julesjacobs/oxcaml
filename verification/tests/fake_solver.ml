@@ -16,7 +16,7 @@ let () =
   then (
     output_string stderr (String.make 100000 'e');
     flush stderr);
-  let resources = ref 0 in
+  let resources = ref 0 and produce_assumptions = ref false in
   let rec commands () =
     match read_line () with
     | "(check-sat)" | "(check-sat-using (then simplify solve-eqs smt))" ->
@@ -30,6 +30,7 @@ let () =
       | "interrupt" ->
         Unix.kill (Unix.getppid ()) Sys.sigint;
         hang ()
+      | "second-bad-model" when !resources > 42 -> print_endline "sat"
       | "bad-status" -> print_endline "probably"
       | "stdout-flood" -> print_endline (String.make (5 * 1024 * 1024) 'x')
       | "unknown" | "solver-timeout" -> print_endline "unknown"
@@ -44,20 +45,40 @@ let () =
       | "duplicate-status" -> print_endline "unsat\nunsat"
       | _ -> print_endline "unsat");
       commands ()
+    | "(set-option :produce-unsat-assumptions true)" ->
+      produce_assumptions := true;
+      commands ()
+    | line when String.starts_with ~prefix:"(check-sat-assuming " line ->
+      if mode <> "assumption-core" then exit 3;
+      resources := !resources + 42;
+      print_endline "unsat";
+      commands ()
+    | "(get-unsat-assumptions)" ->
+      if mode <> "assumption-core" || not !produce_assumptions then exit 3;
+      print_endline "(v0)";
+      commands ()
+    | "(get-unsat-core)" when mode = "assumption-core" -> exit 3
     | "(get-info :reason-unknown)" ->
       print_endline
         (if mode = "solver-timeout"
          then "(:reason-unknown \"timeout\")"
          else "(:reason-unknown \"incomplete\")");
       commands ()
+    | "(push 1)" when String.starts_with ~prefix:"setup-" mode ->
+      print_endline (if mode = "setup-resource"
+        then "(error \"line 12 column 7: push canceled\")"
+        else "(error \"line 12 column 7: push canceled unexpectedly\")");
+      commands ()
     | "(reset)" ->
       resources := 0;
+      produce_assumptions := false;
       commands ()
     | "(get-info :rlimit)" ->
       if mode <> "no-resources" then Printf.printf "(:rlimit %d)\n%!" !resources;
       commands ()
     | "(echo \"vox-query-done\")" ->
-      print_endline "vox-query-done";
+      print_endline (if mode = "quoted-echo" then "\"vox-query-done\""
+        else "vox-query-done");
       commands ()
     | "(exit)" -> ()
     | line when String.starts_with ~prefix:"(get-value" line ->
@@ -70,7 +91,7 @@ let () =
       | "model-error" -> print_endline "(error \"model unavailable\")"
       | "unparsed-model" -> print_endline "((v0 unexpected))"
       | "bad-model" -> print_endline "((v0"
-      | "wrong-model-shape" -> print_endline "(unsat)"
+      | "wrong-model-shape" | "second-bad-model" -> print_endline "(unsat)"
       | "deep-model" -> print_endline (String.make 300 '(' ^ String.make 300 ')')
       | "flat-model" ->
         print_endline

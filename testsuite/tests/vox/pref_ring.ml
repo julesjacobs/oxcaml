@@ -386,7 +386,7 @@ let detach (n : node @ immutable) (left : node @ immutable)
       && not (n.prev === n.next)
       && not (left.next === n.prev) && not (left.next === n.next)
       && not (right.prev === n.prev) && not (right.prev === n.next)} @ unique) :
-    {r : node option Pref.partition | let t = t in Pref.own r.#left === H.restrict (Pref.own t)
+    {r : node option Pref.partition | Pref.own r.#left === H.restrict (Pref.own t)
         (H.put (H.put (H.empty ()) n.prev (Some n)) n.next (Some n))
       && Pref.own r.#right === H.exclude (Pref.own t)
         (H.put (H.put (H.empty ()) n.prev (Some n)) n.next (Some n))

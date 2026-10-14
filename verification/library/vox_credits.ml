@@ -12,20 +12,20 @@ module type S = sig
 
   val tick : (token : {t : token | credits t > 0})
       @ unique total ghost ->
-    {t : token | let token = token in
+    {t : token |
       credits t = credits token - 1} @ unique total ghost @@ total
 
   val split : (amount : int) @ ghost ->
     (token : {t : token | 0 <= amount && amount <= credits t})
       @ unique total ghost ->
-    {p : partition | let token = token in credits p.left = amount &&
+    {p : partition | credits p.left = amount &&
       credits p.right = credits token - amount} @ unique @@ total
 
   val merge : (left : token) @ unique total ghost ->
     (right : {t : token | 0 <= credits left && 0 <= credits t &&
       0 <= credits left + credits t})
       @ unique total ghost ->
-    {t : token | let right = right in
+    {t : token |
       credits t = credits left + credits right} @ unique total ghost @@ total
 
 end
@@ -36,7 +36,7 @@ module Make () = struct
   type partition = { left : token @@ ghost; right : token @@ ghost }
 
   let[@def] credits (token : token @ local immutable total ghost) =
-    ghost_ (let balance = token.balance in balance)
+    ghost_ (token.balance)
 
   let (nonnegative @ total) (token : token @ local immutable total ghost) :
       {u : unit | 0 <= credits token} @ ghost = ghost_ (
@@ -46,9 +46,8 @@ module Make () = struct
 
   let (tick @ total) (token : {t : token | credits t > 0}
         @ unique total ghost) :
-      {t : token | let token = token in
+      {t : token |
       credits t = credits token - 1} @ unique total ghost =
-    let token = token in
     ghost_ (credits_def (borrow_ token));
     let result = { balance = ghost_ (
       let balance = token.balance in
@@ -59,9 +58,8 @@ module Make () = struct
   let (split @ total) (amount : int @ ghost)
       (token : {t : token | 0 <= amount && amount <= credits t}
         @ unique total ghost) :
-      {p : partition | let token = token in credits p.left = amount &&
+      {p : partition | credits p.left = amount &&
         credits p.right = credits token - amount} @ unique =
-    let token = token in
     let left = { balance = ghost_ (amount : amount) } in
     ghost_ (credits_def (borrow_ token));
     let right = { balance = ghost_ (
@@ -76,9 +74,8 @@ module Make () = struct
       (right : {t : token | 0 <= credits left && 0 <= credits t &&
         0 <= credits left + credits t}
         @ unique total ghost) :
-      {t : token | let right = right in
+      {t : token |
       credits t = credits left + credits right} @ unique total ghost =
-    let right = right in
     ghost_ (credits_def (borrow_ left); credits_def (borrow_ right));
     let result = { balance = ghost_ (
       let a = left.balance in
@@ -89,9 +86,8 @@ module Make () = struct
 
   module Budget = struct
     let (create @ total) (amount : {n : int | n >= 0} @ ghost) :
-        {t : token | let amount = amount in credits t = amount}
+        {t : token | credits t = amount}
         @ unique total ghost =
-      let amount = amount in
       let result = { balance = ghost_ (amount : amount) } in
       ghost_ (credits_def (borrow_ result));
       result
@@ -100,6 +96,5 @@ module Make () = struct
       {t : token | credits t = 0} @ unique total ghost =
     let zero = 0 in
     let initial : amount = zero in
-    let result = Budget.create initial in
-    result
+    Budget.create initial
 end

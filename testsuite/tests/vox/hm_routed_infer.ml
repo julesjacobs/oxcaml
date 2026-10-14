@@ -80,7 +80,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
     let i = ghost_ index.T.original in
     ghost_ (Dp.env_lookup_owned h.Ghost.ghost env i ();
       F.lookup_encoded env i index.T.number; ());
-    let premise : ({u : unit | F.valid_forest runtime_env && index.T.number >= 0}) Ghost.t = {Ghost.ghost = ghost_ (refine_ ())} in
+    let premise : ({u : unit | F.valid_forest runtime_env && index.T.number >= 0}) Ghost.t = {Ghost.ghost = ghost_ ()} in
     let refine_ found = F.lookup runtime_env index.T.number premise in
     let p : {p : node Pref.t | lookup env i === Some p && H.mem h.Ghost.ghost p} = match found with
       | Some p -> refine_ p | None -> unreachable_ () in
@@ -202,7 +202,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
   let arg_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem arg_heap.Ghost.ghost x then finite arg_heap.Ghost.ghost t else observe arg_heap.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> let next = G.allocated_forest h.Ghost.ghost trees.Ghost.ghost depth argument var () in
-      let refine_ t = next x in refine_ t)} in
+      next x)} in
   let[@def] arg_heads_selected : E.heads @ ghost = ghost_ (fun x ->
     let refine_ r = Forest_heads.select arg_heap.Ghost.ghost arg_trees.Ghost.ghost x in r) in
   let arg_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ arg_heads_selected} in
@@ -238,7 +238,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
   | Some target ->
   let body_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem middle.Ghost.ghost x then finite middle.Ghost.ghost t else observe middle.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let refine_ t = G.run_forest arg_heap.Ghost.ghost arg_trees.Ghost.ghost depth arg_pool next_env body_run middle.Ghost.ghost body_pool x () in refine_ t)} in
+    {Ghost.ghost = ghost_ (fun x -> G.run_forest arg_heap.Ghost.ghost arg_trees.Ghost.ghost depth arg_pool next_env body_run middle.Ghost.ghost body_pool x ())} in
   let[@def] body_heads_selected : E.heads @ ghost = ghost_ (fun x ->
     let refine_ r = Forest_heads.select middle.Ghost.ghost body_trees.Ghost.ghost x in r) in
   let body_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ body_heads_selected} in
@@ -540,7 +540,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
       | Some _ ->
         let ts : (((x : node Pref.t) @ immutable ->
           {t : tree | tree_root t === x && (if H.mem middle.Ghost.ghost x then finite middle.Ghost.ghost t else observe middle.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-          {Ghost.ghost = ghost_ (fun x -> let refine_ t = G.run_forest h.Ghost.ghost trees.Ghost.ghost depth pool env body middle.Ghost.ghost body_pool x () in refine_ t)} in
+          {Ghost.ghost = ghost_ (fun x -> G.run_forest h.Ghost.ghost trees.Ghost.ghost depth pool env body middle.Ghost.ghost body_pool x ())} in
         let[@def] mid_heads_selected : E.heads @ ghost = ghost_ (fun x ->
           let refine_ r = Forest_heads.select middle.Ghost.ghost ts.Ghost.ghost x in r) in
         let mid_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ mid_heads_selected} in
@@ -595,7 +595,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
   | Some fn ->
   let first_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem h1.Ghost.ghost x then finite h1.Ghost.ghost t else observe h1.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let refine_ t = G.run_forest h.Ghost.ghost trees.Ghost.ghost depth pool env left_run h1.Ghost.ghost pool1 x () in refine_ t)} in
+    {Ghost.ghost = ghost_ (fun x -> G.run_forest h.Ghost.ghost trees.Ghost.ghost depth pool env left_run h1.Ghost.ghost pool1 x ())} in
   let[@def] first_heads_selected : E.heads @ ghost = ghost_ (fun x ->
     let refine_ r = Forest_heads.select h1.Ghost.ghost first_trees.Ghost.ghost x in r) in
   let first_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ first_heads_selected} in
@@ -629,7 +629,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
   | Some actual ->
   let second_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem h2.Ghost.ghost x then finite h2.Ghost.ghost t else observe h2.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let refine_ t = G.run_forest h1.Ghost.ghost first_trees.Ghost.ghost depth pool1 env right_run h2.Ghost.ghost pool2 x () in refine_ t)} in
+    {Ghost.ghost = ghost_ (fun x -> G.run_forest h1.Ghost.ghost first_trees.Ghost.ghost depth pool1 env right_run h2.Ghost.ghost pool2 x ())} in
   let[@def] second_heads_selected : E.heads @ ghost = ghost_ (fun x ->
     let refine_ r = Forest_heads.select h2.Ghost.ghost second_trees.Ghost.ghost x in r) in
   let second_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ second_heads_selected} in
@@ -666,7 +666,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
   let result_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem result_heap.Ghost.ghost x then finite result_heap.Ghost.ghost t else observe result_heap.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> let next = G.allocated_forest h2.Ghost.ghost second_trees.Ghost.ghost depth result_node var () in
-      let refine_ t = next x in refine_ t)} in
+      next x)} in
   let[@def] result_heads_selected : E.heads @ ghost = ghost_ (fun x ->
     let refine_ r = Forest_heads.select result_heap.Ghost.ghost result_trees.Ghost.ghost x in r) in
   let result_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ result_heads_selected} in
@@ -726,7 +726,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
   | Some fn ->
   let first_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem h1.Ghost.ghost x then finite h1.Ghost.ghost t else observe h1.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let refine_ t = G.run_forest h.Ghost.ghost trees.Ghost.ghost depth pool env left_run h1.Ghost.ghost pool1 x () in refine_ t)} in
+    {Ghost.ghost = ghost_ (fun x -> G.run_forest h.Ghost.ghost trees.Ghost.ghost depth pool env left_run h1.Ghost.ghost pool1 x ())} in
   let[@def] first_heads_selected : E.heads @ ghost = ghost_ (fun x ->
     let refine_ r = Forest_heads.select h1.Ghost.ghost first_trees.Ghost.ghost x in r) in
   let first_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ first_heads_selected} in
@@ -760,7 +760,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
   | Some actual ->
   let second_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem h2.Ghost.ghost x then finite h2.Ghost.ghost t else observe h2.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let refine_ t = G.run_forest h1.Ghost.ghost first_trees.Ghost.ghost depth pool1 env right_run h2.Ghost.ghost pool2 x () in refine_ t)} in
+    {Ghost.ghost = ghost_ (fun x -> G.run_forest h1.Ghost.ghost first_trees.Ghost.ghost depth pool1 env right_run h2.Ghost.ghost pool2 x ())} in
   let[@def] second_heads_selected : E.heads @ ghost = ghost_ (fun x ->
     let refine_ r = Forest_heads.select h2.Ghost.ghost second_trees.Ghost.ghost x in r) in
   let second_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ second_heads_selected} in
@@ -792,7 +792,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
   let result_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem result_heap.Ghost.ghost x then finite result_heap.Ghost.ghost t else observe result_heap.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> let next = G.allocated_forest h2.Ghost.ghost second_trees.Ghost.ghost depth result_node var () in
-      let refine_ t = next x in refine_ t)} in
+      next x)} in
   let[@def] result_heads_selected : E.heads @ ghost = ghost_ (fun x ->
     let refine_ r = Forest_heads.select result_heap.Ghost.ghost result_trees.Ghost.ghost x in r) in
   let result_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ result_heads_selected} in
@@ -823,7 +823,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
   let arrow_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem arrow_heap.Ghost.ghost x then finite arrow_heap.Ghost.ghost t else observe arrow_heap.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> let next = G.allocated_forest result_heap.Ghost.ghost result_trees.Ghost.ghost depth arrow_node desc () in
-      let refine_ t = next x in refine_ t)} in
+      next x)} in
   let[@def] arrow_heads_selected : E.heads @ ghost = ghost_ (fun x ->
     let refine_ r = Forest_heads.select arrow_heap.Ghost.ghost arrow_trees.Ghost.ghost x in r) in
   let arrow_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ arrow_heads_selected} in
@@ -882,7 +882,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
   let arg_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem arg_heap.Ghost.ghost x then finite arg_heap.Ghost.ghost t else observe arg_heap.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> let next = G.allocated_forest h.Ghost.ghost trees.Ghost.ghost depth argument var () in
-      let refine_ t = next x in refine_ t)} in
+      next x)} in
   let[@def] arg_heads_selected : E.heads @ ghost = ghost_ (fun x ->
     let refine_ r = Forest_heads.select arg_heap.Ghost.ghost arg_trees.Ghost.ghost x in r) in
   let arg_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ arg_heads_selected} in
@@ -908,7 +908,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
   let result_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem result_heap.Ghost.ghost x then finite result_heap.Ghost.ghost t else observe result_heap.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> let next = G.allocated_forest arg_heap.Ghost.ghost arg_trees.Ghost.ghost depth result_node var () in
-      let refine_ t = next x in refine_ t)} in
+      next x)} in
   let[@def] result_heads_selected : E.heads @ ghost = ghost_ (fun x ->
     let refine_ r = Forest_heads.select result_heap.Ghost.ghost result_trees.Ghost.ghost x in r) in
   let result_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ result_heads_selected} in
@@ -941,7 +941,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
   let self_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem self_heap.Ghost.ghost x then finite self_heap.Ghost.ghost t else observe self_heap.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> let next = G.allocated_forest result_heap.Ghost.ghost result_trees.Ghost.ghost depth self_node desc () in
-      let refine_ t = next x in refine_ t)} in
+      next x)} in
   let[@def] self_heads_selected : E.heads @ ghost = ghost_ (fun x ->
     let refine_ r = Forest_heads.select self_heap.Ghost.ghost self_trees.Ghost.ghost x in r) in
   let self_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ self_heads_selected} in
@@ -986,7 +986,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
   | Some target ->
   let body_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem middle.Ghost.ghost x then finite middle.Ghost.ghost t else observe middle.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let refine_ t = G.run_forest self_heap.Ghost.ghost self_trees.Ghost.ghost depth self_pool next_env body_run middle.Ghost.ghost body_pool x () in refine_ t)} in
+    {Ghost.ghost = ghost_ (fun x -> G.run_forest self_heap.Ghost.ghost self_trees.Ghost.ghost depth self_pool next_env body_run middle.Ghost.ghost body_pool x ())} in
   let[@def] body_heads_selected : E.heads @ ghost = ghost_ (fun x ->
     let refine_ r = Forest_heads.select middle.Ghost.ghost body_trees.Ghost.ghost x in r) in
   let body_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ body_heads_selected} in
@@ -1061,7 +1061,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
   | Some bound_node ->
   let rhs_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem middle.Ghost.ghost x then finite middle.Ghost.ghost t else observe middle.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let refine_ t = G.run_forest h.Ghost.ghost trees.Ghost.ghost child_depth child_pool env rhs_run middle.Ghost.ghost rhs_pool x () in refine_ t)} in
+    {Ghost.ghost = ghost_ (fun x -> G.run_forest h.Ghost.ghost trees.Ghost.ghost child_depth child_pool env rhs_run middle.Ghost.ghost rhs_pool x ())} in
   let[@def] rhs_heads_selected : E.heads @ ghost = ghost_ (fun x ->
     let refine_ r = Forest_heads.select middle.Ghost.ghost rhs_trees.Ghost.ghost x in r) in
   let rhs_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ rhs_heads_selected} in
@@ -1109,7 +1109,7 @@ let rec work : (collect_trace : bool) -> (goal : goal) @ immutable -> (h : node 
   let start : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (Pref.own (borrow_ state))} in
   let parent_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem start.Ghost.ghost x then finite start.Ghost.ghost t else observe start.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let refine_ t = G.representative_closed_forest middle.Ghost.ghost rhs_trees.Ghost.ghost depth rhs_pool x () in refine_ t)} in
+    {Ghost.ghost = ghost_ (fun x -> G.representative_closed_forest middle.Ghost.ghost rhs_trees.Ghost.ghost depth rhs_pool x ())} in
   let parent_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at start.Ghost.ghost rhs_heads.Ghost.ghost depth parent_pool x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> Hm_effective_closing.close_after_run h.Ghost.ghost heads.Ghost.ghost rhs_heads.Ghost.ghost depth pool facts.Ghost.ghost env rhs_run middle.Ghost.ghost rhs_pool (refine_ rhs_facts.Ghost.ghost) x (); ())} in
   let env_input : {f : F.forest | F.valid_forest f} = refine_ runtime_env in

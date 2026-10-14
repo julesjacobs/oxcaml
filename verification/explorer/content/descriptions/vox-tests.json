@@ -785,7 +785,7 @@
       "short": "Generates random modules in the model's supported subset, with its own syntax and binary encoder that share no code with the model, so the decoder is tested on bytes it did not produce."
     }
   },
-  "testsuite/tests/vox/wasm_differential_harness.js": {
+  "testsuite/tests/vox/wasm_differential_harness.cjs": {
     "what": {
       "short": "The engine side of the differential test: Node validates, instantiates and runs each module and reports status, result, globals and memory."
     }

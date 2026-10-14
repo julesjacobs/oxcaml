@@ -9,9 +9,8 @@
 module C = Vox_big_credits.Make ()
 
 let (twice @ total) (token : {t : C.token | C.credits t >= 2Z} @ unique total ghost) :
-    {t : C.token | let token = token in
+    {t : C.token |
       C.credits t = Bigint.sub (C.credits token) 2Z} @ unique total ghost =
-  let token = token in
   let first = C.tick (token) in
   C.tick (first)
 
@@ -37,9 +36,8 @@ let () =
 
 let (observe @ total) :
     (token : {t : C.token | C.credits t > 0Z}) @ unique total ghost ->
-    {t : C.token | let token = token in
+    {t : C.token |
       C.credits t = Bigint.sub (C.credits token) 1Z} @ unique total ghost = fun token ->
-  let token = token in
   let first = ghost_ (C.credits (borrow_ token)) in
   let second = ghost_ (C.credits (borrow_ token)) in
   let available : {t : C.token | C.credits t > 0Z} = token in

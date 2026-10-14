@@ -7,7 +7,6 @@
 type point = {x : int; y : int}
 
 let refined_record_first (q : {q : point | q.x = 0}) : {r : int | r = 0} =
-  let q = q in
   let r = q.x in
   r;;
 [%%expect{|
@@ -212,7 +211,6 @@ module Tree = struct
       r
     | Node (value, rest) ->
       let copied : {r : 'a tree | r === rest} = copy rest in
-      let copied = copied in
       let r = Node (value, copied) in
       r
 
@@ -223,7 +221,6 @@ module Tree = struct
       r
     | Node (_, rest) ->
       let rest : {r : Bigint.t | r > 0Z} = size rest in
-      let rest = rest in
       let r = Bigint.(1Z + rest) in
       r
 end;;
@@ -242,15 +239,14 @@ end
 
 let total_congruence (p : point) (q : {q : point | q === p})
     : {u : unit |
-        let q = q in
         Stable.id q === Stable.id p} =
   ();;
 [%%expect{|
 module Stable : sig val id : 'a -> 'a end
 val total_congruence :
   (p : point) ->
-  (q' : {q : point | q === p}) ->
-  {u : unit | let q = q' in (Stable.id q) === (Stable.id p)} = <fun>
+  (q : {q : point | q === p}) -> {u : unit | (Stable.id q) === (Stable.id p)} =
+  <fun>
 |}]
 
 type ordinary = Ordinary_stop | Ordinary_more of ordinary

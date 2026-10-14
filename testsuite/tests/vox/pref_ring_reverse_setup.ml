@@ -74,7 +74,6 @@ let build_source : (s : node) @ immutable -> (a : node) @ immutable -> (b :
       && H.at (Pref.own r) c.prev === Some (Some b)
       && H.at (Pref.own r) c.next === Some (Some s)} @ unique =
   fun s a b c t ->
-  let t = t in
   let initial = ghost_ (Pref.own (borrow_ t)) in
   let p0 = s.next in
   let v0 = Some a in
@@ -139,5 +138,4 @@ let build_source : (s : node) @ immutable -> (a : node) @ immutable -> (b :
       (H.put (H.put (H.put (initial) s.next (Some a)) a.prev (Some s)) a.next
       (Some b)) b.prev (Some a)) b.next (Some c)) c.prev (Some b)) c.next (Some
       s)) s.prev (Some c)} = u in
-  let _expanded = _expanded in
   t

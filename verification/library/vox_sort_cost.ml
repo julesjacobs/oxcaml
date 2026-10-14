@@ -28,19 +28,17 @@ let rec (height_bound @ total) : (size : Bigint.t) ->
 
 let rec (bounded_int @ total) : (bound : int) ->
     (amount : {n : Bigint.t | 0Z <= n && n <= Bigint.of_int bound}) ->
-    {n : int | let amount = amount in
+    {n : int |
       Bigint.of_int n = amount && 0 <= n && n <= bound} @ ghost =
     fun bound amount -> ghost_ (
-  let amount = amount in
-  if amount <= 0Z then (let result = 0 in result)
+  if amount <= 0Z then 0
   else (
     let next_bound = bound - 1 in
     let smaller = Bigint.sub amount 1Z in
     let next : {n : Bigint.t | 0Z <= n &&
       n <= Bigint.of_int next_bound} = smaller in
     let previous = bounded_int next_bound next in
-    let result = previous + 1 in
-    result))
+    previous + 1))
 [@@decreases bound]
 
 let rec (height_minimal @ total) : (size : Bigint.t) ->

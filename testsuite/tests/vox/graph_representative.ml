@@ -36,8 +36,8 @@ let rec representative_loop :
           let joined = Via (q, path) in
           resolves_def h.Ghost.ghost p value joined;
           let joined : {d : resolution | resolves h.Ghost.ghost p value d} = refine_ joined in
-          let refine_ result = lift.Ghost.ghost value joined in refine_ result)} in
-      let refine_ out = representative_loop start h_witness5 scope_witness6 q (refine_ state_argument8) next_lift in refine_ out
+          lift.Ghost.ghost value joined)} in
+      representative_loop start h_witness5 scope_witness6 q (refine_ state_argument8) next_lift
 
     | Var | Bool | Word | List _ | Arrow _ ->
       let path = ghost_ Here in
@@ -45,7 +45,7 @@ let rec representative_loop :
       ghost_ (resolves_def h.Ghost.ghost p p path);
       let path : {d : resolution | resolves h.Ghost.ghost start.Ghost.ghost p d} @ immutable ghost = ghost_ (
         let path : {d : resolution | resolves h.Ghost.ghost p p d} = refine_ path in
-        let refine_ out = lift.Ghost.ghost p path in refine_ out) in
+        lift.Ghost.ghost p path) in
       let result = #{value = p; path = path} in refine_ result
 
 let representative :
@@ -61,5 +61,5 @@ let representative :
       {d : resolution | resolves h.Ghost.ghost start.Ghost.ghost value d} @ immutable)) Ghost.t =
       {Ghost.ghost = ghost_ (fun value path -> refine_ path)} in
     let t : {t : node Pref.token | Pref.own t === h.Ghost.ghost && H.mem h.Ghost.ghost p} = refine_ t in
-    let refine_ result = representative_loop start h scope p t lift in refine_ result
+    representative_loop start h scope p t lift
 

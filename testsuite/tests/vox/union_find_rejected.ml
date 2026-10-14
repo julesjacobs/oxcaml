@@ -59,7 +59,7 @@ Line 8, characters 32-38:
 8 |     let result = U.find x state (zero) in
                                     ^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_union_find.mli", lines 151-152, characters 28-46:
+File "vox_union_find.mli", line 152, characters 8-46:
   The refinement is stated here.
 |}]
 

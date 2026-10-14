@@ -49,7 +49,7 @@ let read_owned : (a : t) ->
   fun a t ->
     let p = L.cell a in
     ghost_ (location_def a; owned_def a (P.own t));
-    let v = P.read p t in v
+    P.read p t
 
 let try_increment (a : t) =
   let r = try_acquire a in
@@ -61,8 +61,7 @@ let try_increment (a : t) =
     ghost_ (location_def a; owned_def a h);
     let x : {v : int | 0 <= v && h === P.Heap.put (P.Heap.empty ()) p v} =
       let b = borrow_ t in
-      let v = P.read p b in
-      v in
+      P.read p b in
     let next = x + 1 in
     let y = if next < 0 then x else next in
     let t = P.write p y t in

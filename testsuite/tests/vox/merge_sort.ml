@@ -24,7 +24,7 @@ module Make_compare (C : Vox_credits.S) = struct
   type result = #{ before : bool; state : C.token @@ ghost }
   let (compare @ total) : (left : int) -> (right : int) ->
       (token : {t : C.token | C.credits t > 0}) @ unique total ghost ->
-      {r : result | let token = token in
+      {r : result |
         r.#before = O.le left right &&
         C.credits r.#state = C.credits token - 1} @ unique =
       fun left right token ->
@@ -49,7 +49,7 @@ let public_permutation (values : int list) = ghost_ (
 let (funded_sort @ total) (values : int list) (target : int)
     (token : {t : C.token | Vox_sort_cost.budget (Vox_sequence.length values) <=
       Bigint.of_int (C.credits t)} @ unique total ghost) :
-    {r : Sort.result | let token = token in
+    {r : Sort.result |
       Sort.P.sorted r.#values && Sort.P.permutation values r.#values &&
       Sort.P.count values target = Sort.P.count r.#values target &&
       Vox_sequence.length r.#values = Vox_sequence.length values &&
@@ -88,7 +88,7 @@ let check values =
 
 let (two @ total) : (x : int) -> (y : int) -> (z : int) ->
     (token : {t : C.token | C.credits t >= 2}) @ unique total ghost ->
-    {r : Compare.result | let token = token in
+    {r : Compare.result |
       r.#before = (O.le x y && O.le y z) &&
       C.credits r.#state = C.credits token - 2} @ unique =
     fun x y z token ->
@@ -132,7 +132,7 @@ module Make_rank_compare (C : Vox_credits.S) = struct
   type result = #{ before : bool; state : C.token @@ ghost }
   let (compare @ total) : (left : Ranked.elt) -> (right : Ranked.elt) ->
       (token : {t : C.token | C.credits t > 0}) @ unique total ghost ->
-      {r : result | let token = token in
+      {r : result |
         r.#before = Ranked.le left right &&
         C.credits r.#state = C.credits token - 1} @ unique =
       fun left right token ->

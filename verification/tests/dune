@@ -5,19 +5,50 @@
  (enabled_if (= %{context_name} main)))
 
 (test
+ (name test_sat_solver)
+ (modules test_sat_solver)
+ (modes native)
+ (libraries vox_sat_solver)
+ (enabled_if (= %{context_name} main)))
+
+(tests
+ (names test_smt_integer test_smt_arithmetic test_smt_bitvector
+  test_smt_equality test_smt_datatype test_smt_nonlinear test_smt_engine
+  test_smt_encoding test_smt_resource test_smt_operation)
+ (modules test_smt_integer test_smt_arithmetic test_smt_bitvector
+  test_smt_equality test_smt_datatype test_smt_nonlinear test_smt_engine
+  test_smt_encoding test_smt_resource test_smt_operation)
+ (libraries vox_smt_pure)
+ (enabled_if (= %{context_name} main)))
+
+(test
  (name test_smt)
  (modules test_smt)
  (libraries vox_smt vox_smt_solver unix)
  (enabled_if (= %{context_name} main))
  (action (run %{test} %{exe:fake_solver.exe})))
 
-(test
+(executable
  (name test_z3)
  (modules test_z3)
  (libraries vox_smt vox_smt_solver)
+ (enabled_if (= %{context_name} main)))
+
+(rule
+ (alias runtest)
+ (enabled_if (= %{context_name} main))
+ (action (run %{exe:test_z3.exe} %{exe:../vox_smt_main.exe})))
+
+(rule
+ (alias runtest)
+ (enabled_if (= %{context_name} main))
+ (action (run %{exe:test_z3.exe} ocaml)))
+
+(rule
+ (alias runtest)
  (enabled_if
   (and (= %{context_name} main) (= %{env:VOX_TEST_Z3=false} true)))
- (action (run %{test} %{bin:z3})))
+ (action (run %{exe:test_z3.exe} %{bin:z3})))
 
 (test
  (name test_encoding)

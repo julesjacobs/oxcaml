@@ -61,7 +61,7 @@ let run_range values first past =
         let i : {i : int | 0 <= i
           && Bigint.of_int i <= Model.length (Slice.current s)} =
           first in
-        let j : {j : int | let i = i in i <= j
+        let j : {j : int | i <= j
           && Bigint.of_int j <= Model.length (Slice.current s)} =
           past in
         let state = sort_range s i j in state

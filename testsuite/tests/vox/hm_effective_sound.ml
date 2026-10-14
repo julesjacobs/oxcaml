@@ -51,7 +51,7 @@ let rec (run_sound @ total) : (h : node Pref.heap) @ immutable -> (heads : E.hea
       (match result rhs with None -> let d = D.Constant in refine_ d | Some original ->
       let middle_forest : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
         (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h trees child_depth empty env rhs middle child_pool x () in refine_ t in
+        Hm_effective_forest.run_forest h trees child_depth empty env rhs middle child_pool x () in
       let[@def] middle_heads : E.heads = fun x -> let refine_ r = Forest_heads.select middle middle_forest x in r in
       let middle_valid : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head middle middle_heads x}) @ total = fun x ->
         middle_heads_def x; let refine_ r = Forest_heads.select middle middle_forest x in
@@ -66,7 +66,7 @@ let closed = Representative_pool_spec.close_heap middle depth child_pool in let 
       Representative_level.representatives_scoped middle child_pool ();
       let closed_forest : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
         (if H.mem closed x then finite closed t else observe closed x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Forest_transport.closed_forest_at middle middle_forest depth filtered x () in refine_ t in
+        Forest_transport.closed_forest_at middle middle_forest depth filtered x () in
       Hm_effective_driver_proofs.run_result h trees child_depth empty env rhs middle child_pool original ();
       middle_facts original; Hm_effective_result.result_below h trees child_depth empty env rhs middle child_pool middle_heads original ();
       let refine_ finite_tree = middle_forest original in
@@ -185,7 +185,7 @@ let closed = Representative_pool_spec.close_heap middle depth child_pool in let 
       let desc = primitive_desc op in allocated_def middle depth p desc;
       let ts : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
         (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h trees depth pool env body middle body_pool x () in refine_ t in
+        Hm_effective_forest.run_forest h trees depth pool env body middle body_pool x () in
       let mid_model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation middle rho x}) @ total = fun x ->
         let refine_ _t = ts x in model x;
         Hm_effective_model.allocation_restrict middle p (cell desc depth) rho x (); () in
@@ -202,7 +202,7 @@ let closed = Representative_pool_spec.close_heap middle depth child_pool in let 
       let pool1 = Entry (arg, pool) in let env1 = Bind (arg, env) in
       let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Level_finite_proofs.allocation_finite_at h trees arg v x () in refine_ t in
+        Level_finite_proofs.allocation_finite_at h trees arg v x () in
       let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select h1 ts1 x in r in
       let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 heads1 x}) @ total = fun x ->
         heads1_def x; let refine_ r = Forest_heads.select h1 ts1 x in
@@ -216,7 +216,7 @@ let closed = Representative_pool_spec.close_heap middle depth child_pool in let 
       P.context_def rho schemas1; boundary_scheme rho arg;
       let ts2 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h1 ts1 depth pool1 env1 body middle body_pool x () in refine_ t in
+        Hm_effective_forest.run_forest h1 ts1 depth pool1 env1 body middle body_pool x () in
             (match result body with None -> let d = D.Constant in refine_ d | Some b -> match out with
       | None -> let d = D.Constant in refine_ d | Some _ ->
       let desc = Arrow (arg, b) in let w = cell desc depth in allocated_def middle depth p desc;
@@ -229,14 +229,14 @@ let closed = Representative_pool_spec.close_heap middle depth child_pool in let 
     | RCons (left, right, h1, pool1, h2, pool2, _, ok, derivation) ->
       let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h trees depth pool env left h1 pool1 x () in refine_ t in
+        Hm_effective_forest.run_forest h trees depth pool env left h1 pool1 x () in
       let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select h1 ts1 x in r in
       let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 heads1 x}) @ total = fun x ->
         heads1_def x; let refine_ r = Forest_heads.select h1 ts1 x in
         E.valid_head_def h1 heads1 x; () in
             let ts2 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h1 ts1 depth pool1 env right h2 pool2 x () in refine_ t in
+        Hm_effective_forest.run_forest h1 ts1 depth pool1 env right h2 pool2 x () in
             (match result left with None -> let d = D.Constant in refine_ d | Some f ->
       match result right with None -> let d = D.Constant in refine_ d | Some a ->
       let desc = List f in let v = cell desc depth in let h3 = H.put h2 p v in
@@ -260,14 +260,14 @@ let closed = Representative_pool_spec.close_heap middle depth child_pool in let 
     | RApp (left, right, h1, pool1, h2, pool2, _, arrow, ok, derivation) ->
       let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h trees depth pool env left h1 pool1 x () in refine_ t in
+        Hm_effective_forest.run_forest h trees depth pool env left h1 pool1 x () in
       let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select h1 ts1 x in r in
       let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 heads1 x}) @ total = fun x ->
         heads1_def x; let refine_ r = Forest_heads.select h1 ts1 x in
         E.valid_head_def h1 heads1 x; () in
             let ts2 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Hm_effective_forest.run_forest h1 ts1 depth pool1 env right h2 pool2 x () in refine_ t in
+        Hm_effective_forest.run_forest h1 ts1 depth pool1 env right h2 pool2 x () in
             (match result left with None -> let d = D.Constant in refine_ d | Some f ->
       match result right with None -> let d = D.Constant in refine_ d | Some a ->
       let var : desc = Var in let v = cell var depth in let h3 = H.put h2 p v in
@@ -276,7 +276,7 @@ let closed = Representative_pool_spec.close_heap middle depth child_pool in let 
       cell_def var depth; allocatable_def h2 v;
       let ts3 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h3 x then finite h3 t else observe h3 x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Level_finite_proofs.allocation_finite_at h2 ts2 p v x () in refine_ t in
+        Level_finite_proofs.allocation_finite_at h2 ts2 p v x () in
             let model4 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h4 rho x}) @ total = fun x ->
         Effective_unifier_model.success_forward_at h4 rho f arrow after derivation model x (); () in
       let model3 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h3 rho x}) @ total = fun x ->
@@ -305,21 +305,21 @@ let closed = Representative_pool_spec.close_heap middle depth child_pool in let 
       below_def h2 arg depth; below_def h2 res depth;
       let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Level_finite_proofs.allocation_finite_at h trees arg v x () in refine_ t in
+        Level_finite_proofs.allocation_finite_at h trees arg v x () in
       let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select h1 ts1 x in r in
       let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 heads1 x}) @ total = fun x ->
         heads1_def x; let refine_ r = Forest_heads.select h1 ts1 x in
         E.valid_head_def h1 heads1 x; () in
             let ts2 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Level_finite_proofs.allocation_finite_at h1 ts1 res v x () in refine_ t in
+        Level_finite_proofs.allocation_finite_at h1 ts1 res v x () in
       let[@def] heads2 : E.heads = fun x -> let refine_ r = Forest_heads.select h2 ts2 x in r in
       let valid2 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h2 heads2 x}) @ total = fun x ->
         heads2_def x; let refine_ r = Forest_heads.select h2 ts2 x in
         E.valid_head_def h2 heads2 x; () in
             let ts3 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h3 x then finite h3 t else observe h3 x === None)} @ immutable) @ total = fun x ->
-        let refine_ t = Level_finite_proofs.allocation_finite_at h2 ts2 self w x () in refine_ t in
+        Level_finite_proofs.allocation_finite_at h2 ts2 self w x () in
       let[@def] heads3 : E.heads = fun x -> let refine_ r = Forest_heads.select h3 ts3 x in r in
       let valid3 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h3 heads3 x}) @ total = fun x ->
         heads3_def x; let refine_ r = Forest_heads.select h3 ts3 x in
@@ -372,7 +372,7 @@ let (closed_sound @ total) : (e : execution) @ immutable -> (after : node Pref.h
       let t = Free x in tree_root_def t; observe_def h x; refine_ t in
     let final_trees : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
         (if H.mem after x then finite after t else observe after x === None)} @ immutable) @ total = fun x ->
-      let refine_ t = Hm_effective_forest.closed_forest e after pool x () in refine_ t in
+      Hm_effective_forest.closed_forest e after pool x () in
     let[@def] rho : node Pref.t @ immutable total -> ty @ immutable total = fun x ->
       let refine_ t = final_trees x in readback t in
     let agrees : ((x : node Pref.t) @ immutable ->

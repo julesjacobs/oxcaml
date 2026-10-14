@@ -133,7 +133,6 @@ let append : (owner : {o : t | valid o && Memo.Spec.valid o.view &&
          owned arena; [post] is the ghost postcondition on its final
          contents. *)
       let result = A.with_mut arena post (fun slice ->
-        let slice = slice in
         let slot :
           {i : int | 0 <= i && i < Iarray.length (Slice.current slice)} =
           count in

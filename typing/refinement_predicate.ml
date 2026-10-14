@@ -379,12 +379,22 @@ let constant_equal (c1 : Parsetree.constant) (c2 : Parsetree.constant) =
       String.equal s1 s2 && Option.equal String.equal d1 d2
   | desc1, desc2 -> desc1 = desc2
 
-let equal_with_types ~pairs rexp1 rexp2 =
+let equal_with_types ?(value_path = Fun.id) ?(constructor_path = Fun.id)
+    ?(type_path = Fun.id) ~pairs rexp1 rexp2 =
   (* [pairs] pairs the binders of the left predicate with the binders of
      the right one, innermost first.  The types of corresponding nodes are
      collected; the caller decides how they must be related.  A type is
      [exposed] when the verifier assumes its refinements while evaluating
      the predicate. *)
+  let value_desc = function
+    | Rexp_ident path as desc ->
+        let path' = value_path path in
+        if path == path' then desc else Rexp_ident path'
+    | desc -> desc
+  in
+  let same_path normalize left right =
+    Path.same (normalize left) (normalize right)
+  in
   let types = ref [] in
   let pair_types ?(exposed = false) binders ty1 ty2 =
     types := { left = ty1; right = ty2; exposed; binders } :: !types
@@ -412,7 +422,7 @@ let equal_with_types ~pairs rexp1 rexp2 =
         pair_types ?exposed pairs rexp1.rexp_type rexp2.rexp_type;
         eq_desc pairs rexp1 rexp2
   and eq_desc pairs rexp1 rexp2 =
-    match rexp1.rexp_desc, rexp2.rexp_desc with
+    match value_desc rexp1.rexp_desc, value_desc rexp2.rexp_desc with
     | Rexp_refinement _, _ | _, Rexp_refinement _ -> eq pairs rexp1 rexp2
     | Rexp_var id1, Rexp_var id2 -> var_eq pairs id1 id2
     | Rexp_ident p1, Rexp_ident p2 -> Path.same p1 p2
@@ -437,7 +447,7 @@ let equal_with_types ~pairs rexp1 rexp2 =
              (fun (l1, e1) (l2, e2) -> l1 = l2 && eq pairs e1 e2)
              c1 c2
     | Rexp_construct (p1, args1), Rexp_construct (p2, args2) ->
-        Path.same p1 p2
+        same_path constructor_path p1 p2
         && List.compare_lengths args1 args2 = 0
         && List.for_all2 (eq pairs) args1 args2
     | Rexp_record (f1, e1), Rexp_record (f2, e2)
@@ -446,7 +456,7 @@ let equal_with_types ~pairs rexp1 rexp2 =
         List.compare_lengths f1 f2 = 0
         && List.for_all2
              (fun (p1, l1, e1) (p2, l2, e2) ->
-               Path.same p1 p2
+               same_path type_path p1 p2
                && String.equal l1 l2
                && eq pairs e1 e2)
              f1 f2
@@ -457,7 +467,7 @@ let equal_with_types ~pairs rexp1 rexp2 =
         && List.for_all2 (eq pairs) es1 es2
     | Rexp_field (e1, p1, l1), Rexp_field (e2, p2, l2)
     | Rexp_unboxed_field (e1, p1, l1), Rexp_unboxed_field (e2, p2, l2) ->
-        Path.same p1 p2
+        same_path type_path p1 p2
         && String.equal l1 l2
         && eq pairs e1 e2
     | Rexp_ifthenelse (c1, t1, e1), Rexp_ifthenelse (c2, t2, e2) ->
@@ -519,7 +529,8 @@ let equal_with_types ~pairs rexp1 rexp2 =
             (Some pairs) c1 c2
         else None
     | Rpat_construct (c1, args1), Rpat_construct (c2, args2) ->
-        if Path.same c1 c2 && List.compare_lengths args1 args2 = 0 then
+        if same_path constructor_path c1 c2
+           && List.compare_lengths args1 args2 = 0 then
           List.fold_left2
             (fun pairs p1 p2 ->
               Option.bind pairs (fun pairs -> eq_pat pairs p1 p2))
@@ -530,7 +541,8 @@ let equal_with_types ~pairs rexp1 rexp2 =
           List.fold_left2
             (fun pairs (path1, label1, pat1) (path2, label2, pat2) ->
               Option.bind pairs (fun pairs ->
-                  if Path.same path1 path2 && String.equal label1 label2
+                  if same_path type_path path1 path2
+                     && String.equal label1 label2
                   then eq_pat pairs pat1 pat2
                   else None))
             (Some pairs) f1 f2

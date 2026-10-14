@@ -663,15 +663,9 @@ let emit_debug_info_gen ?discriminator dbg file_emitter loc_emitter =
 let binary_backend_available = ref false
 
 let reduce_heap_size ~reset =
-  let _minor, _promoted, major_words = Gc.counters () in
-  (* Uses [major_words] because it doesn't require a heap traversal to compute
-     and for this workload a majority of major words are live at this point. *)
-  let heap_reduction_threshold =
-    if !Oxcaml_flags.heap_reduction_threshold >= 0
-    then float !Oxcaml_flags.heap_reduction_threshold
-    else Float.infinity
-  in
-  if Float.compare major_words heap_reduction_threshold > 0
+  let threshold = !Oxcaml_flags.heap_reduction_threshold in
+  (* Cumulative allocation includes objects already reclaimed. *)
+  if threshold >= 0 && (Gc.quick_stat ()).heap_words > threshold
   then
     Profile.record_call "compact" (fun () ->
         reset ();

@@ -1,5 +1,5 @@
 // Engine side of the differential test of the Vox WebAssembly model.
-// Usage: node wasm_differential_harness.js DIR FROM TO [TIMEOUT_MS]
+// Usage: node wasm_differential_harness.cjs DIR FROM TO [TIMEOUT_MS]
 // For each id in [FROM, TO), reads DIR/<id>.wasm (the module as the model sees
 // it) and, if present, DIR/<id>.variant.wasm (the same module exporting every
 // global as g<k>), and DIR/<id>.input, the input as an unsigned decimal.

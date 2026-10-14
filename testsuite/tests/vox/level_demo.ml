@@ -24,31 +24,31 @@ let () =
   let scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem saved x) || finite_scope saved x}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; cell_def desc 4; let desc = Arrow (a, a) in cell_def desc 4;
     active_def saved x; at_level_def saved x; active_def saved a; at_level_def saved a;
-    finite_scope_def saved x; source_ok_def saved x; refine_ ()) in
+    finite_scope_def saved x; source_ok_def saved x; ()) in
   let order : ((x : node Pref.t) @ immutable -> {u : unit | ordered saved x}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; cell_def desc 4; let desc = Arrow (a, a) in cell_def desc 4;
     below_def saved a 4; at_level_def saved a; children_below_def saved desc 4;
     let desc = Var in children_below_def saved desc 0; children_below_def saved desc 4;
-    ordered_def saved x; refine_ ()) in
+    ordered_def saved x; ()) in
   ghost_ (let desc = Var in cell_def desc 0; let desc = Arrow (a, a) in cell_def desc 4;
     active_def saved p; at_level_def saved p; active_def saved q; at_level_def saved q);
-  let state : {t : node Pref.token | Pref.own t === saved && H.mem saved p && H.mem saved q && active saved p && active saved q} = refine_ state in
+  let state : {t : node Pref.token | Pref.own t === saved && H.mem saved p && H.mem saved q && active saved p && active saved q} = state in
   let unmarked : ((x : node Pref.t) @ immutable ->
     {u : unit | match H.at saved x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
     let desc = Var in cell_def desc 0; cell_def desc 4; let desc = Arrow (a, a) in cell_def desc 4;
-    refine_ ()) in
+    ()) in
   let refine_ out = Level_unifier.unify saved scope unmarked p q state in
   assert out.#ok;
   let h = ghost_ (Pref.own (borrow_ out.#state)) in let d = ghost_ out.#derivation in let ok = out.#ok in
   let _scope_after : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || finite_scope h x}) @ total ghost = ghost_ (fun x ->
-    let refine_ u = unified_scope saved scope p q ok h d x (refine_ ()) in refine_ u) in
-  let _order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x}) @ total ghost = ghost_ (fun x -> order x; let refine_ u = unified_ordered saved p q ok h d x (refine_ ()) in refine_ u) in
-  ghost_ (unified_frame saved p q ok h d p (refine_ ());
-    unified_frame saved p q ok h d q (refine_ ()); unified_frame saved p q ok h d a (refine_ ()));
+    unified_scope saved scope p q ok h d x ()) in
+  let _order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x}) @ total ghost = ghost_ (fun x -> order x; unified_ordered saved p q ok h d x ()) in
+  ghost_ (unified_frame saved p q ok h d p ();
+    unified_frame saved p q ok h d q (); unified_frame saved p q ok h d a ());
   let state = out.#state in
-  let old : node = let t : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ state in let refine_ v = Pref.read p t in v in
-  let target : node = let t : {t : node Pref.token | H.mem (Pref.own t) q} = refine_ state in let refine_ v = Pref.read q t in v in
-  let child : node = let t : {t : node Pref.token | H.mem (Pref.own t) a} = refine_ state in let refine_ v = Pref.read a t in v in
+  let old : node = let t : {t : node Pref.token | H.mem (Pref.own t) p} = state in let refine_ v = Pref.read p t in v in
+  let target : node = let t : {t : node Pref.token | H.mem (Pref.own t) q} = state in let refine_ v = Pref.read q t in v in
+  let child : node = let t : {t : node Pref.token | H.mem (Pref.own t) a} = state in let refine_ v = Pref.read a t in v in
   assert (old.desc = Link q && target.level = Finite 0 && child.level = Finite 0);
   assert (old.memo = Empty_memo && target.memo = Empty_memo && child.memo = Empty_memo);
   ()

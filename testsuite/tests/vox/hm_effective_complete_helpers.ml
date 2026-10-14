@@ -45,7 +45,6 @@ let (with_alloc @ total) : (h : node Pref.heap) @ immutable -> (heads : E.heads)
       (next : ((x : node Pref.t) @ immutable -> {u : unit | equation (H.put h p v) tau x})) @ total ->
       (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
       {u : unit | tau p === value} -> {u : unit | claim}) @ total = fun tau next equal fit ->
-
       let converted : ((x : node Pref.t) @ immutable -> {u : unit | node_equation after tau x}) @ total = fun x ->
         next x; equation_def after tau x; observe_def after x; node_equation_def after tau x; () in
       let () = use tau converted equal fit in () in
@@ -164,7 +163,7 @@ let (with_variable_model @ total) : (h : node Pref.heap) @ immutable -> (heads :
       facts x; runtime_at_def h heads depth pool x; safe_def h heads x; () in
     let trees : ((x : node Pref.t) @ immutable ->
       {s : template | not (H.mem h x) || (root s === x && Effective_template.valid_template h heads s)} @ immutable) @ total = fun x ->
-      let refine_ tree = forest x in if H.mem h x then (let refine_ s = snapshot h heads tree () in refine_ s)
+      let refine_ tree = forest x in if H.mem h x then (snapshot h heads tree ())
       else (let s = Boundary x in refine_ s) in
     T.eval_arguments_length xi args; T.eval_open_scheme xi sigma args;
     let values = T.eval_arguments xi args in

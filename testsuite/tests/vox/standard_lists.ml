@@ -14,7 +14,6 @@ module Copy = struct
       xs
     | head :: tail ->
       let copied : {r : 'a list | r === tail} = copy tail in
-      let copied = copied in
       let result = head :: copied in
       result
 end
@@ -24,7 +23,6 @@ let (nested @ total) : unit -> int list list @ immutable contended =
   fun () ->
     let input = [[1]; [2]] in
     let copied : {r : int list list | r === input} = Copy.copy input in
-    let copied = copied in
     copied
 
 type 'a list_alias = 'a list

@@ -83,7 +83,6 @@ let edit : (a : int Owned_array.t) @ unique ->
         let pair_post = ghost_ (fun (_ : unit @ immutable) (after : int Model.t @ immutable) ->
         after === [99; 88]) in
         let range = Slice.with_range s first past pair_post (fun middle ->
-          let middle = middle in
           let sized : {s : int Slice.t | Model.length (Slice.current s) === 2Z} = middle in
           let u = write_pair sized in
           u) in

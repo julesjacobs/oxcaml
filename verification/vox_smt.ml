@@ -29,6 +29,8 @@ module Datatype = struct
     { datatype_id = id; datatype_label = label }
 
   let label t = t.datatype_label
+
+  let hash t = t.datatype_id
 end
 
 module Constructor = struct
@@ -51,6 +53,8 @@ module Constructor = struct
   let datatype t = t.constructor_datatype
 
   let fields t = t.constructor_fields
+
+  let hash t = t.constructor_id
 end
 
 type datatype_declaration =
@@ -58,25 +62,29 @@ type datatype_declaration =
     constructors : Constructor.t list
   }
 
-let datatypes_well_founded declarations =
-  let declared = Hashtbl.create (List.length declarations) in
+let datatypes_well_founded ?(poll = fun () -> ()) declarations =
+  let declared = Hashtbl.create 16 in
   List.iter
     (fun declaration ->
+      poll ();
       Hashtbl.replace declared declaration.datatype.datatype_id declaration)
     declarations;
-  let inhabited = Hashtbl.create (List.length declarations) in
+  let inhabited = Hashtbl.create 16 in
   let changed = ref true in
   while !changed do
     changed := false;
     List.iter
       (fun declaration ->
+        poll ();
         let id = declaration.datatype.datatype_id in
         if
           (not (Hashtbl.mem inhabited id))
           && List.exists
                (fun constructor ->
+                 poll ();
                  List.for_all
                    (fun (_, sort) ->
+                     poll ();
                      match sort with
                      | Datatype datatype ->
                        Hashtbl.mem declared datatype.datatype_id
@@ -110,6 +118,8 @@ module Symbol = struct
   let label t = t.label
 
   let sort t = t.sort
+
+  let hash t = t.id
 end
 
 module Function = struct
@@ -133,6 +143,8 @@ module Function = struct
   let arguments t = t.arguments
 
   let result t = t.result
+
+  let hash t = t.id
 end
 
 type op =
@@ -182,6 +194,120 @@ type term =
   | Construct of Constructor.t * term list
   | Is of Constructor.t * term
   | Select of Constructor.t * int * term
+
+let compare_operands ~poll left right =
+  let module Pairs = Hashtbl.Make (struct
+    type t = term * term
+    let equal (a, b) (x, y) = poll (); a == x && b == y
+    let hash (a, b) =
+      poll ();
+      (Hashtbl.hash_param 2 8 a * 65599) lxor Hashtbl.hash_param 2 8 b
+  end) in
+  let seen = lazy (Pairs.create 16) in
+  let tag = function
+    | Boolean _ -> 0 | Integer _ -> 1 | Big_integer _ -> 2
+    | Var _ -> 3 | App _ -> 4 | Call _ -> 5 | Construct _ -> 6
+    | Is _ -> 7 | Select _ -> 8 in
+  let string left right =
+    let rec loop i =
+      poll ();
+      if i = String.length left then
+        if i = String.length right then 0 else -1
+      else if i = String.length right then 1
+      else
+        let order = Char.compare left.[i] right.[i] in
+        if order = 0 then loop (i + 1) else order in
+    if left == right then 0 else loop 0 in
+  let next order f = if order = 0 then f () else order in
+  let rec sorts left right =
+    poll ();
+    if left == right then 0 else
+    let tag = function
+      | Bool -> 0 | Int63 -> 1 | Int -> 2 | Opaque _ -> 3 | Datatype _ -> 4 in
+    let order = Int.compare (tag left) (tag right) in
+    if order <> 0 then order else match left, right with
+    | Opaque a, Opaque b -> Int.compare a b
+    | Datatype a, Datatype b -> datatype a b
+    | _ -> 0
+  and datatype left right =
+    poll ();
+    if left == right then 0 else
+    next (Int.compare left.datatype_id right.datatype_id)
+      (fun () -> string left.datatype_label right.datatype_label) in
+  let rec lists compare left right =
+    poll ();
+    if left == right then 0 else match left, right with
+    | [], [] -> 0 | [], _ -> -1 | _, [] -> 1
+    | x :: xs, y :: ys ->
+      next (compare x y) (fun () -> lists compare xs ys) in
+  let symbol left right =
+    if left == right then 0 else
+    next (Int.compare left.Symbol.id right.Symbol.id) (fun () ->
+      next (string left.Symbol.label right.Symbol.label)
+        (fun () -> sorts left.Symbol.sort right.Symbol.sort)) in
+  let function_ left right =
+    if left == right then 0 else
+    next (Int.compare left.Function.id right.Function.id) (fun () ->
+      next (string left.Function.label right.Function.label) (fun () ->
+        next (lists sorts left.Function.arguments right.Function.arguments)
+          (fun () -> sorts left.Function.result right.Function.result))) in
+  let constructor left right =
+    if left == right then 0 else
+    next (Int.compare left.constructor_id right.constructor_id) (fun () ->
+      next (datatype left.constructor_datatype right.constructor_datatype)
+        (fun () -> next (string left.constructor_label right.constructor_label)
+          (fun () -> lists (fun (a, x) (b, y) ->
+              next (string a b) (fun () -> sorts x y))
+            left.constructor_fields right.constructor_fields))) in
+  let rec term left right =
+    poll ();
+    if left == right then 0 else
+    let order = Int.compare (tag left) (tag right) in
+    if order <> 0 then order else
+    match left, right with
+    | Boolean a, Boolean b -> Bool.compare a b
+    | Integer a, Integer b -> Int64.compare a b
+    | Big_integer a, Big_integer b -> string a b
+    | Var a, Var b -> symbol a b
+    | (App _ | Call _ | Construct _ | Is _ | Select _), _ ->
+      let seen = Lazy.force seen in
+      let key = left, right in
+      (match Pairs.find_opt seen key with
+      | Some order -> order
+      | None ->
+        let order = composite left right in
+        Pairs.replace seen key order;
+        order)
+    | _ -> invalid_arg "Vox_smt.compare_operands: source comparison tags"
+  and composite left right =
+    match left, right with
+    | App (a, xs), App (b, ys) ->
+      let order = Stdlib.compare a b in
+      if order <> 0 then order else arguments xs ys
+    | Call (a, xs), Call (b, ys) ->
+      let order = function_ a b in
+      if order <> 0 then order else arguments xs ys
+    | Construct (a, xs), Construct (b, ys) ->
+      let order = constructor a b in
+      if order <> 0 then order else arguments xs ys
+    | Is (a, x), Is (b, y) ->
+      let order = constructor a b in
+      if order <> 0 then order else term x y
+    | Select (a, i, x), Select (b, j, y) ->
+      let order = constructor a b in
+      if order <> 0 then order else
+      let order = Int.compare i j in
+      if order <> 0 then order else term x y
+    | _ -> invalid_arg "Vox_smt.compare_operands: source comparison tags"
+  and arguments left right =
+    poll ();
+    if left == right then 0 else
+    match left, right with
+    | [], [] -> 0 | [], _ -> -1 | _, [] -> 1
+    | x :: xs, y :: ys ->
+      let order = term x y in
+      if order = 0 then arguments xs ys else order in
+  arguments left right
 
 type labelled_term =
   { label : string;
@@ -243,14 +369,20 @@ let sort_name = function
   | Opaque id -> Printf.sprintf "opaque(%d)" id
   | Datatype datatype -> Printf.sprintf "datatype(%s)" datatype.datatype_label
 
-let decimal_integer text =
+let decimal_integer ?(poll = fun () -> ()) text =
   let len = String.length text in
   let start = if len > 0 && text.[0] = '-' then 1 else 0 in
+  let rec digits index =
+    if index = len then true
+    else begin
+      poll ();
+      let c = text.[index] in
+      c >= '0' && c <= '9' && digits (index + 1)
+    end
+  in
   len > start
   && (text.[start] <> '0' || len = 1)
-  && String.for_all
-       (fun c -> c >= '0' && c <= '9')
-       (String.sub text start (len - start))
+  && digits start
 
 let error fmt = Printf.ksprintf (fun s -> raise (Sort_error s)) fmt
 
@@ -301,12 +433,17 @@ let rec term_sort = function
     | Conditional, [_; t; _] -> term_sort t
     | Conditional, _ -> error "ite expects 3 operands")
 
-let check ?(poll = fun () -> ()) ~int_width q =
+type query_features =
+  { bitvector_encoding : bool; machine_multiplication : bool }
+
+let check_features ?(poll = fun () -> ()) ~int_width q =
+  let bitvector_encoding = ref false and machine_multiplication = ref false in
   poll ();
   if int_width <> 63 then raise (Unsupported_target int_width);
   let datatypes = Hashtbl.create 16 in
   List.iter
     (fun declaration ->
+      poll ();
       let datatype = declaration.datatype in
       if Hashtbl.mem datatypes datatype.datatype_id
       then error "Duplicate SMT datatype %S" datatype.datatype_label;
@@ -317,8 +454,10 @@ let check ?(poll = fun () -> ()) ~int_width q =
   let constructors = Hashtbl.create 32 in
   List.iter
     (fun declaration ->
+      poll ();
       List.iter
         (fun constructor ->
+          poll ();
           if
             constructor.constructor_datatype.datatype_id
             <> declaration.datatype.datatype_id
@@ -331,25 +470,30 @@ let check ?(poll = fun () -> ()) ~int_width q =
           Hashtbl.add constructors constructor.constructor_id constructor)
         declaration.constructors)
     q.datatypes;
-  let require_declared_sort = function
+  let require_declared_sort sort =
+    poll ();
+    match sort with
     | Datatype datatype when not (Hashtbl.mem datatypes datatype.datatype_id) ->
       error "Undeclared SMT datatype %S" datatype.datatype_label
     | Bool | Int63 | Int | Opaque _ | Datatype _ -> ()
   in
   List.iter
     (fun declaration ->
+      poll ();
       List.iter
         (fun constructor ->
+          poll ();
           List.iter
             (fun (_, sort) -> require_declared_sort sort)
             constructor.constructor_fields)
         declaration.constructors)
     q.datatypes;
-  if not (datatypes_well_founded q.datatypes)
+  if not (datatypes_well_founded ~poll q.datatypes)
   then error "SMT datatype declarations are not well-founded";
   let declared = Hashtbl.create 16 in
   List.iter
     (fun s ->
+      poll ();
       if Hashtbl.mem declared s.Symbol.id
       then error "Duplicate SMT symbol %S" (Symbol.label s);
       require_declared_sort (Symbol.sort s);
@@ -358,6 +502,7 @@ let check ?(poll = fun () -> ()) ~int_width q =
   let functions = Hashtbl.create 16 in
   List.iter
     (fun f ->
+      poll ();
       if Hashtbl.mem functions f.Function.id
       then error "Duplicate SMT function %S" (Function.label f);
       List.iter require_declared_sort (Function.arguments f);
@@ -368,16 +513,85 @@ let check ?(poll = fun () -> ()) ~int_width q =
     if actual <> expected
     then error "Expected %s, got %s" (sort_name expected) (sort_name actual)
   in
+  let hash term =
+    let remaining = ref 16 and value = ref 0 in
+    let add n = value := (!value * 65599) lxor n in
+    let rec visit term =
+      if !remaining > 0 then begin
+        decr remaining;
+        match term with
+        | Boolean b -> add 0; add (if b then 1 else 0)
+        | Integer n -> add 1; add (Hashtbl.hash n)
+        | Big_integer text -> add 2; add (String.length text)
+        | Var symbol -> add 3; add symbol.Symbol.id
+        | App (op, args) -> add 4; add (Hashtbl.hash op); arguments args
+        | Call (function_, args) ->
+          add 5; add function_.Function.id; arguments args
+        | Construct (constructor, args) ->
+          add 6; add constructor.constructor_id; arguments args
+        | Is (constructor, arg) ->
+          add 7; add constructor.constructor_id; visit arg
+        | Select (constructor, index, arg) ->
+          add 8; add constructor.constructor_id; add index; visit arg
+      end
+    and arguments = function
+      | [] -> ()
+      | arg :: rest ->
+        if !remaining > 0 then begin visit arg; arguments rest end
+    in
+    visit term;
+    !value
+  in
+  let module Terms = Hashtbl.Make (struct
+    type t = term
+
+    let equal a b = a == b
+
+    let hash = hash
+  end) in
+  let active = Terms.create 32 and inferred = Hashtbl.create 128 in
+  let rec find term = function
+    | [] -> None
+    | (previous, sort) :: rest ->
+      if previous == term then Some sort else find term rest
+  in
+  let rec keep count = function
+    | [] -> []
+    | _ when count = 0 -> []
+    | pair :: rest -> pair :: keep (count - 1) rest
+  in
   let rec infer term =
     poll ();
     match term with
+    | Boolean _ | Integer _ | Big_integer _ | Var _ -> infer_node term
+    | App _ | Call _ | Construct _ | Is _ | Select _ -> infer_shared term
+  and infer_shared term =
+    let key = hash term in
+    let previous =
+      Option.value (Hashtbl.find_opt inferred key) ~default:[]
+    in
+    match find term previous with
+    | Some sort -> sort
+    | None ->
+      if Terms.mem active term then error "Cyclic SMT term";
+      Terms.add active term ();
+      let sort = infer_node term in
+      Terms.remove active term;
+      let previous =
+        Option.value (Hashtbl.find_opt inferred key) ~default:[]
+      in
+      (* Distinct allocations can have equal hashes. Bound completed buckets
+         so they cannot turn validation into a quadratic identity search. *)
+      Hashtbl.replace inferred key ((term, sort) :: keep 7 previous);
+      sort
+  and infer_node = function
     | Boolean _ -> Bool
     | Integer n ->
       if n < -4611686018427387904L || n > 4611686018427387903L
       then error "Integer %Ld is outside the signed 63-bit range" n;
       Int63
     | Big_integer text ->
-      if not (decimal_integer text)
+      if not (decimal_integer ~poll text)
       then error "Invalid unbounded integer constant %S" text;
       Int
     | Var s ->
@@ -420,6 +634,11 @@ let check ?(poll = fun () -> ()) ~int_width q =
         error "Invalid selector %d for %S" index constructor.constructor_label
       end
     | App (op, args) -> (
+      (match op with
+      | Mul -> machine_multiplication := true
+      | Bit_and | Bit_or | Bit_xor | Shift_right_logical | Shift_left
+      | Shift_right_arithmetic -> bitvector_encoding := true
+      | _ -> ());
       let signature = operator_signature op in
       let arity =
         match signature with
@@ -448,11 +667,41 @@ let check ?(poll = fun () -> ()) ~int_width q =
     with Sort_error message -> error "%s: %s" label message
   in
   List.iter fact q.facts;
-  fact q.goal
+  fact q.goal;
+  { bitvector_encoding = !bitvector_encoding;
+    machine_multiplication = !machine_multiplication }
+
+let check ?poll ~int_width q =
+  ignore (check_features ?poll ~int_width q)
+
+let contains_abstract_bitwise ~poll q =
+  let recent = Array.make 2 (Boolean false) in
+  let next = ref 0 in
+  let rec contains term =
+    poll ();
+    match term with
+    | Boolean _ | Integer _ | Big_integer _ | Var _ -> false
+    | App ((Bit_and | Bit_or | Bit_xor | Shift_right_logical), _) -> true
+    | App _ | Call _ | Construct _ | Is _ | Select _ ->
+      if term == recent.(0) || term == recent.(1) then false
+      else
+        let result = match term with
+          | App (_, args) | Call (_, args) | Construct (_, args) ->
+            List.exists contains args
+          | Is (_, value) | Select (_, _, value) -> contains value
+          | Boolean _ | Integer _ | Big_integer _ | Var _ -> false in
+        if not result then begin
+          recent.(!next) <- term;
+          next := 1 - !next
+        end;
+        result
+  in
+  contains q.goal.term || List.exists (fun f -> contains f.term) q.facts
 
 (* Each distinct bitwise application becomes a call to an uninterpreted
    function, constrained by facts that hold for the 63-bit operation. *)
-let abstract_bitwise q =
+let abstract_bitwise ?(poll = fun () -> ()) q =
+  if not (contains_abstract_bitwise ~poll q) then None else
   let functions = ref [] in
   let function_for op =
     match List.assq_opt op !functions with
@@ -466,7 +715,31 @@ let abstract_bitwise q =
       f
   in
   let applications = ref [] and seen = Hashtbl.create 16 in
+  let recent = Array.make 2 (Boolean false) in
+  let results = Array.make 2 (Boolean false) in
+  let next = ref 0 in
+  let rec lookup term remaining index =
+    if remaining = 0 then -1
+    else if recent.(index) == term then index
+    else lookup term (remaining - 1) ((index - 1) land 1)
+  in
   let rec rewrite term =
+    poll ();
+    match term with
+    | Boolean _ | Integer _ | Big_integer _ | Var _ -> term
+    | App _ | Call _ | Construct _ | Is _ | Select _ ->
+      let cached = lookup term 2 ((!next - 1) land 1) in
+      if cached >= 0 then results.(cached)
+      else
+        let result = rewrite_node term in
+        recent.(!next) <- term;
+        results.(!next) <- result;
+        next := (!next + 1) land 1;
+        result
+  and arguments args =
+    let rewritten = List.map rewrite args in
+    if List.for_all2 ( == ) args rewritten then args else rewritten
+  and rewrite_node term =
     match term with
     | Boolean _ | Integer _ | Big_integer _ | Var _ -> term
     | App (((Bit_and | Bit_or | Bit_xor | Shift_right_logical) as op), [a; b])
@@ -479,11 +752,21 @@ let abstract_bitwise q =
         applications := (op, a, b, call) :: !applications
       end;
       call
-    | App (op, args) -> App (op, List.map rewrite args)
-    | Call (f, args) -> Call (f, List.map rewrite args)
-    | Construct (c, args) -> Construct (c, List.map rewrite args)
-    | Is (c, value) -> Is (c, rewrite value)
-    | Select (c, index, value) -> Select (c, index, rewrite value)
+    | App (op, args) ->
+      let rewritten = arguments args in
+      if rewritten == args then term else App (op, rewritten)
+    | Call (f, args) ->
+      let rewritten = arguments args in
+      if rewritten == args then term else Call (f, rewritten)
+    | Construct (c, args) ->
+      let rewritten = arguments args in
+      if rewritten == args then term else Construct (c, rewritten)
+    | Is (c, value) ->
+      let rewritten = rewrite value in
+      if rewritten == value then term else Is (c, rewritten)
+    | Select (c, index, value) ->
+      let rewritten = rewrite value in
+      if rewritten == value then term else Select (c, index, rewritten)
   in
   let goal = { q.goal with term = rewrite q.goal.term } in
   let facts = List.map (fun f -> { f with term = rewrite f.term }) q.facts in
@@ -611,8 +894,18 @@ let abstract_bitwise q =
       }
   end
 
-let to_smtlib ?(poll = fun () -> ()) ?resource_limit ?assumptions ~int_width
-    ~timeout_ms q =
+type smtlib_query =
+  { settings : string;
+    limits : string;
+    logic : string;
+    declarations : (string * string) list;
+    assertions : string list;
+    goal_assertion : string;
+    check_command : string
+  }
+
+let to_smtlib_query ?(poll = fun () -> ()) ?resource_limit ?assumptions
+    ~int_width ~timeout_ms q =
   check ~poll ~int_width q;
   if timeout_ms <= 0 then invalid_arg "Vox_smt.to_smtlib: timeout_ms";
   Option.iter
@@ -656,6 +949,11 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ?assumptions ~int_width
         declaration.constructors)
     q.datatypes;
   let add s = Buffer.add_string b s in
+  let take () =
+    let text = Buffer.contents b in
+    Buffer.clear b;
+    text
+  in
   let minimum = "(- 4611686018427387904)" in
   let maximum = "4611686018427387903" in
   let modulus = "9223372036854775808" in
@@ -921,13 +1219,18 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ?assumptions ~int_width
   add "(set-option :print-success false)\n";
   add "(set-option :produce-models true)\n";
   if Option.is_some assumptions
-  then add "(set-option :produce-unsat-cores true)\n";
+  then begin
+    add "(set-option :produce-unsat-cores true)\n";
+    add "(set-option :produce-unsat-assumptions true)\n"
+  end;
+  let settings = take () in
   add (Printf.sprintf "(set-option :timeout %d)\n" timeout_ms);
   (* Z3 options persist across queries in a session, so every query sets its own
      limit (0: unlimited). *)
   add
     (Printf.sprintf "(set-option :rlimit %d)\n"
        (Option.value resource_limit ~default:0));
+  let limits = take () in
   let rec uses_int t =
     term_sort t = Int
     ||
@@ -953,9 +1256,12 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ?assumptions ~int_width
      else if multiplications = [] && q.functions = []
      then "(set-logic QF_LIA)\n"
      else "(set-logic QF_UFLIA)\n");
+  let logic = take () in
+  let declarations = ref [] in
+  let declare name text = declarations := (name, text) :: !declarations in
   if has_bitwise
   then begin
-    add
+    declare "int63_of_bits"
       "(define-fun int63_of_bits ((x (_ BitVec 63))) Int\n\
       \  (ite (= ((_ extract 62 62) x) #b0) (bv2int x)\n\
       \    (- (bv2int x) 9223372036854775808)))\n"
@@ -964,7 +1270,7 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ?assumptions ~int_width
     (fun (op, name) ->
       if uses op
       then
-        add
+        declare name
           (Printf.sprintf
              "(declare-fun %s ((_ BitVec 63) (_ BitVec 63)) (_ BitVec 63))\n"
              name))
@@ -973,7 +1279,7 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ?assumptions ~int_width
       Shift_right_arithmetic, "int63_asr_unspecified" ];
   if uses Add && not has_bitwise
   then
-    add
+    declare "int63_add"
       (Printf.sprintf
          "(define-fun int63_add ((x Int) (y Int)) Int\n\
          \  (ite (> (+ x y) %s) (- (+ x y) %s)\n\
@@ -981,7 +1287,7 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ?assumptions ~int_width
          maximum modulus minimum modulus);
   if uses Sub && not has_bitwise
   then
-    add
+    declare "int63_sub"
       (Printf.sprintf
          "(define-fun int63_sub ((x Int) (y Int)) Int\n\
          \  (ite (> (- x y) %s) (- (- x y) %s)\n\
@@ -989,20 +1295,22 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ?assumptions ~int_width
          maximum modulus minimum modulus);
   if uses Neg && not has_bitwise
   then
-    add
+    declare "int63_neg"
       (Printf.sprintf
          "(define-fun int63_neg ((x Int)) Int\n  (ite (= x %s) %s (- x)))\n"
          minimum minimum);
   if (not has_bitwise) && (uses_general Div || uses_general Rem)
-  then add "(define-fun int63_abs ((x Int)) Int (ite (< x 0) (- x) x))\n";
+  then
+    declare "int63_abs"
+      "(define-fun int63_abs ((x Int)) Int (ite (< x 0) (- x) x))\n";
   if has_bitwise && uses Div
   then
-    add
+    declare "int63_div"
       "(define-fun int63_div ((x (_ BitVec 63)) (y (_ BitVec 63))) (_ BitVec \
        63) (ite (= y (_ bv0 63)) (_ bv0 63) (bvsdiv x y)))\n";
   if uses_general Div && not has_bitwise
   then
-    add
+    declare "int63_div"
       (Printf.sprintf
          "(define-fun int63_div ((x Int) (y Int)) Int\n\
          \  (ite (= y 0) 0\n\
@@ -1013,21 +1321,21 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ?assumptions ~int_width
          maximum modulus);
   if has_bitwise && uses Rem
   then
-    add
+    declare "int63_rem"
       "(define-fun int63_rem ((x (_ BitVec 63)) (y (_ BitVec 63))) (_ BitVec \
        63) (ite (= y (_ bv0 63)) (_ bv0 63) (bvsrem x y)))\n";
   if uses_general Rem && not has_bitwise
   then
-    add
+    declare "int63_rem"
       "(define-fun int63_rem ((x Int) (y Int)) Int\n\
       \  (ite (= y 0) 0\n\
       \    (let ((r (mod (int63_abs x) (int63_abs y))))\n\
       \      (ite (< x 0) (- r) r))))\n";
   if multiplications <> [] && not has_bitwise
-  then add "(declare-fun int63_mul (Int Int) Int)\n";
+  then declare "int63_mul" "(declare-fun int63_mul (Int Int) Int)\n";
   List.iter
     (fun id ->
-      add
+      declare (Hashtbl.find opaque_names id)
         (Printf.sprintf "(declare-sort %s 0)\n" (Hashtbl.find opaque_names id)))
     opaque_ids;
   if q.datatypes <> []
@@ -1064,23 +1372,27 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ?assumptions ~int_width
           declaration.constructors;
         add ")")
       q.datatypes;
-    add "))\n"
+    add "))\n";
+    declare "datatypes" (take ())
   end;
   List.iter
     (fun s ->
-      add
+      declare (Hashtbl.find names s.Symbol.id)
         (Printf.sprintf "(declare-fun %s () %s)\n"
            (Hashtbl.find names s.Symbol.id)
            (smt_sort (Symbol.sort s))))
     q.symbols;
   List.iter
     (fun f ->
-      add
+      declare (Hashtbl.find functions f.Function.id)
         (Printf.sprintf "(declare-fun %s (%s) %s)\n"
            (Hashtbl.find functions f.Function.id)
            (String.concat " " (List.map smt_sort (Function.arguments f)))
            (smt_sort (Function.result f))))
     q.functions;
+  let declarations = List.rev !declarations in
+  let assertions = ref [] in
+  let finish_assertion () = assertions := take () :: !assertions in
   let bounded value =
     if not has_bitwise
     then begin
@@ -1092,7 +1404,8 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ?assumptions ~int_width
       term value;
       add " ";
       add maximum;
-      add ")))\n"
+      add ")))\n";
+      finish_assertion ()
     end
   in
   List.iter
@@ -1115,7 +1428,8 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ?assumptions ~int_width
           add " ";
           term value;
           add ") 4611686018427387904) 9223372036854775808) ";
-          add "4611686018427387904)))\n"
+          add "4611686018427387904)))\n";
+          finish_assertion ()
         | _ -> ())
       multiplications;
   List.iter bounded int63_results;
@@ -1123,11 +1437,13 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ?assumptions ~int_width
     (fun f ->
       add "(assert ";
       term f.term;
-      add ")\n")
+      add ")\n";
+      finish_assertion ())
     q.facts;
   add "(assert (not ";
   term q.goal.term;
   add "))\n";
+  let goal_assertion = take () in
   (match assumptions with
   | Some assumptions ->
     (* Z3's tactics do not report cores, so a query with assumptions always uses
@@ -1144,7 +1460,16 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ?assumptions ~int_width
       (if has_bitwise
        then "(check-sat-using (then simplify solve-eqs smt))\n"
        else "(check-sat)\n"));
-  Buffer.contents b
+  { settings; limits; logic; declarations; assertions = List.rev !assertions;
+    goal_assertion; check_command = take () }
+
+let to_smtlib ?poll ?resource_limit ?assumptions ~int_width ~timeout_ms q =
+  let q =
+    to_smtlib_query ?poll ?resource_limit ?assumptions ~int_width ~timeout_ms q
+  in
+  q.settings ^ q.limits ^ q.logic
+  ^ String.concat "" (List.map snd q.declarations)
+  ^ String.concat "" q.assertions ^ q.goal_assertion ^ q.check_command
 
 type value =
   | Bool_value of bool

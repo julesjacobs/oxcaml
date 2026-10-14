@@ -15,22 +15,22 @@ let rec (unified_leaf_origin @ total) : (saved : node Pref.heap) @ immutable ->
     {o : origin | not (low_var after x cut) || originates saved after cut x o} @ immutable ghost =
   fun saved h cut prior p q ok after d x premise -> ghost_ (
     let refine_ premise = premise in unified_def h p q ok after d; match d with
-    | Base old -> let refine_ o = Leaf_provenance_proofs.unified_leaf_origin saved h cut prior p q ok after old x (refine_ ()) in refine_ o
-    | Resolve (r, s, _, _, rest) | List_children (r, s, rest) -> let refine_ o = unified_leaf_origin saved h cut prior r s ok after rest x (refine_ ()) in refine_ o
+    | Base old -> Leaf_provenance_proofs.unified_leaf_origin saved h cut prior p q ok after old x ()
+    | Resolve (r, s, _, _, rest) | List_children (r, s, rest) -> unified_leaf_origin saved h cut prior r s ok after rest x ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       let next : ((y : node Pref.t) @ immutable ->
         {o : origin | not (low_var middle y cut) || originates saved middle cut y o} @ immutable) @ total = fun y ->
-        let refine_ o = unified_leaf_origin saved h cut prior a c left_ok middle left y (refine_ ()) in refine_ o in
-      if left_ok then (let refine_ o = unified_leaf_origin saved middle cut next b e ok after right x (refine_ ()) in refine_ o)
-      else (let refine_ o = next x in refine_ o)
+        unified_leaf_origin saved h cut prior a c left_ok middle left y () in
+      if left_ok then (unified_leaf_origin saved middle cut next b e ok after right x ())
+      else (next x)
     | Post_link (middle, rest, source, target) ->
       Structure_spec.linkable_def middle source target;
       let next : ((y : node Pref.t) @ immutable ->
         {o : origin | not (low_var middle y cut) || originates saved middle cut y o} @ immutable) @ total = fun y ->
-        let refine_ o = unified_leaf_origin saved h cut prior p q true middle rest y (refine_ ()) in refine_ o in
-      let refine_ o = Structure_origin_proofs.rewrite_leaf_origin saved middle cut next source target x (refine_ ()) in refine_ o
+        unified_leaf_origin saved h cut prior p q true middle rest y () in
+      Structure_origin_proofs.rewrite_leaf_origin saved middle cut next source target x ()
     | Pre_compress (middle, edits, rest) ->
       let next : ((y : node Pref.t) @ immutable ->
         {o : origin | not (low_var middle y cut) || originates saved middle cut y o} @ immutable) @ total = fun y ->
-        let refine_ o = Compression_origin_proofs.leaf_origin saved h middle edits cut prior y (refine_ ()) in refine_ o in
-      let refine_ o = unified_leaf_origin saved middle cut next p q ok after rest x (refine_ ()) in refine_ o)
+        Compression_origin_proofs.leaf_origin saved h middle edits cut prior y () in
+      unified_leaf_origin saved middle cut next p q ok after rest x ())

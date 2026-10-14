@@ -18,8 +18,7 @@ let rec fold_right_ih :
   | x :: tail ->
     let acc = fold_right_ih r f tail initial () in
     let model = ghost_ tail in
-    let result = f x model acc () in
-    result
+    f x model acc ()
 
 let rec map_ih :
     (r : (('a : immutable_data) list @ immutable total ->
@@ -34,14 +33,13 @@ let rec map_ih :
     {ys : 'b list | r xs ys} @ immutable total = fun r f xs base ->
   let _ = base in
   match xs with
-  | [] -> let ys = [] in ys
+  | [] -> []
   | x :: tail ->
     let ys = map_ih r f tail () in
     let tail_model = ghost_ tail in
     let output_model = ghost_ ys in
     let y = f x tail_model output_model () in
-    let result = y :: ys in
-    result
+    y :: ys
 
 let[@def] rec map_rel
     (r : (('a : immutable_data) @ immutable total ->
